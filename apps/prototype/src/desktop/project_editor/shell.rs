@@ -477,6 +477,11 @@ impl Editor {
                 style.visuals = egui::Visuals::dark();
                 style.visuals.override_text_color = Some(egui::Color32::from_rgb(231, 237, 246));
                 style.spacing.item_spacing.x = 5.;
+                let drag_rect = egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    egui::vec2(ui.available_width(), 32.),
+                );
+                window_frame::drag_region(ui, drag_rect);
                 ui.horizontal(|ui| {
                     let (rect, _) =
                         ui.allocate_exact_size(egui::vec2(25., 27.), egui::Sense::hover());
@@ -509,17 +514,31 @@ impl Editor {
                         self.action_button(ui, action, false);
                     }
                     ui.separator();
-                    let width = (ui.available_width() - 80.).max(110.);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(width, 32.),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| self.document_tabs(ui),
+                    let width =
+                        (ui.available_width() - 90. - window_frame::CONTROLS_WIDTH).max(110.);
+                    let (tabs_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(width, 32.), egui::Sense::hover());
+                    // O espaço reservado precisa permanecer ocupado mesmo quando há
+                    // poucas abas. Um escopo que avançasse o cursor pelo conteúdo
+                    // reduziria a faixa e afastaria os controles da borda direita.
+                    let mut tabs_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(tabs_rect)
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     );
+                    self.document_tabs(&mut tabs_ui);
                     self.action_button(ui, Action::New, false);
                     if icons::button(ui, Icon::Search, text(T::SearchTools), false, false).clicked()
                     {
                         self.shell.search_open = true;
                         self.shell.search_focus = true;
+                    }
+                    ui.separator();
+                    if window_frame::controls(ui).close.clicked() {
+                        // Percorrer o mesmo fluxo de fechamento usado pela decoração
+                        // nativa: aguardar a tarefa e oferecer Salvar/Descartar/Cancelar.
+                        self.want_exit = true;
+                        ui.ctx().request_repaint();
                     }
                 });
             });

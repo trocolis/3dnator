@@ -37,6 +37,9 @@ pub(super) enum Icon {
     Eye,
     EyeOff,
     Close,
+    Minimize,
+    Maximize,
+    Restore,
     Search,
     Check,
     Select,
@@ -106,7 +109,7 @@ impl Pen<'_> {
 pub(super) fn paint(painter: &egui::Painter, rect: egui::Rect, icon: Icon, enabled: bool) {
     paint_with_ink(painter, rect, icon, enabled, theme::INK);
 }
-fn paint_with_ink(
+pub(super) fn paint_with_ink(
     painter: &egui::Painter,
     rect: egui::Rect,
     icon: Icon,
@@ -344,6 +347,18 @@ fn paint_with_ink(
             if icon == Icon::EyeOff {
                 p.line(&[[3., 3.], [21., 21.]], p.ink);
             }
+        }
+        Icon::Minimize => p.line(&[[5., 17.], [19., 17.]], p.ink),
+        Icon::Maximize => p.line(
+            &[[5., 5.], [19., 5.], [19., 19.], [5., 19.], [5., 5.]],
+            p.ink,
+        ),
+        Icon::Restore => {
+            p.line(&[[8., 4.], [20., 4.], [20., 16.], [17., 16.]], p.ink);
+            p.line(
+                &[[4., 8.], [16., 8.], [16., 20.], [4., 20.], [4., 8.]],
+                p.ink,
+            );
         }
         Icon::Close => {
             p.line(&[[6., 6.], [18., 18.]], p.ink);

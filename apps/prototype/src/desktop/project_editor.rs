@@ -10,6 +10,7 @@ mod shell;
 mod sketch_editor;
 mod theme;
 mod views;
+mod window_frame;
 use crate::i18n::{Text as T, text};
 use eframe::{egui, egui_wgpu};
 use nator_commands::{Command, Effect, PreparedCommand, Session};
@@ -31,6 +32,7 @@ pub fn run() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
+            .with_decorations(false)
             .with_inner_size([1280., 820.])
             .with_min_inner_size([900., 600.]),
         ..Default::default()
@@ -1129,6 +1131,7 @@ impl Editor {
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
         self.command_palette(ui.ctx());
+        window_frame::resize_handles(ui);
         self.maybe_recover(ui.ctx());
     }
 }

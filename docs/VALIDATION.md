@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Controles integrados da janela — 26/10/2026
+
+- Configurada janela sem decoração nativa, com minimizar/maximizar/restaurar/fechar na barra escura superior, conforme esclarecimento do usuário. Capturas reais em 1280 × 820 e 900 × 600 inspecionadas: `target/codex-validation/window-frame-20261026/model-aligned.png` e `compact-aligned.png`, sem erros de validação wgpu/GL llvmpipe.
+- Quatro regressões de eventos verificam os comandos de minimizar/maximizar/restaurar; o encaminhamento de fechar ao editor sem forçar saída nativa; arraste/duplo clique no fundo da barra; redimensionamento das bordas e sua desativação ao maximizar. O ensaio detectou e corrigiu a disputa entre o arraste do fundo e o clique dos botões.
+- Nove testes da aplicação aprovados com e sem OCCT, incluindo as regressões anteriores da interface. Formatação e Clippy do workspace com todos os alvos e avisos negados aprovados nas duas configurações; compilação desktop Linux aprovada. A execução efetiva dos comandos pelo gerenciador de janelas e a interação com diálogos nativos não são cobertas pela captura sem janela; Windows continua adiado.
+
 ## Refinamento da interface — 26/10/2026
 
 - Referência visual: organização compacta do SolidCraft consultada no projeto local. Ícones vetoriais e implementação produzidos no 3dnator. Estrutura e uso em [INTERFACE.md](INTERFACE.md).

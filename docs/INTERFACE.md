@@ -4,7 +4,7 @@ A organização visual usa como referência o shell compacto do SolidCraft e seu
 
 ## Organização e uso
 
-- **Barra superior:** menu Arquivo, salvar, desfazer/refazer, projetos em abas, novo projeto e busca. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar.
+- **Barra superior:** menu Arquivo, salvar, desfazer/refazer, projetos em abas, novo projeto e busca. À direita ficam minimizar, maximizar/restaurar e fechar o aplicativo, substituindo a barra de título nativa. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar.
 - **Modelo:** novo rascunho XY, extrusão, revolução, furo, arredondamento, chanfro, casca, espelhamento, padrão linear e parâmetros. As operações abrem seu editor com a ferramenta já escolhida; perfil e corpo são sugeridos pelo contexto e continuam sujeitos à confirmação.
 - **Montagem:** organização de instâncias, ferramentas de repetição e acesso à documentação/exportação. Os controles completos de clones, grupos e padrões permanecem no diálogo de montagem.
 - **Inserir:** importação STL/STEP, suporte de referência, rascunhos XY/XZ/YZ ou na face selecionada e exportação. O arquivo próprio continua sendo o meio de preservar o histórico.
@@ -15,6 +15,8 @@ A organização visual usa como referência o shell compacto do SolidCraft e seu
 O rascunho é enquadrado ao abrir, considerando centros e extensões de círculos/arcos. O botão **Enquadrar** da faixa sobre o canvas restaura essa vista após zoom, deslocamento ou redimensionamento da janela. As cotas usam a formatação em português, sem zeros decimais desnecessários.
 
 A árvore usa ícones, controles de visibilidade, nomes abreviados por elipse e grupos por tipo. Duplo clique em peça/corpo entra na construção da peça. Os ícones de pasta e painel no canto da faixa recolhem/restauram árvore e propriedades. Os painéis têm largura ajustável e rolagem; a faixa de ferramentas também rola horizontalmente em janelas menores.
+
+Arraste o fundo livre da barra escura para mover a janela. Duplo clique nessa região maximiza ou restaura; as bordas e os cantos redimensionam a janela quando ela não está maximizada. Os botões da barra recebem seus próprios cliques. Fechar o aplicativo aguarda a tarefa em andamento e segue a confirmação de salvamento dos projetos modificados.
 
 Na base, os ícones do histórico paramétrico abrem a edição das operações da peça ativa. Eles representam operações persistidas, enquanto desfazer/refazer continua pertencendo à sessão. O marcador azul indica o fim da sequência; não é um controle de retrocesso do histórico.
 
@@ -31,6 +33,7 @@ O fundo claro do renderizador e do rascunho usa a mesma paleta dos painéis. Cor
 - `apps/prototype/src/desktop/project_editor/theme.rs`: paleta, tipografia e medidas.
 - `icons.rs`: desenhos originais e widgets de ícone/linha de árvore.
 - `shell.rs`: barra superior, faixa por tarefa, busca e histórico visual.
+- `window_frame.rs`: controles da janela, arraste e redimensionamento sem decoração nativa.
 - `views.rs`, `sketch_editor.rs` e `navigation.rs`: painéis, canvas e integração com o editor existente.
 - `crates/renderer/src/lib.rs` e `view.wgsl`: cor de apresentação do fundo, incluindo o esmaecimento.
 

@@ -1,6 +1,10 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    MinimizeWindow,
+    MaximizeWindow,
+    RestoreWindow,
+    CloseWindow,
     AuxiliaryProject,
     FilletShort,
     MirrorShort,
@@ -350,6 +354,10 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::MinimizeWindow => "Minimizar janela",
+        Text::MaximizeWindow => "Maximizar janela",
+        Text::RestoreWindow => "Restaurar janela",
+        Text::CloseWindow => "Fechar aplicativo",
         Text::AuxiliaryProject => "Projeto auxiliar",
         Text::FilletShort => "Arredondar",
         Text::MirrorShort => "Espelhar",

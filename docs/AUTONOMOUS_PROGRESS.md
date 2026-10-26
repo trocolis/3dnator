@@ -2,6 +2,12 @@
 
 Autorização do usuário: continuar todas as etapas sem solicitar acompanhamento.
 
+## Janela sem barra de título nativa — 26/10/2026
+
+- Usuário confirmou que os controles devem ficar na barra escura superior, imediatamente abaixo da antiga barra de título. Decoração nativa removida; minimizar, maximizar/restaurar e fechar integrados à direita dessa barra.
+- Implementados arraste do fundo, duplo clique para maximizar/restaurar e alças nas bordas/cantos para redimensionar. Fechar continua pelo fluxo do editor, aguardando a tarefa e preservando Salvar/Descartar/Cancelar para projetos modificados.
+- Quatro regressões novas aprovadas; nove testes da aplicação aprovados com/sem OCCT. Formatação e Clippy aprovados nas duas configurações. Capturas 1280 × 820 e 900 × 600 inspecionadas em `target/codex-validation/window-frame-20261026/`; nenhuma validação Windows ou de gerenciador de janelas foi declarada sem execução.
+
 ## Refinamento da interface e prioridades — 26/10/2026
 
 - Usuário adiou a prioridade de testes Windows e solicitou polimento da interface com referência no projeto local SolidCraft. O suporte Windows permanece preparado, com CI nativa opcional por `workflow_dispatch`/`validate_windows`.

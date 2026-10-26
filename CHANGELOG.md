@@ -4,6 +4,7 @@
 
 ### Interface desktop
 
+- Removida a barra de título nativa. Minimizar, maximizar/restaurar e fechar ficam à direita da barra escura do aplicativo; o fundo da barra permite mover a janela e o duplo clique alterna a maximização. Bordas e cantos preservam o redimensionamento, e fechar continua oferecendo a confirmação de alterações não salvas.
 - Nova composição inspirada na organização visual do SolidCraft: barra escura de documentos, faixa clara por tarefa, árvore com grupos e controles de visibilidade, painéis recolhíveis e histórico paramétrico com ícones.
 - Ícones vetoriais originais para ações de arquivo, modelagem, rascunho, montagem, câmera e navegação, com tooltips, nomes acessíveis e ativação por teclado.
 - Acesso direto às operações com a ferramenta já selecionada; sugestões iniciais de perfil e corpo preservam a confirmação da operação. Busca de ferramentas pela tecla S, tolerante a acentos, e aba contextual de rascunho.
