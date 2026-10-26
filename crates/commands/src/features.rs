@@ -90,6 +90,61 @@ fn region(
     Ok(regions.swap_remove(index))
 }
 
+/// Eixo de revolução a partir de uma linha do rascunho, em coordenadas da peça.
+#[cfg(feature = "occt")]
+fn sketch_axis(
+    sketch: &nator_sketch::Sketch,
+    line: u64,
+) -> Result<([f64; 3], [f64; 3]), DocumentError> {
+    let (a, b) = sketch.line(line).map_err(|_| {
+        DocumentError(
+            "A linha do eixo não existe mais no rascunho; escolha o eixo novamente.".into(),
+        )
+    })?;
+    let (a, b) = (sketch.plane.world(a), sketch.plane.world(b));
+    Ok((a, nator_geometry::sub(b, a)))
+}
+
+/// Medidas avaliadas de um furo; `through` é a profundidade usada em furos passantes.
+#[cfg(feature = "occt")]
+fn hole_geometry(
+    spec: &nator_document::features::HoleSpec,
+    parameters: &nator_document::parameters::Parameters,
+    through: f64,
+) -> Result<nator_kernel::hole::HoleGeometry, DocumentError> {
+    use nator_document::features::HoleHeadSpec;
+    use nator_kernel::hole::{HoleGeometry, HoleHead};
+    let length = |e: &str| parameters.evaluate(e, Dimension::Length);
+    let angle = |e: &str| parameters.evaluate(e, Dimension::Angle);
+    let head = match &spec.head {
+        HoleHeadSpec::Simple => HoleHead::Simple,
+        HoleHeadSpec::Counterbore { diameter, depth } => HoleHead::Counterbore {
+            diameter: length(diameter)?,
+            depth: length(depth)?,
+        },
+        HoleHeadSpec::Countersink {
+            diameter,
+            angle: cone,
+        } => HoleHead::Countersink {
+            diameter: length(diameter)?,
+            angle: angle(cone)?,
+        },
+    };
+    let (depth, tip_angle) = match &spec.depth {
+        Some(depth) => (
+            length(depth)?,
+            spec.tip_angle.as_deref().map(angle).transpose()?,
+        ),
+        None => (through, None),
+    };
+    Ok(HoleGeometry {
+        diameter: length(&spec.diameter)?,
+        depth,
+        head,
+        tip_angle,
+    })
+}
+
 /// Uma referência por índice só vale para o B-rep exato em que foi escolhida.
 #[cfg(feature = "occt")]
 fn same_geometry(bytes: &[u8], expected: u64) -> Result<(), DocumentError> {
@@ -160,12 +215,14 @@ pub(super) fn normalize(
             axis_origin,
             axis_direction,
             angle,
+            axis_line,
         } => Operation::Revolve {
             region: stable_region(sketch, region)?,
             sketch,
             axis_origin,
             axis_direction,
             angle,
+            axis_line,
         },
         Operation::Fillet { base, edge, radius } => Operation::Fillet {
             edge: stable_edge(doc, part, base, edge)?,
@@ -270,13 +327,18 @@ pub(super) fn construct(
             axis_origin,
             axis_direction,
             angle,
+            axis_line,
         } => {
             let sketch = sketch_of(doc, part, *sketch)?;
+            let (origin, direction) = match axis_line {
+                Some(line) => sketch_axis(sketch, *line)?,
+                None => (*axis_origin, *axis_direction),
+            };
             Solid::revolve(
                 sketch,
                 &region(sketch, reference)?,
-                *axis_origin,
-                *axis_direction,
+                origin,
+                direction,
                 piece.parameters.evaluate(angle, Dimension::Angle)?,
                 &owner,
             )
@@ -327,6 +389,75 @@ pub(super) fn construct(
         } => source(doc, part, *base)?
             .0
             .transformed(nator_geometry::Placement::new(*translation, *rotation).map_err(error)?)
+            .map_err(error)?,
+        Operation::Hole {
+            base,
+            sketch,
+            points,
+            spec,
+        } => {
+            let sketch = sketch_of(doc, part, *sketch)?;
+            let (mut solid, _) = source(doc, part, *base)?;
+            let body = doc
+                .body(*base)
+                .ok_or_else(|| DocumentError("Corpo do furo inexistente.".into()))?;
+            let bounds = body.geometry.mesh().bounds();
+            let center = body.placement.apply(bounds.center());
+            let diagonal = nator_geometry::norm(bounds.size());
+            let normal = sketch.plane.normal();
+            let direction = if spec.reverse {
+                normal
+            } else {
+                normal.map(|v| -v)
+            };
+            for (index, point) in points.iter().enumerate() {
+                let position = sketch.plane.world(sketch.point(*point).map_err(|_| {
+                    DocumentError(
+                        "Um ponto do furo não existe mais no rascunho; selecione os pontos novamente."
+                            .into(),
+                    )
+                })?);
+                // Passante: profundidade que certamente atravessa o corpo a partir do ponto.
+                let through =
+                    2. * (diagonal + nator_geometry::norm(nator_geometry::sub(position, center)));
+                let geometry = hole_geometry(spec, &piece.parameters, through)?;
+                let tool = Solid::hole_tool(position, direction, &geometry, &owner, index)
+                    .map_err(error)?;
+                solid = solid.boolean(&tool, 1, &owner).map_err(error)?;
+            }
+            solid
+        }
+        Operation::Pattern { base, layout } => {
+            let placements =
+                nator_document::features::pattern_placements(layout, &piece.parameters)?;
+            source(doc, part, *base)?
+                .0
+                .pattern(&placements, &owner)
+                .map_err(error)?
+        }
+        Operation::Mirror {
+            base,
+            origin,
+            normal,
+            keep_original,
+        } => {
+            let (solid, _) = source(doc, part, *base)?;
+            let mut image = solid.mirrored(*origin, *normal).map_err(error)?;
+            if *keep_original {
+                // A imagem recebe sufixo para que suas faces não repitam os nomes originais.
+                image.map_face_names(|name| format!("{name}:m"));
+                solid.boolean(&image, 0, &owner).map_err(error)?
+            } else {
+                image
+            }
+        }
+        Operation::Split {
+            base,
+            origin,
+            normal,
+        } => source(doc, part, *base)?
+            .0
+            .split(*origin, *normal, &owner)
             .map_err(error)?,
     };
     solid.volume().map_err(error)?;

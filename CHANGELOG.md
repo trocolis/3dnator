@@ -9,6 +9,14 @@
 - Histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca e transformação, construídos pelo OCCT fora da thread da interface.
 - Montagem com subpeças, clones independentes e grupos; folhas técnicas associadas com vistas, cotas, corte e exportação PNG/PDF.
 
+### Construção mecânica
+
+- Furos posicionados por centros de círculo ou pontos isolados de um rascunho: cegos com ou sem ponta de broca, passantes, com rebaixo ou escareados, com medidas em expressões e opção de inverter a direção.
+- Rosca simplificada registrada no furo (designação, diâmetro nominal e passo), sem hélice na geometria.
+- Padrões linear (uma ou duas direções) e circular, espelhamento por plano com opção de manter o original e divisão de corpo por plano.
+- Revolução em torno dos eixos do plano do rascunho ou de uma linha do rascunho, que acompanha as cotas.
+- Editor de operações reorganizado por ferramenta, com seções para cada operação.
+
 ### Referências estáveis
 
 - Faces de sólidos recebem nomes pela origem (entidade do rascunho, tampa, arredondamento, face herdada), registrados pelo histórico do OCCT na ponte C++.

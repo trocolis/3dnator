@@ -53,9 +53,14 @@ pub enum Operation {
     Revolve {
         sketch: SketchId,
         region: RegionRef,
+        /// Eixo fixo em coordenadas da peça, usado quando `axis_line` é `None`.
         axis_origin: [f64; 3],
         axis_direction: [f64; 3],
         angle: String,
+        /// Linha do rascunho usada como eixo (em geral de construção). Acompanha as cotas
+        /// do rascunho a cada recálculo.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_line: Option<u64>,
     },
     Boolean {
         base: BodyId,
@@ -82,7 +87,90 @@ pub enum Operation {
         translation: [f64; 3],
         rotation: [f64; 3],
     },
+    /// Furos centrados em pontos de um rascunho, furando contra a normal do plano do
+    /// rascunho (a favor dela com `reverse`).
+    Hole {
+        base: BodyId,
+        sketch: SketchId,
+        /// Pontos do rascunho usados como centros; a identidade dos pontos é estável.
+        points: Vec<u64>,
+        spec: HoleSpec,
+    },
+    /// Cópias do corpo unidas em padrão linear ou circular.
+    Pattern { base: BodyId, layout: PatternLayout },
+    /// Espelhamento por plano. Com `keep_original`, une o corpo e sua imagem.
+    Mirror {
+        base: BodyId,
+        origin: [f64; 3],
+        normal: [f64; 3],
+        keep_original: bool,
+    },
+    /// Parte do corpo do lado para onde `normal` aponta.
+    Split {
+        base: BodyId,
+        origin: [f64; 3],
+        normal: [f64; 3],
+    },
 }
+
+/// Furo com medidas em expressões dos parâmetros da peça.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HoleSpec {
+    pub diameter: String,
+    /// Profundidade da parede cilíndrica; `None` atravessa o corpo.
+    pub depth: Option<String>,
+    pub head: HoleHeadSpec,
+    /// Ângulo total da ponta de broca em furos cegos; `None` deixa o fundo plano.
+    pub tip_angle: Option<String>,
+    pub reverse: bool,
+    /// Rosca simplificada: registrada para documentação, sem hélice na geometria.
+    pub thread: Option<ThreadSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum HoleHeadSpec {
+    Simple,
+    Counterbore { diameter: String, depth: String },
+    Countersink { diameter: String, angle: String },
+}
+
+/// Rosca registrada no furo: designação (por exemplo `M6`), diâmetro nominal, passo e
+/// profundidade útil. O furo modelado é o de broca; a rosca não altera a geometria.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThreadSpec {
+    pub designation: String,
+    pub nominal: String,
+    pub pitch: String,
+    pub depth: Option<String>,
+}
+
+/// Direção de repetição de um padrão linear: `count` ocorrências espaçadas de `spacing`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinearAxis {
+    pub direction: [f64; 3],
+    pub count: u32,
+    pub spacing: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PatternLayout {
+    /// Uma ou duas direções; com duas, as ocorrências formam uma grade.
+    Linear {
+        first: LinearAxis,
+        second: Option<LinearAxis>,
+    },
+    /// `count` ocorrências ao redor do eixo. Um ângulo total de 360° distribui as cópias
+    /// por igual; outro ângulo coloca a última cópia exatamente nele.
+    Circular {
+        axis_origin: [f64; 3],
+        axis_direction: [f64; 3],
+        count: u32,
+        angle: String,
+    },
+}
+
+/// Limite de ocorrências por padrão e de furos por operação neste protótipo.
+pub const MAX_OCCURRENCES: usize = 1000;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum BooleanMode {
     Join,
@@ -96,13 +184,19 @@ impl Operation {
             Self::Fillet { base, .. }
             | Self::Chamfer { base, .. }
             | Self::Shell { base, .. }
-            | Self::Transform { base, .. } => vec![*base],
+            | Self::Transform { base, .. }
+            | Self::Hole { base, .. }
+            | Self::Pattern { base, .. }
+            | Self::Mirror { base, .. }
+            | Self::Split { base, .. } => vec![*base],
             _ => Vec::new(),
         }
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
-            Self::Extrude { sketch, .. } | Self::Revolve { sketch, .. } => Some(*sketch),
+            Self::Extrude { sketch, .. }
+            | Self::Revolve { sketch, .. }
+            | Self::Hole { sketch, .. } => Some(*sketch),
             _ => None,
         }
     }
@@ -143,12 +237,25 @@ impl Feature {
             Ok(())
         };
         body(&mut self.output)?;
+        let sketch = |id: &mut SketchId| -> Result<(), DocumentError> {
+            *id = *sketches
+                .get(id)
+                .ok_or_else(|| DocumentError("Rascunho ausente ao clonar.".into()))?;
+            Ok(())
+        };
         match &mut self.operation {
-            Operation::Extrude { sketch, .. } | Operation::Revolve { sketch, .. } => {
-                *sketch = *sketches
-                    .get(sketch)
-                    .ok_or_else(|| DocumentError("Rascunho ausente ao clonar.".into()))?;
+            Operation::Extrude { sketch: id, .. } | Operation::Revolve { sketch: id, .. } => {
+                sketch(id)?;
             }
+            Operation::Hole {
+                base, sketch: id, ..
+            } => {
+                body(base)?;
+                sketch(id)?;
+            }
+            Operation::Pattern { base, .. }
+            | Operation::Mirror { base, .. }
+            | Operation::Split { base, .. } => body(base)?,
             Operation::Boolean { base, tool, .. } => {
                 body(base)?;
                 body(tool)?;
@@ -280,11 +387,196 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 Placement::new(*translation, *rotation)
                     .map_err(|e| DocumentError(e.to_string()))?;
             }
+            Operation::Hole {
+                points,
+                spec,
+                sketch,
+                ..
+            } => {
+                if points.is_empty() || points.len() > MAX_OCCURRENCES {
+                    return Err(DocumentError(
+                        "A operação de furo precisa de 1 a 1000 pontos.".into(),
+                    ));
+                }
+                let record = part.sketches.iter().find(|s| s.id == *sketch);
+                if points
+                    .iter()
+                    .any(|p| record.is_some_and(|r| r.sketch.point(*p).is_err()))
+                {
+                    return Err(DocumentError(
+                        "Um ponto do furo não existe mais no rascunho; selecione os pontos novamente."
+                            .into(),
+                    ));
+                }
+                validate_hole(spec, &part.parameters)?;
+            }
+            Operation::Pattern { layout, .. } => validate_pattern(layout, &part.parameters)?,
+            Operation::Mirror { origin, normal, .. } | Operation::Split { origin, normal, .. } => {
+                validate_plane(*origin, *normal)?;
+            }
             Operation::Boolean { .. } => {}
         }
         ready.insert(f.output);
     }
     Ok(())
+}
+
+fn positive(
+    parameters: &parameters::Parameters,
+    expression: &str,
+    dimension: parameters::Dimension,
+) -> Result<f64, DocumentError> {
+    let value = parameters.evaluate(expression, dimension)?;
+    if value.is_finite() && value > 0. {
+        Ok(value)
+    } else {
+        Err(DocumentError(format!(
+            "A medida \"{expression}\" deve ser positiva."
+        )))
+    }
+}
+
+fn validate_hole(
+    spec: &HoleSpec,
+    parameters: &parameters::Parameters,
+) -> Result<(), DocumentError> {
+    use parameters::Dimension::{Angle, Length};
+    positive(parameters, &spec.diameter, Length)?;
+    if let Some(depth) = &spec.depth {
+        positive(parameters, depth, Length)?;
+    }
+    if let Some(angle) = &spec.tip_angle {
+        positive(parameters, angle, Angle)?;
+    }
+    match &spec.head {
+        HoleHeadSpec::Simple => {}
+        HoleHeadSpec::Counterbore { diameter, depth } => {
+            positive(parameters, diameter, Length)?;
+            positive(parameters, depth, Length)?;
+        }
+        HoleHeadSpec::Countersink { diameter, angle } => {
+            positive(parameters, diameter, Length)?;
+            positive(parameters, angle, Angle)?;
+        }
+    }
+    if let Some(thread) = &spec.thread {
+        validate_name(&thread.designation)?;
+        positive(parameters, &thread.nominal, Length)?;
+        positive(parameters, &thread.pitch, Length)?;
+        if let Some(depth) = &thread.depth {
+            positive(parameters, depth, Length)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_direction(direction: [f64; 3], name: &str) -> Result<(), DocumentError> {
+    if direction.iter().any(|v| !v.is_finite()) || nator_geometry::norm(direction) < 1e-9 {
+        return Err(DocumentError(format!("{name} deve ser não nula e finita.")));
+    }
+    Ok(())
+}
+
+fn validate_plane(origin: [f64; 3], normal: [f64; 3]) -> Result<(), DocumentError> {
+    if origin.iter().any(|v| !v.is_finite()) {
+        return Err(DocumentError("Origem do plano inválida.".into()));
+    }
+    validate_direction(normal, "A normal do plano")
+}
+
+fn validate_pattern(
+    layout: &PatternLayout,
+    parameters: &parameters::Parameters,
+) -> Result<(), DocumentError> {
+    use parameters::Dimension::{Angle, Length};
+    let count = match layout {
+        PatternLayout::Linear { first, second } => {
+            let mut total = 1_usize;
+            for axis in std::iter::once(first).chain(second) {
+                validate_direction(axis.direction, "A direção do padrão")?;
+                parameters.evaluate(&axis.spacing, Length)?;
+                total = total.saturating_mul(axis.count as usize);
+            }
+            total
+        }
+        PatternLayout::Circular {
+            axis_origin,
+            axis_direction,
+            count,
+            angle,
+        } => {
+            validate_plane(*axis_origin, *axis_direction)?;
+            let total = parameters.evaluate(angle, Angle)?;
+            if !total.is_finite()
+                || total.abs() < 1e-9
+                || total.abs() > std::f64::consts::TAU + 1e-9
+            {
+                return Err(DocumentError(
+                    "O ângulo do padrão circular deve estar entre 0° e 360°.".into(),
+                ));
+            }
+            *count as usize
+        }
+    };
+    if !(2..=MAX_OCCURRENCES).contains(&count) {
+        return Err(DocumentError(
+            "O padrão deve ter entre 2 e 1000 ocorrências.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Posições de um padrão em coordenadas da peça; a primeira é sempre a identidade.
+pub fn pattern_placements(
+    layout: &PatternLayout,
+    parameters: &parameters::Parameters,
+) -> Result<Vec<Placement>, DocumentError> {
+    use parameters::Dimension::{Angle, Length};
+    let error = |e: nator_geometry::GeometryError| DocumentError(e.to_string());
+    validate_pattern(layout, parameters)?;
+    match layout {
+        PatternLayout::Linear { first, second } => {
+            let step = |axis: &LinearAxis| -> Result<[f64; 3], DocumentError> {
+                let spacing = parameters.evaluate(&axis.spacing, Length)?;
+                let length = nator_geometry::norm(axis.direction);
+                Ok(axis.direction.map(|v| v / length * spacing))
+            };
+            let a = step(first)?;
+            let (b, rows) = match second {
+                Some(axis) => (step(axis)?, axis.count),
+                None => ([0.; 3], 1),
+            };
+            let mut placements = Vec::new();
+            for j in 0..rows {
+                for i in 0..first.count {
+                    let offset = std::array::from_fn(|k| a[k] * f64::from(i) + b[k] * f64::from(j));
+                    placements.push(Placement::new(offset, [0.; 3]).map_err(error)?);
+                }
+            }
+            Ok(placements)
+        }
+        PatternLayout::Circular {
+            axis_origin,
+            axis_direction,
+            count,
+            angle,
+        } => {
+            let total = parameters.evaluate(angle, Angle)?;
+            let full = (total.abs() - std::f64::consts::TAU).abs() < 1e-9;
+            let step = if full {
+                total / f64::from(*count)
+            } else {
+                total / f64::from(count - 1)
+            };
+            (0..*count)
+                .map(|k| {
+                    Placement::default()
+                        .rotated_about(*axis_origin, *axis_direction, step * f64::from(k))
+                        .map_err(error)
+                })
+                .collect()
+        }
+    }
 }
 
 fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
@@ -309,6 +601,49 @@ pub fn validate_face_name(name: &str) -> Result<(), DocumentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pattern_placements_follow_spacing_and_angles() -> Result<(), Box<dyn Error>> {
+        let mut parameters = parameters::Parameters::default();
+        parameters.set(
+            "passo".into(),
+            "12 mm".into(),
+            parameters::Dimension::Length,
+        )?;
+        let grid = PatternLayout::Linear {
+            first: LinearAxis {
+                direction: [2., 0., 0.],
+                count: 3,
+                spacing: "passo".into(),
+            },
+            second: Some(LinearAxis {
+                direction: [0., 1., 0.],
+                count: 2,
+                spacing: "20 mm".into(),
+            }),
+        };
+        let placements = pattern_placements(&grid, &parameters)?;
+        assert_eq!(placements.len(), 6);
+        assert_eq!(placements[0], Placement::default());
+        assert_eq!(placements[2].apply([0.; 3]), [24., 0., 0.]);
+        assert_eq!(placements[5].apply([0.; 3]), [24., 20., 0.]);
+        let ring = |angle: &str, count| PatternLayout::Circular {
+            axis_origin: [0.; 3],
+            axis_direction: [0., 0., 1.],
+            count,
+            angle: angle.into(),
+        };
+        // 360°: quatro cópias a cada 90°; 90°: três cópias com a última em 90°.
+        let full = pattern_placements(&ring("360 deg", 4), &parameters)?;
+        let quarter = pattern_placements(&ring("90 deg", 3), &parameters)?;
+        let x = |p: &Placement| p.apply([10., 0., 0.]);
+        assert!((x(&full[1])[1] - 10.).abs() < 1e-9);
+        assert!((x(&quarter[2])[1] - 10.).abs() < 1e-9);
+        assert!((x(&quarter[1])[0] - 10. * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9);
+        // Uma única ocorrência não é um padrão.
+        assert!(pattern_placements(&ring("360 deg", 1), &parameters).is_err());
+        Ok(())
+    }
 
     #[test]
     fn cloning_moves_face_owners_to_the_new_bodies() -> Result<(), Box<dyn Error>> {
