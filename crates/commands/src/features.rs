@@ -332,7 +332,8 @@ pub(super) fn construct(
     solid.volume().map_err(error)?;
     let brep = Arc::new(solid.to_brep().map_err(error)?);
     let faces = Arc::new(solid.face_names().to_vec());
-    let mesh = Arc::new(MeshAsset::new(solid.tessellate(0.05, 0.25).map_err(error)?));
+    let (mesh, triangle_faces) = solid.tessellate_with_faces(0.05, 0.25).map_err(error)?;
+    let mesh = Arc::new(MeshAsset::with_faces(mesh, triangle_faces)?);
     Ok(Built { mesh, brep, faces })
 }
 #[cfg(not(feature = "occt"))]

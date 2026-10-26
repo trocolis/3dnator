@@ -72,16 +72,28 @@ impl Editor {
             let tab = self.current().id;
             let revision = self.current().session.revision();
             let mode = self.pick_mode;
+            let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
             self.start(ui.ctx(), None, move || {
-                document
-                    .pick(ray)
-                    .map(|pick| Outcome::Picked {
-                        tab,
-                        revision,
-                        pick,
-                        mode,
-                    })
+                let pick = document.pick(ray).map_err(|e| e.to_string())?;
+                // Com o diálogo de operações esperando, o clique vira referência por nomes.
+                let topology = awaiting.zip(pick.as_ref()).map(|(kind, p)| {
+                    match kind {
+                        feature_editor::Awaiting::Edge => {
+                            document.edge_at(p).map(feature_editor::Kept::Edge)
+                        }
+                        feature_editor::Awaiting::Face => {
+                            document.face_at(p).map(feature_editor::Kept::Face)
+                        }
+                    }
                     .map_err(|e| e.to_string())
+                });
+                Ok(Outcome::Picked {
+                    tab,
+                    revision,
+                    pick,
+                    mode,
+                    topology,
+                })
             });
         }
         if self.move_freely

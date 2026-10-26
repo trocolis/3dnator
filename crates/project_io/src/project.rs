@@ -23,6 +23,9 @@ const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
 const MESH_MAGIC: &[u8; 8] = b"3DMSH001";
+/// Faces de origem dos triângulos de um sólido: assinatura, contagem u32 e um u32 por
+/// triângulo, todos little-endian.
+const FACES_MAGIC: &[u8; 8] = b"3DFAC001";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +78,9 @@ struct BodyRecord {
     /// Um nome por face do B-rep, na ordem topológica; vazio em corpos de malha.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     face_names: Vec<String>,
+    /// Face de origem de cada triângulo da malha de um sólido (`faces/<id>.bin`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    faces_path: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -118,6 +124,31 @@ impl PlacementRecord {
 fn error(e: impl std::fmt::Display) -> ImportError {
     ImportError(e.to_string())
 }
+fn faces_path(id: u64) -> String {
+    format!("faces/{id}.bin")
+}
+
+fn decode_faces(bytes: &[u8], triangles: usize) -> Result<Vec<u32>, ImportError> {
+    let invalid = || ImportError("Faces de origem dos triângulos inválidas.".into());
+    if bytes.get(..8) != Some(FACES_MAGIC.as_slice()) {
+        return Err(invalid());
+    }
+    let count = bytes
+        .get(8..12)
+        .and_then(|b| <[u8; 4]>::try_from(b).ok())
+        .map(u32::from_le_bytes)
+        .ok_or_else(invalid)? as usize;
+    if count != triangles || bytes.len() != 12 + count * 4 {
+        return Err(invalid());
+    }
+    Ok(bytes[12..]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| u32::from_le_bytes(*b))
+        .collect())
+}
+
 fn mesh_path(id: u64) -> String {
     format!("meshes/{id}.bin")
 }
@@ -270,6 +301,20 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             if !body.face_names.is_empty() && brep.is_none() {
                 return Err(ImportError("Nomes de faces sem B-rep no projeto.".into()));
             }
+            let geometry = if let Some(path) = body.faces_path {
+                if path != faces_path(body.id) || !expected_names.insert(path.clone()) {
+                    return Err(ImportError(
+                        "Caminho de faces inválido ou repetido no projeto.".into(),
+                    ));
+                }
+                let faces = decode_faces(
+                    &read_entry(&mut archive, &path, MAX_EXPANDED_BYTES)?,
+                    mesh.triangles().len(),
+                )?;
+                MeshAsset::with_faces(mesh, faces).map_err(error)?
+            } else {
+                MeshAsset::new(mesh)
+            };
             bodies.push(Body {
                 brep,
                 face_names: Arc::new(body.face_names),
@@ -277,7 +322,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 name: body.name,
                 visible: body.visible,
                 placement: body.placement.into_placement()?,
-                geometry: Arc::new(MeshAsset::new(mesh)),
+                geometry: Arc::new(geometry),
             });
         }
         parts.push(Part {
@@ -458,6 +503,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                         mesh_path: mesh_path(b.id.0),
                         brep_path: b.brep.as_ref().map(|_| format!("breps/{}.brep", b.id.0)),
                         face_names: b.face_names.to_vec(),
+                        faces_path: b.geometry.triangle_faces().map(|_| faces_path(b.id.0)),
                     })
                     .collect(),
             })
@@ -504,6 +550,18 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                     .start_file(format!("breps/{}.brep", body.id.0), options)
                     .map_err(error)?;
                 archive.write_all(bytes)?;
+            }
+            if let Some(faces) = body.geometry.triangle_faces() {
+                archive
+                    .start_file(faces_path(body.id.0), options)
+                    .map_err(error)?;
+                let mut buffer = Vec::with_capacity(12 + faces.len() * 4);
+                buffer.extend_from_slice(FACES_MAGIC);
+                buffer.extend_from_slice(&(faces.len() as u32).to_le_bytes());
+                for face in faces {
+                    buffer.extend_from_slice(&face.to_le_bytes());
+                }
+                archive.write_all(&buffer)?;
             }
             archive
                 .start_file(mesh_path(body.id.0), options)
@@ -708,15 +766,26 @@ mod tests {
         let mut doc = document()?;
         let body = doc.parts()[0].bodies[0].id;
         let names = vec!["b9:start".to_owned(), String::new(), "b9:e4".to_owned()];
+        let mesh = doc
+            .body(body)
+            .ok_or("Corpo ausente")?
+            .geometry
+            .mesh()
+            .clone();
+        let faces = (0..mesh.triangles().len() as u32)
+            .map(|i| i % 3)
+            .collect::<Vec<_>>();
         {
             let target = doc.body_mut(body)?;
             target.brep = Some(Arc::new(b"conteudo-brep".to_vec()));
             target.face_names = Arc::new(names.clone());
+            target.geometry = Arc::new(MeshAsset::with_faces(mesh, faces.clone())?);
         }
         write_project(&path, &doc)?;
         let loaded = read_project(&path)?;
         let restored = loaded.body(body).ok_or("Corpo ausente")?;
         assert_eq!(restored.face_names.as_slice(), names.as_slice());
+        assert_eq!(restored.geometry.triangle_faces(), Some(faces.as_slice()));
         // Nomes sem B-rep são rejeitados pela validação do documento.
         doc.body_mut(body)?.brep = None;
         assert!(write_project(&directory.path().join("invalido.3dnator"), &doc).is_err());

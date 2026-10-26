@@ -16,6 +16,7 @@
 - Clonar uma peça remapeia os donos dos nomes de faces para os novos corpos.
 - Formato `.3dnator` versão 7, com nomes de faces por corpo e migração explícita das referências por índice das versões anteriores.
 - Seleção de região no editor de operações por lista com área e furos, em vez de índice numérico.
+- Seleção gráfica de arestas e faces para arredondamento, chanfro e casca: o clique sobre uma face, ou perto de uma aresta, já gera a referência pelos nomes das faces. A malha dos sólidos guarda a face de origem de cada triângulo, também no arquivo.
 
 ### Visualização e desempenho
 

@@ -286,3 +286,64 @@ fn a_removed_corner_is_reported_instead_of_filleting_another_edge() -> Result<()
     assert_eq!(session.revision(), revision);
     Ok(())
 }
+
+/// Um clique perto do canto interno, sobre a face da base, escolhe a aresta do canto pelos
+/// nomes das faces, sem índice topológico, e o arredondamento resultante é o esperado.
+#[test]
+fn clicking_near_the_inner_corner_selects_its_edge() -> Result<()> {
+    use nator_document::assembly::Pick;
+    let (mut session, part, _, extrusion, _, inner) = build()?;
+    let owner = body_owner(extrusion);
+    let body = session.document().body(extrusion).ok_or("Corpo ausente")?;
+    let face = body
+        .face_names
+        .iter()
+        .position(|n| *n == format!("{owner}:e{}", inner[0]))
+        .ok_or("Face da base ausente")? as u32;
+    let triangle = body
+        .geometry
+        .triangle_faces()
+        .ok_or("Malha sem faces de origem")?
+        .iter()
+        .position(|f| *f == face)
+        .ok_or("Triângulo da face ausente")?;
+    // Base com espessura 6: a face superior interna fica em z = 6 e o canto em x = 6.
+    let pick = Pick {
+        instance: session.document().instances()[0].id,
+        part,
+        body: extrusion,
+        triangle,
+        point: [6.2, -10., 6.],
+        normal: [0., 0., 1.],
+        vertices: [[0.; 3]; 3],
+        placement: nator_geometry::Placement::default(),
+    };
+    let edge = session.document().edge_at(&pick)?;
+    let mut expected = [
+        format!("{owner}:e{}", inner[0]),
+        format!("{owner}:e{}", inner[1]),
+    ];
+    let EdgeRef::Between(mut faces) = edge.clone() else {
+        return Err("Seleção gráfica deveria produzir uma referência por nomes".into());
+    };
+    faces.sort();
+    expected.sort();
+    assert_eq!(faces, expected);
+    let rounded = match session.execute(Command::AddFeature {
+        part,
+        name: "Arredondamento clicado".into(),
+        operation: Operation::Fillet {
+            base: extrusion,
+            edge,
+            radius: "3 mm".into(),
+        },
+    })? {
+        Effect::Imported { body, .. } => body,
+        _ => return Err("Arredondamento não criado".into()),
+    };
+    // Sem o furo: só o arredondamento acrescenta material ao perfil extrudado.
+    let profile = (60. * 6. + 6. * 24.) * 20.;
+    let fillet = (1. - std::f64::consts::FRAC_PI_4) * 9. * 20.;
+    assert!((solid(&session, rounded)?.volume()? - (profile + fillet)).abs() < 1e-3);
+    Ok(())
+}

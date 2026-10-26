@@ -162,6 +162,8 @@ enum Outcome {
         revision: u64,
         pick: Option<nator_document::assembly::Pick>,
         mode: navigation::PickMode,
+        /// Referência escolhida para o diálogo de operações, quando ele esperava um clique.
+        topology: Option<Result<feature_editor::Kept, String>>,
     },
     Drawing {
         tab: u64,
@@ -412,7 +414,26 @@ impl Editor {
                 revision,
                 pick,
                 mode,
+                topology,
             }) => {
+                let current = self
+                    .find_tab(tab)
+                    .is_some_and(|t| t.session.revision() == revision);
+                if current
+                    && let (Some(result), Some(p), Some(draft)) =
+                        (topology, pick.as_ref(), self.feature_edit.as_mut())
+                {
+                    match result {
+                        Ok(_) if p.part != draft.part() => {
+                            self.status = text(T::PickOtherPart).into();
+                        }
+                        Ok(kept) => {
+                            self.status = feature_editor::Draft::describe(&kept);
+                            draft.apply_pick(p.body, kept);
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
                 if let Some(target) = self
                     .find_tab(tab)
                     .filter(|t| t.session.revision() == revision)
@@ -652,9 +673,13 @@ impl Editor {
                             nator_kernel::Solid::read_step(&path).map_err(|e| e.to_string())?;
                         let brep = Arc::new(solid.to_brep().map_err(|e| e.to_string())?);
                         let faces = solid.face_count().map_err(|e| e.to_string())?;
-                        let geometry = Arc::new(MeshAsset::new(
-                            solid.tessellate(0.05, 0.25).map_err(|e| e.to_string())?,
-                        ));
+                        let (mesh, triangle_faces) = solid
+                            .tessellate_with_faces(0.05, 0.25)
+                            .map_err(|e| e.to_string())?;
+                        let geometry = Arc::new(
+                            MeshAsset::with_faces(mesh, triangle_faces)
+                                .map_err(|e| e.to_string())?,
+                        );
                         let command = PreparedCommand::new(
                             document,
                             revision,

@@ -36,6 +36,9 @@ pub enum Text {
     Angle,
     TopologyIndex,
     KeptReference,
+    PickInViewport,
+    PickingTopology,
+    PickOtherPart,
     KernelUnavailable,
     RemoveFeature,
     ModelFilter,
@@ -278,6 +281,9 @@ pub fn text(key: Text) -> &'static str {
             "Índice de aresta/face no corpo base; ao aplicar, vira referência pelas faces de origem"
         }
         Text::KeptReference => "Referência atual (mantida enquanto o índice não for alterado)",
+        Text::PickInViewport => "Selecionar na área 3D",
+        Text::PickingTopology => "Clique sobre a face ou perto da aresta desejada",
+        Text::PickOtherPart => "O corpo selecionado pertence a outra peça.",
         Text::KernelUnavailable => {
             "SDK OCCT necessário: compile com a feature occt para construir sólidos."
         }

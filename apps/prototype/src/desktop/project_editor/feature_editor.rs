@@ -20,10 +20,17 @@ const TOOLS: [T; 8] = [
     T::Shell,
 ];
 
-/// Referência topológica gravada na operação em edição.
-enum Kept {
+/// Referência topológica gravada na operação em edição ou escolhida na área 3D.
+pub(super) enum Kept {
     Edge(EdgeRef),
     Face(FaceRef),
+}
+
+/// O que o próximo clique na área 3D deve selecionar para o diálogo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Awaiting {
+    Edge,
+    Face,
 }
 
 pub(super) struct Draft {
@@ -40,6 +47,8 @@ pub(super) struct Draft {
     /// Índice de aresta/face no corpo base, quando o usuário escolhe uma nova seleção.
     index: usize,
     kept_topology: Option<Kept>,
+    /// O próximo clique na área 3D escolhe a aresta/face da operação.
+    selecting: bool,
     from: String,
     to: String,
     angle: String,
@@ -58,6 +67,7 @@ impl Draft {
             kept_region: None,
             index: 0,
             kept_topology: None,
+            selecting: false,
             from: "0 mm".into(),
             to: "10 mm".into(),
             angle: "360 deg".into(),
@@ -144,6 +154,29 @@ fn describe_topology(kept: &Kept) -> String {
         Kept::Edge(EdgeRef::Index { index, .. }) | Kept::Face(FaceRef::Index { index, .. }) => {
             format!("#{index}")
         }
+    }
+}
+
+impl Draft {
+    /// Tipo de elemento que o próximo clique deve selecionar, se o diálogo estiver esperando.
+    pub(super) fn awaiting(&self) -> Option<Awaiting> {
+        match self.kind {
+            5 | 6 if self.selecting => Some(Awaiting::Edge),
+            7 if self.selecting => Some(Awaiting::Face),
+            _ => None,
+        }
+    }
+    pub(super) fn part(&self) -> PartId {
+        self.part
+    }
+    /// Aplica uma seleção gráfica: o corpo clicado passa a ser a base da operação.
+    pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
+        self.base = Some(body);
+        self.kept_topology = Some(kept);
+        self.selecting = false;
+    }
+    pub(super) fn describe(kept: &Kept) -> String {
+        describe_topology(kept)
     }
 }
 
@@ -282,6 +315,11 @@ impl Editor {
                                 text(T::KeptReference),
                                 describe_topology(kept)
                             ));
+                        }
+                        if d.selecting {
+                            ui.colored_label(egui::Color32::LIGHT_BLUE, text(T::PickingTopology));
+                        } else if ui.button(text(T::PickInViewport)).clicked() {
+                            d.selecting = true;
                         }
                         ui.label(text(T::TopologyIndex));
                         if ui

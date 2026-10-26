@@ -354,6 +354,8 @@ pub struct Pick {
     pub instance: InstanceId,
     pub part: PartId,
     pub body: BodyId,
+    /// Triângulo atingido na malha local do corpo.
+    pub triangle: usize,
     pub point: Point3,
     pub normal: Point3,
     pub vertices: [Point3; 3],
@@ -391,6 +393,7 @@ impl Document {
                         instance: instance.id,
                         part: part.id,
                         body: body.id,
+                        triangle: hit.triangle,
                         point: pose.apply(hit.point),
                         normal: nator_geometry::sub(pose.apply(hit.normal), zero),
                         vertices: body

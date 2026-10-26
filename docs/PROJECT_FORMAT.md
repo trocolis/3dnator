@@ -8,6 +8,7 @@ Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas decla
 manifest.json
 meshes/<body_id>.bin
 breps/<body_id>.brep      (somente corpos sólidos CAD)
+faces/<body_id>.bin       (somente corpos sólidos CAD, opcional)
 ```
 
 ## Manifesto
@@ -37,7 +38,17 @@ Cada malha usa:
 | Vértices | Três f64 little-endian por vértice |
 | Triângulos | Três índices u32 little-endian por triângulo |
 
-A precisão do projeto não é reduzida a f32, como ocorre na exportação STL binária. A malha de um corpo sólido é a malha de exibição; a geometria precisa está no B-rep, gravado no formato texto do OCCT (`BRepTools::Write`, até 64 MiB por corpo).
+A precisão do projeto não é reduzida a f32, como ocorre na exportação STL binária. Vértices de coordenadas idênticas são compartilhados. A malha de um corpo sólido é a malha de exibição; a geometria precisa está no B-rep, gravado no formato texto do OCCT (`BRepTools::Write`, até 64 MiB por corpo).
+
+Para sólidos, `faces/<body_id>.bin` (campo `faces_path`) guarda a face do B-rep de origem de cada triângulo da malha, o que permite selecionar faces e arestas na área 3D:
+
+| Campo | Codificação |
+| --- | --- |
+| Assinatura | 8 bytes ASCII `3DFAC001` |
+| Quantidade | u32 little-endian, igual ao número de triângulos da malha |
+| Faces | Um u32 little-endian por triângulo, menor que a quantidade de nomes de faces |
+
+Sem essa entrada, o sólido continua editável pelo histórico, mas a seleção gráfica pede que a operação seja recalculada.
 
 ## Nomes de faces e referências estáveis (versão 7)
 

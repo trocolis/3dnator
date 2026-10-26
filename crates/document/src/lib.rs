@@ -5,6 +5,7 @@ use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 pub mod assembly;
 pub mod features;
 pub mod parameters;
+pub mod selection;
 
 pub const MAX_ELEMENTS: usize = 10_000;
 pub const MAX_SCENE_TRIANGLES: usize = 2_000_000;
@@ -54,6 +55,9 @@ pub struct MeshAsset {
     topology: Topology,
     /// Arestas vivas por triângulo (ver `Mesh::edge_analysis`), usadas na exibição.
     creases: Vec<u8>,
+    /// Face do B-rep de origem de cada triângulo, nos corpos sólidos. Permite selecionar
+    /// faces e arestas na área 3D e convertê-las em referências por nome.
+    triangle_faces: Option<Vec<u32>>,
 }
 impl MeshAsset {
     pub fn new(mesh: Mesh) -> Self {
@@ -62,7 +66,22 @@ impl MeshAsset {
             mesh,
             topology,
             creases,
+            triangle_faces: None,
         }
+    }
+    /// Malha de exibição de um sólido, com a face de origem de cada triângulo.
+    pub fn with_faces(mesh: Mesh, faces: Vec<u32>) -> Result<Self, DocumentError> {
+        if faces.len() != mesh.triangles().len() {
+            return Err(DocumentError(
+                "Faces de origem não correspondem aos triângulos da malha.".into(),
+            ));
+        }
+        let mut asset = Self::new(mesh);
+        asset.triangle_faces = Some(faces);
+        Ok(asset)
+    }
+    pub fn triangle_faces(&self) -> Option<&[u32]> {
+        self.triangle_faces.as_deref()
     }
     pub fn mesh(&self) -> &Mesh {
         &self.mesh
@@ -490,6 +509,15 @@ impl Document {
                     .is_some_and(|b| b.is_empty() || b.len() > 64 * 1024 * 1024)
                 {
                     return Err(DocumentError("B-rep vazio ou excessivo.".into()));
+                }
+                if body
+                    .geometry
+                    .triangle_faces()
+                    .is_some_and(|faces| faces.iter().any(|f| *f as usize >= body.face_names.len()))
+                {
+                    return Err(DocumentError(
+                        "Triângulo associado a uma face inexistente no corpo.".into(),
+                    ));
                 }
                 if !body.face_names.is_empty()
                     && (body.brep.is_none()
