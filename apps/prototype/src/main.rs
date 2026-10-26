@@ -11,6 +11,7 @@ mod desktop;
 mod editor_validation;
 #[cfg(feature = "desktop")]
 mod i18n;
+mod part_validation;
 #[cfg(feature = "desktop")]
 mod preview;
 mod project_validation;
@@ -43,7 +44,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         [command] if command == "--help" || command == "-h" => {
             println!(
-                "3dnator — protótipo {}\n\nSem argumentos: abrir editor de projetos.\n--inspect ARQUIVO.stl: inspecionar malha (coordenadas assumidas em mm).\n--export-reference ARQUIVO.stl: exportar suporte em L de referência.\n--validate DIRETORIO_NOVO: validar OCCT e gerar relatório e arquivos.\n--validate-project DIRETORIO_NOVO: validar salvamento, recuperação e comandos.\n--validate-sketch DIRETORIO_NOVO: validar restrições, expressões e recálculo.\n--validate-editor DIRETORIO_NOVO: validar montagem e folhas PNG/PDF.\n--render-project-preview PROJETO IMAGEM.png: capturar o editor real.\n--inspect-project ARQUIVO.3dnator: inspecionar projeto.\n--render-preview ARQUIVO.png: capturar renderizador (requer desktop).\n--version: informar versão e disponibilidade do núcleo.\n\nSTL aceita ASCII ou binário. STEP e operações CAD exigem --features occt.\nRascunhos, parâmetros, montagem e folhas disponíveis no protótipo.",
+                "3dnator — protótipo {}\n\nSem argumentos: abrir editor de projetos.\n--inspect ARQUIVO.stl: inspecionar malha (coordenadas assumidas em mm).\n--export-reference ARQUIVO.stl: exportar suporte em L de referência.\n--validate DIRETORIO_NOVO: validar OCCT e gerar relatório e arquivos.\n--validate-project DIRETORIO_NOVO: validar salvamento, recuperação e comandos.\n--validate-sketch DIRETORIO_NOVO: validar restrições, expressões e recálculo.\n--validate-part DIRETORIO_NOVO: validar a peça de referência com OCCT (cotas, recálculo, STEP/STL).\n--validate-editor DIRETORIO_NOVO: validar montagem e folhas PNG/PDF.\n--render-project-preview PROJETO IMAGEM.png: capturar o editor real.\n--inspect-project ARQUIVO.3dnator: inspecionar projeto.\n--render-preview ARQUIVO.png: capturar renderizador (requer desktop).\n--version: informar versão e disponibilidade do núcleo.\n\nSTL aceita ASCII ou binário. STEP e operações CAD exigem --features occt.\nRascunhos, parâmetros, montagem e folhas disponíveis no protótipo.",
                 env!("CARGO_PKG_VERSION")
             );
             Ok(())
@@ -91,6 +92,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command, path] if command == "--validate-editor" => {
             editor_validation::run(Path::new(path))
         }
+        [command, path] if command == "--validate-part" => part_validation::run(Path::new(path)),
         [command, path] if command == "--validate-sketch" => {
             sketch_validation::run(Path::new(path))
         }

@@ -1,5 +1,22 @@
 # Validação local do protótipo
 
+## Incremento 0.3.0 com OCCT — 26/10/2026
+
+Validação em Linux x86_64 (Arch, Rust 1.99.1, GCC 16.2.1) com OCCT 7.9.3 extraído do pacote oficial do Arch, checksum conferido com o banco de dados assinado do pacman. Primeira execução da ponte C++ com um SDK real.
+
+| Verificação | Resultado |
+| --- | --- |
+| Configuração CMake da ponte | Falhava em qualquer SDK 7.x pela ordem dos componentes; corrigida |
+| `cargo clippy --workspace --all-targets` com e sem `occt` | Aprovado, avisos negados |
+| Testes do workspace com `occt` | 57 aprovados, incluindo 5 de nomeação no núcleo e 4 de fluxo paramétrico nos comandos |
+| `--validate` (primitivas, corte, furo, arredondamento, chanfro, erro preservando a origem, tesselação, STEP/STL) | 9 passos aprovados; 37 ms; pico RSS 46 MiB |
+| `--validate-project`, `--validate-sketch`, `--validate-editor` com o binário `occt` | Aprovados |
+| `--validate-part` (critério de entrega da etapa 2) | Aprovado: volume final 14.375,365 mm³ igual ao analítico; STEP reimportado com o mesmo volume e caixa 60 × 25 × 30 mm; STL fechado e orientado, 656 triângulos, desvio de volume de 0,001% |
+| Janela real em Wayland (GPU Intel UHD/NVIDIA) | Abre e permanece estável por 20 s; interação não testada |
+| Windows, Ubuntu (OCCT 7.6) e diálogos nativos | Pendentes; workflows preparados |
+
+O cenário clássico de nomeação topológica foi verificado: o arredondamento do canto interno do suporte permanece na mesma aresta quando a espessura muda de 6 para 9 mm, e o volume confere com (1 − π/4)·r²·L. Substituir o canto por uma diagonal faz o recálculo falhar com "Referência perdida", sem aplicar o arredondamento em outra aresta e sem alterar o documento.
+
 ## Incremento 0.2.0 — 26/10/2026
 
 Validação em Linux x86_64 com as dependências do cache, sem SDK OCCT ou servidor gráfico acessível.

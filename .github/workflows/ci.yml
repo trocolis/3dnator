@@ -49,6 +49,7 @@ jobs:
       - run: cargo clippy -p nator-prototype --no-default-features --features occt --locked -- -D warnings
       - run: cargo test -p nator-kernel -p nator-commands --features occt --locked
       - run: cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/linux
+      - run: cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-part validation-output/linux-part
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -80,6 +81,7 @@ jobs:
           cargo clippy -p nator-prototype --no-default-features --features occt --locked -- -D warnings
           cargo test -p nator-kernel -p nator-commands --features occt --locked
           cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/windows
+          cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-part validation-output/windows-part
       - uses: actions/upload-artifact@v4
         if: always()
         with:

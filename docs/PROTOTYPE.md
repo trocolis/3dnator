@@ -73,13 +73,19 @@ Os PNGs devem ter destinos novos. A captura da interface carrega o projeto, sele
 
 O SDK OCCT continua opcional e externo. A ponte usa CMake e bibliotecas compartilhadas OCCT 7.x (alvo 7.6 a 7.9), com API Rust própria. Configure `OpenCASCADE_DIR` para a pasta de `OpenCASCADEConfig.cmake`, ou `CMAKE_PREFIX_PATH` para o prefixo de instalação, além do caminho de bibliotecas do sistema. No Windows, a pasta dos DLLs precisa estar no PATH.
 
-A receita prevista para Ubuntu 24.04 usa `cmake`, `libocct-data-exchange-dev` e `libocct-modeling-algorithms-dev`. O workflow Windows usa conda-forge com `occt>=7.8,<8`, CMake e MSVC. As receitas não foram executadas neste ambiente.
+A ponte foi compilada e validada no Linux com OCCT 7.9.3 (pacote `opencascade` do Arch). Em Arch Linux, `sudo pacman -S opencascade` instala um SDK compatível. Sem acesso de administrador, o pacote oficial pode ser extraído em uma pasta local e indicado por `OpenCASCADE_DIR` (`<prefixo>/usr/lib/cmake/opencascade`) e `LD_LIBRARY_PATH` (`<prefixo>/usr/lib`), desde que as dependências do pacote já estejam instaladas no sistema.
+
+A receita prevista para Ubuntu 24.04 usa `cmake`, `libocct-data-exchange-dev` e `libocct-modeling-algorithms-dev` (OCCT 7.6). O workflow Windows usa conda-forge com `occt>=7.8,<8`, CMake e MSVC. Essas duas receitas ainda não foram executadas.
 
 ```sh
 cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/occt-run-001
+cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-part validation-output/part-001
+cargo test -p nator-kernel -p nator-commands --features occt --locked
 ```
 
-Esse ensaio verifica volumes, cortes, chanfro/arredondamento e ida e volta STEP/STL. A importação STEP ainda é uma leitura de geometria para o ensaio/CLI, sem preservar cores ou hierarquia. O editor de projetos 0.2.0 importa STL; a integração de sólidos STEP no documento fica para o fluxo CAD. Não salva uma simples tesselação como se fosse um sólido CAD editável.
+`--validate` verifica volumes, cortes, chanfro/arredondamento e ida e volta STEP/STL com primitivas. `--validate-part` executa o critério de entrega da etapa 2 com comandos do documento: suporte em L cotado por parâmetros, extrusão, furo, arredondamento, alteração das cotas com recálculo, desfazer/refazer, salvar, reabrir e exportar STEP e STL, conferindo volume analítico, dimensões e topologia da malha. Os testes com `--features occt` cobrem a nomeação estável de faces e as referências do histórico.
+
+A importação STEP lê geometria, sem preservar cores ou hierarquia. Um sólido STEP importado entra no documento com B-rep e faces nomeadas pela posição, estáveis porque essa geometria não é recalculada.
 
 Sem o SDK e a feature `occt`, CAD/STEP falham explicitamente; não há núcleo simulado.
 
