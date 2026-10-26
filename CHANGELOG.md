@@ -44,6 +44,7 @@
 
 ### Documentação técnica
 
+- Vistas de sólidos com remoção exata de linhas ocultas no B-rep pelo OCCT HLR, incluindo oclusão entre corpos e silhuetas curvas. Curvas projetadas são discretizadas com desvio linear de 0,01 mm, independentemente da malha de exibição; folhas de malhas ou contextos mistos continuam identificadas como aproximadas. Cortes de malha mantêm identificação explícita.
 - Vista em corte A–A com contornos fechados e hachura a 45°, e traço do plano de corte com as letras de identificação nas vistas ortogonais.
 - Legenda com revisão e data editáveis; cotas com vírgula decimal e sem zeros supérfluos.
 - Notas de rosca derivadas dos furos do histórico na legenda da folha.

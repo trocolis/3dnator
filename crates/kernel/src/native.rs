@@ -19,7 +19,9 @@ use std::{
     ptr::NonNull,
     rc::Rc,
 };
+mod projection;
 mod step;
+pub use projection::projected_edges;
 pub use step::{StepAssembly, StepBody, StepOccurrence, StepPart};
 
 // O intercâmbio STEP usa configurações globais do OCCT (Interface_Static e XCAF).
@@ -148,7 +150,7 @@ fn path_string(path: &Path) -> Result<CString, KernelError> {
 /// Vetor finito e não nulo, normalizado.
 fn unit(vector: Point3, name: &str) -> Result<Point3, KernelError> {
     let length = nator_geometry::norm(vector);
-    if vector.iter().all(|v| v.is_finite()) && length > 1e-9 {
+    if vector.iter().all(|v| v.is_finite()) && length.is_finite() && length > 1e-9 {
         Ok(vector.map(|v| v / length))
     } else {
         Err(KernelError(format!(

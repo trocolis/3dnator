@@ -1,6 +1,6 @@
 # Arquitetura do aplicativo
 
-Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geometry`, `sketch`, `kernel`, `document`, `commands`, `project_io`, `renderer` e `drawing` (folhas técnicas, derivado da geometria de apresentação). A interface ainda vive em `apps/prototype/src/desktop`, que reúne os papéis planejados de `ui` e `app`; a extração para crates próprios fica para quando a interface estabilizar.
+Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geometry`, `sketch`, `kernel`, `document`, `commands`, `project_io`, `renderer` e `drawing` (folhas técnicas a partir de projeções próprias ou malhas). A interface ainda vive em `apps/prototype/src/desktop`, que reúne os papéis planejados de `ui` e `app`; a extração para crates próprios fica para quando a interface estabilizar.
 
 ## Módulos
 
@@ -28,7 +28,7 @@ A câmera de apresentação oferece projeção ortográfica (padrão) e perspect
 - `document` usa os tipos e APIs próprios de geometria, rascunhos e núcleo; não recebe tipos públicos de OCCT.
 - `commands` coordena as alterações do documento e o recálculo. `project_io` usa o documento e as APIs internas para codificar, decodificar e converter dados, sem depender da interface.
 - `renderer` recebe dados de apresentação derivados do documento, sem se tornar a fonte da geometria precisa.
-- `drawing` recebe uma malha de apresentação e a especificação da folha; o documento só guarda a especificação e fornece notas derivadas do histórico.
+- `drawing` recebe projeções vetoriais próprias ou malhas e a especificação da folha; não depende do núcleo. `commands::drawing` coordena a projeção HLR no B-rep para contextos exclusivamente sólidos e o método aproximado para malhas/contextos mistos. O documento guarda a especificação e fornece notas derivadas do histórico.
 - `ui` apresenta o estado, conduz interações e solicita comandos e operações de arquivo; `app` conecta esses serviços ao ciclo de vida da aplicação.
 - A definição dos crates concretos e de seus contratos deve respeitar esses limites, sem dependências circulares.
 

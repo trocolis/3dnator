@@ -174,9 +174,7 @@ impl Editor {
                 let target = draft.target;
                 let tab = draft.tab;
                 self.start(ctx, None, move || {
-                    let mesh = document.drawing_mesh(target).map_err(|e| e.to_string())?;
-                    let notes = document.drawing_notes(target);
-                    let sheet = nator_drawing::generate_with_notes(&mesh, &spec, &notes)
+                    let sheet = nator_commands::drawing::generate(&document, target, &spec)
                         .map_err(|e| e.to_string())?;
                     if action == 0 {
                         return Ok(Outcome::Drawing {

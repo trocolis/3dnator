@@ -116,6 +116,21 @@ fn native_run(directory: &Path) -> Result<(), Box<dyn Error>> {
         return Err("Volume STEP divergente".into());
     }
     let output = directory.join("assembly.step");
+    let specification = nator_drawing::Specification {
+        title: "Montagem STEP — vistas precisas".into(),
+        scale: 0.5,
+        hidden_lines: true,
+        ..Default::default()
+    };
+    let sheet = nator_commands::drawing::generate(&reopened, None, &specification)?;
+    if !sheet.exact_projection {
+        return Err("A folha da montagem sólida não usou o B-rep".into());
+    }
+    nator_project_io::write_export(&directory.join("drawing.pdf"), &nator_drawing::pdf(&sheet)?)?;
+    nator_project_io::write_export(
+        &directory.join("drawing.png"),
+        &nator_drawing::png(&sheet, 150)?,
+    )?;
     nator_project_io::export_step(&output, |p| {
         step_scene(&reopened, StepScope::Assembly)
             .map_err(|e| e.to_string())?
@@ -138,7 +153,7 @@ fn native_run(directory: &Path) -> Result<(), Box<dyn Error>> {
     {
         return Err("Geometria STEP mudou no segundo ciclo".into());
     }
-    let report = serde_json::json!({"status":"passed","app_version":env!("CARGO_PKG_VERSION"),"format_version":nator_project_io::FORMAT_VERSION,"occt_version":nator_kernel::version(),"elapsed_ms":started.elapsed().as_secs_f64()*1000.,"checks":["UTF-8 names","shared part definition","rotated assembly positions","body and occurrence colors","self-contained save/reopen without source STEP","exact volume","assembly export and reimport"],"body_volume_mm3":volume,"instances":reopened.instances().len(),"parts":reopened.parts().len()});
+    let report = serde_json::json!({"status":"passed","app_version":env!("CARGO_PKG_VERSION"),"format_version":nator_project_io::FORMAT_VERSION,"occt_version":nator_kernel::version(),"elapsed_ms":started.elapsed().as_secs_f64()*1000.,"checks":["UTF-8 names","shared part definition","rotated assembly positions","body and occurrence colors","self-contained save/reopen without source STEP","exact volume","assembly export and reimport","precise B-rep drawing with PNG/PDF export"],"body_volume_mm3":volume,"instances":reopened.instances().len(),"parts":reopened.parts().len()});
     std::fs::write(
         directory.join("report.json"),
         serde_json::to_vec_pretty(&report)?,

@@ -88,10 +88,10 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
         return Err("Persistência perdeu elementos".into());
     }
     let mesh = reopened.drawing_mesh(Some(part))?;
-    let sheet = nator_drawing::generate_with_notes(
-        &mesh,
+    let sheet = nator_commands::drawing::generate(
+        &reopened,
+        Some(part),
         &reopened.sheets()[0].specification,
-        &reopened.drawing_notes(reopened.sheets()[0].target),
     )?;
     nator_project_io::write_export(&directory.join("support.pdf"), &nator_drawing::pdf(&sheet)?)?;
     nator_project_io::write_export(

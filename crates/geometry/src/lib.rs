@@ -8,6 +8,15 @@ pub use placement::Placement;
 
 pub type Point3 = [f64; 3];
 
+/// Segmento em um plano de projeção, em mm. `hidden` vem da classificação de
+/// visibilidade; curvas podem ser discretizadas com uma tolerância explícita.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectedSegment {
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+    pub hidden: bool,
+}
+
 /// Cor sólida sRGB, com três canais inteiros de 0 a 255. Não representa material ou
 /// transparência; esses controles de exibição permanecem independentes da cor do corpo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -258,16 +258,22 @@ impl Document {
     }
     /// A folha de peça usa sua origem local e inclui as subpeças, sem colocar a montagem na peça.
     pub fn drawing_mesh(&self, target: Option<PartId>) -> Result<Mesh, DocumentError> {
-        let mesh = if let Some(part) = target {
+        self.drawing_context(target)?
+            .scene_mesh()?
+            .ok_or_else(|| DocumentError("Não há corpos visíveis para gerar a folha.".into()))
+    }
+    /// Contexto independente para consultas de desenho. A origem da definição escolhida
+    /// substitui as posições de suas ocorrências na montagem, incluindo suas subpeças.
+    pub fn drawing_context(&self, target: Option<PartId>) -> Result<Self, DocumentError> {
+        if let Some(part) = target {
             let mut local = self.clone();
             local.instances.retain(|i| i.parent.is_some());
             local.groups.clear();
             local.add_instance(part, None, Placement::default())?;
-            local.scene_mesh()?
+            Ok(local)
         } else {
-            self.scene_mesh()?
-        };
-        mesh.ok_or_else(|| DocumentError("Não há corpos visíveis para gerar a folha.".into()))
+            Ok(self.clone())
+        }
     }
     /// Notas de documentação derivadas do histórico: roscas simplificadas dos furos da peça
     /// (ou de todas as peças, na folha de montagem). As medidas aparecem como digitadas.

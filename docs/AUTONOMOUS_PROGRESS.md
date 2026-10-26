@@ -17,6 +17,13 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - 79 testes sem OCCT e 105 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. `--validate-step` aprovado em `target/codex-validation/step-002/`; projeto `imported.3dnator`, STEP `assembly.step`, relatório `report.json` e captura real `target/codex-validation/step-editor-001.png`.
 - A CI recebeu o ensaio STEP. Windows/OCCT 7.6 continuam sem execução local; a próxima frente funcional é documentação técnica (HLR, cotagem associativa e múltiplos cortes), seguida de sombras e preparação de distribuição.
 
+### Vistas HLR do B-rep
+
+- A camada de comandos prepara sólidos posicionados na origem da folha e pede ao OCCT a classificação conjunta de linhas visíveis/ocultas. O desenho recebe segmentos próprios em mm; não depende do núcleo. Curvas são discretizadas com controle de desvio de 0,01 mm, por intervalos C2.
+- O diálogo usa a projeção precisa para contextos exclusivamente sólidos e conserva a alternativa aproximada para malhas/contextos mistos, identificando a origem na legenda. Cortes da malha continuam identificados como aproximados.
+- 79 testes sem OCCT e 108 com OCCT aprovados, com formatação e Clippy aprovados. O ensaio STEP passou a gerar a folha precisa em PNG/PDF, disponível em `target/codex-validation/step-hlr-001/` e inspecionada visualmente.
+- Restam na documentação técnica: cotas associativas reposicionáveis, múltiplos cortes e corte preciso do B-rep. Depois seguem sombras opcionais e preparação de distribuição. Não houve mudança no formato de projeto neste incremento.
+
 ## Critério de trabalho
 
 Concluir incrementos verificáveis, preservar decisões já aprovadas, executar os testes pertinentes e atualizar este registro. Não publicar o repositório, não substituir malhas por sólidos simulados e não declarar validações que não foram executadas.

@@ -1,5 +1,6 @@
 //! Transações do documento e coordenação do histórico paramétrico, com desfazer/refazer.
 mod assembly;
+pub mod drawing;
 pub mod export;
 mod features;
 pub mod measure;

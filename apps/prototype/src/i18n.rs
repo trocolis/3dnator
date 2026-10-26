@@ -504,7 +504,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Section => "Interseção de corte visual",
         Text::SectionPosition => "Posição Z do corte em mm",
         Text::MeshDrawingNotice => {
-            "Vistas e oclusão aproximadas da malha. As cotas gerais medem os limites projetados."
+            "A legenda identifica vistas do B-rep ou aproximadas da malha. Cortes de malha são aproximados; cotas gerais medem os limites projetados."
         }
         Text::PickVertex => "Vértice da malha",
         Text::PickEdge => "Aresta do triângulo",

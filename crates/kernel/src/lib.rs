@@ -25,7 +25,9 @@ mod naming;
 #[allow(unsafe_code)]
 mod native;
 #[cfg(feature = "occt")]
-pub use native::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart, version};
+pub use native::{
+    Solid, StepAssembly, StepBody, StepOccurrence, StepPart, projected_edges, version,
+};
 
 /// Propriedades de massa com densidade uniforme, em mm, mm² e mm³.
 #[derive(Debug, Clone, Copy, PartialEq)]

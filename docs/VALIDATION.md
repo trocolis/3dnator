@@ -1,5 +1,9 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — vistas precisas do B-rep (26/10/2026)
+
+79 testes sem OCCT e 108 com OCCT aprovados; formatação e Clippy com avisos negados aprovados nas duas configurações. As regressões novas confirmam que um bloco atrás de outro recebe linhas ocultas, que o perímetro visível externo confere com o analítico e que a silhueta circular é extraída do B-rep com controle explícito de desvio. A folha de um cilindro com malha propositalmente grosseira usa HLR; acrescentar um corpo de malha troca para o método aproximado identificado na legenda. O ensaio `--validate-step target/codex-validation/step-hlr-001` também gera `drawing.pdf` e `drawing.png`, com quatro vistas HLR da montagem, escala 0,5 e linhas ocultas. A imagem foi inspecionada. Cortes ainda são calculados sobre a malha e isso permanece explícito na legenda.
+
 ## Continuação 0.3.0 — montagem STEP (26/10/2026)
 
 - 79 testes sem OCCT e 105 com OCCT 7.9.3 aprovados. Três regressões novas verificam nomes UTF-8, definições compartilhadas por raízes e subpeças, cores de corpo e ocorrência, posições rotacionadas, persistência sem o STEP de origem, exportação/reimportação, atomicidade e rejeição de ciclos e malhas no escopo de exportação.

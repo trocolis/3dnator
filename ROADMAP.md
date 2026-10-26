@@ -12,7 +12,7 @@ Pendências conhecidas, por etapa:
 2. **Primeira peça:** intercâmbio STEP com cores sólidas e estrutura de montagem implementado e validado no Linux por `--validate-step`; cores individuais de faces, materiais e montagens STEP com arquivos externos ficam fora do intercâmbio atual.
 3. **Construção mecânica:** hélice real de rosca (adiada por decisão de escopo); arredondamento de raio variável não faz parte do escopo inicial.
 4. **Montagem:** espelhamento de peças com subpeças implementado, preservando definições compartilhadas, grupos internos e histórico independente; validação manual dos fluxos ainda pendente conforme a base técnica. Alinhamento contínuo por restrições não faz parte do escopo inicial.
-5. **Documentação técnica:** folhas derivadas da malha de exibição (remoção aproximada de linhas ocultas, sem HLR exato do B-rep); cotas apenas gerais e não reposicionáveis; uma vista em corte por folha.
+5. **Documentação técnica:** vistas de sólidos já usam HLR exato do B-rep, com curvas discretizadas a 0,01 mm; malhas e contextos mistos mantêm projeção aproximada identificada. Pendentes cotas associativas reposicionáveis, múltiplos cortes por folha e corte preciso do B-rep.
 
 Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais ainda não foram implementadas.
 

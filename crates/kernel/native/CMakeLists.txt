@@ -20,7 +20,7 @@ set_target_properties(nator_occt PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lib"
   POSITION_INDEPENDENT_CODE ON)
 
-set(nator_libraries TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool TKFillet TKOffset TKMesh TKXSBase TKCDF TKLCAF TKCAF TKXCAF)
+set(nator_libraries TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool TKFillet TKOffset TKMesh TKHLR TKXSBase TKCDF TKLCAF TKCAF TKXCAF)
 # Os toolkits STEP foram reorganizados no OCCT 7.8.
 find_library(nator_step NAMES TKDESTEP HINTS ${OpenCASCADE_LIBRARY_DIR})
 if(nator_step)

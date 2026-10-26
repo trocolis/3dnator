@@ -1,5 +1,6 @@
-//! Folhas vetoriais derivadas da geometria de apresentação, sem dependência da interface.
-use nator_geometry::{Mesh, Point3, cross, dot, norm, sub};
+//! Folhas vetoriais a partir de projeções próprias ou malhas, sem dependência da interface
+//! ou do núcleo CAD. A legenda identifica a origem e a precisão das vistas.
+use nator_geometry::{Mesh, Point3, ProjectedSegment, cross, dot, norm, sub};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error, fmt};
 mod export;
@@ -150,6 +151,14 @@ pub struct Sheet {
     pub size: [f64; 2],
     pub style: Style,
     pub primitives: Vec<Primitive>,
+    /// A visibilidade das vistas veio do B-rep; curvas continuam discretizadas para
+    /// exportação vetorial. Cortes gerados a partir de malhas são identificados à parte.
+    pub exact_projection: bool,
+}
+
+pub struct ProjectedView {
+    pub view: View,
+    pub segments: Vec<ProjectedSegment>,
 }
 impl Sheet {
     pub fn line(&mut self, a: [f64; 2], b: [f64; 2], width: f64, dashed: bool) {
@@ -299,6 +308,17 @@ pub fn generate(mesh: &Mesh, spec: &Specification) -> Result<Sheet> {
 
 /// Folha com notas derivadas do modelo (por exemplo, roscas dos furos) na legenda.
 pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) -> Result<Sheet> {
+    generate_with_projections(mesh, spec, notes, None)
+}
+
+/// A geometria precisa chega como dados de apresentação próprios, sem ligar esta camada
+/// ao núcleo CAD. Ausência de projeções usa o método aproximado de malhas explicitamente.
+pub fn generate_with_projections(
+    mesh: &Mesh,
+    spec: &Specification,
+    notes: &[String],
+    projections: Option<&[ProjectedView]>,
+) -> Result<Sheet> {
     spec.validate()?;
     if notes.len() > 64
         || notes
@@ -307,7 +327,7 @@ pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) 
     {
         return Err(DrawingError("Notas da folha inválidas.".into()));
     }
-    if mesh.triangles().len() > 200_000 {
+    if projections.is_none() && mesh.triangles().len() > 200_000 {
         return Err(DrawingError(
             "Folhas de malha limitadas a duzentos mil triângulos.".into(),
         ));
@@ -317,6 +337,7 @@ pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) 
         size,
         style: spec.style,
         primitives: Vec::new(),
+        exact_projection: projections.is_some(),
     };
     for (a, b) in [
         ([8., 8.], [size[0] - 8., 8.]),
@@ -337,13 +358,22 @@ pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) 
         [12., size[1] - 12.],
         2.5,
         format!(
-            "3dnator | mm | ESCALA {}:1 | REV {} | DATA {} | VISTAS DERIVADAS DA MALHA",
+            "3dnator | mm | ESCALA {}:1 | REV {} | DATA {} | {}",
             format_mm(spec.scale),
             spec.revision,
             if spec.date.is_empty() {
                 "-"
             } else {
                 spec.date.as_str()
+            },
+            if projections.is_some() {
+                if spec.section.is_some() {
+                    "HLR DO B-REP / CORTE DA MALHA"
+                } else {
+                    "HLR DO B-REP"
+                }
+            } else {
+                "VISTAS DERIVADAS DA MALHA"
             }
         ),
     );
@@ -360,7 +390,28 @@ pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) 
             format!("{}. {value}", row + 1),
         );
     }
-    let edges = feature_edges(mesh);
+    if let Some(views) = projections {
+        let mut count = 0;
+        for (index, view) in views.iter().enumerate() {
+            count += view.segments.len();
+            if views[..index].iter().any(|v| v.view == view.view)
+                || count > 500000
+                || view
+                    .segments
+                    .iter()
+                    .any(|s| s.a.iter().chain(&s.b).any(|v| !v.is_finite()))
+            {
+                return Err(DrawingError(
+                    "Projeções da folha inválidas ou excessivas.".into(),
+                ));
+            }
+        }
+    }
+    let edges = if projections.is_none() {
+        feature_edges(mesh)
+    } else {
+        Vec::new()
+    };
     if edges.len() > 600_000 {
         return Err(DrawingError(
             "Malha com arestas demais para a folha.".into(),
@@ -375,11 +426,28 @@ pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) 
     };
     for (index, view) in views.iter().copied().enumerate() {
         let basis = view.basis();
-        let points = mesh
-            .vertices()
-            .iter()
-            .map(|p| [dot(*p, basis.0), dot(*p, basis.1)])
-            .collect::<Vec<_>>();
+        let projected = if let Some(projections) = projections {
+            Some(projections.iter().find(|p| p.view == view).ok_or_else(|| {
+                DrawingError("Uma vista não recebeu sua projeção precisa.".into())
+            })?)
+        } else {
+            None
+        };
+        let points = if let Some(projected) = projected {
+            if projected.segments.is_empty() {
+                return Err(DrawingError("A vista precisa não contém segmentos.".into()));
+            }
+            projected
+                .segments
+                .iter()
+                .flat_map(|s| [s.a, s.b])
+                .collect::<Vec<_>>()
+        } else {
+            mesh.vertices()
+                .iter()
+                .map(|p| [dot(*p, basis.0), dot(*p, basis.1)])
+                .collect::<Vec<_>>()
+        };
         let min = std::array::from_fn::<_, 2, _>(|i| {
             points.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min)
         });
@@ -410,47 +478,61 @@ pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) 
             2.5,
             view.label(),
         );
-        let span = extent[0].max(extent[1]).max(1e-6);
-        let depth = depth_buffer(mesh, basis, min, span)?;
-        for e in &edges {
-            let visible_edge = e.normals.len() != 2
-                || dot(e.normals[0], e.normals[1]) < 0.998
-                || dot(e.normals[0], basis.2) * dot(e.normals[1], basis.2) < 0.;
-            if !visible_edge {
-                continue;
-            }
-            let (a, b) = (
-                [dot(e.a, basis.0), dot(e.a, basis.1)],
-                [dot(e.b, basis.0), dot(e.b, basis.1)],
-            );
-            let count = (((a[0] - b[0]).hypot(a[1] - b[1]) / span * 500.).ceil() as usize).max(1);
-            let mut runs: Vec<(f64, f64, bool)> = Vec::new();
-            for i in 0..count {
-                let lo = i as f64 / count as f64;
-                let hi = (i + 1) as f64 / count as f64;
-                let t = (lo + hi) / 2.;
-                let p = std::array::from_fn::<_, 3, _>(|k| e.a[k] + (e.b[k] - e.a[k]) * t);
-                let x = ((dot(p, basis.0) - min[0]) * 500. / span + 6.)
-                    .floor()
-                    .clamp(0., 511.) as usize;
-                let y = ((dot(p, basis.1) - min[1]) * 500. / span + 6.)
-                    .floor()
-                    .clamp(0., 511.) as usize;
-                let hidden = dot(p, basis.2) < depth[y * 512 + x] - span * 0.006;
-                if let Some(last) = runs.last_mut().filter(|r| r.2 == hidden) {
-                    last.1 = hi;
-                } else {
-                    runs.push((lo, hi, hidden));
+        if let Some(projected) = projected {
+            for segment in &projected.segments {
+                if !segment.hidden || spec.hidden_lines {
+                    sheet.line(
+                        map(segment.a),
+                        map(segment.b),
+                        if segment.hidden { 0.12 } else { 0.25 },
+                        segment.hidden,
+                    );
                 }
             }
-            for (lo, hi, hidden) in runs {
-                if !hidden || spec.hidden_lines {
-                    sheet.line(
-                        map([a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo]),
-                        map([a[0] + (b[0] - a[0]) * hi, a[1] + (b[1] - a[1]) * hi]),
-                        if hidden { 0.12 } else { 0.25 },
-                        hidden,
-                    );
+        } else {
+            let span = extent[0].max(extent[1]).max(1e-6);
+            let depth = depth_buffer(mesh, basis, min, span)?;
+            for e in &edges {
+                let visible_edge = e.normals.len() != 2
+                    || dot(e.normals[0], e.normals[1]) < 0.998
+                    || dot(e.normals[0], basis.2) * dot(e.normals[1], basis.2) < 0.;
+                if !visible_edge {
+                    continue;
+                }
+                let (a, b) = (
+                    [dot(e.a, basis.0), dot(e.a, basis.1)],
+                    [dot(e.b, basis.0), dot(e.b, basis.1)],
+                );
+                let count =
+                    (((a[0] - b[0]).hypot(a[1] - b[1]) / span * 500.).ceil() as usize).max(1);
+                let mut runs: Vec<(f64, f64, bool)> = Vec::new();
+                for i in 0..count {
+                    let lo = i as f64 / count as f64;
+                    let hi = (i + 1) as f64 / count as f64;
+                    let t = (lo + hi) / 2.;
+                    let p = std::array::from_fn::<_, 3, _>(|k| e.a[k] + (e.b[k] - e.a[k]) * t);
+                    let x = ((dot(p, basis.0) - min[0]) * 500. / span + 6.)
+                        .floor()
+                        .clamp(0., 511.) as usize;
+                    let y = ((dot(p, basis.1) - min[1]) * 500. / span + 6.)
+                        .floor()
+                        .clamp(0., 511.) as usize;
+                    let hidden = dot(p, basis.2) < depth[y * 512 + x] - span * 0.006;
+                    if let Some(last) = runs.last_mut().filter(|r| r.2 == hidden) {
+                        last.1 = hi;
+                    } else {
+                        runs.push((lo, hi, hidden));
+                    }
+                }
+                for (lo, hi, hidden) in runs {
+                    if !hidden || spec.hidden_lines {
+                        sheet.line(
+                            map([a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo]),
+                            map([a[0] + (b[0] - a[0]) * hi, a[1] + (b[1] - a[1]) * hi]),
+                            if hidden { 0.12 } else { 0.25 },
+                            hidden,
+                        );
+                    }
                 }
             }
         }
