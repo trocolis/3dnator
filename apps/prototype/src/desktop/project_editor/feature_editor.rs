@@ -198,8 +198,16 @@ pub(super) struct Draft {
     /// Índice de aresta/face no corpo base, quando o usuário escolhe uma nova seleção.
     index: usize,
     kept_topology: Option<Kept>,
+    /// Arestas/faces adicionais da mesma operação (arredondamento, chanfro, casca).
+    extra_topology: Vec<Kept>,
     /// O próximo clique na área 3D escolhe a aresta/face da operação.
     selecting: bool,
+    /// O próximo clique acrescenta uma aresta/face em vez de substituir a principal.
+    appending: bool,
+    /// Chanfro por distância e ângulo, com o ângulo em expressão.
+    chamfer_angle: Option<String>,
+    /// Casca com paredes para fora do sólido original.
+    outward: bool,
     from: String,
     to: String,
     angle: String,
@@ -222,7 +230,11 @@ impl Draft {
             kept_axis: None,
             index: 0,
             kept_topology: None,
+            extra_topology: Vec::new(),
             selecting: false,
+            appending: false,
+            chamfer_angle: None,
+            outward: false,
             from: "0 mm".into(),
             to: "10 mm".into(),
             angle: "360 deg".into(),
@@ -277,31 +289,45 @@ impl Draft {
                 d.base = Some(base);
                 d.tool_body = Some(tool);
             }
-            Operation::Fillet { base, edge, radius } => {
+            Operation::Fillet {
+                base,
+                edge,
+                radius,
+                additional_edges,
+            } => {
                 d.tool = Tool::Fillet;
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Edge(edge));
+                d.extra_topology = additional_edges.into_iter().map(Kept::Edge).collect();
                 d.to = radius;
             }
             Operation::Chamfer {
                 base,
                 edge,
                 distance,
+                angle,
+                additional_edges,
             } => {
                 d.tool = Tool::Chamfer;
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Edge(edge));
+                d.extra_topology = additional_edges.into_iter().map(Kept::Edge).collect();
                 d.to = distance;
+                d.chamfer_angle = angle;
             }
             Operation::Shell {
                 base,
                 face,
                 thickness,
+                additional_faces,
+                outward,
             } => {
                 d.tool = Tool::Shell;
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Face(face));
+                d.extra_topology = additional_faces.into_iter().map(Kept::Face).collect();
                 d.to = thickness;
+                d.outward = outward;
             }
             Operation::Hole {
                 base,
@@ -446,9 +472,10 @@ fn hole_points(sketch: &Sketch) -> Vec<u64> {
 impl Draft {
     /// Tipo de elemento que o próximo clique deve selecionar, se o diálogo estiver esperando.
     pub(super) fn awaiting(&self) -> Option<Awaiting> {
+        let waiting = self.selecting || self.appending;
         match self.tool {
-            Tool::Fillet | Tool::Chamfer if self.selecting => Some(Awaiting::Edge),
-            Tool::Shell if self.selecting => Some(Awaiting::Face),
+            Tool::Fillet | Tool::Chamfer if waiting => Some(Awaiting::Edge),
+            Tool::Shell if waiting => Some(Awaiting::Face),
             _ => None,
         }
     }
@@ -457,12 +484,29 @@ impl Draft {
     }
     /// Aplica uma seleção gráfica: o corpo clicado passa a ser a base da operação.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
-        self.base = Some(body);
-        self.kept_topology = Some(kept);
+        if self.appending && self.base == Some(body) {
+            self.extra_topology.push(kept);
+        } else {
+            // Outro corpo, ou seleção principal: as escolhas anteriores deixam de valer.
+            self.base = Some(body);
+            self.kept_topology = Some(kept);
+            self.extra_topology.clear();
+        }
         self.selecting = false;
+        self.appending = false;
     }
     pub(super) fn describe(kept: &Kept) -> String {
         describe_topology(kept)
+    }
+
+    fn extra_edges(&self) -> Vec<EdgeRef> {
+        self.extra_topology
+            .iter()
+            .filter_map(|k| match k {
+                Kept::Edge(edge) => Some(edge.clone()),
+                Kept::Face(_) => None,
+            })
+            .collect()
     }
 
     fn hole_spec(&self) -> HoleSpec {
@@ -580,16 +624,28 @@ impl Draft {
                 base,
                 edge,
                 radius: self.to.clone(),
+                additional_edges: self.extra_edges(),
             },
             Tool::Chamfer => Operation::Chamfer {
                 base,
                 edge,
                 distance: self.to.clone(),
+                angle: self.chamfer_angle.clone(),
+                additional_edges: self.extra_edges(),
             },
             Tool::Shell => Operation::Shell {
                 base,
                 face,
                 thickness: self.to.clone(),
+                additional_faces: self
+                    .extra_topology
+                    .iter()
+                    .filter_map(|k| match k {
+                        Kept::Face(face) => Some(face.clone()),
+                        Kept::Edge(_) => None,
+                    })
+                    .collect(),
+                outward: self.outward,
             },
             Tool::Hole => {
                 Operation::Hole {
@@ -761,10 +817,46 @@ impl Editor {
                             describe_topology(kept)
                         ));
                     }
-                    if d.selecting {
+                    let mut remove = None;
+                    for (i, kept) in d.extra_topology.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("+ {}", describe_topology(kept)));
+                            if ui.small_button("×").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove {
+                        d.extra_topology.remove(i);
+                    }
+                    if d.selecting || d.appending {
                         ui.colored_label(egui::Color32::LIGHT_BLUE, text(T::PickingTopology));
-                    } else if ui.button(text(T::PickInViewport)).clicked() {
-                        d.selecting = true;
+                    } else {
+                        ui.horizontal(|ui| {
+                            if ui.button(text(T::PickInViewport)).clicked() {
+                                d.selecting = true;
+                            }
+                            if d.kept_topology.is_some()
+                                && ui.button(text(T::PickAnother)).clicked()
+                            {
+                                d.appending = true;
+                            }
+                        });
+                    }
+                    if d.tool == Tool::Chamfer {
+                        let mut by_angle = d.chamfer_angle.is_some();
+                        if ui
+                            .checkbox(&mut by_angle, text(T::ChamferByAngle))
+                            .changed()
+                        {
+                            d.chamfer_angle = by_angle.then(|| "45 deg".into());
+                        }
+                        if let Some(angle) = &mut d.chamfer_angle {
+                            labeled_text(ui, T::Angle, angle);
+                        }
+                    }
+                    if d.tool == Tool::Shell {
+                        ui.checkbox(&mut d.outward, text(T::ShellOutward));
                     }
                     ui.label(text(T::TopologyIndex));
                     if ui

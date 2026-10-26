@@ -165,6 +165,7 @@ fn build() -> Result<(Session, PartId, SketchId, BodyId, BodyId, [u64; 2])> {
                 signature: stamp,
             },
             radius: "3 mm".into(),
+            additional_edges: Vec::new(),
         },
     })?)?;
     Ok((session, part, id, extrusion, fillet, inner))
@@ -336,6 +337,7 @@ fn clicking_near_the_inner_corner_selects_its_edge() -> Result<()> {
             base: extrusion,
             edge,
             radius: "3 mm".into(),
+            additional_edges: Vec::new(),
         },
     })? {
         Effect::Imported { body, .. } => body,

@@ -10,7 +10,7 @@ Pendências conhecidas, por etapa:
 
 1. **Base técnica:** compilação, testes e validação OCCT no Windows e no Ubuntu (OCCT 7.6), já preparados na CI mas ainda não executados por falta de repositório remoto; medições na máquina de referência de 8 GB (as atuais foram feitas na GPU integrada de um notebook mais forte); interação real com teclado, mouse e diálogos, que os ensaios automáticos não cobrem.
 2. **Primeira peça:** importação STEP sem cores nem estrutura de montagem; extrusão até uma face e extrusão diretamente como união, corte ou interseção (hoje feitas com uma operação booleana seguinte).
-3. **Construção mecânica:** arredondamento e chanfro de várias arestas por operação, propagação por arestas tangentes e chanfro por distância/ângulo; casca com várias faces removidas e paredes para fora; hélice real de rosca (adiada por decisão de escopo).
+3. **Construção mecânica:** hélice real de rosca (adiada por decisão de escopo); arredondamento de raio variável não faz parte do escopo inicial.
 4. **Montagem:** espelhamento de peças que contêm subpeças; alinhamento contínuo por restrições não faz parte do escopo inicial.
 5. **Documentação técnica:** folhas derivadas da malha de exibição (remoção aproximada de linhas ocultas, sem HLR exato do B-rep); cotas apenas gerais e não reposicionáveis; uma vista em corte por folha.
 

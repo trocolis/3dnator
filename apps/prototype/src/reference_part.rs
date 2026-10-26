@@ -200,6 +200,7 @@ pub fn build() -> Result<ReferencePart> {
                 signature: stamp,
             },
             radius: "3 mm".into(),
+            additional_edges: Vec::new(),
         },
     })?)?;
     Ok(ReferencePart {

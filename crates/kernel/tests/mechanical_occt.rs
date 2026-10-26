@@ -145,3 +145,82 @@ impl CloneMesh for Solid {
         Ok(copy.tessellate(0.1, 0.3)?)
     }
 }
+
+/// Face lateral de extrusão: `b{corpo}:e{entidade}` (e não `:end`).
+fn is_side(name: &str) -> bool {
+    name.split(':').nth(1).is_some_and(|tail| {
+        tail.strip_prefix('e')
+            .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// Índices das arestas verticais do bloco (entre faces laterais vizinhas).
+fn vertical_edges(body: &Solid) -> Result<Vec<usize>> {
+    let names = body.face_names().to_vec();
+    let sides = names
+        .iter()
+        .filter(|n| is_side(n))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut edges = Vec::new();
+    for (i, a) in sides.iter().enumerate() {
+        for b in &sides[i + 1..] {
+            if let Ok(edge) = body.edge_between(&[a.clone(), b.clone()]) {
+                edges.push(edge);
+            }
+        }
+    }
+    Ok(edges)
+}
+
+#[test]
+fn multiple_edges_tangent_propagation_and_chamfer_by_angle() -> Result<()> {
+    let body = block()?;
+    let verticals = vertical_edges(&body)?;
+    assert_eq!(verticals.len(), 4);
+    // Duas arestas verticais de 20 mm com raio 2: cada uma remove (1 - π/4)·r²·L.
+    let rounded = body.fillet(&verticals[..2], 2., "b2")?;
+    let per_edge = (1. - PI / 4.) * 4. * 20.;
+    assert!((BLOCK - rounded.volume()? - 2. * per_edge).abs() < 1e-4);
+    // Com os quatro cantos arredondados, o contorno do topo é tangente contínuo: arredondar
+    // uma única aresta do topo propaga pelo contorno inteiro.
+    let all = body.fillet(&verticals, 2., "b2")?;
+    let top = all.face_named("b1:end")?;
+    let names = all.face_names().to_vec();
+    let side = names
+        .iter()
+        .find(|n| is_side(n))
+        .cloned()
+        .ok_or("Lateral ausente")?;
+    let edge = all.edge_between(&[names[top].clone(), side])?;
+    let crown = all.fillet(&[edge], 1., "b3")?;
+    let single = (1. - PI / 4.) * 1. * 40.;
+    assert!(all.volume()? - crown.volume()? > 3. * single);
+    // Chanfro por distância (2 mm na face de referência) e ângulo de 30° em uma aresta de 20 mm.
+    let angled = body.chamfer(&verticals[..1], 2., Some(30_f64.to_radians()), "b4")?;
+    let removed = BLOCK - angled.volume()?;
+    let expected = 0.5 * 2. * 2. * 30_f64.to_radians().tan() * 20.;
+    assert!((removed - expected).abs() < 1e-4, "{removed} != {expected}");
+    assert!(body.chamfer(&verticals[..1], 2., Some(1.6), "b4").is_err());
+    Ok(())
+}
+
+#[test]
+fn shell_outward_and_with_several_open_faces() -> Result<()> {
+    let body = block()?;
+    let top = body.face_named("b1:end")?;
+    // Para fora: as paredes crescem 2 mm além do bloco original, aberto no topo.
+    let outward = body.shell(&[top], 2., true, "b2")?;
+    assert!((outward.volume()? - (44. * 34. * 22. - BLOCK)).abs() < 1e-3);
+    assert!(outward.face_names().iter().any(|n| n.ends_with(":outer")));
+    // Para dentro, abrindo também a face y = 0 (lateral gerada pela primeira linha).
+    let front = body
+        .face_names()
+        .iter()
+        .position(|n| is_side(n))
+        .ok_or("Lateral ausente")?;
+    let open = body.shell(&[top, front], 2., false, "b3")?;
+    let cavity = 36. * 28. * 18.;
+    assert!((open.volume()? - (BLOCK - cavity)).abs() < 1e-3);
+    Ok(())
+}

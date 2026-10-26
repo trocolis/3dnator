@@ -426,43 +426,87 @@ Shape* nator_boolean(const Shape* a, const Shape* b, int mode) noexcept {
     });
 }
 
-Shape* nator_fillet(const Shape* body, std::size_t edge, double radius) noexcept {
+// Arredondamento de raio constante em uma ou mais arestas. O OCCT propaga cada contorno
+// pelas arestas tangentes contínuas, como pede o README.
+Shape* nator_fillet(const Shape* body, const std::size_t* edges, std::size_t count,
+                    double radius) noexcept {
     return build([&](Shape& shape) {
+        if (count == 0 || count > 1000) {
+            throw std::runtime_error("Selecione de 1 a 1000 arestas.");
+        }
         BRepFilletAPI_MakeFillet operation(body->value);
-        operation.Add(radius, edge_at(body, edge));
+        for (std::size_t i = 0; i < count; ++i) {
+            operation.Add(radius, edge_at(body, edges[i]));
+        }
         operation.Build();
         if (!operation.IsDone()) {
-            throw std::runtime_error("Não foi possível arredondar a aresta.");
+            throw std::runtime_error("Não foi possível arredondar as arestas.");
         }
         shape.value = operation.Shape();
         shape.origins = history(operation, shape.value, {&body->value});
     });
 }
 
-Shape* nator_chamfer(const Shape* body, std::size_t edge, double distance) noexcept {
+// Chanfro simétrico (`angle` <= 0) ou por distância e ângulo. No segundo caso, a distância é
+// medida sobre a primeira face adjacente de cada aresta, na ordem topológica do corpo.
+Shape* nator_chamfer(const Shape* body, const std::size_t* edges, std::size_t count,
+                     double distance, double angle) noexcept {
     return build([&](Shape& shape) {
+        if (count == 0 || count > 1000) {
+            throw std::runtime_error("Selecione de 1 a 1000 arestas.");
+        }
+        TopTools_IndexedDataMapOfShapeListOfShape ancestors;
+        TopExp::MapShapesAndAncestors(body->value, TopAbs_EDGE, TopAbs_FACE, ancestors);
         BRepFilletAPI_MakeChamfer operation(body->value);
-        operation.Add(distance, edge_at(body, edge));
+        for (std::size_t i = 0; i < count; ++i) {
+            const TopoDS_Edge edge = edge_at(body, edges[i]);
+            if (angle <= 0) {
+                operation.Add(distance, edge);
+                continue;
+            }
+            const auto* faces = ancestors.Seek(edge);
+            if (faces == nullptr || faces->IsEmpty()) {
+                throw std::runtime_error("Aresta sem face para medir o chanfro.");
+            }
+            const auto faces_in_order = map_of(body->value, TopAbs_FACE);
+            TopoDS_Face reference;
+            int best = 0;
+            for (const auto& face : *faces) {
+                const int index = faces_in_order.FindIndex(face);
+                if (index > 0 && (best == 0 || index < best)) {
+                    best = index;
+                    reference = TopoDS::Face(face);
+                }
+            }
+            operation.AddDA(distance, angle, edge, reference);
+        }
         operation.Build();
         if (!operation.IsDone()) {
-            throw std::runtime_error("Não foi possível chanfrar a aresta.");
+            throw std::runtime_error("Não foi possível chanfrar as arestas.");
         }
         shape.value = operation.Shape();
         shape.origins = history(operation, shape.value, {&body->value});
     });
 }
 
-// Casca para dentro: a face indicada é removida e as paredes têm a espessura pedida.
-Shape* nator_shell(const Shape* body, std::size_t face, double thickness) noexcept {
+// Casca com as faces indicadas removidas. Paredes para dentro (espessura negativa no OCCT)
+// ou para fora do sólido original.
+Shape* nator_shell(const Shape* body, const std::size_t* faces, std::size_t count,
+                   double thickness, bool outward) noexcept {
     return build([&](Shape& shape) {
-        const auto faces = map_of(body->value, TopAbs_FACE);
-        if (face >= static_cast<std::size_t>(faces.Extent())) {
-            throw std::runtime_error("Face inexistente.");
-        }
+        const auto all = map_of(body->value, TopAbs_FACE);
         TopTools_ListOfShape removed;
-        removed.Append(faces(static_cast<int>(face) + 1));
+        for (std::size_t i = 0; i < count; ++i) {
+            if (faces[i] >= static_cast<std::size_t>(all.Extent())) {
+                throw std::runtime_error("Face inexistente.");
+            }
+            removed.Append(all(static_cast<int>(faces[i]) + 1));
+        }
+        // Junção por interseção mantém cantos vivos; a junção padrão (arco) arredondaria os
+        // cantos externos de uma casca para fora.
         BRepOffsetAPI_MakeThickSolid operation;
-        operation.MakeThickSolidByJoin(body->value, removed, -thickness, 1e-6);
+        operation.MakeThickSolidByJoin(body->value, removed, outward ? thickness : -thickness,
+                                       1e-6, BRepOffset_Skin, false, false, GeomAbs_Intersection);
         if (!operation.IsDone()) {
             throw std::runtime_error("Falha ao criar casca.");
         }

@@ -67,20 +67,34 @@ pub enum Operation {
         tool: BodyId,
         mode: BooleanMode,
     },
+    /// Arredondamento de raio constante. O núcleo propaga cada aresta pelas tangentes.
     Fillet {
         base: BodyId,
         edge: EdgeRef,
         radius: String,
+        /// Outras arestas arredondadas na mesma operação.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_edges: Vec<EdgeRef>,
     },
+    /// Chanfro simétrico, ou por distância e ângulo quando `angle` é informado.
     Chamfer {
         base: BodyId,
         edge: EdgeRef,
         distance: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_edges: Vec<EdgeRef>,
     },
+    /// Casca com as faces indicadas removidas, para dentro ou para fora.
     Shell {
         base: BodyId,
         face: FaceRef,
         thickness: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_faces: Vec<FaceRef>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        outward: bool,
     },
     Transform {
         base: BodyId,
@@ -260,18 +274,38 @@ impl Feature {
                 body(base)?;
                 body(tool)?;
             }
-            Operation::Fillet { base, edge, .. } | Operation::Chamfer { base, edge, .. } => {
+            Operation::Fillet {
+                base,
+                edge,
+                additional_edges,
+                ..
+            }
+            | Operation::Chamfer {
+                base,
+                edge,
+                additional_edges,
+                ..
+            } => {
                 body(base)?;
-                if let EdgeRef::Between(faces) = edge {
-                    for face in faces {
-                        *face = remap_face_name(face, bodies);
+                for edge in std::iter::once(edge).chain(additional_edges) {
+                    if let EdgeRef::Between(faces) = edge {
+                        for face in faces {
+                            *face = remap_face_name(face, bodies);
+                        }
                     }
                 }
             }
-            Operation::Shell { base, face, .. } => {
+            Operation::Shell {
+                base,
+                face,
+                additional_faces,
+                ..
+            } => {
                 body(base)?;
-                if let FaceRef::Named(name) = face {
-                    *name = remap_face_name(name, bodies);
+                for face in std::iter::once(face).chain(additional_faces) {
+                    if let FaceRef::Named(name) = face {
+                        *name = remap_face_name(name, bodies);
+                    }
                 }
             }
             Operation::Transform { base, .. } => body(base)?,
@@ -356,24 +390,54 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                     ));
                 }
             }
-            Operation::Fillet { radius, edge, .. }
+            Operation::Fillet {
+                radius,
+                edge,
+                additional_edges,
+                ..
+            }
             | Operation::Chamfer {
                 distance: radius,
                 edge,
+                additional_edges,
                 ..
             } => {
-                if let EdgeRef::Between(faces) = edge {
-                    faces.iter().try_for_each(|f| validate_face_name(f))?;
+                if additional_edges.len() >= MAX_OCCURRENCES {
+                    return Err(DocumentError("Arestas demais na operação.".into()));
+                }
+                for edge in std::iter::once(edge).chain(additional_edges) {
+                    if let EdgeRef::Between(faces) = edge {
+                        faces.iter().try_for_each(|f| validate_face_name(f))?;
+                    }
                 }
                 if part.parameters.evaluate(radius, Length)? <= 0. {
                     return Err(DocumentError("Dimensão deve ser positiva.".into()));
                 }
+                if let Operation::Chamfer {
+                    angle: Some(angle), ..
+                } = &f.operation
+                {
+                    let value = part.parameters.evaluate(angle, Angle)?;
+                    if !(value > 0. && value < std::f64::consts::FRAC_PI_2) {
+                        return Err(DocumentError(
+                            "O ângulo do chanfro deve ficar entre 0° e 90°.".into(),
+                        ));
+                    }
+                }
             }
             Operation::Shell {
-                thickness, face, ..
+                thickness,
+                face,
+                additional_faces,
+                ..
             } => {
-                if let FaceRef::Named(name) = face {
-                    validate_face_name(name)?;
+                if additional_faces.len() >= MAX_OCCURRENCES {
+                    return Err(DocumentError("Faces demais na casca.".into()));
+                }
+                for face in std::iter::once(face).chain(additional_faces) {
+                    if let FaceRef::Named(name) = face {
+                        validate_face_name(name)?;
+                    }
                 }
                 if part.parameters.evaluate(thickness, Length)? <= 0. {
                     return Err(DocumentError("Dimensão deve ser positiva.".into()));
@@ -660,14 +724,25 @@ mod tests {
                 base: BodyId(12),
                 edge: EdgeRef::Between(["b12:e7".into(), "b12:end".into()]),
                 radius: "2 mm".into(),
+                additional_edges: vec![EdgeRef::Between(["b12:e8".into(), "b12:end".into()])],
             },
         };
         feature.remap(&bodies, &HashMap::new())?;
-        let Operation::Fillet { base, edge, .. } = feature.operation else {
+        let Operation::Fillet {
+            base,
+            edge,
+            additional_edges,
+            ..
+        } = feature.operation
+        else {
             return Err("A operação deixou de ser um arredondamento".into());
         };
         assert_eq!(base, BodyId(40));
         assert_eq!(edge, EdgeRef::Between(["b40:e7".into(), "b40:end".into()]));
+        assert_eq!(
+            additional_edges,
+            vec![EdgeRef::Between(["b40:e8".into(), "b40:end".into()])]
+        );
         Ok(())
     }
 }

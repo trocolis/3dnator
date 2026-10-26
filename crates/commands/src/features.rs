@@ -224,8 +224,17 @@ pub(super) fn normalize(
             angle,
             axis_line,
         },
-        Operation::Fillet { base, edge, radius } => Operation::Fillet {
+        Operation::Fillet {
+            base,
+            edge,
+            radius,
+            additional_edges,
+        } => Operation::Fillet {
             edge: stable_edge(doc, part, base, edge)?,
+            additional_edges: additional_edges
+                .into_iter()
+                .map(|e| stable_edge(doc, part, base, e))
+                .collect::<Result<_, _>>()?,
             base,
             radius,
         },
@@ -233,34 +242,53 @@ pub(super) fn normalize(
             base,
             edge,
             distance,
+            angle,
+            additional_edges,
         } => Operation::Chamfer {
             edge: stable_edge(doc, part, base, edge)?,
+            additional_edges: additional_edges
+                .into_iter()
+                .map(|e| stable_edge(doc, part, base, e))
+                .collect::<Result<_, _>>()?,
             base,
             distance,
+            angle,
         },
         Operation::Shell {
             base,
             face,
             thickness,
-        } => {
-            let face = match face {
-                FaceRef::Index { index, signature } => {
-                    let (solid, bytes) = source(doc, part, base)?;
-                    same_geometry(&bytes, signature)?;
-                    match solid.face_name(index) {
-                        Ok(name) => FaceRef::Named(name.to_owned()),
-                        Err(_) => FaceRef::Index { index, signature },
-                    }
-                }
-                named => named,
-            };
-            Operation::Shell {
-                base,
-                face,
-                thickness,
-            }
-        }
+            additional_faces,
+            outward,
+        } => Operation::Shell {
+            face: stable_face(doc, part, base, face)?,
+            additional_faces: additional_faces
+                .into_iter()
+                .map(|f| stable_face(doc, part, base, f))
+                .collect::<Result<_, _>>()?,
+            base,
+            thickness,
+            outward,
+        },
         other => other,
+    })
+}
+
+#[cfg(feature = "occt")]
+fn stable_face(
+    doc: &Document,
+    part: PartId,
+    base: BodyId,
+    face: FaceRef,
+) -> Result<FaceRef, DocumentError> {
+    let FaceRef::Index { index, signature } = face else {
+        return Ok(face);
+    };
+    let (solid, bytes) = source(doc, part, base)?;
+    same_geometry(&bytes, signature)?;
+    Ok(match solid.face_name(index) {
+        Ok(name) => FaceRef::Named(name.to_owned()),
+        Err(_) => FaceRef::Index { index, signature },
     })
 }
 
@@ -356,30 +384,55 @@ pub(super) fn construct(
                 &owner,
             )
             .map_err(error)?,
-        Operation::Fillet { base, edge, radius } => {
+        Operation::Fillet {
+            base,
+            edge,
+            radius,
+            additional_edges,
+        } => {
             let (solid, bytes) = source(doc, part, *base)?;
+            let edges = std::iter::once(edge)
+                .chain(additional_edges)
+                .map(|e| edge_index(&solid, &bytes, e))
+                .collect::<Result<Vec<_>, _>>()?;
             solid
-                .fillet(edge_index(&solid, &bytes, edge)?, value(radius)?, &owner)
+                .fillet(&edges, value(radius)?, &owner)
                 .map_err(error)?
         }
         Operation::Chamfer {
             base,
             edge,
             distance,
+            angle,
+            additional_edges,
         } => {
             let (solid, bytes) = source(doc, part, *base)?;
+            let edges = std::iter::once(edge)
+                .chain(additional_edges)
+                .map(|e| edge_index(&solid, &bytes, e))
+                .collect::<Result<Vec<_>, _>>()?;
+            let angle = angle
+                .as_deref()
+                .map(|a| piece.parameters.evaluate(a, Dimension::Angle))
+                .transpose()?;
             solid
-                .chamfer(edge_index(&solid, &bytes, edge)?, value(distance)?, &owner)
+                .chamfer(&edges, value(distance)?, angle, &owner)
                 .map_err(error)?
         }
         Operation::Shell {
             base,
             face,
             thickness,
+            additional_faces,
+            outward,
         } => {
             let (solid, bytes) = source(doc, part, *base)?;
+            let faces = std::iter::once(face)
+                .chain(additional_faces)
+                .map(|f| face_index(&solid, &bytes, f))
+                .collect::<Result<Vec<_>, _>>()?;
             solid
-                .shell(face_index(&solid, &bytes, face)?, value(thickness)?, &owner)
+                .shell(&faces, value(thickness)?, *outward, &owner)
                 .map_err(error)?
         }
         Operation::Transform {

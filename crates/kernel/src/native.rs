@@ -37,7 +37,13 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn nator_boolean(a: *const c_void, b: *const c_void, mode: i32) -> *mut c_void;
     fn nator_transform(body: *const c_void, matrix: *const f64) -> *mut c_void;
-    fn nator_shell(body: *const c_void, face: usize, thickness: f64) -> *mut c_void;
+    fn nator_shell(
+        body: *const c_void,
+        faces: *const usize,
+        count: usize,
+        thickness: f64,
+        outward: bool,
+    ) -> *mut c_void;
     fn nator_brep_prepare(body: *mut c_void) -> bool;
     fn nator_brep_size(body: *const c_void) -> usize;
     fn nator_brep_copy(body: *const c_void, target: *mut c_char, size: usize) -> bool;
@@ -48,8 +54,19 @@ unsafe extern "C" {
     fn nator_box(x: f64, y: f64, z: f64, dx: f64, dy: f64, dz: f64) -> *mut c_void;
     fn nator_cylinder(x: f64, y: f64, z: f64, radius: f64, height: f64) -> *mut c_void;
     fn nator_cut(body: *const c_void, tool: *const c_void) -> *mut c_void;
-    fn nator_fillet(body: *const c_void, edge: usize, radius: f64) -> *mut c_void;
-    fn nator_chamfer(body: *const c_void, edge: usize, distance: f64) -> *mut c_void;
+    fn nator_fillet(
+        body: *const c_void,
+        edges: *const usize,
+        count: usize,
+        radius: f64,
+    ) -> *mut c_void;
+    fn nator_chamfer(
+        body: *const c_void,
+        edges: *const usize,
+        count: usize,
+        distance: f64,
+        angle: f64,
+    ) -> *mut c_void;
     fn nator_volume(body: *const c_void, volume: *mut f64) -> bool;
     fn nator_read_step(path: *const c_char) -> *mut c_void;
     fn nator_write_step(body: *const c_void, path: *const c_char) -> bool;
@@ -456,49 +473,94 @@ impl Solid {
     }
 
     /// Casca para dentro, removendo a face `face`.
-    pub fn shell(&self, face: usize, thickness: f64, owner: &str) -> Result<Self, KernelError> {
+    /// Casca com as faces `faces` removidas e paredes de `thickness` mm, para dentro ou para
+    /// fora do sólido. As faces deslocadas recebem o sufixo `:inner` ou `:outer`.
+    pub fn shell(
+        &self,
+        faces: &[usize],
+        thickness: f64,
+        outward: bool,
+        owner: &str,
+    ) -> Result<Self, KernelError> {
         owner_name(owner)?;
         positive(thickness, "Espessura")?;
-        // SAFETY: ponte valida índice e constrói geometria nova.
-        Self::from_pointer(unsafe { nator_shell(self.pointer.as_ptr(), face, thickness) })?
-            .with_inherited(
-                &[&self.faces],
-                &Inheritance {
-                    owner,
-                    generated: "rim",
-                    modified_suffix: Some("inner"),
-                },
+        if faces.len() > 1000 {
+            return Err(KernelError("Faces demais na casca.".into()));
+        }
+        // SAFETY: lista de índices viva durante a chamada; a ponte valida cada índice.
+        Self::from_pointer(unsafe {
+            nator_shell(
+                self.pointer.as_ptr(),
+                faces.as_ptr(),
+                faces.len(),
+                thickness,
+                outward,
             )
+        })?
+        .with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner,
+                generated: "rim",
+                modified_suffix: Some(if outward { "outer" } else { "inner" }),
+            },
+        )
     }
 
-    pub fn fillet(&self, edge: usize, radius: f64, owner: &str) -> Result<Self, KernelError> {
+    /// Arredondamento de raio constante nas arestas indicadas (com propagação tangente).
+    pub fn fillet(&self, edges: &[usize], radius: f64, owner: &str) -> Result<Self, KernelError> {
         owner_name(owner)?;
         positive(radius, "Raio")?;
-        // SAFETY: o índice da aresta é validado na ponte; falhas são convertidas em erro.
-        Self::from_pointer(unsafe { nator_fillet(self.pointer.as_ptr(), edge, radius) })?
-            .with_inherited(
-                &[&self.faces],
-                &Inheritance {
-                    owner,
-                    generated: "round",
-                    modified_suffix: None,
-                },
-            )
+        // SAFETY: lista de índices viva durante a chamada; a ponte valida cada índice e a
+        // quantidade, e falhas viram erro sem alterar o sólido original.
+        Self::from_pointer(unsafe {
+            nator_fillet(self.pointer.as_ptr(), edges.as_ptr(), edges.len(), radius)
+        })?
+        .with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner,
+                generated: "round",
+                modified_suffix: None,
+            },
+        )
     }
 
-    pub fn chamfer(&self, edge: usize, distance: f64, owner: &str) -> Result<Self, KernelError> {
+    /// Chanfro simétrico, ou por distância e ângulo (rad) quando `angle` é informado.
+    pub fn chamfer(
+        &self,
+        edges: &[usize],
+        distance: f64,
+        angle: Option<f64>,
+        owner: &str,
+    ) -> Result<Self, KernelError> {
         owner_name(owner)?;
         positive(distance, "Distância")?;
+        if let Some(angle) = angle
+            && !(angle.is_finite() && angle > 0.01 && angle < std::f64::consts::FRAC_PI_2 - 0.01)
+        {
+            return Err(KernelError(
+                "O ângulo do chanfro deve ficar entre 0° e 90°.".into(),
+            ));
+        }
         // SAFETY: mesmo contrato de fillet; não modifica o sólido original.
-        Self::from_pointer(unsafe { nator_chamfer(self.pointer.as_ptr(), edge, distance) })?
-            .with_inherited(
-                &[&self.faces],
-                &Inheritance {
-                    owner,
-                    generated: "chamfer",
-                    modified_suffix: None,
-                },
+        Self::from_pointer(unsafe {
+            nator_chamfer(
+                self.pointer.as_ptr(),
+                edges.as_ptr(),
+                edges.len(),
+                distance,
+                angle.unwrap_or(0.),
             )
+        })?
+        .with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner,
+                generated: "chamfer",
+                modified_suffix: None,
+            },
+        )
     }
 
     /// Extrusão de uma região entre `from` e `to` mm ao longo da normal do plano do rascunho.

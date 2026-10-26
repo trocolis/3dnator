@@ -72,7 +72,7 @@ fn fillet_reference_survives_a_thickness_change() -> Result<()> {
             None => reference.insert([format!("b1:e{horizontal}"), format!("b1:e{vertical}")]),
         };
         let edge = body.edge_between(pair)?;
-        let rounded = body.fillet(edge, 3., "b2")?;
+        let rounded = body.fillet(&[edge], 3., "b2")?;
         let without = body.volume()?;
         let with = rounded.volume()?;
         // Arredondamento interno (côncavo) acrescenta material: (1 - π/4)·r²·L.
@@ -94,11 +94,13 @@ fn brep_round_trip_keeps_names_aligned_with_faces() -> Result<()> {
     let (sketch, horizontal, vertical) = bracket(6.)?;
     let mut body = Solid::extrude(&sketch, &single_region(&sketch)?, 0., 20., "b1")?;
     let pair = [format!("b1:e{horizontal}"), format!("b1:e{vertical}")];
-    let before = body.fillet(body.edge_between(&pair)?, 2., "b2")?.volume()?;
+    let before = body
+        .fillet(&[body.edge_between(&pair)?], 2., "b2")?
+        .volume()?;
     let names = body.face_names().to_vec();
     let restored = Solid::from_brep(&body.to_brep()?, Some(&names))?;
     let after = restored
-        .fillet(restored.edge_between(&pair)?, 2., "b2")?
+        .fillet(&[restored.edge_between(&pair)?], 2., "b2")?
         .volume()?;
     assert!((before - after).abs() < 1e-9);
     // Uma lista de nomes de outro sólido é rejeitada em vez de desalinhada.
@@ -132,7 +134,7 @@ fn shell_and_transform_keep_referenceable_faces() -> Result<()> {
     let mut sketch = Sketch::new("Caixa", Plane::xy());
     sketch.add_rectangle([0., 0.], [40., 30.], false)?;
     let block = Solid::extrude(&sketch, &single_region(&sketch)?, 0., 20., "b1")?;
-    let open = block.shell(block.face_named("b1:end")?, 2., "b2")?;
+    let open = block.shell(&[block.face_named("b1:end")?], 2., false, "b2")?;
     let expected = 40. * 30. * 20. - 36. * 26. * 18.;
     assert!((open.volume()? - expected).abs() < 1e-4);
     let names = open.face_names();

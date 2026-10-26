@@ -15,6 +15,7 @@
 - Rosca simplificada registrada no furo (designação, diâmetro nominal e passo), sem hélice na geometria.
 - Padrões linear (uma ou duas direções) e circular, espelhamento por plano com opção de manter o original e divisão de corpo por plano.
 - Revolução em torno dos eixos do plano do rascunho ou de uma linha do rascunho, que acompanha as cotas.
+- Arredondamento e chanfro de várias arestas por operação, com propagação pelas arestas tangentes; chanfro por distância e ângulo; casca com várias faces removidas e paredes para dentro ou para fora, com cantos vivos.
 - Padrões linear e circular de entidades no rascunho, com direção dada por uma linha ou centro dado por um círculo ou arco.
 - Editor de operações reorganizado por ferramenta, com seções para cada operação.
 
