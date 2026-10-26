@@ -157,6 +157,26 @@ pub enum Text {
     Section,
     SectionPosition,
     PlaneNormal,
+    AssociativeDimensions,
+    DimensionKind,
+    DimensionView,
+    DimensionLength,
+    DimensionRadiusFace,
+    DimensionDiameterFace,
+    DimensionRadiusEdge,
+    DimensionDiameterEdge,
+    DimensionFaceDistance,
+    DimensionFaceAngle,
+    CaptureFirstReference,
+    CaptureSecondReference,
+    AddDimension,
+    RemoveDimension,
+    UpdateDimensionReferences,
+    DimensionTextPosition,
+    SupplementaryAngle,
+    DimensionReview,
+    StaleDrawingPreview,
+    DrawingReferenceMissing,
     AddSection,
     RemoveSection,
     Portrait,
@@ -513,6 +533,30 @@ pub fn text(key: Text) -> &'static str {
         Text::PngResolution => "Resolução PNG (DPI)",
         Text::SectionPosition => "Origem do plano de corte (mm)",
         Text::PlaneNormal => "Normal do plano de corte",
+        Text::AssociativeDimensions => "Cotas associativas",
+        Text::DimensionKind => "Tipo de cota",
+        Text::DimensionView => "Vista da cota",
+        Text::DimensionLength => "Comprimento da aresta",
+        Text::DimensionRadiusFace => "Raio da face",
+        Text::DimensionDiameterFace => "Diâmetro da face",
+        Text::DimensionRadiusEdge => "Raio da aresta circular",
+        Text::DimensionDiameterEdge => "Diâmetro da aresta circular",
+        Text::DimensionFaceDistance => "Distância entre faces paralelas",
+        Text::DimensionFaceAngle => "Ângulo entre faces planas",
+        Text::CaptureFirstReference => "Capturar primeira referência selecionada",
+        Text::CaptureSecondReference => "Capturar segunda referência selecionada",
+        Text::AddDimension => "Adicionar cota",
+        Text::RemoveDimension => "Remover cota",
+        Text::UpdateDimensionReferences => "Aplicar referências à cota escolhida",
+        Text::DimensionTextPosition => {
+            "Deslocamento do texto no papel (mm); também pode arrastar na prévia"
+        }
+        Text::SupplementaryAngle => "Ângulo suplementar",
+        Text::DimensionReview => "Cotas que precisam de revisão",
+        Text::StaleDrawingPreview => {
+            "Prévia anterior à alteração. Atualize antes de reposicionar as cotas."
+        }
+        Text::DrawingReferenceMissing => "Referência removida",
         Text::MeshDrawingNotice => {
             "A legenda identifica vistas do B-rep ou aproximadas da malha. Cortes de malha são aproximados; cotas gerais medem os limites projetados."
         }

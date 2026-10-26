@@ -2,24 +2,64 @@
 use super::*;
 use nator_document::{SheetId, SheetRecord};
 use nator_drawing::{Orientation, Paper, Primitive, Section, SectionView, Specification, Style};
+mod annotations;
+impl Draft {
+    pub(super) fn keep_reference(
+        &mut self,
+        first: bool,
+        reference: nator_document::drawing::DrawingTopologyRef,
+    ) {
+        if first {
+            self.first_reference = Some(reference);
+        } else {
+            self.second_reference = Some(reference);
+        }
+    }
+    pub(super) fn keep_sheet_id(&mut self, id: SheetId) {
+        self.id = Some(id);
+    }
+}
 pub(super) struct Draft {
     pub tab: u64,
     id: Option<SheetId>,
     target: Option<PartId>,
     spec: Specification,
+    annotations: Vec<nator_document::drawing::DrawingAnnotation>,
+    annotation_kind: usize,
+    annotation_view: nator_drawing::View,
+    supplementary: bool,
+    selected_annotation: Option<nator_drawing::AnnotationId>,
+    first_reference: Option<nator_document::drawing::DrawingTopologyRef>,
+    second_reference: Option<nator_document::drawing::DrawingTopologyRef>,
     pub preview: Option<nator_drawing::Sheet>,
+    pub preview_revision: Option<u64>,
 }
 impl Editor {
     pub(super) fn open_drawing(&mut self, record: Option<SheetRecord>) {
-        let (id, target, spec) = record
-            .map(|r| (Some(r.id), r.target, r.specification))
-            .unwrap_or_else(|| (None, self.current().active_part, Specification::default()));
+        let (id, target, spec, annotations) = record
+            .map(|r| (Some(r.id), r.target, r.specification, r.annotations))
+            .unwrap_or_else(|| {
+                (
+                    None,
+                    self.current().active_part,
+                    Specification::default(),
+                    Vec::new(),
+                )
+            });
         self.drawing_edit = Some(Draft {
             tab: self.current().id,
             id,
             target,
             spec,
+            annotations,
+            annotation_kind: 0,
+            annotation_view: nator_drawing::View::Front,
+            supplementary: false,
+            selected_annotation: None,
+            first_reference: None,
+            second_reference: None,
             preview: None,
+            preview_revision: None,
         });
     }
     pub(super) fn drawing_dialog(&mut self, ctx: &egui::Context) {
@@ -31,8 +71,13 @@ impl Editor {
         };
         let document = tab.session.document().clone();
         let revision = tab.session.revision();
+        let picked = tab.picked.clone();
+        let view = tab.view.clone();
         let mut open = true;
         let mut action = None;
+        let mut capture = None;
+        let previous_spec = draft.spec.clone();
+        let previous_annotations = draft.annotations.clone();
         egui::Window::new(text(T::Drawing))
             .open(&mut open)
             .default_width(720.)
@@ -128,6 +173,7 @@ impl Editor {
                             },
                         });
                     }
+                    capture = draft.annotation_controls(ui, &document, picked.is_some());
                     ui.horizontal_wrapped(|ui| {
                         for (label, id) in [
                             (T::Preview, 0),
@@ -141,6 +187,13 @@ impl Editor {
                         }
                     });
                 });
+                if draft.spec != previous_spec || draft.annotations != previous_annotations {
+                    draft.preview = None;
+                    draft.preview_revision = None;
+                }
+                if draft.preview.is_some() && draft.preview_revision != Some(revision) {
+                    ui.colored_label(egui::Color32::YELLOW, text(T::StaleDrawingPreview));
+                }
                 if let Some(sheet) = &draft.preview {
                     let width = ui.available_width().min(800.);
                     let scale = width / sheet.size[0] as f32;
@@ -188,9 +241,39 @@ impl Editor {
                             }
                         }
                     }
+                    if !sheet.annotation_warnings.is_empty() {
+                        ui.colored_label(egui::Color32::LIGHT_RED, text(T::DimensionReview));
+                        for (id, message) in &sheet.annotation_warnings {
+                            ui.small(format!("#{}: {message}", id.0));
+                        }
+                    }
+                    if let Err(error) =
+                        draft.preview_interactions(ui, rect, scale, revision, self.busy())
+                    {
+                        self.status = error;
+                    }
                 }
             });
-        if let Some(action) = action {
+        if let (Some((first, edge)), Some(pick)) = (capture, picked) {
+            let tab = draft.tab;
+            let target = draft.target;
+            self.start(ctx, None, move || {
+                let reference = nator_commands::drawing::capture_reference(
+                    &document,
+                    target,
+                    &pick,
+                    edge,
+                    |o| view.pickable(o),
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(Outcome::DrawingReference {
+                    tab,
+                    revision,
+                    first,
+                    reference,
+                })
+            });
+        } else if let Some(action) = action {
             if action == 3 {
                 let id = draft.id.or_else(|| {
                     document
@@ -208,15 +291,22 @@ impl Editor {
                         id,
                         target: draft.target,
                         specification: draft.spec.clone(),
+                        annotations: draft.annotations.clone(),
                     },
                 );
             } else {
                 let spec = draft.spec.clone();
+                let annotations = draft.annotations.clone();
                 let target = draft.target;
                 let tab = draft.tab;
                 self.start(ctx, None, move || {
-                    let sheet = nator_commands::drawing::generate(&document, target, &spec)
-                        .map_err(|e| e.to_string())?;
+                    let sheet = nator_commands::drawing::generate_with_annotations(
+                        &document,
+                        target,
+                        &spec,
+                        &annotations,
+                    )
+                    .map_err(|e| e.to_string())?;
                     if action == 0 {
                         return Ok(Outcome::Drawing {
                             tab,

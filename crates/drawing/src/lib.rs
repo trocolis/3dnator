@@ -3,7 +3,9 @@
 use nator_geometry::{Mesh, Point3, ProjectedSegment, cross, dot, norm, sub};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error, fmt};
+mod annotations;
 mod export;
+pub use annotations::{AnnotationGeometry, AnnotationHandle, AnnotationId, ResolvedAnnotation};
 pub use export::{pdf, png};
 #[derive(Debug, Clone)]
 pub struct DrawingError(pub String);
@@ -63,19 +65,19 @@ impl View {
         }
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Section {
     pub origin: Point3,
     pub normal: Point3,
 }
 /// Identificador estável: 0 é reservado ao corte A–A legado; 1 a 25 representam B–B
 /// a Z–Z. Remover um corte não renomeia os demais nem suas referências visuais.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SectionView {
     pub id: u32,
     pub section: Section,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Specification {
     pub title: String,
     pub paper: Paper,
@@ -225,6 +227,11 @@ pub struct Sheet {
     /// exportação vetorial. Cortes gerados a partir de malhas são identificados à parte.
     pub exact_projection: bool,
     pub exact_sections: bool,
+    pub annotation_handles: Vec<AnnotationHandle>,
+    pub annotation_warnings: Vec<(AnnotationId, String)>,
+    annotations: Vec<ResolvedAnnotation>,
+    placements: Vec<annotations::ViewPlacement>,
+    annotation_base: usize,
 }
 
 pub struct ProjectedView {
@@ -431,6 +438,11 @@ pub fn generate_with_geometry(
         primitives: Vec::new(),
         exact_projection: projections.is_some(),
         exact_sections: sections.is_some() && spec.has_sections(),
+        annotation_handles: Vec::new(),
+        annotation_warnings: Vec::new(),
+        annotations: Vec::new(),
+        placements: Vec::new(),
+        annotation_base: 0,
     };
     for (a, b) in [
         ([8., 8.], [size[0] - 8., 8.]),
@@ -619,6 +631,12 @@ pub fn generate_with_geometry(
                 origin[1] - (p[1] - (min[1] + max[1]) / 2.) * spec.scale,
             ]
         };
+        sheet.placements.push(annotations::ViewPlacement {
+            view,
+            origin,
+            center: [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5],
+            scale: spec.scale,
+        });
         sheet.text(
             [origin[0] - 18., origin[1] + cell[1] / 2. - 1.],
             2.5,
@@ -703,6 +721,7 @@ pub fn generate_with_geometry(
     if sheet.primitives.len() > 500_000 {
         return Err(DrawingError("Folha contém elementos demais.".into()));
     }
+    sheet.annotation_base = sheet.primitives.len();
     Ok(sheet)
 }
 /// Eixos U/V de um plano de corte, com U × V = normal.

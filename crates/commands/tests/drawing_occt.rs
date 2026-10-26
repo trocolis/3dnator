@@ -1,9 +1,16 @@
 //! Vistas de B-rep: oclusão exata entre corpos e curvas independentes da tesselação.
 #![cfg(feature = "occt")]
 use nator_commands::{Command, Session, drawing};
-use nator_document::{Document, MeshAsset};
-use nator_drawing::{Primitive, Section, Specification, View};
-use nator_kernel::{Solid, projected_edges};
+use nator_document::{
+    Document, MeshAsset,
+    drawing::{
+        DrawingAnnotation, DrawingBodyRef, DrawingEdgeRef, DrawingFaceRef, DrawingMeasure,
+        DrawingTopologyRef,
+    },
+    features::{EdgeRef, FaceRef},
+};
+use nator_drawing::{AnnotationId, Primitive, Section, Specification, View};
+use nator_kernel::{FaceKind, Solid, projected_edges};
 use std::{error::Error, sync::Arc};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 #[test]
@@ -132,5 +139,197 @@ fn precise_annular_section_preserves_holes_and_the_source_solid() -> Result<()> 
             .section_segments([0.; 3], [f64::MAX; 3], 0.01)
             .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn associative_annotations_measure_edges_radii_and_face_relations() -> Result<()> {
+    let mut cylinder = Solid::cylinder([0.; 3], 5., 20.)?;
+    let faces = cylinder.face_count()?;
+    let brep = cylinder.to_brep()?;
+    let (mesh, triangle_faces) = cylinder.tessellate_with_faces(1., 1.)?;
+    let mut session = Session::new(Document::new("Cotas Associativas")?)?;
+    let effect = session.execute(Command::ImportSolid {
+        destination: None,
+        name: "Cilindro".into(),
+        geometry: Arc::new(MeshAsset::with_faces(mesh, triangle_faces)?),
+        brep: Arc::new(brep),
+        faces,
+    })?;
+    let nator_commands::Effect::Imported { part, body } = effect else {
+        return Err("Corpo não criado".into());
+    };
+    let doc_body = session
+        .document()
+        .body(body)
+        .ok_or("Corpo ausente no documento")?;
+    let face_names = doc_body.face_names.clone();
+    assert_eq!(face_names.len(), 3);
+    let brep_bytes = doc_body.brep.as_ref().ok_or("B-rep ausente no corpo")?;
+    let solid = Solid::from_brep(brep_bytes, Some(&face_names))?;
+    let mut cyl_face = None;
+    let mut cap_faces = Vec::new();
+    for name in face_names.iter() {
+        let i = solid.face_named(name)?;
+        let m = solid.face_measure(i)?;
+        match m.kind {
+            FaceKind::Cylinder { .. } => cyl_face = Some(name.clone()),
+            FaceKind::Plane { .. } => cap_faces.push(name.clone()),
+            _ => {}
+        }
+    }
+    let cyl_face = cyl_face.ok_or("Face cilíndrica não encontrada")?;
+    assert_eq!(cap_faces.len(), 2);
+
+    let circular_edge = solid.edge_between(&[cap_faces[0].clone(), cyl_face.clone()])?;
+    let circular_edge_faces = solid.edge_face_names(circular_edge)?;
+
+    let target = DrawingBodyRef {
+        body,
+        path: Vec::new(),
+    };
+
+    // 1. Cota de raio na face cilíndrica
+    let a1 = DrawingAnnotation {
+        id: AnnotationId(1),
+        view: View::Front,
+        measurement: DrawingMeasure::Radius {
+            topology: DrawingTopologyRef::Face(DrawingFaceRef {
+                target: target.clone(),
+                face: FaceRef::Named(cyl_face),
+            }),
+            diameter: false,
+        },
+        offset_mm: [5., 5.],
+    };
+
+    // 2. Cota de diâmetro na aresta circular
+    let a2 = DrawingAnnotation {
+        id: AnnotationId(2),
+        view: View::Top,
+        measurement: DrawingMeasure::Radius {
+            topology: DrawingTopologyRef::Edge(DrawingEdgeRef {
+                target: target.clone(),
+                edge: EdgeRef::Between(circular_edge_faces),
+            }),
+            diameter: true,
+        },
+        offset_mm: [10., -10.],
+    };
+
+    // 3. Cota de distância entre as faces planas (altura do cilindro = 20)
+    let a3 = DrawingAnnotation {
+        id: AnnotationId(3),
+        view: View::Front,
+        measurement: DrawingMeasure::FaceDistance {
+            first: DrawingFaceRef {
+                target: target.clone(),
+                face: FaceRef::Named(cap_faces[0].clone()),
+            },
+            second: DrawingFaceRef {
+                target: target.clone(),
+                face: FaceRef::Named(cap_faces[1].clone()),
+            },
+        },
+        offset_mm: [15., 0.],
+    };
+
+    let spec = Specification::default();
+    let sheet =
+        drawing::generate_with_annotations(session.document(), Some(part), &spec, &[a1, a2, a3])?;
+
+    assert!(sheet.annotation_warnings.is_empty());
+    assert_eq!(sheet.annotation_handles.len(), 3);
+    assert!(sheet.annotation_handles.iter().any(|h| h.label == "R 5"));
+    assert!(sheet.annotation_handles.iter().any(|h| h.label == "Ø 10"));
+    assert!(sheet.annotation_handles.iter().any(|h| h.label == "20"));
+
+    // Reposicionamento na folha sem alterar o documento
+    let mut sheet_mut = sheet.clone();
+    sheet_mut.reposition_annotation(AnnotationId(1), [25., 30.])?;
+    let h1 = sheet_mut
+        .annotation_handles
+        .iter()
+        .find(|h| h.id.0 == 1)
+        .ok_or("Alça 1 não encontrada")?;
+    assert_eq!(h1.offset_mm, [25., 30.]);
+
+    Ok(())
+}
+
+#[test]
+fn missing_geometry_generates_annotation_warnings_and_survives_save() -> Result<()> {
+    let mut box_solid = Solid::cuboid([0.; 3], [10., 20., 30.])?;
+    let faces = box_solid.face_count()?;
+    let brep = box_solid.to_brep()?;
+    let (mesh, triangle_faces) = box_solid.tessellate_with_faces(1., 1.)?;
+    let mut session = Session::new(Document::new("Cotas Aviso")?)?;
+    let effect = session.execute(Command::ImportSolid {
+        destination: None,
+        name: "Bloco".into(),
+        geometry: Arc::new(MeshAsset::with_faces(mesh, triangle_faces)?),
+        brep: Arc::new(brep),
+        faces,
+    })?;
+    let nator_commands::Effect::Imported { part, body } = effect else {
+        return Err("Corpo não criado".into());
+    };
+
+    let target = DrawingBodyRef {
+        body,
+        path: Vec::new(),
+    };
+
+    // Cota apontando para face inexistente
+    let missing_annotation = DrawingAnnotation {
+        id: AnnotationId(1),
+        view: View::Front,
+        measurement: DrawingMeasure::Radius {
+            topology: DrawingTopologyRef::Face(DrawingFaceRef {
+                target,
+                face: FaceRef::Named("b1:face_inexistente".into()),
+            }),
+            diameter: false,
+        },
+        offset_mm: [5., 5.],
+    };
+
+    let spec = Specification::default();
+    let sheet = drawing::generate_with_annotations(
+        session.document(),
+        Some(part),
+        &spec,
+        std::slice::from_ref(&missing_annotation),
+    )?;
+
+    assert_eq!(sheet.annotation_warnings.len(), 1);
+    assert_eq!(sheet.annotation_warnings[0].0.0, 1);
+    assert!(sheet.primitives.iter().any(|p| {
+        matches!(p, Primitive::Text { value, .. } if value.contains("REVISAR COTA 1"))
+    }));
+
+    // Salvar folha com anotações e testar persistência e desfazer/refazer
+    session.execute(Command::SetSheet {
+        id: None,
+        target: Some(part),
+        specification: spec.clone(),
+        annotations: vec![missing_annotation],
+    })?;
+
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("annotations.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let reopened = nator_project_io::read_project(&path)?;
+    assert_eq!(reopened.sheets().len(), 1);
+    assert_eq!(reopened.sheets()[0].annotations.len(), 1);
+    assert_eq!(reopened.sheets()[0].annotations[0].id.0, 1);
+
+    // Desfazer
+    assert!(session.undo());
+    assert!(session.document().sheets().is_empty());
+    assert!(session.redo());
+    assert_eq!(session.document().sheets().len(), 1);
+    assert_eq!(session.document().sheets()[0].annotations.len(), 1);
+
     Ok(())
 }

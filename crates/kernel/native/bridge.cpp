@@ -951,3 +951,4 @@ Shape* nator_brep_read(const char* data, std::size_t size) noexcept {
 #include "step_scene.hpp"
 #include "projection.hpp"
 #include "section.hpp"
+#include "annotation.hpp"

@@ -19,6 +19,7 @@ use std::{
     ptr::NonNull,
     rc::Rc,
 };
+mod annotation;
 mod projection;
 mod section;
 mod step;

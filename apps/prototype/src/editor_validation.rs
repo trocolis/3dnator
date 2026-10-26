@@ -86,6 +86,7 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
         id: None,
         target: Some(part),
         specification: spec.clone(),
+        annotations: Vec::new(),
     })?;
     let project = directory.join("assembly.3dnator");
     nator_project_io::write_project(&project, session.document())?;

@@ -239,6 +239,12 @@ enum Outcome {
         revision: u64,
         sheet: nator_drawing::Sheet,
     },
+    DrawingReference {
+        tab: u64,
+        revision: u64,
+        first: bool,
+        reference: nator_document::drawing::DrawingTopologyRef,
+    },
     Prepared {
         tab: u64,
         command: PreparedCommand,
@@ -571,14 +577,23 @@ impl Editor {
                 }
             }
             Ok(Outcome::Prepared { tab, command }) => {
+                let mut saved = None;
                 if let Some(target) = self.find_tab(tab) {
                     match target.session.commit(command) {
-                        Ok(_) => {
+                        Ok(effect) => {
+                            if let Effect::SheetSaved { id } = effect {
+                                saved = Some(id);
+                            }
                             target.changed();
                             self.requested = None;
                         }
                         Err(error) => self.status = error.to_string(),
                     }
+                }
+                if let Some(id) = saved
+                    && let Some(draft) = self.drawing_edit.as_mut().filter(|d| d.tab == tab)
+                {
+                    draft.keep_sheet_id(id);
                 }
             }
             Ok(Outcome::SketchSolved {
@@ -642,6 +657,22 @@ impl Editor {
                     && let Some(d) = self.drawing_edit.as_mut().filter(|d| d.tab == tab)
                 {
                     d.preview = Some(sheet);
+                    d.preview_revision = Some(revision);
+                }
+            }
+            Ok(Outcome::DrawingReference {
+                tab,
+                revision,
+                first,
+                reference,
+            }) => {
+                if self
+                    .tabs
+                    .iter()
+                    .any(|t| t.id == tab && t.session.revision() == revision)
+                    && let Some(draft) = self.drawing_edit.as_mut().filter(|d| d.tab == tab)
+                {
+                    draft.keep_reference(first, reference);
                 }
             }
             Ok(Outcome::Cancelled) => {}

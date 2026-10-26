@@ -22,6 +22,7 @@ pub enum Command {
         id: Option<nator_document::SheetId>,
         target: Option<PartId>,
         specification: nator_drawing::Specification,
+        annotations: Vec<nator_document::drawing::DrawingAnnotation>,
     },
     ImportSolid {
         destination: Option<PartId>,
@@ -143,6 +144,7 @@ pub enum Effect {
     Changed,
     Imported { part: PartId, body: BodyId },
     SketchCreated { part: PartId, sketch: SketchId },
+    SheetSaved { id: nator_document::SheetId },
 }
 
 impl Command {
@@ -189,8 +191,10 @@ impl Command {
                 id,
                 target,
                 specification,
+                annotations,
             } => {
-                doc.set_sheet(id, target, specification)?;
+                let id = doc.set_sheet(id, target, specification, annotations)?;
+                return Ok(Effect::SheetSaved { id });
             }
             Self::ImportSolid {
                 destination,
@@ -745,6 +749,7 @@ mod tests {
             id: None,
             target: Some(part),
             specification: spec,
+            annotations: Vec::new(),
         })?;
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("cortes.3dnator");

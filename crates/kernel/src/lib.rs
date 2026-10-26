@@ -72,6 +72,20 @@ pub struct EdgeMeasure {
     pub radius: Option<f64>,
 }
 
+/// Pontos de apoio de cotas, em mm no referencial do sólido consultado. Superfícies
+/// cilíndricas/esféricas têm centro e ponto radial; outras fornecem somente o centroide.
+#[derive(Debug, Clone, Copy)]
+pub struct FaceAnchors {
+    pub centroid: [f64; 3],
+    pub radial: Option<[[f64; 3]; 2]>,
+}
+#[derive(Debug, Clone, Copy)]
+pub struct EdgeAnchors {
+    pub start: [f64; 3],
+    pub end: [f64; 3],
+    pub circle_center: Option<[f64; 3]>,
+}
+
 /// Nomes posicionais (`{dono}:f{i}`) para sólidos importados, que nunca são recalculados.
 pub fn indexed_face_names(owner: &str, count: usize) -> Vec<String> {
     naming::indexed_names(owner, count)

@@ -3,6 +3,7 @@
 use nator_geometry::{Mesh, Placement, RgbColor, Topology};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 pub mod assembly;
+pub mod drawing;
 pub mod features;
 pub mod parameters;
 pub mod selection;
@@ -27,6 +28,8 @@ pub struct SheetRecord {
     pub id: SheetId,
     pub target: Option<PartId>,
     pub specification: nator_drawing::Specification,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<drawing::DrawingAnnotation>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,6 +236,7 @@ impl Document {
         id: Option<SheetId>,
         target: Option<PartId>,
         specification: nator_drawing::Specification,
+        annotations: Vec<drawing::DrawingAnnotation>,
     ) -> Result<SheetId, DocumentError> {
         if let Some(id) = id {
             let record = self
@@ -244,6 +248,7 @@ impl Document {
                 id,
                 target,
                 specification,
+                annotations,
             };
             Ok(id)
         } else {
@@ -252,6 +257,7 @@ impl Document {
                 id,
                 target,
                 specification,
+                annotations,
             });
             Ok(id)
         }
@@ -511,7 +517,11 @@ impl Document {
         let count = self.parts.len()
             + self.instances.len()
             + self.groups.len()
-            + self.sheets.len()
+            + self
+                .sheets
+                .iter()
+                .map(|s| 1 + s.annotations.len())
+                .sum::<usize>()
             + self
                 .parts
                 .iter()
@@ -621,6 +631,7 @@ impl Document {
             }
         }
         for sheet in &self.sheets {
+            drawing::validate(&sheet.annotations, self.next_id)?;
             register(sheet.id.0)?;
             sheet
                 .specification

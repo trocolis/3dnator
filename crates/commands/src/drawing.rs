@@ -2,6 +2,8 @@
 //! conservam o método aproximado identificado na legenda. O cálculo ocorre no worker.
 use nator_document::{Document, DocumentError, PartId};
 use nator_drawing::{Sheet, Specification};
+mod annotations;
+pub use annotations::{capture_reference, generate_with_annotations};
 pub fn generate(
     document: &Document,
     target: Option<PartId>,

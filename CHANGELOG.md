@@ -44,6 +44,12 @@
 
 ### Documentação técnica
 
+- Cotas associativas com amarração a faces e arestas estáveis da geometria e caminhos de ocorrência em montagens. Apoios geométricos extraídos diretamente do B-rep no núcleo OCCT (centroides de faces, centros e pontos radiais em cilindros e esferas, extremidades e centros de arcos em arestas).
+- Medições suportadas em folhas: comprimento de arestas (linear ou chamada para curvas), raio e diâmetro em faces e arestas circulares, distância entre faces planas paralelas e ângulo entre faces planas (com arco em vistas ortogonais paralelas ou chamada em vistas oblíquas, e opção de ângulo suplementar).
+- Cotas mantêm-se associadas a revisões do modelo: se uma referência geométrica for removida ou oculta, a cota é preservada no documento e identificada com aviso de revisão pendente na folha, sem interromper a geração nem escolher geometria substituta por proximidade.
+- Reposicionamento interativo de cotas por arraste de alças na prévia da folha técnica, recalculando traços e textos no papel sem reexecutar o núcleo CAD nem bloquear a interface.
+- Formato de projeto `.3dnator` versão 11, persistindo alças e referências associativas nas folhas, com migração compatível para arquivos de versões anteriores.
+
 - Cortes de sólidos calculados pela interseção precisa do B-rep com os planos da folha, incluindo contornos curvos e furos internos. Hachuras são agrupadas por corpo, para que sobreposições de peças distintas não criem vazios artificiais. Traços dos planos e vistas em corte usam as mesmas curvas, amostradas a 0,01 mm.
 - Até oito vistas em corte na mesma folha, com identificadores A–A a Z–Z estáveis e layout que se ajusta ao número de cortes; origem e normal do plano editáveis. Orientação retrato/paisagem e resolução PNG de 72 a 300 DPI salvas por folha. Formato de projeto versão 10 com valores padrão para folhas anteriores.
 - Vistas de sólidos com remoção exata de linhas ocultas no B-rep pelo OCCT HLR, incluindo oclusão entre corpos e silhuetas curvas. Curvas projetadas são discretizadas com desvio linear de 0,01 mm, independentemente da malha de exibição; folhas de malhas ou contextos mistos continuam identificadas como aproximadas. Cortes de malha mantêm identificação explícita.
