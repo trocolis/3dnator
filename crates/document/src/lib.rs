@@ -240,6 +240,34 @@ impl Document {
         };
         mesh.ok_or_else(|| DocumentError("Não há corpos visíveis para gerar a folha.".into()))
     }
+    /// Notas de documentação derivadas do histórico: roscas simplificadas dos furos da peça
+    /// (ou de todas as peças, na folha de montagem). As medidas aparecem como digitadas.
+    pub fn drawing_notes(&self, target: Option<PartId>) -> Vec<String> {
+        use features::Operation;
+        self.parts
+            .iter()
+            .filter(|p| target.is_none_or(|t| t == p.id))
+            .flat_map(|part| &part.features)
+            .filter_map(|feature| match &feature.operation {
+                Operation::Hole { points, spec, .. } => spec.thread.as_ref().map(|thread| {
+                    let depth = thread
+                        .depth
+                        .as_deref()
+                        .map(|d| format!(", profundidade {d}"))
+                        .unwrap_or_default();
+                    format!(
+                        "ROSCA {} (Ø {}, passo {}{depth}) EM {} FURO(S) - {}",
+                        thread.designation,
+                        thread.nominal,
+                        thread.pitch,
+                        points.len(),
+                        feature.name
+                    )
+                }),
+                _ => None,
+            })
+            .collect()
+    }
     pub fn id(&self) -> &str {
         &self.id
     }

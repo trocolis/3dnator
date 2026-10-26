@@ -36,6 +36,8 @@ pub enum Text {
     Angle,
     TopologyIndex,
     KeptReference,
+    DrawingRevision,
+    DrawingDate,
     SketchOnFace,
     InstancePattern,
     MirrorInstance,
@@ -324,6 +326,8 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::KeptReference => "Referência atual (mantida enquanto o índice não for alterado)",
         Text::PickInViewport => "Selecionar na área 3D",
+        Text::DrawingRevision => "Revisão",
+        Text::DrawingDate => "Data",
         Text::SketchOnFace => "Na face selecionada (plano capturado)",
         Text::InstancePattern => "Criar padrão de instâncias",
         Text::MirrorInstance => "Espelhar como nova peça",

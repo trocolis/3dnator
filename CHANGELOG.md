@@ -24,6 +24,12 @@
 - Espelhamento de instância como peça nova e independente: sólidos recebem uma operação final de espelhamento no histórico do clone, que continua paramétrico; corpos de malha são refletidos com a orientação das faces corrigida.
 - Novo rascunho na face selecionada, de qualquer peça visível, com o plano capturado em coordenadas da peça de destino.
 
+### Documentação técnica
+
+- Vista em corte A–A com contornos fechados e hachura a 45°, e traço do plano de corte com as letras de identificação nas vistas ortogonais.
+- Legenda com revisão e data editáveis; cotas com vírgula decimal e sem zeros supérfluos.
+- Notas de rosca derivadas dos furos do histórico na legenda da folha.
+
 ### Referências estáveis
 
 - Faces de sólidos recebem nomes pela origem (entidade do rascunho, tampa, arredondamento, face herdada), registrados pelo histórico do OCCT na ponte C++.

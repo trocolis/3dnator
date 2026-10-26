@@ -70,6 +70,15 @@ pub struct Specification {
     pub hidden_lines: bool,
     pub dimensions: bool,
     pub section: Option<Section>,
+    /// Revisão exibida na legenda (por exemplo `A`).
+    #[serde(default = "default_revision")]
+    pub revision: String,
+    /// Data exibida na legenda, como digitada (por exemplo `26/10/2026`).
+    #[serde(default)]
+    pub date: String,
+}
+fn default_revision() -> String {
+    "A".into()
 }
 impl Default for Specification {
     fn default() -> Self {
@@ -81,8 +90,18 @@ impl Default for Specification {
             hidden_lines: false,
             dimensions: true,
             section: None,
+            revision: default_revision(),
+            date: String::new(),
         }
     }
+}
+
+/// Medida em mm com vírgula decimal e até três casas, sem zeros à direita (`60`, `12,5`).
+pub fn format_mm(value: f64) -> String {
+    let text = format!("{:.3}", (value * 1000.).round() / 1000.);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    let text = if text == "-0" { "0" } else { text };
+    text.replace('.', ",")
 }
 impl Specification {
     pub fn size(&self) -> [f64; 2] {
@@ -92,13 +111,17 @@ impl Specification {
         }
     }
     pub fn validate(&self) -> Result<()> {
+        let invalid_text = |t: &str| t.len() > 512 || t.chars().any(char::is_control);
         if !self.scale.is_finite()
             || self.scale <= 0.
             || self.scale > 1000.
-            || self.title.len() > 512
-            || self.title.chars().any(char::is_control)
+            || invalid_text(&self.title)
+            || invalid_text(&self.revision)
+            || invalid_text(&self.date)
         {
-            return Err(DrawingError("Título ou escala da folha inválidos.".into()));
+            return Err(DrawingError(
+                "Título, revisão, data ou escala da folha inválidos.".into(),
+            ));
         }
         if let Some(s) = &self.section
             && (s.origin.iter().chain(&s.normal).any(|v| !v.is_finite()) || norm(s.normal) < 1e-9)
@@ -271,7 +294,19 @@ fn depth_buffer(
     Ok(depth)
 }
 pub fn generate(mesh: &Mesh, spec: &Specification) -> Result<Sheet> {
+    generate_with_notes(mesh, spec, &[])
+}
+
+/// Folha com notas derivadas do modelo (por exemplo, roscas dos furos) na legenda.
+pub fn generate_with_notes(mesh: &Mesh, spec: &Specification, notes: &[String]) -> Result<Sheet> {
     spec.validate()?;
+    if notes.len() > 64
+        || notes
+            .iter()
+            .any(|n| n.len() > 256 || n.chars().any(char::is_control))
+    {
+        return Err(DrawingError("Notas da folha inválidas.".into()));
+    }
     if mesh.triangles().len() > 200_000 {
         return Err(DrawingError(
             "Folhas de malha limitadas a duzentos mil triângulos.".into(),
@@ -302,10 +337,29 @@ pub fn generate(mesh: &Mesh, spec: &Specification) -> Result<Sheet> {
         [12., size[1] - 12.],
         2.5,
         format!(
-            "3dnator | mm | ESCALA {}:1 | VISTAS DERIVADAS DA MALHA",
-            spec.scale
+            "3dnator | mm | ESCALA {}:1 | REV {} | DATA {} | VISTAS DERIVADAS DA MALHA",
+            format_mm(spec.scale),
+            spec.revision,
+            if spec.date.is_empty() {
+                "-"
+            } else {
+                spec.date.as_str()
+            }
         ),
     );
+    // Notas na faixa da legenda: até três linhas, com a contagem do restante.
+    for (row, note) in notes.iter().take(3).enumerate() {
+        let value = if row == 2 && notes.len() > 3 {
+            format!("{note} (+{} notas)", notes.len() - 3)
+        } else {
+            note.clone()
+        };
+        sheet.text(
+            [size[0] * 0.58, size[1] - 22. + row as f64 * 4.5],
+            2.5,
+            format!("{}. {value}", row + 1),
+        );
+    }
     let edges = feature_edges(mesh);
     if edges.len() > 600_000 {
         return Err(DrawingError(
@@ -313,10 +367,13 @@ pub fn generate(mesh: &Mesh, spec: &Specification) -> Result<Sheet> {
         ));
     }
     let cell = [(size[0] - 36.) / 2., (size[1] - 58.) / 2.];
-    for (index, view) in [View::Front, View::Right, View::Top, View::Isometric]
-        .into_iter()
-        .enumerate()
-    {
+    // Com corte, a quarta célula mostra a vista em corte A–A no lugar da isométrica.
+    let views: &[View] = if spec.section.is_some() {
+        &[View::Front, View::Right, View::Top]
+    } else {
+        &[View::Front, View::Right, View::Top, View::Isometric]
+    };
+    for (index, view) in views.iter().copied().enumerate() {
         let basis = view.basis();
         let points = mesh
             .vertices()
@@ -398,27 +455,230 @@ pub fn generate(mesh: &Mesh, spec: &Specification) -> Result<Sheet> {
             }
         }
         if let Some(section) = &spec.section {
-            for [a, b] in section_segments(mesh, section)? {
-                sheet.line(
-                    map([dot(a, basis.0), dot(a, basis.1)]),
-                    map([dot(b, basis.0), dot(b, basis.1)]),
-                    0.7,
-                    false,
-                );
-            }
+            cutting_plane_trace(&mut sheet, mesh, section, basis, &map)?;
         }
         if spec.dimensions && view != View::Isometric {
             let a = map(min);
             let b = map(max);
-            sheet.dimension(a, [b[0], a[1]], [0., 7.], format!("{:.3}", extent[0]));
-            sheet.dimension(a, [a[0], b[1]], [-7., 0.], format!("{:.3}", extent[1]));
+            sheet.dimension(a, [b[0], a[1]], [0., 7.], format_mm(extent[0]));
+            sheet.dimension(a, [a[0], b[1]], [-7., 0.], format_mm(extent[1]));
         }
+    }
+    if let Some(section) = &spec.section {
+        let origin = [18. + cell[0] * 1.5, 12. + cell[1] * 1.5];
+        section_view(&mut sheet, mesh, section, spec.scale, origin, cell)?;
     }
     if sheet.primitives.len() > 500_000 {
         return Err(DrawingError("Folha contém elementos demais.".into()));
     }
     Ok(sheet)
 }
+/// Eixos U/V de um plano de corte, com U × V = normal.
+fn section_basis(section: &Section) -> (Point3, Point3, Point3) {
+    let n = section.normal.map(|v| v / norm(section.normal));
+    let helper = if n[2].abs() < 0.9 {
+        [0., 0., 1.]
+    } else {
+        [0., 1., 0.]
+    };
+    let u = cross(helper, n);
+    let u = u.map(|v| v / norm(u));
+    (u, cross(n, u), n)
+}
+
+/// Encadeia segmentos de corte em contornos fechados, ligando extremidades coincidentes.
+/// Cadeias abertas (malha com furos) são descartadas: hachurar exige contorno fechado.
+pub fn section_loops(segments: &[[Point3; 2]]) -> Vec<Vec<Point3>> {
+    let key = |p: Point3| p.map(|v| (v * 1e6).round() as i64);
+    let mut by_point: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    for (i, [a, b]) in segments.iter().enumerate() {
+        by_point.entry(key(*a)).or_default().push(i);
+        by_point.entry(key(*b)).or_default().push(i);
+    }
+    let mut used = vec![false; segments.len()];
+    let mut loops = Vec::new();
+    for start in 0..segments.len() {
+        if used[start] {
+            continue;
+        }
+        used[start] = true;
+        let first = segments[start][0];
+        let mut points = vec![first];
+        let mut current = segments[start][1];
+        let mut closed = false;
+        for _ in 0..segments.len() {
+            if key(current) == key(first) {
+                closed = true;
+                break;
+            }
+            points.push(current);
+            let Some(next) = by_point
+                .get(&key(current))
+                .and_then(|list| list.iter().copied().find(|i| !used[*i]))
+            else {
+                break;
+            };
+            used[next] = true;
+            let [a, b] = segments[next];
+            current = if key(a) == key(current) { b } else { a };
+        }
+        if closed && points.len() >= 3 {
+            loops.push(points);
+        }
+    }
+    loops
+}
+
+/// Hachura a 45° de contornos 2D pela regra par-ímpar, com espaçamento `spacing`.
+pub fn hatch(loops: &[Vec<[f64; 2]>], spacing: f64) -> Vec<[[f64; 2]; 2]> {
+    if loops.is_empty() || !spacing.is_finite() || spacing <= 0. {
+        return Vec::new();
+    }
+    // Coordenada rotacionada: t = (x + y)/√2 percorre as linhas, s = (x - y)/√2 as cruza.
+    let r = std::f64::consts::FRAC_1_SQRT_2;
+    let rotate = |p: [f64; 2]| [(p[0] - p[1]) * r, (p[0] + p[1]) * r];
+    let back = |q: [f64; 2]| [(q[0] + q[1]) * r, (q[1] - q[0]) * r];
+    let edges = loops
+        .iter()
+        .flat_map(|l| (0..l.len()).map(move |i| (rotate(l[i]), rotate(l[(i + 1) % l.len()]))))
+        .collect::<Vec<_>>();
+    let (lo, hi) = edges
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| {
+            (lo.min(a[1]).min(b[1]), hi.max(a[1]).max(b[1]))
+        });
+    let mut lines = Vec::new();
+    let steps = ((hi - lo) / spacing).ceil() as usize;
+    if steps > 20_000 {
+        return lines;
+    }
+    for k in 0..steps {
+        let t = lo + (k as f64 + 0.5) * spacing;
+        let mut hits = edges
+            .iter()
+            .filter(|(a, b)| (a[1] > t) != (b[1] > t))
+            .map(|(a, b)| a[0] + (t - a[1]) * (b[0] - a[0]) / (b[1] - a[1]))
+            .collect::<Vec<_>>();
+        hits.sort_by(f64::total_cmp);
+        for [enter, leave] in hits.as_chunks::<2>().0 {
+            lines.push([back([*enter, t]), back([*leave, t])]);
+        }
+    }
+    lines
+}
+
+/// Traço do plano de corte nas vistas em que ele aparece como linha, com as letras A.
+fn cutting_plane_trace(
+    sheet: &mut Sheet,
+    mesh: &Mesh,
+    section: &Section,
+    basis: (Point3, Point3, Point3),
+    map: &dyn Fn([f64; 2]) -> [f64; 2],
+) -> Result<()> {
+    let n = section.normal.map(|v| v / norm(section.normal));
+    // O plano só vira linha quando é perpendicular ao plano da vista.
+    if dot(n, basis.2).abs() > 1e-6 {
+        return Ok(());
+    }
+    let points = section_segments(mesh, section)?
+        .into_iter()
+        .flatten()
+        .map(|p| map([dot(p, basis.0), dot(p, basis.1)]))
+        .collect::<Vec<_>>();
+    let direction = [dot(n, basis.1), -dot(n, basis.0)];
+    let along = |p: [f64; 2]| p[0] * direction[0] - p[1] * direction[1];
+    let (Some(a), Some(b)) = (
+        points
+            .iter()
+            .copied()
+            .min_by(|p, q| along(*p).total_cmp(&along(*q))),
+        points
+            .iter()
+            .copied()
+            .max_by(|p, q| along(*p).total_cmp(&along(*q))),
+    ) else {
+        return Ok(());
+    };
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let length = d[0].hypot(d[1]);
+    if length < 1e-9 {
+        return Ok(());
+    }
+    let u = [d[0] / length, d[1] / length];
+    let (p, q) = (
+        [a[0] - u[0] * 6., a[1] - u[1] * 6.],
+        [b[0] + u[0] * 6., b[1] + u[1] * 6.],
+    );
+    sheet.line(p, q, 0.25, true);
+    sheet.text([p[0] - 2., p[1] - 1.], 3.5, "A");
+    sheet.text([q[0] + 1., q[1] - 1.], 3.5, "A");
+    Ok(())
+}
+
+/// Vista em corte A–A: contornos da seção no plano de corte, hachurados.
+fn section_view(
+    sheet: &mut Sheet,
+    mesh: &Mesh,
+    section: &Section,
+    scale: f64,
+    origin: [f64; 2],
+    cell: [f64; 2],
+) -> Result<()> {
+    let (u, v, _) = section_basis(section);
+    let loops = section_loops(&section_segments(mesh, section)?)
+        .into_iter()
+        .map(|l| {
+            l.into_iter()
+                .map(|p| {
+                    [
+                        dot(sub(p, section.origin), u),
+                        dot(sub(p, section.origin), v),
+                    ]
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    sheet.text(
+        [origin[0] - 18., origin[1] + cell[1] / 2. - 1.],
+        2.5,
+        "CORTE A-A",
+    );
+    if loops.is_empty() {
+        sheet.text(origin, 2.5, "O PLANO NÃO CORTA O MODELO");
+        return Ok(());
+    }
+    let (min, max) = loops.iter().flatten().fold(
+        ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]),
+        |(lo, hi), p| {
+            (
+                [lo[0].min(p[0]), lo[1].min(p[1])],
+                [hi[0].max(p[0]), hi[1].max(p[1])],
+            )
+        },
+    );
+    if (max[0] - min[0]) * scale > cell[0] - 16. || (max[1] - min[1]) * scale > cell[1] - 16. {
+        return Err(DrawingError(
+            "O corte não cabe na folha; reduza a escala ou use A3.".into(),
+        ));
+    }
+    let map = |p: [f64; 2]| {
+        [
+            origin[0] + (p[0] - (min[0] + max[0]) / 2.) * scale,
+            origin[1] - (p[1] - (min[1] + max[1]) / 2.) * scale,
+        ]
+    };
+    for l in &loops {
+        for i in 0..l.len() {
+            sheet.line(map(l[i]), map(l[(i + 1) % l.len()]), 0.35, false);
+        }
+    }
+    // Hachura com 2,5 mm de espaçamento no papel.
+    for [a, b] in hatch(&loops, 2.5 / scale) {
+        sheet.line(map(a), map(b), 0.13, false);
+    }
+    Ok(())
+}
+
 /// Interseção visual com triângulos. Não altera os corpos, nem os converte em sólidos.
 pub fn section_segments(mesh: &Mesh, section: &Section) -> Result<Vec<[Point3; 2]>> {
     let spec = Specification {
@@ -462,7 +722,7 @@ mod tests {
             sheet
                 .primitives
                 .iter()
-                .any(|p| matches!(p,Primitive::Text{value,..} if value=="60.000"))
+                .any(|p| matches!(p,Primitive::Text{value,..} if value=="60"))
         );
         let pdf = pdf(&sheet)?;
         assert!(pdf.starts_with(b"%PDF-1.4"));
@@ -471,6 +731,71 @@ mod tests {
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         Ok(())
     }
+    #[test]
+    fn numbers_use_decimal_comma_without_trailing_zeros() {
+        assert_eq!(format_mm(60.), "60");
+        assert_eq!(format_mm(12.5), "12,5");
+        assert_eq!(format_mm(0.1234), "0,123");
+        assert_eq!(format_mm(-0.0001), "0");
+    }
+
+    #[test]
+    fn section_view_has_closed_hatched_outline_and_labels() -> Result<()> {
+        let mesh = nator_geometry::reference_bracket().map_err(|e| DrawingError(e.to_string()))?;
+        // Corte horizontal a 3 mm: atravessa só a base, um retângulo 60 × 20.
+        let section = Section {
+            origin: [0., 0., 3.],
+            normal: [0., 0., 1.],
+        };
+        let loops = section_loops(&section_segments(&mesh, &section)?);
+        assert_eq!(loops.len(), 1);
+        let (u, v, _) = section_basis(&section);
+        let flat = loops[0]
+            .iter()
+            .map(|p| [dot(*p, u), dot(*p, v)])
+            .collect::<Vec<_>>();
+        let area = (0..flat.len())
+            .map(|i| {
+                let (a, b) = (flat[i], flat[(i + 1) % flat.len()]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f64>()
+            .abs()
+            / 2.;
+        assert!((area - 1200.).abs() < 1e-6);
+        // Hachuras ficam dentro do contorno e somam o comprimento esperado.
+        let lines = hatch(&[flat], 2.5);
+        let total = lines
+            .iter()
+            .map(|[a, b]| (a[0] - b[0]).hypot(a[1] - b[1]))
+            .sum::<f64>();
+        assert!((total - 1200. / 2.5).abs() < 25.);
+        let spec = Specification {
+            section: Some(section),
+            revision: "B".into(),
+            date: "26/10/2026".into(),
+            ..Specification::default()
+        };
+        let sheet = generate_with_notes(&mesh, &spec, &["Rosca M6 × 1 em 2 furos".into()])?;
+        let texts = sheet
+            .primitives
+            .iter()
+            .filter_map(|p| match p {
+                Primitive::Text { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"CORTE A-A"));
+        assert!(texts.iter().filter(|t| **t == "A").count() >= 2);
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("REV B") && t.contains("26/10/2026"))
+        );
+        assert!(texts.iter().any(|t| t.contains("M6")));
+        Ok(())
+    }
+
     #[test]
     fn sections_lie_on_the_requested_plane() -> Result<()> {
         let mesh = nator_geometry::reference_bracket().map_err(|e| DrawingError(e.to_string()))?;

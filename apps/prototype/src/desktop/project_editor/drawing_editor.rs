@@ -42,6 +42,14 @@ impl Editor {
                     ui.label(text(T::DrawingTitle));
                     ui.text_edit_singleline(&mut draft.spec.title);
                     ui.horizontal(|ui| {
+                        ui.label(text(T::DrawingRevision));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut draft.spec.revision).desired_width(40.),
+                        );
+                        ui.label(text(T::DrawingDate));
+                        ui.add(egui::TextEdit::singleline(&mut draft.spec.date).desired_width(90.));
+                    });
+                    ui.horizontal(|ui| {
                         ui.label(text(T::Paper));
                         ui.selectable_value(&mut draft.spec.paper, Paper::A4, "A4");
                         ui.selectable_value(&mut draft.spec.paper, Paper::A3, "A3");
@@ -167,7 +175,9 @@ impl Editor {
                 let tab = draft.tab;
                 self.start(ctx, None, move || {
                     let mesh = document.drawing_mesh(target).map_err(|e| e.to_string())?;
-                    let sheet = nator_drawing::generate(&mesh, &spec).map_err(|e| e.to_string())?;
+                    let notes = document.drawing_notes(target);
+                    let sheet = nator_drawing::generate_with_notes(&mesh, &spec, &notes)
+                        .map_err(|e| e.to_string())?;
                     if action == 0 {
                         return Ok(Outcome::Drawing {
                             tab,
