@@ -228,10 +228,15 @@ impl Editor {
             let additive = ui.input(|i| i.modifiers.command);
             let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
             let view = self.current().view.clone();
+            let cut = self.current().section;
             self.start(ui.ctx(), None, move || {
-                let pick = document
-                    .pick_with(ray, |occurrence| view.pickable(occurrence))
-                    .map_err(|e| e.to_string())?;
+                // A parte escondida pelo corte de seção não é selecionável.
+                let pick = section::first_visible(
+                    document
+                        .pick_all_with(ray, |occurrence| view.pickable(occurrence))
+                        .map_err(|e| e.to_string())?,
+                    cut,
+                );
                 // Com o diálogo de operações esperando, o clique vira referência por nomes.
                 let topology = awaiting.zip(pick.as_ref()).map(|(kind, p)| {
                     match kind {

@@ -65,6 +65,7 @@ pub(super) enum Icon {
     Flip,
     Align,
     Group,
+    Section,
     Join,
     CutBody,
     IntersectBody,
@@ -559,6 +560,17 @@ pub(super) fn paint_with_ink(
             p.line(&[[6., 22.], [2., 22.], [2., 18.]], p.accent);
             p.face(&[[5., 6.], [12., 6.], [12., 12.], [5., 12.]], p.fill);
             p.face(&[[12., 12.], [19., 12.], [19., 18.], [12., 18.]], p.fill);
+        }
+        Icon::Section => {
+            p.cube();
+            p.face(
+                &[[1., 13.], [14., 6.], [23., 11.], [10., 18.]],
+                egui::Color32::from_rgba_unmultiplied(196, 82, 64, 120),
+            );
+            p.line(
+                &[[1., 13.], [14., 6.], [23., 11.], [10., 18.], [1., 13.]],
+                egui::Color32::from_rgb(160, 60, 48),
+            );
         }
         Icon::NewBody => {
             p.cube();

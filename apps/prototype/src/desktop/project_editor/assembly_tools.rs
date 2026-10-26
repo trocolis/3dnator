@@ -504,11 +504,13 @@ impl Editor {
             f64::from(rect.aspect_ratio()),
         );
         let view = self.current().view.clone();
-        let Ok(Some(mut pick)) = self
+        let Some(mut pick) = self
             .current()
             .session
             .document()
-            .pick_with(ray, |o| view.pickable(o))
+            .pick_all_with(ray, |o| view.pickable(o))
+            .ok()
+            .and_then(|picks| section::first_visible(picks, self.current().section))
         else {
             return true;
         };

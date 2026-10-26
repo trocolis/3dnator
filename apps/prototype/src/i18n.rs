@@ -443,6 +443,12 @@ pub enum Text {
     RenameDefinition,
     SelectMembers,
     StepShort,
+    SectionAnalysis,
+    PickedFace,
+    SectionFaceHint,
+    SectionHint,
+    AnalysesGroup,
+    EditFeatureShort,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -921,5 +927,13 @@ pub fn text(key: Text) -> &'static str {
         Text::RenameDefinition => "Renomear definição da peça",
         Text::SelectMembers => "Selecionar membros",
         Text::StepShort => "STEP",
+        Text::SectionAnalysis => "Corte de seção",
+        Text::PickedFace => "Face escolhida",
+        Text::SectionFaceHint => "Usa o plano da face escolhida na área 3D, capturado agora.",
+        Text::SectionHint => {
+            "Arraste a seta para deslocar o plano. O corte é só visual: não altera o modelo nem o desfazer, e a seleção ignora a parte cortada."
+        }
+        Text::AnalysesGroup => "Análises",
+        Text::EditFeatureShort => "Editar",
     }
 }

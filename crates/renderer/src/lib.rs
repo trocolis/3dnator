@@ -18,6 +18,18 @@ pub struct PreparedMesh {
     opaque_vertices: usize,
     /// Vértices do plano de sombra suave sob a base da cena.
     ground_shadow: Vec<u8>,
+    /// Normalização usada nos vértices (centro e maior dimensão da caixa), para levar
+    /// planos do mundo ao espaço da GPU.
+    center: Point3,
+    scale: f64,
+}
+
+/// Plano de corte de visualização em coordenadas do mundo: a parte para onde `normal`
+/// aponta, a partir de `point`, deixa de ser desenhada. Não altera a geometria.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectionPlane {
+    pub point: Point3,
+    pub normal: Point3,
 }
 
 /// Estilos de exibição gravados nos bits 8 a 15 do atributo de arestas (ver `view.wgsl`).
@@ -134,6 +146,8 @@ impl PreparedMesh {
             vertices,
             opaque_vertices: opaque_triangles * 3,
             ground_shadow,
+            center,
+            scale,
         })
     }
     /// Bytes que serão enviados à GPU.
@@ -550,6 +564,10 @@ pub struct Viewport {
     pub show_shadows: bool,
     /// Fundo de apresentação; não participa da cena nem da geometria.
     background: [f32; 4],
+    /// Corte de visualização ativo; faces internas expostas recebem tampa hachurada.
+    pub section: Option<SectionPlane>,
+    /// Normalização da malha enviada (centro e escala), para o plano de corte.
+    normalization: (Point3, f64),
     color: wgpu::Texture,
     view: wgpu::TextureView,
     depth: wgpu::TextureView,
@@ -568,8 +586,9 @@ pub struct Viewport {
     shadow_pipeline: wgpu::RenderPipeline,
 }
 
-/// Uniforme do shader: matriz 4×4, quatro opções e cor do fundo (alinhamento de 16 bytes).
-const UNIFORM_BYTES: u64 = 96;
+/// Uniforme do shader: matriz 4×4, quatro opções, cor do fundo e plano de corte no espaço
+/// normalizado (alinhamento de 16 bytes).
+const UNIFORM_BYTES: u64 = 112;
 
 fn float_bytes(values: impl IntoIterator<Item = f32>) -> Vec<u8> {
     values.into_iter().flat_map(f32::to_le_bytes).collect()
@@ -743,6 +762,8 @@ impl Viewport {
             show_edges: true,
             show_shadows: false,
             background: [0.075, 0.09, 0.11, 1.],
+            section: None,
+            normalization: ([0.; 3], 1.),
             color,
             view,
             depth,
@@ -811,6 +832,7 @@ impl Viewport {
         self.vertex_count = (mesh.vertices.len() / VERTEX_BYTES) as u32;
         self.opaque_count = (mesh.opaque_vertices as u32).min(self.vertex_count);
         self.shadow_count = (mesh.ground_shadow.len() / VERTEX_BYTES) as u32;
+        self.normalization = (mesh.center, mesh.scale);
         self.camera = Camera::default();
         self.camera
             .fit(f64::from(self.size[0]) / f64::from(self.size[1]));
@@ -844,6 +866,22 @@ impl Viewport {
         true
     }
 
+    /// Plano de corte no espaço normalizado dos vértices: n·p ≤ d permanece visível.
+    /// Com p = centro + escala·q, n·q ≤ (d − n·centro) / escala.
+    fn clip_plane(&self) -> [f32; 4] {
+        let Some(section) = self.section else {
+            return [0.; 4];
+        };
+        let length = norm(section.normal);
+        let (center, scale) = self.normalization;
+        if length < 1e-12 || scale <= 0. {
+            return [0.; 4];
+        }
+        let n = section.normal.map(|v| v / length);
+        let d = (dot(n, section.point) - dot(n, center)) / scale;
+        [n[0] as f32, n[1] as f32, n[2] as f32, d as f32]
+    }
+
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let matrix = self
             .camera
@@ -853,12 +891,18 @@ impl Viewport {
             flag(self.show_triangles),
             flag(self.show_edges),
             flag(self.show_shadows),
-            0.,
+            flag(self.section.is_some()),
         ];
         queue.write_buffer(
             &self.uniform,
             0,
-            &float_bytes(matrix.into_iter().chain(options).chain(self.background)),
+            &float_bytes(
+                matrix
+                    .into_iter()
+                    .chain(options)
+                    .chain(self.background)
+                    .chain(self.clip_plane()),
+            ),
         );
         let mut encoder = device.create_command_encoder(&Default::default());
         {

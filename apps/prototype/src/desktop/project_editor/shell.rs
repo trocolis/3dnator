@@ -77,6 +77,7 @@ enum Action {
     InstanceMirror,
     Group,
     Ungroup,
+    Section,
     Parameters,
     Measure,
     Drawing,
@@ -121,6 +122,7 @@ impl Action {
             Self::InstanceMirror => T::MirrorComponent,
             Self::Group => T::GroupTool,
             Self::Ungroup => T::UngroupTool,
+            Self::Section => T::SectionAnalysis,
             Self::Parameters => T::Parameters,
             Self::Measure => T::MeasureSelection,
             Self::Drawing => T::Drawing,
@@ -186,6 +188,7 @@ impl Action {
             Self::InstancePattern(_) => Icon::Pattern,
             Self::InstanceMirror => Icon::Mirror,
             Self::Group | Self::Ungroup => Icon::Group,
+            Self::Section => Icon::Section,
             Self::Parameters => Icon::Parameters,
             Self::Measure => Icon::Measure,
             Self::Drawing => Icon::Drawing,
@@ -251,6 +254,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::InstanceMirror,
     Action::Group,
     Action::Ungroup,
+    Action::Section,
     Action::Parameters,
     Action::Drawing,
     Action::Measure,
@@ -352,6 +356,7 @@ impl Editor {
             Action::Shadows => self.viewport.show_shadows,
             Action::Triangles => self.viewport.show_triangles,
             Action::Browser => self.shell.browser_visible,
+            Action::Section => self.current().section.is_some_and(|s| s.visible),
             Action::Properties => self.shell.properties_visible,
             Action::SketchTool(tool) => self
                 .current()
@@ -459,6 +464,7 @@ impl Editor {
             Action::InstancePattern(circular) => self.open_instance_pattern(circular),
             Action::InstanceMirror => self.open_instance_mirror(),
             Action::Group => self.group_selection(context),
+            Action::Section => self.open_section(),
             Action::Ungroup => self.ungroup_selection(context),
             Action::Parameters => self.open_parameters(),
             Action::Measure => {
@@ -862,11 +868,8 @@ impl Editor {
                 self.ribbon_group(ui, T::ExportGroup, &[Action::ExportStl, Action::ExportStep]);
             }
             RibbonTab::Inspect => {
-                self.ribbon_group(
-                    ui,
-                    T::DocumentGroup,
-                    &[Action::Measure, Action::Drawing, Action::Parameters],
-                );
+                self.ribbon_group(ui, T::AnalysesGroup, &[Action::Measure, Action::Section]);
+                self.ribbon_group(ui, T::DocumentGroup, &[Action::Drawing, Action::Parameters]);
                 self.ribbon_group(ui, T::ExportGroup, &[Action::ExportStl, Action::ExportStep]);
             }
             RibbonTab::View => {
@@ -884,7 +887,12 @@ impl Editor {
                 self.ribbon_group(
                     ui,
                     T::VisualControls,
-                    &[Action::Perspective, Action::Shadows, Action::Triangles],
+                    &[
+                        Action::Perspective,
+                        Action::Shadows,
+                        Action::Triangles,
+                        Action::Section,
+                    ],
                 );
                 self.ribbon_group(ui, T::PanelsGroup, &[Action::Browser, Action::Properties]);
             }

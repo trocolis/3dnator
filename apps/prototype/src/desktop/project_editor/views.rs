@@ -304,6 +304,49 @@ impl Editor {
                                 });
                             });
                         }
+                        // Análises da aba: corte de seção (controle visual, fora do documento).
+                        if let Some(cut) = self.current().section {
+                            ui.separator();
+                            theme::section(ui, text(T::AnalysesGroup));
+                            ui.horizontal(|ui| {
+                                if icons::button(
+                                    ui,
+                                    if cut.visible {
+                                        icons::Icon::Eye
+                                    } else {
+                                        icons::Icon::EyeOff
+                                    },
+                                    text(T::Visibility),
+                                    false,
+                                    false,
+                                )
+                                .clicked()
+                                    && let Some(section) = &mut self.current_mut().section
+                                {
+                                    section.visible = !section.visible;
+                                }
+                                let response = icons::entry(
+                                    ui,
+                                    icons::Icon::Section,
+                                    text(T::SectionAnalysis),
+                                    self.section_edit.is_some(),
+                                );
+                                if response.double_clicked() {
+                                    self.open_section();
+                                }
+                                response.context_menu(|ui| {
+                                    if ui.button(text(T::EditFeatureShort)).clicked() {
+                                        self.open_section();
+                                        ui.close();
+                                    }
+                                    if ui.button(text(T::DeleteFeature)).clicked() {
+                                        self.current_mut().section = None;
+                                        self.section_edit = None;
+                                        ui.close();
+                                    }
+                                });
+                            });
+                        }
                         if !document.sheets().is_empty() {
                             ui.separator();
                             theme::section(ui, text(T::DocumentGroup));
@@ -620,7 +663,8 @@ impl Editor {
                 // Com o campo Perfil ativo, o clique escolhe a região do rascunho; janela e
                 // pressão longa são gestos de seleção que substituem o clique simples.
                 // O manipulador e os painéis de montagem têm prioridade sobre a seleção comum.
-                let gizmo = self.move_gizmo(ui, &response);
+                self.viewport.section = self.current().section_plane();
+                let gizmo = self.section_gizmo(ui, &response) || self.move_gizmo(ui, &response);
                 let assembly = !gizmo && self.assembly_pick(&response);
                 let profile = self.profile_overlay(ui, &response);
                 let gesture = self.selection_gestures(ui, &response);

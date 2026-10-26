@@ -12,6 +12,7 @@ mod live_preview;
 mod navigation;
 mod parameter_editor;
 mod profile_pick;
+mod section;
 mod selection_tools;
 mod shell;
 mod sketch_editor;
@@ -193,6 +194,8 @@ struct Tab {
     reference: Option<nator_document::assembly::Pick>,
     /// Controles visuais da aba: não entram no documento nem no desfazer.
     view: ViewState,
+    /// Corte de seção da área 3D, também apenas visual.
+    section: Option<section::Section>,
     drag_start: Option<egui::Pos2>,
 }
 impl Tab {
@@ -243,6 +246,7 @@ impl Tab {
             measurements: Vec::new(),
             reference: None,
             view: ViewState::default(),
+            section: None,
             drag_start: None,
         })
     }
@@ -468,6 +472,8 @@ pub struct Editor {
     /// Renomeação pela árvore e ação escolhida num menu de subnível.
     rename: Option<browser::RenameDraft>,
     pending_menu: Option<browser::MenuAction>,
+    /// Painel do corte de seção aberto.
+    section_edit: Option<section::SectionDraft>,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -572,6 +578,7 @@ impl Editor {
             assembly_panel: None,
             rename: None,
             pending_menu: None,
+            section_edit: None,
         })
     }
     fn busy(&self) -> bool {
@@ -1401,6 +1408,7 @@ impl Editor {
         self.dialogs(ui.ctx());
         self.feature_dialog(ui.ctx());
         self.assembly_panel(ui.ctx());
+        self.section_panel(ui.ctx());
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());

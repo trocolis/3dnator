@@ -14,6 +14,11 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Corte de seção na área 3D
+
+- Ferramenta **Corte de seção** (Inspecionar e Vista): plano principal (XY, XZ, YZ) ou da face escolhida, deslocamento por campo ou seta arrastável na área 3D e inversão do lado. A parte cortada não é desenhada e o interior exposto vira tampa hachurada, pelo próprio shader.
+- O corte é um controle visual da aba, listado em **Análises** na árvore com visibilidade, edição e exclusão; não altera o modelo nem o desfazer. Seleção, pré-seleção, lista de sobrepostos e painéis ignoram a parte cortada.
+
 ### Montagem e posicionamento
 
 - Painel **Mover/Copiar** com manipulador 3D (setas por eixo, anéis de rotação e centro livre), campos de translação e rotação no mundo, pivô no centro de massa ou na origem, cópia como nova instância ou corpo independente e prévia ao vivo. Vários elementos se movem em uma só ação de desfazer, inclusive dentro de pais rotacionados.

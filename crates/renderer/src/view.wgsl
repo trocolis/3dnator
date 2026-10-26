@@ -1,10 +1,13 @@
 // Matriz da câmera e opções de exibição:
 // `options.x > 0.5` mostra a triangulação; `options.y > 0.5` mostra as arestas vivas;
 // `options.z > 0.5` ativa as sombras opcionais (iluminação direcional com faces opostas sombreadas).
+// `options.w > 0.5` ativa o corte de visualização: `clip.xyz · p > clip.w` não é desenhado
+// (p no espaço normalizado dos vértices) e as faces internas expostas viram tampa hachurada.
 struct View {
     transform: mat4x4<f32>,
     options: vec4<f32>,
     background: vec4<f32>,
+    clip: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -27,6 +30,7 @@ struct VertexOutput {
     @location(1) @interpolate(linear) barycentric: vec3<f32>,
     @location(2) @interpolate(flat) edges: u32,
     @location(3) @interpolate(flat) color: vec3<f32>,
+    @location(4) local: vec3<f32>,
 }
 
 @vertex fn vertex_main(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
@@ -42,10 +46,21 @@ struct VertexOutput {
     );
     output.edges = input.edges;
     output.color = input.color.rgb;
+    output.local = input.position;
     return output;
 }
 
-@fragment fn surface_main(input: VertexOutput) -> @location(0) vec4<f32> {
+@fragment fn surface_main(
+    input: VertexOutput,
+    @builtin(front_facing) front: bool,
+) -> @location(0) vec4<f32> {
+    // Derivadas calculadas antes de qualquer desvio ou descarte, como exige a uniformidade
+    // do WGSL.
+    let width = fwidth(input.barycentric);
+    let clipping = view.options.w > 0.5;
+    if (clipping && dot(view.clip.xyz, input.local) > view.clip.w) {
+        discard;
+    }
     let light = normalize(vec3<f32>(0.4, -0.6, 1.0));
     let n = normalize(input.normal);
     let n_dot_l = dot(n, light);
@@ -62,8 +77,6 @@ struct VertexOutput {
 
     let intensity = mix(unshadowed, shadowed, view.options.z);
     let surface = input.color * intensity;
-    // Derivadas calculadas fora de desvios, como exige a uniformidade do WGSL.
-    let width = fwidth(input.barycentric);
     // Proximidade de cada aresta: 1 sobre a aresta, 0 a ~1,2 px dela.
     let near = vec3<f32>(1.0) - smoothstep(vec3<f32>(0.0), width * 1.2, input.barycentric);
     let flags = vec3<f32>(
@@ -75,6 +88,13 @@ struct VertexOutput {
     let crease_near = near * flags;
     let crease = max(max(crease_near.x, crease_near.y), crease_near.z) * view.options.y;
     let style = (input.edges >> 8u) & 255u;
+    // Com o corte, o interior de um sólido fechado aparece pelas faces de costas: elas são
+    // pintadas como tampa, com hachura a 45° em coordenadas de tela.
+    if (clipping && !front) {
+        let stripe = fract((input.position.x + input.position.y) / 7.0) < 0.22;
+        let cap = select(vec3<f32>(0.80, 0.36, 0.30), vec3<f32>(0.45, 0.13, 0.11), stripe);
+        return vec4<f32>(cap, select(1.0, 0.4, style == 1u || style == 2u));
+    }
     // Seleção: superfície tingida de azul e arestas vivas azuis, com a profundidade normal.
     let selected = select(0.0, 1.0, style == 3u);
     let tinted = mix(surface, vec3<f32>(0.24, 0.56, 0.94) * intensity + vec3<f32>(0.10), 0.32 * selected);

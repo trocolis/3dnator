@@ -381,9 +381,9 @@ impl Editor {
         let document = self.picking_document();
         let view = self.current().view.clone();
         let pick = document
-            .pick_with(ray, |occurrence| view.pickable(occurrence))
+            .pick_all_with(ray, |occurrence| view.pickable(occurrence))
             .ok()
-            .flatten();
+            .and_then(|picks| section::first_visible(picks, self.current().section));
         let (overlay, label) = match pick {
             Some(pick) => self.pick_overlay(&document, &pick),
             None => (Overlay::default(), String::new()),

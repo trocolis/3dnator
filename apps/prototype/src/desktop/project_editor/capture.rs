@@ -38,11 +38,11 @@ pub(crate) fn render_ui_scenario(
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
-        | "assembly-ribbon" => {}
+        | "assembly-ribbon" | "section" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section."
                     .into(),
             );
         }
@@ -231,6 +231,24 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(Some(Selection::Body { part, id: body }));
+        }
+        "section" => {
+            editor.current_mut().select(None);
+            let middle = editor
+                .current()
+                .session
+                .document()
+                .scene_mesh()?
+                .map(|m| m.bounds().center()[1])
+                .unwrap_or(0.);
+            editor.open_section();
+            if let Some(section) = &mut editor.current_mut().section {
+                // XZ pelo meio da largura: atravessa o furo do suporte de referência e
+                // remove a metade da frente, deixando a tampa voltada para a câmera.
+                section.base = section::Base::Principal(1);
+                section.offset = middle;
+                section.flip = true;
+            }
         }
         "move" | "align" | "assembly-ribbon" => {
             editor.current_mut().active_part = None;

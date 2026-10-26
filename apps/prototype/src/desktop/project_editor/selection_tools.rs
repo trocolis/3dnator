@@ -236,9 +236,12 @@ impl Editor {
         );
         let document = self.current().session.document();
         let view = self.current().view.clone();
-        let Ok(picks) = document.pick_all_with(ray, |o| view.pickable(o)) else {
+        let Ok(mut picks) = document.pick_all_with(ray, |o| view.pickable(o)) else {
             return;
         };
+        if let Some(cut) = self.current().section.filter(|s| s.visible) {
+            picks.retain(|p| cut.keeps(p.point));
+        }
         if picks.is_empty() {
             return;
         }
