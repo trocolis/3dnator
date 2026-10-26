@@ -1,7 +1,7 @@
 //! Folhas guardam associação à peça/montagem; exportar regenera com a revisão capturada.
 use super::*;
 use nator_document::{SheetId, SheetRecord};
-use nator_drawing::{Paper, Primitive, Section, Specification, Style};
+use nator_drawing::{Orientation, Paper, Primitive, Section, SectionView, Specification, Style};
 pub(super) struct Draft {
     pub tab: u64,
     id: Option<SheetId>,
@@ -36,6 +36,7 @@ impl Editor {
         egui::Window::new(text(T::Drawing))
             .open(&mut open)
             .default_width(720.)
+            .vscroll(true)
             .show(ctx, |ui| {
                 ui.label(text(T::MeshDrawingNotice));
                 ui.add_enabled_ui(!self.busy(), |ui| {
@@ -53,12 +54,24 @@ impl Editor {
                         ui.label(text(T::Paper));
                         ui.selectable_value(&mut draft.spec.paper, Paper::A4, "A4");
                         ui.selectable_value(&mut draft.spec.paper, Paper::A3, "A3");
+                        let mut portrait = draft.spec.orientation == Orientation::Portrait;
+                        if ui.checkbox(&mut portrait, text(T::Portrait)).changed() {
+                            draft.spec.orientation = if portrait {
+                                Orientation::Portrait
+                            } else {
+                                Orientation::Landscape
+                            };
+                        }
                         ui.label(text(T::Scale));
                         ui.add(
                             egui::DragValue::new(&mut draft.spec.scale)
                                 .range(0.001..=1000.)
                                 .speed(0.05),
                         );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(text(T::PngResolution));
+                        ui.add(egui::DragValue::new(&mut draft.spec.png_dpi).range(72..=300));
                     });
                     ui.horizontal(|ui| {
                         let mut blue = draft.spec.style == Style::Blueprint;
@@ -80,12 +93,40 @@ impl Editor {
                         });
                     }
                     if let Some(s) = &mut draft.spec.section {
-                        ui.label(text(T::SectionPosition));
-                        ui.add(
-                            egui::DragValue::new(&mut s.origin[2])
-                                .range(-1e9..=1e9)
-                                .speed(0.1),
-                        );
+                        section_controls(ui, s);
+                    }
+                    let mut remove = None;
+                    for (index, view) in draft.spec.additional_sections.iter_mut().enumerate() {
+                        let label =
+                            char::from_u32(u32::from('A').saturating_add(view.id)).unwrap_or('?');
+                        egui::CollapsingHeader::new(format!("{label}–{label}"))
+                            .id_salt(("section", view.id))
+                            .show(ui, |ui| {
+                                section_controls(ui, &mut view.section);
+                                if ui.button(text(T::RemoveSection)).clicked() {
+                                    remove = Some(index);
+                                }
+                            });
+                    }
+                    if let Some(index) = remove {
+                        draft.spec.additional_sections.remove(index);
+                    }
+                    if ui
+                        .add_enabled(
+                            draft.spec.additional_sections.len() < 7,
+                            egui::Button::new(text(T::AddSection)),
+                        )
+                        .clicked()
+                        && let Some(id) = (1..=25)
+                            .find(|id| !draft.spec.additional_sections.iter().any(|v| v.id == *id))
+                    {
+                        draft.spec.additional_sections.push(SectionView {
+                            id,
+                            section: Section {
+                                origin: [0.; 3],
+                                normal: [0., 0., 1.],
+                            },
+                        });
                     }
                     ui.horizontal_wrapped(|ui| {
                         for (label, id) in [
@@ -195,7 +236,7 @@ impl Editor {
                     let bytes = if action == 1 {
                         nator_drawing::pdf(&sheet)
                     } else {
-                        nator_drawing::png(&sheet, 150)
+                        nator_drawing::png(&sheet, spec.png_dpi)
                     }
                     .map_err(|e| e.to_string())?;
                     nator_project_io::write_export(&path, &bytes).map_err(|e| e.to_string())?;
@@ -207,4 +248,31 @@ impl Editor {
             self.drawing_edit = Some(draft);
         }
     }
+}
+
+/// A origem está em mm; a normal só define direção e é normalizada na geometria.
+/// Mantemos os valores digitados para que um vetor nulo produza erro explícito na prévia.
+fn section_controls(ui: &mut egui::Ui, section: &mut Section) {
+    ui.label(text(T::SectionPosition));
+    ui.horizontal(|ui| {
+        for (axis, v) in ["X", "Y", "Z"].into_iter().zip(&mut section.origin) {
+            ui.add(
+                egui::DragValue::new(v)
+                    .range(-1e9..=1e9)
+                    .speed(0.1)
+                    .prefix(format!("{axis} ")),
+            );
+        }
+    });
+    ui.label(text(T::PlaneNormal));
+    ui.horizontal(|ui| {
+        for (axis, v) in ["X", "Y", "Z"].into_iter().zip(&mut section.normal) {
+            ui.add(
+                egui::DragValue::new(v)
+                    .range(-1e9..=1e9)
+                    .speed(0.1)
+                    .prefix(format!("{axis} ")),
+            );
+        }
+    });
 }

@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 9
+# Formato de projeto — versão interna 10
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 9; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 10; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -80,6 +80,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 9 → 10: folhas acrescentam `orientation` (padrão `Landscape`), `png_dpi` (150) e `additional_sections` (vazio). O campo `section` continua representando A–A; cortes adicionais guardam identificadores de 1 a 25 e o plano (origem em mm, normal), sem renumeração após remoções. São aceitos até sete cortes adicionais, com identificadores únicos, normais válidas e PNG de 72 a 300 DPI.
 - 8 → 9: `color_srgb` ausente em uma instância assume `None`; geometria, cores de corpos e compartilhamento são preservados.
 - 7 → 8: `color_srgb` ausente assume `None`, preservando a aparência neutra dos projetos anteriores. A cor não altera malhas, B-rep ou referências.
 - Versões 1 a 6: campos acrescentados ao longo dessas versões (rascunhos, parâmetros, histórico, B-rep, subconjuntos, grupos, folhas) são opcionais e assumem valores vazios quando ausentes.

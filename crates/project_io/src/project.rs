@@ -16,10 +16,10 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-/// Versão 9: cor sRGB opcional por ocorrência, além das cores de corpo da versão 8.
+/// Versão 10: múltiplos cortes, orientação e resolução PNG nas folhas técnicas.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 9;
+pub const FORMAT_VERSION: u32 = 10;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

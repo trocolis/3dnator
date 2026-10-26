@@ -19,6 +19,12 @@ pub enum Paper {
     A4,
     A3,
 }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub enum Orientation {
+    #[default]
+    Landscape,
+    Portrait,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Style {
     Conventional,
@@ -62,6 +68,13 @@ pub struct Section {
     pub origin: Point3,
     pub normal: Point3,
 }
+/// Identificador estável: 0 é reservado ao corte A–A legado; 1 a 25 representam B–B
+/// a Z–Z. Remover um corte não renomeia os demais nem suas referências visuais.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectionView {
+    pub id: u32,
+    pub section: Section,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Specification {
     pub title: String,
@@ -71,6 +84,12 @@ pub struct Specification {
     pub hidden_lines: bool,
     pub dimensions: bool,
     pub section: Option<Section>,
+    #[serde(default)]
+    pub additional_sections: Vec<SectionView>,
+    #[serde(default)]
+    pub orientation: Orientation,
+    #[serde(default = "default_dpi")]
+    pub png_dpi: u32,
     /// Revisão exibida na legenda (por exemplo `A`).
     #[serde(default = "default_revision")]
     pub revision: String,
@@ -80,6 +99,9 @@ pub struct Specification {
 }
 fn default_revision() -> String {
     "A".into()
+}
+fn default_dpi() -> u32 {
+    150
 }
 impl Default for Specification {
     fn default() -> Self {
@@ -91,6 +113,9 @@ impl Default for Specification {
             hidden_lines: false,
             dimensions: true,
             section: None,
+            additional_sections: Vec::new(),
+            orientation: Orientation::Landscape,
+            png_dpi: default_dpi(),
             revision: default_revision(),
             date: String::new(),
         }
@@ -106,13 +131,43 @@ pub fn format_mm(value: f64) -> String {
 }
 impl Specification {
     pub fn size(&self) -> [f64; 2] {
-        match self.paper {
+        let size = match self.paper {
             Paper::A4 => [297., 210.],
             Paper::A3 => [420., 297.],
+        };
+        if self.orientation == Orientation::Portrait {
+            [size[1], size[0]]
+        } else {
+            size
         }
+    }
+    pub fn has_sections(&self) -> bool {
+        self.section.is_some() || !self.additional_sections.is_empty()
+    }
+    pub fn section_views(&self) -> Vec<(&Section, char)> {
+        self.section
+            .iter()
+            .map(|s| (s, 'A'))
+            .chain(self.additional_sections.iter().map(|s| {
+                (
+                    &s.section,
+                    char::from_u32(u32::from('A').saturating_add(s.id)).unwrap_or('?'),
+                )
+            }))
+            .collect()
     }
     pub fn validate(&self) -> Result<()> {
         let invalid_text = |t: &str| t.len() > 512 || t.chars().any(char::is_control);
+        if !(72..=300).contains(&self.png_dpi) {
+            return Err(DrawingError(
+                "A resolução PNG deve ficar entre 72 e 300 DPI.".into(),
+            ));
+        }
+        if self.additional_sections.len() > 7 {
+            return Err(DrawingError(
+                "A folha aceita até sete cortes adicionais ao corte A–A.".into(),
+            ));
+        }
         if !self.scale.is_finite()
             || self.scale <= 0.
             || self.scale > 1000.
@@ -124,10 +179,25 @@ impl Specification {
                 "Título, revisão, data ou escala da folha inválidos.".into(),
             ));
         }
-        if let Some(s) = &self.section
-            && (s.origin.iter().chain(&s.normal).any(|v| !v.is_finite()) || norm(s.normal) < 1e-9)
-        {
-            return Err(DrawingError("Plano de corte inválido.".into()));
+        for (index, section) in self.additional_sections.iter().enumerate() {
+            if !(1..=25).contains(&section.id)
+                || self.additional_sections[..index]
+                    .iter()
+                    .any(|s| s.id == section.id)
+            {
+                return Err(DrawingError(
+                    "Identificador de corte inválido ou repetido.".into(),
+                ));
+            }
+        }
+        for (s, _) in self.section_views() {
+            let length = norm(s.normal);
+            if s.origin.iter().chain(&s.normal).any(|v| !v.is_finite())
+                || !length.is_finite()
+                || length < 1e-9
+            {
+                return Err(DrawingError("Plano de corte inválido.".into()));
+            }
         }
         Ok(())
     }
@@ -367,7 +437,7 @@ pub fn generate_with_projections(
                 spec.date.as_str()
             },
             if projections.is_some() {
-                if spec.section.is_some() {
+                if spec.has_sections() {
                     "HLR DO B-REP / CORTE DA MALHA"
                 } else {
                     "HLR DO B-REP"
@@ -417,9 +487,16 @@ pub fn generate_with_projections(
             "Malha com arestas demais para a folha.".into(),
         ));
     }
-    let cell = [(size[0] - 36.) / 2., (size[1] - 58.) / 2.];
-    // Com corte, a quarta célula mostra a vista em corte A–A no lugar da isométrica.
-    let views: &[View] = if spec.section.is_some() {
+    let sections = spec.section_views();
+    let rows = if sections.is_empty() {
+        2
+    } else {
+        (3 + sections.len()).div_ceil(2)
+    };
+    let cell = [(size[0] - 36.) / 2., (size[1] - 58.) / rows as f64];
+    // As vistas ortogonais vêm primeiro; os cortes ocupam células adicionais com
+    // identificadores estáveis. Sem cortes, a quarta célula mostra a isométrica.
+    let views: &[View] = if spec.has_sections() {
         &[View::Front, View::Right, View::Top]
     } else {
         &[View::Front, View::Right, View::Top, View::Isometric]
@@ -536,8 +613,8 @@ pub fn generate_with_projections(
                 }
             }
         }
-        if let Some(section) = &spec.section {
-            cutting_plane_trace(&mut sheet, mesh, section, basis, &map)?;
+        for (section, label) in &sections {
+            cutting_plane_trace(&mut sheet, mesh, section, basis, &map, &label.to_string())?;
         }
         if spec.dimensions && view != View::Isometric {
             let a = map(min);
@@ -546,9 +623,21 @@ pub fn generate_with_projections(
             sheet.dimension(a, [a[0], b[1]], [-7., 0.], format_mm(extent[1]));
         }
     }
-    if let Some(section) = &spec.section {
-        let origin = [18. + cell[0] * 1.5, 12. + cell[1] * 1.5];
-        section_view(&mut sheet, mesh, section, spec.scale, origin, cell)?;
+    for (index, (section, label)) in sections.iter().enumerate() {
+        let position = index + 3;
+        let origin = [
+            18. + cell[0] * (0.5 + (position % 2) as f64),
+            12. + cell[1] * (0.5 + (position / 2) as f64),
+        ];
+        section_view(
+            &mut sheet,
+            mesh,
+            section,
+            spec.scale,
+            origin,
+            cell,
+            &label.to_string(),
+        )?;
     }
     if sheet.primitives.len() > 500_000 {
         return Err(DrawingError("Folha contém elementos demais.".into()));
@@ -649,13 +738,14 @@ pub fn hatch(loops: &[Vec<[f64; 2]>], spacing: f64) -> Vec<[[f64; 2]; 2]> {
     lines
 }
 
-/// Traço do plano de corte nas vistas em que ele aparece como linha, com as letras A.
+/// Traço do plano nas vistas em que aparece como linha, com o identificador do corte.
 fn cutting_plane_trace(
     sheet: &mut Sheet,
     mesh: &Mesh,
     section: &Section,
     basis: (Point3, Point3, Point3),
     map: &dyn Fn([f64; 2]) -> [f64; 2],
+    label: &str,
 ) -> Result<()> {
     let n = section.normal.map(|v| v / norm(section.normal));
     // O plano só vira linha quando é perpendicular ao plano da vista.
@@ -692,12 +782,12 @@ fn cutting_plane_trace(
         [b[0] + u[0] * 6., b[1] + u[1] * 6.],
     );
     sheet.line(p, q, 0.25, true);
-    sheet.text([p[0] - 2., p[1] - 1.], 3.5, "A");
-    sheet.text([q[0] + 1., q[1] - 1.], 3.5, "A");
+    sheet.text([p[0] - 2., p[1] - 1.], 3.5, label);
+    sheet.text([q[0] + 1., q[1] - 1.], 3.5, label);
     Ok(())
 }
 
-/// Vista em corte A–A: contornos da seção no plano de corte, hachurados.
+/// Vista em corte identificada: contornos da seção no plano de corte, hachurados.
 fn section_view(
     sheet: &mut Sheet,
     mesh: &Mesh,
@@ -705,6 +795,7 @@ fn section_view(
     scale: f64,
     origin: [f64; 2],
     cell: [f64; 2],
+    label: &str,
 ) -> Result<()> {
     let (u, v, _) = section_basis(section);
     let loops = section_loops(&section_segments(mesh, section)?)
@@ -723,7 +814,7 @@ fn section_view(
     sheet.text(
         [origin[0] - 18., origin[1] + cell[1] / 2. - 1.],
         2.5,
-        "CORTE A-A",
+        format!("CORTE {label}-{label}"),
     );
     if loops.is_empty() {
         sheet.text(origin, 2.5, "O PLANO NÃO CORTA O MODELO");
@@ -795,6 +886,91 @@ pub fn section_segments(mesh: &Mesh, section: &Section) -> Result<Vec<[Point3; 2
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn multiple_sections_keep_their_labels_in_portrait_and_landscape() -> Result<()> {
+        let mesh = nator_geometry::reference_bracket().map_err(|e| DrawingError(e.to_string()))?;
+        let mut spec = Specification {
+            section: Some(Section {
+                origin: [0., 0., 3.],
+                normal: [0., 0., 1.],
+            }),
+            additional_sections: vec![SectionView {
+                id: 2,
+                section: Section {
+                    origin: [0., 0., 10.],
+                    normal: [0., 0., 1.],
+                },
+            }],
+            orientation: Orientation::Portrait,
+            png_dpi: 96,
+            ..Default::default()
+        };
+        for orientation in [Orientation::Portrait, Orientation::Landscape] {
+            spec.orientation = orientation;
+            let sheet = generate(&mesh, &spec)?;
+            let texts = sheet
+                .primitives
+                .iter()
+                .filter_map(|p| {
+                    if let Primitive::Text { value, .. } = p {
+                        Some(value.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert!(texts.contains(&"CORTE A-A") && texts.contains(&"CORTE C-C"));
+            assert!(!texts.contains(&"CORTE B-B"));
+            assert_eq!(
+                sheet.size,
+                if orientation == Orientation::Portrait {
+                    [210., 297.]
+                } else {
+                    [297., 210.]
+                }
+            );
+            let image = png(&sheet, spec.png_dpi)?;
+            let width = u32::from_be_bytes([image[16], image[17], image[18], image[19]]);
+            let height = u32::from_be_bytes([image[20], image[21], image[22], image[23]]);
+            assert_eq!(width, (sheet.size[0] * 96. / 25.4).round() as u32);
+            assert_eq!(height, (sheet.size[1] * 96. / 25.4).round() as u32);
+        }
+        spec.section = None;
+        assert!(spec.has_sections());
+        let sheet = generate(&mesh, &spec)?;
+        assert!(
+            sheet
+                .primitives
+                .iter()
+                .any(|p| matches!(p,Primitive::Text {value,..} if value=="CORTE C-C"))
+        );
+        Ok(())
+    }
+    #[test]
+    fn invalid_section_identifiers_normals_and_png_resolution_are_rejected() {
+        let view = SectionView {
+            id: 1,
+            section: Section {
+                origin: [0.; 3],
+                normal: [0., 0., 1.],
+            },
+        };
+        let mut spec = Specification {
+            additional_sections: vec![view.clone(), view],
+            ..Default::default()
+        };
+        assert!(spec.validate().is_err());
+        spec.additional_sections.pop();
+        spec.additional_sections[0].id = u32::MAX;
+        assert_eq!(spec.section_views()[0].1, '?');
+        assert!(spec.validate().is_err());
+        spec.additional_sections[0].id = 1;
+        spec.additional_sections[0].section.normal = [f64::MAX; 3];
+        assert!(spec.validate().is_err());
+        spec.additional_sections.clear();
+        spec.png_dpi = 301;
+        assert!(spec.validate().is_err());
+    }
     #[test]
     fn sheet_preserves_scale_dimensions_and_pdf_vectors() -> Result<()> {
         let mesh = nator_geometry::reference_bracket().map_err(|e| DrawingError(e.to_string()))?;

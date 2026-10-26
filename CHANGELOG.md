@@ -44,6 +44,7 @@
 
 ### Documentação técnica
 
+- Até oito vistas em corte na mesma folha, com identificadores A–A a Z–Z estáveis e layout que se ajusta ao número de cortes; origem e normal do plano editáveis. Orientação retrato/paisagem e resolução PNG de 72 a 300 DPI salvas por folha. Formato de projeto versão 10 com valores padrão para folhas anteriores.
 - Vistas de sólidos com remoção exata de linhas ocultas no B-rep pelo OCCT HLR, incluindo oclusão entre corpos e silhuetas curvas. Curvas projetadas são discretizadas com desvio linear de 0,01 mm, independentemente da malha de exibição; folhas de malhas ou contextos mistos continuam identificadas como aproximadas. Cortes de malha mantêm identificação explícita.
 - Vista em corte A–A com contornos fechados e hachura a 45°, e traço do plano de corte com as letras de identificação nas vistas ortogonais.
 - Legenda com revisão e data editáveis; cotas com vírgula decimal e sem zeros supérfluos.

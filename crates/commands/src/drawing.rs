@@ -50,7 +50,7 @@ pub fn generate(
             }
         }
         if !mesh_body && !solids.is_empty() {
-            let views = if spec.section.is_some() {
+            let views = if spec.has_sections() {
                 &[View::Front, View::Right, View::Top][..]
             } else {
                 &[View::Front, View::Right, View::Top, View::Isometric][..]

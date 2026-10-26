@@ -723,6 +723,55 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn sheet_layout_and_stable_section_ids_survive_saving_and_undo() -> Result<(), Box<dyn Error>> {
+        use nator_drawing::{Orientation, Section, SectionView, Specification};
+        let mut session = Session::new(Document::new("Cortes")?)?;
+        session.execute(import()?)?;
+        let part = session.document().parts()[0].id;
+        let spec = Specification {
+            orientation: Orientation::Portrait,
+            png_dpi: 96,
+            additional_sections: vec![SectionView {
+                id: 3,
+                section: Section {
+                    origin: [0., 0., 3.],
+                    normal: [0., 0., 1.],
+                },
+            }],
+            ..Default::default()
+        };
+        session.execute(Command::SetSheet {
+            id: None,
+            target: Some(part),
+            specification: spec,
+        })?;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("cortes.3dnator");
+        nator_project_io::write_project(&path, session.document())?;
+        let reopened = nator_project_io::read_project(&path)?;
+        let spec = &reopened.sheets()[0].specification;
+        assert_eq!(spec.orientation, Orientation::Portrait);
+        assert_eq!(spec.png_dpi, 96);
+        assert_eq!(spec.additional_sections[0].id, 3);
+        let sheet = crate::drawing::generate(&reopened, Some(part), spec)?;
+        assert!(
+            sheet.primitives.iter().any(
+                |p| matches!(p,nator_drawing::Primitive::Text {value,..} if value=="CORTE D-D")
+            )
+        );
+        assert!(session.undo());
+        assert!(session.document().sheets().is_empty());
+        assert!(session.redo());
+        assert_eq!(
+            session.document().sheets()[0]
+                .specification
+                .additional_sections[0]
+                .id,
+            3
+        );
+        Ok(())
+    }
     fn import() -> Result<Command, Box<dyn Error>> {
         Ok(Command::ImportMesh {
             destination: None,

@@ -1,7 +1,7 @@
 //! Exercício integrado sem janela: montagem, independência, folhas e intercâmbio de malha.
 use nator_commands::{Command, Session};
 use nator_document::{Document, MeshAsset};
-use nator_drawing::{Section, Specification};
+use nator_drawing::{Orientation, Section, SectionView, Specification};
 use nator_geometry::{Placement, reference_bracket};
 use std::{error::Error, path::Path, sync::Arc, time::Instant};
 pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
@@ -71,6 +71,15 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
             origin: [0., 0., 10.],
             normal: [0., 0., 1.],
         }),
+        additional_sections: vec![SectionView {
+            id: 1,
+            section: Section {
+                origin: [0., 10., 0.],
+                normal: [0., 1., 0.],
+            },
+        }],
+        orientation: Orientation::Portrait,
+        png_dpi: 96,
         ..Specification::default()
     };
     session.execute(Command::SetSheet {
@@ -96,10 +105,10 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
     nator_project_io::write_export(&directory.join("support.pdf"), &nator_drawing::pdf(&sheet)?)?;
     nator_project_io::write_export(
         &directory.join("support.png"),
-        &nator_drawing::png(&sheet, 150)?,
+        &nator_drawing::png(&sheet, reopened.sheets()[0].specification.png_dpi)?,
     )?;
     nator_project_io::write_stl(&directory.join("support.stl"), &mesh)?;
-    let report = serde_json::json!({"status":"passed","app_version":env!("CARGO_PKG_VERSION"),"schema":nator_project_io::FORMAT_VERSION,"elapsed_ms":started.elapsed().as_secs_f64()*1000.,"checks":["shared instances","independent clone","group movement","undo/redo","ungroup preserves placement","associated sheet survives save/reopen","part drawing uses local origin","four vector views and dimensions","PNG and vector PDF export","visual section","STL export"],"pdf_primitives":sheet.primitives.len(),"native_cad_validated":false});
+    let report = serde_json::json!({"status":"passed","app_version":env!("CARGO_PKG_VERSION"),"schema":nator_project_io::FORMAT_VERSION,"elapsed_ms":started.elapsed().as_secs_f64()*1000.,"checks":["shared instances","independent clone","group movement","undo/redo","ungroup preserves placement","associated sheet survives save/reopen","part drawing uses local origin","orthographic views and dimensions","multiple identified sections","portrait paper and configurable PNG resolution","PNG and vector PDF export","visual section","STL export"],"pdf_primitives":sheet.primitives.len(),"native_cad_validated":false});
     std::fs::write(
         directory.join("report.json"),
         serde_json::to_vec_pretty(&report)?,

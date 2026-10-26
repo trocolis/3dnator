@@ -24,6 +24,13 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - 79 testes sem OCCT e 108 com OCCT aprovados, com formatação e Clippy aprovados. O ensaio STEP passou a gerar a folha precisa em PNG/PDF, disponível em `target/codex-validation/step-hlr-001/` e inspecionada visualmente.
 - Restam na documentação técnica: cotas associativas reposicionáveis, múltiplos cortes e corte preciso do B-rep. Depois seguem sombras opcionais e preparação de distribuição. Não houve mudança no formato de projeto neste incremento.
 
+### Múltiplos cortes e configurações da folha
+
+- Implementados A–A e até sete cortes adicionais por folha, com identificadores estáveis e planos editáveis por origem/normal. A distribuição das células cresce com o número de cortes sem modificar a escala escolhida.
+- Orientação retrato/paisagem e resolução PNG de 72 a 300 DPI persistidas por folha. Formato 10 com valores padrão para projetos anteriores.
+- 82 testes sem OCCT e 111 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. Ensaio `target/codex-validation/multiple-sections-001/` gerou a folha em retrato com cortes perpendiculares A–A/B–B, inspecionada visualmente.
+- Próximas tarefas funcionais: corte preciso do B-rep, cotas associativas reposicionáveis e sombras opcionais; depois preparação de distribuição. As validações externas permanecem registradas no roadmap.
+
 ## Critério de trabalho
 
 Concluir incrementos verificáveis, preservar decisões já aprovadas, executar os testes pertinentes e atualizar este registro. Não publicar o repositório, não substituir malhas por sólidos simulados e não declarar validações que não foram executadas.

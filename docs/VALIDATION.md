@@ -1,5 +1,9 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — múltiplos cortes e formato da folha (26/10/2026)
+
+82 testes sem OCCT e 111 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. As regressões verificam manutenção de identificadores após remoção de A–A, retrato/paisagem, dimensões do PNG na resolução escolhida, rejeição de cortes repetidos ou inválidos e salvamento/reabertura/desfazer/refazer das configurações. `--validate-editor target/codex-validation/multiple-sections-001` aprovado, com folha A4 em retrato, cortes A–A/B–B perpendiculares e PNG em 96 DPI. Projeto, PNG e PDF estão no diretório do ensaio; a imagem foi inspecionada. O formato de projeto passou a 10, com cortes adicionais vazios, paisagem e 150 DPI por padrão em folhas anteriores.
+
 ## Continuação 0.3.0 — vistas precisas do B-rep (26/10/2026)
 
 79 testes sem OCCT e 108 com OCCT aprovados; formatação e Clippy com avisos negados aprovados nas duas configurações. As regressões novas confirmam que um bloco atrás de outro recebe linhas ocultas, que o perímetro visível externo confere com o analítico e que a silhueta circular é extraída do B-rep com controle explícito de desvio. A folha de um cilindro com malha propositalmente grosseira usa HLR; acrescentar um corpo de malha troca para o método aproximado identificado na legenda. O ensaio `--validate-step target/codex-validation/step-hlr-001` também gera `drawing.pdf` e `drawing.png`, com quatro vistas HLR da montagem, escala 0,5 e linhas ocultas. A imagem foi inspecionada. Cortes ainda são calculados sobre a malha e isso permanece explícito na legenda.
