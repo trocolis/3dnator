@@ -1,4 +1,3 @@
-mod assembly_editor;
 mod assembly_tools;
 mod browser;
 pub(crate) mod capture;
@@ -14,6 +13,7 @@ mod mesh_import;
 mod navigation;
 mod parameter_editor;
 mod profile_pick;
+mod project_tree;
 mod section;
 mod selection_tools;
 mod shell;
@@ -182,7 +182,6 @@ struct Tab {
     active_part: Option<PartId>,
     sketch_edit: Option<sketch_editor::Workspace>,
     plane_pick: Option<sketch_scene::PlanePicker>,
-    origin_visible: bool,
     camera_transition: Option<sketch_scene::CameraTransition>,
     name_input: String,
     position_input: Point3,
@@ -236,7 +235,6 @@ impl Tab {
             active_part: None,
             sketch_edit: None,
             plane_pick: None,
-            origin_visible: true,
             camera_transition: None,
             name_input: String::new(),
             position_input: [0.; 3],
@@ -482,7 +480,6 @@ pub struct Editor {
     assembly_panel: Option<assembly_tools::Panel>,
     /// Renomeação pela árvore e ação escolhida num menu de subnível.
     rename: Option<browser::RenameDraft>,
-    pending_menu: Option<browser::MenuAction>,
     /// Painel do corte de seção aberto.
     section_edit: Option<section::SectionDraft>,
     /// Reparo do rascunho em edição.
@@ -605,7 +602,6 @@ impl Editor {
             gestures: selection_tools::SelectionGestures::default(),
             assembly_panel: None,
             rename: None,
-            pending_menu: None,
             section_edit: None,
             sketch_repair: None,
             thumbnails: std::collections::HashMap::new(),

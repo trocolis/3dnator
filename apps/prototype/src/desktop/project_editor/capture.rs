@@ -40,11 +40,11 @@ pub(crate) fn render_ui_scenario(
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
         | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import"
         | "menu-new-part" | "menu-move" | "menu-copy" | "reference-align" | "reference-sketch"
-        | "copy-beside" => {}
+        | "copy-beside" | "tree-folders" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders."
                     .into(),
             );
         }
@@ -350,6 +350,32 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(instance.map(Selection::Instance));
+        }
+        "tree-folders" => {
+            // Peça da raiz em edição, com a origem dela visível e a pasta de rascunhos
+            // oculta: a árvore esmaece o que a pasta esconde e a cena acompanha.
+            let document = editor.current().session.document();
+            let root = document
+                .instances()
+                .iter()
+                .find(|i| i.parent.is_none())
+                .and_then(|i| document.part(i.part))
+                .ok_or("Projeto sem instâncias.")?;
+            let (root, sketches) = (root.id, !root.sketches.is_empty());
+            editor.apply_menu_action(
+                &egui::Context::default(),
+                browser::MenuAction::Activate(root),
+            );
+            editor.execute(Command::SetFolderVisibility {
+                folder: nator_document::Folder::PartOrigin(root),
+                visible: true,
+            });
+            if sketches {
+                editor.execute(Command::SetFolderVisibility {
+                    folder: nator_document::Folder::Sketches(root),
+                    visible: false,
+                });
+            }
         }
         "reference-sketch" => {
             // Rascunho de referência aberto para edição, sobre a montagem.
@@ -869,14 +895,15 @@ mod tests {
         assert_eq!(editor.texture, texture);
         settle(&mut editor, &context)?;
         // Um clique fora dos planos da origem escolhe a face do sólido, sem
-        // aproximá-la pela normal de um triângulo e sem trocar de canvas.
+        // aproximá-la pela normal de um triângulo e sem trocar de canvas. O ponto fica
+        // longe do canto superior direito, onde estão o cubo e o giro da vista.
         editor.start_sketch_plane();
         let rect = frame(&mut editor, &context, Vec::new())?;
         let point = sketch_scene::project(
             &editor.viewport.camera,
             editor.display_bounds(),
             rect,
-            [16., 12., 8.],
+            [16., 3., 8.],
         )
         .ok_or("Face sem projeção")?;
         click(&mut editor, &context, point)?;

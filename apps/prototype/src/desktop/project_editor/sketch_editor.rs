@@ -198,7 +198,7 @@ impl Editor {
                     .instance(occurrence.instance)
                     .and_then(|i| document.part(i.part))
                 {
-                    for body in piece.bodies.iter().filter(|b| b.visible) {
+                    for body in piece.shown_bodies() {
                         let vertices = body.geometry.mesh().vertices();
                         let stride = (vertices.len() / 64).max(1);
                         for p in vertices.iter().step_by(stride).take(64) {

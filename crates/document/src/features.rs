@@ -948,6 +948,7 @@ mod tests {
                 feature(13, transform(10)),
             ],
             history_marker: None,
+            folders: PartFolders::default(),
         })
     }
 

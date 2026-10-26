@@ -473,7 +473,6 @@ pub enum Text {
     ResultSize,
     MeshImportHint,
     ReferenceSketch,
-    ReferenceSketches,
     NewPartMenu,
     NewEmptyPart,
     NewPartFromStep,
@@ -502,6 +501,10 @@ pub enum Text {
     CopyPatternHint,
     ReferenceSketchHint,
     StepNeedsKernel,
+    ProjectNode,
+    PartsFolder,
+    SubpartsFolder,
+    StopEditPart,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -1020,7 +1023,6 @@ pub fn text(key: Text) -> &'static str {
             "O STL não informa a unidade. Confira as dimensões antes de inserir; a malha entra como corpo de referência, sem conversão para sólido."
         }
         Text::ReferenceSketch => "Rascunho de referência",
-        Text::ReferenceSketches => "Rascunhos de referência",
         Text::NewPartMenu => "Nova peça",
         Text::NewEmptyPart => "Criar nova peça",
         Text::NewPartFromStep => "Criar a partir de STEP",
@@ -1065,5 +1067,9 @@ pub fn text(key: Text) -> &'static str {
         Text::StepNeedsKernel => {
             "Indisponível: este executável foi compilado sem o núcleo OCCT (--features occt)."
         }
+        Text::ProjectNode => "Projeto",
+        Text::PartsFolder => "Peças",
+        Text::SubpartsFolder => "Sub-peças",
+        Text::StopEditPart => "Concluir a edição da peça",
     }
 }

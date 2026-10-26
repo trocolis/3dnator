@@ -453,7 +453,7 @@ impl Editor {
         if !construction {
             let mut overlay = Overlay::default();
             if let Some(part) = document.part(pick.part) {
-                for b in part.bodies.iter().filter(|b| b.visible) {
+                for b in part.shown_bodies() {
                     let pose = pick
                         .placement
                         .compose(b.placement)

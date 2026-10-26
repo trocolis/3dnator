@@ -136,7 +136,11 @@ fn reference_anchor(
             best = Some((distance, anchor));
         }
     };
-    for record in document.reference_sketches().iter().filter(|s| s.visible) {
+    for record in document
+        .reference_sketches()
+        .iter()
+        .filter(|s| document.shows_reference_sketch(s))
+    {
         let sketch = &record.sketch;
         let frame = sketch_scene::Frame {
             camera: camera.clone(),
@@ -315,8 +319,7 @@ fn pivot_point(tab: &Tab, frames: &[Frame], pivot: Pivot) -> Option<Point3> {
             Selection::Instance(id) => {
                 let part = document.instance(id).and_then(|i| document.part(i.part))?;
                 // Centro em coordenadas da peça, levado ao mundo pela ocorrência.
-                bodies_center(part.bodies.iter().filter(|b| b.visible))
-                    .map(|c| frame.world.apply(c))
+                bodies_center(part.shown_bodies()).map(|c| frame.world.apply(c))
             }
             Selection::Body { id, .. } => {
                 let body = document.body(id)?;
@@ -1132,7 +1135,7 @@ impl Editor {
                         if let Some(part) =
                             document.instance(id).and_then(|i| document.part(i.part))
                         {
-                            for body in part.bodies.iter().filter(|b| b.visible) {
+                            for body in part.shown_bodies() {
                                 let pose = moved.compose(body.placement).unwrap_or(moved);
                                 overlay.extend(highlight::body_outline(
                                     &mut self.highlight_cache,

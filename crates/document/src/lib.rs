@@ -182,6 +182,76 @@ pub struct Part {
     /// `None` constrói todas. As operações depois do marcador ficam inativas e novas
     /// operações são inseridas nessa posição, como ao voltar a uma etapa do histórico.
     pub history_marker: Option<usize>,
+    /// Visibilidade das pastas da peça na árvore (corpos, subpeças, rascunhos, origem).
+    pub folders: PartFolders,
+}
+impl Part {
+    /// Corpos exibidos: visíveis e com a pasta Corpos visível. A visibilidade própria de
+    /// cada corpo, que o histórico também usa, não muda quando a pasta é ocultada.
+    pub fn shown_bodies(&self) -> impl Iterator<Item = &Body> {
+        let folder = self.folders.bodies;
+        self.bodies.iter().filter(move |b| folder && b.visible)
+    }
+    /// Rascunho exibido: visível e com a pasta Rascunhos visível.
+    pub fn shows_sketch(&self, record: &SketchRecord) -> bool {
+        self.folders.sketches && record.visible
+    }
+}
+
+/// Visibilidade das pastas de uma peça na árvore do projeto. A visibilidade efetiva de um
+/// elemento combina a dele com a da pasta, e ocultar a pasta preserva a escolha de cada um.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PartFolders {
+    pub bodies: bool,
+    pub subparts: bool,
+    pub sketches: bool,
+    /// Eixos da origem da peça, desenhados em cada ocorrência; ocultos por padrão.
+    pub origin: bool,
+}
+impl Default for PartFolders {
+    fn default() -> Self {
+        Self {
+            bodies: true,
+            subparts: true,
+            sketches: true,
+            origin: false,
+        }
+    }
+}
+
+/// Visibilidade dos nós do projeto na árvore: o próprio projeto (tudo), as peças da raiz,
+/// os rascunhos de referência e a origem da montagem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectFolders {
+    pub project: bool,
+    pub parts: bool,
+    pub sketches: bool,
+    pub origin: bool,
+}
+impl Default for ProjectFolders {
+    fn default() -> Self {
+        Self {
+            project: true,
+            parts: true,
+            sketches: true,
+            origin: true,
+        }
+    }
+}
+
+/// Nó da árvore com visibilidade própria, além de peças, corpos e rascunhos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Folder {
+    Project,
+    Parts,
+    ReferenceSketches,
+    Origin,
+    Bodies(PartId),
+    Subparts(PartId),
+    Sketches(PartId),
+    PartOrigin(PartId),
 }
 #[derive(Debug, Clone)]
 pub struct Instance {
@@ -209,6 +279,7 @@ pub struct Document {
     /// nenhuma peça, então nenhuma operação pode usá-los como perfil: servem apenas de
     /// referência para posicionar componentes.
     reference_sketches: Vec<SketchRecord>,
+    folders: ProjectFolders,
 }
 
 pub fn validate_name(name: &str) -> Result<(), DocumentError> {
@@ -235,6 +306,7 @@ impl Document {
             sheets: Vec::new(),
             settings: Settings::default(),
             reference_sketches: Vec::new(),
+            folders: ProjectFolders::default(),
         })
     }
     /// Toda entrada de persistência passa pelas mesmas invariantes das edições.
@@ -255,6 +327,7 @@ impl Document {
             sheets: Vec::new(),
             settings: Settings::default(),
             reference_sketches: Vec::new(),
+            folders: ProjectFolders::default(),
         };
         document.validate()?;
         Ok(document)
@@ -264,6 +337,66 @@ impl Document {
     }
     pub fn settings(&self) -> Settings {
         self.settings
+    }
+    pub fn folders(&self) -> ProjectFolders {
+        self.folders
+    }
+    pub fn restore_folders(&mut self, folders: ProjectFolders) {
+        self.folders = folders;
+    }
+    /// Visibilidade própria do nó, sem considerar os nós acima dele.
+    pub fn folder_visible(&self, folder: Folder) -> Result<bool, DocumentError> {
+        let part = |id: PartId| {
+            self.part(id)
+                .map(|p| p.folders)
+                .ok_or_else(|| DocumentError("Peça inexistente.".into()))
+        };
+        Ok(match folder {
+            Folder::Project => self.folders.project,
+            Folder::Parts => self.folders.parts,
+            Folder::ReferenceSketches => self.folders.sketches,
+            Folder::Origin => self.folders.origin,
+            Folder::Bodies(id) => part(id)?.bodies,
+            Folder::Subparts(id) => part(id)?.subparts,
+            Folder::Sketches(id) => part(id)?.sketches,
+            Folder::PartOrigin(id) => part(id)?.origin,
+        })
+    }
+    pub fn set_folder_visible(
+        &mut self,
+        folder: Folder,
+        visible: bool,
+    ) -> Result<(), DocumentError> {
+        let flag = match folder {
+            Folder::Project => &mut self.folders.project,
+            Folder::Parts => &mut self.folders.parts,
+            Folder::ReferenceSketches => &mut self.folders.sketches,
+            Folder::Origin => &mut self.folders.origin,
+            Folder::Bodies(id) => &mut self.part_mut(id)?.folders.bodies,
+            Folder::Subparts(id) => &mut self.part_mut(id)?.folders.subparts,
+            Folder::Sketches(id) => &mut self.part_mut(id)?.folders.sketches,
+            Folder::PartOrigin(id) => &mut self.part_mut(id)?.folders.origin,
+        };
+        *flag = visible;
+        Ok(())
+    }
+    /// Instância exibida no seu nível: visível e com a pasta que a contém visível (Peças,
+    /// na raiz, dentro do projeto; Subpeças, dentro de uma peça). Os níveis acima são
+    /// conferidos ao percorrer a montagem (`occurrences`).
+    pub fn shows_instance(&self, instance: &Instance) -> bool {
+        instance.visible
+            && match instance.parent {
+                None => self.folders.project && self.folders.parts,
+                Some(parent) => self.part(parent).is_some_and(|p| p.folders.subparts),
+            }
+    }
+    /// Rascunho de referência exibido: visível, com a pasta e o projeto visíveis.
+    pub fn shows_reference_sketch(&self, record: &SketchRecord) -> bool {
+        self.folders.project && self.folders.sketches && record.visible
+    }
+    /// Eixos da origem da montagem exibidos.
+    pub fn shows_origin(&self) -> bool {
+        self.folders.project && self.folders.origin
     }
     pub fn set_settings(&mut self, settings: Settings) -> Result<(), DocumentError> {
         if settings.display_decimals > MAX_DISPLAY_DECIMALS {
@@ -478,6 +611,7 @@ impl Document {
             parameters: parameters::Parameters::default(),
             features: Vec::new(),
             history_marker: None,
+            folders: PartFolders::default(),
         });
         self.instances.push(Instance {
             parent: None,
@@ -573,6 +707,7 @@ impl Document {
                     parameters: parameters::Parameters::default(),
                     features: Vec::new(),
                     history_marker: None,
+                    folders: PartFolders::default(),
                 });
                 self.instances.push(Instance {
                     parent: None,
@@ -812,7 +947,7 @@ impl Document {
             let part = self
                 .part(instance.part)
                 .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
-            for body in part.bodies.iter().filter(|b| b.visible) {
+            for body in part.shown_bodies() {
                 scene_triangles = scene_triangles
                     .checked_add(body.geometry.mesh().triangles().len())
                     .ok_or_else(|| DocumentError("Cena excede o limite numérico.".into()))?;
@@ -870,7 +1005,7 @@ impl Document {
                 .iter()
                 .filter_map(|id| self.instance(*id).and_then(|i| i.color))
                 .next_back();
-            for body in part.bodies.iter().filter(|b| b.visible) {
+            for body in part.shown_bodies() {
                 let Some(look) = style(&occurrence, part.id, body.id) else {
                     continue;
                 };

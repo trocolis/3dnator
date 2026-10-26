@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 14
+# Formato de projeto — versão interna 15
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 14; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 15; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -25,6 +25,8 @@ Cada peça contém:
 - desde a versão 12, `history_marker` opcional: quantidade de operações construídas a partir do início. As posteriores ficam inativas, com a última geometria oculta, e novas operações entram nessa posição. Ausente, todo o histórico é construído; o marcador nunca aponta para o fim (forma canônica).
 
 Desde a versão 14, o manifesto pode conter `reference_sketches`: rascunhos de referência da montagem, com o mesmo formato dos rascunhos de peça e coordenadas da montagem. Os identificadores compartilham o espaço dos rascunhos de peça. Não pertencem a peça nenhuma, não têm parâmetros (cotas guardam valores numéricos) e nenhuma operação pode usá-los como perfil; servem apenas de destino para posicionar componentes. Ausente, a lista é vazia.
+
+Desde a versão 15, o manifesto e cada peça podem conter `folders`, a visibilidade das pastas da árvore. No projeto: `project`, `parts`, `sketches` (rascunhos de referência) e `origin`, todos `true` por padrão. Na peça: `bodies`, `subparts`, `sketches` (`true` por padrão) e `origin` (`false`). A visibilidade efetiva de um corpo, rascunho ou instância combina a dele com a das pastas acima; a de cada elemento é preservada. O campo só é gravado quando difere do padrão.
 
 Cada instância referencia uma definição de peça, a peça pai opcional (subconjuntos) e guarda posição/orientação relativas ao pai. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
 
@@ -83,6 +85,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 14 → 15: o manifesto e as peças acrescentam `folders` (ausente vale o padrão: tudo visível, exceto a origem das peças). A origem global, antes um controle da sessão sempre visível ao abrir, passa a ser gravada.
 - 13 → 14: o manifesto acrescenta `reference_sketches` (ausente vale lista vazia). A gravação omite o campo quando não há rascunhos de referência.
 - 12 → 13: o manifesto acrescenta `settings` (configurações do documento, hoje `display_decimals`, de 0 a 6; ausente vale 2) e o pacote pode conter `thumbnail.png`, uma miniatura isométrica de até 4 MiB conferida apenas pela assinatura PNG. Projetos anteriores abrem com as configurações padrão e sem miniatura.
 - 11 → 12: operações acrescentam `suppressed` (ausente vale `false`) e peças acrescentam `history_marker` (ausente vale `None`). Projetos anteriores abrem com todo o histórico ativo. Resultados de operações inativas (suprimidas, dependentes de uma suprimida ou posteriores ao marcador) precisam estar ocultos; o leitor rejeita o contrário.

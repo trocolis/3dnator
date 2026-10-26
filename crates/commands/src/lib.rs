@@ -163,6 +163,11 @@ pub enum Command {
         id: BodyId,
         visible: bool,
     },
+    /// Visibilidade de uma pasta da árvore (peças, rascunhos, corpos, subpeças, origens).
+    SetFolderVisibility {
+        folder: nator_document::Folder,
+        visible: bool,
+    },
     SetInstanceVisibility {
         id: InstanceId,
         visible: bool,
@@ -327,6 +332,7 @@ impl Command {
             Self::SetBodyVisibility { .. } | Self::SetInstanceVisibility { .. } => {
                 "Alterar visibilidade"
             }
+            Self::SetFolderVisibility { .. } => "Alterar visibilidade da pasta",
             Self::MoveBody { .. } => "Posicionar corpo",
             Self::MoveInstance { .. } => "Posicionar instância",
             Self::RemoveBody { .. } => "Excluir corpo",
@@ -632,6 +638,9 @@ impl Command {
             Self::SetSketchVisibility { id, visible } => doc.sketch_mut(id)?.visible = visible,
             Self::SetBodyVisibility { id, visible } => doc.body_mut(id)?.visible = visible,
             Self::SetInstanceVisibility { id, visible } => doc.instance_mut(id)?.visible = visible,
+            Self::SetFolderVisibility { folder, visible } => {
+                doc.set_folder_visible(folder, visible)?;
+            }
             Self::MoveBody { id, placement } => {
                 doc.body_mut(id)?.placement = placement;
                 let part = doc
@@ -1435,6 +1444,47 @@ mod tests {
         assert!(session.document().sketch(sketch).is_none());
         assert!(session.undo());
         assert!(session.document().is_reference_sketch(sketch));
+        Ok(())
+    }
+
+    #[test]
+    fn folder_visibility_is_an_undoable_edit() -> Result<(), Box<dyn Error>> {
+        use nator_document::Folder;
+        let mut session = Session::new(Document::new("Pastas")?)?;
+        session.execute(import()?)?;
+        let part = session.document().parts()[0].id;
+        session.execute(Command::SetFolderVisibility {
+            folder: Folder::PartOrigin(part),
+            visible: true,
+        })?;
+        assert!(
+            session
+                .document()
+                .folder_visible(Folder::PartOrigin(part))?
+        );
+        assert!(session.undo());
+        assert!(
+            !session
+                .document()
+                .folder_visible(Folder::PartOrigin(part))?
+        );
+        assert!(session.redo());
+        assert!(
+            session
+                .document()
+                .folder_visible(Folder::PartOrigin(part))?
+        );
+        // Pasta de uma peça inexistente é recusada sem mudar o documento.
+        let revision = session.revision();
+        assert!(
+            session
+                .execute(Command::SetFolderVisibility {
+                    folder: Folder::Bodies(PartId(999)),
+                    visible: false,
+                })
+                .is_err()
+        );
+        assert_eq!(session.revision(), revision);
         Ok(())
     }
 

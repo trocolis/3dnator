@@ -179,46 +179,6 @@ fn face_work_plane(world: Plane, placement: Placement) -> Result<Plane, nator_sk
 }
 
 impl Editor {
-    pub(super) fn sketch_tree_entry(
-        &mut self,
-        ui: &mut egui::Ui,
-        part: PartId,
-        record: &nator_document::SketchRecord,
-    ) {
-        let active = self
-            .current()
-            .sketch_edit
-            .as_ref()
-            .is_some_and(|w| w.id == record.id);
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled_ui(!self.busy() && !active, |ui| {
-                    icons::button(
-                        ui,
-                        if record.visible {
-                            icons::Icon::Eye
-                        } else {
-                            icons::Icon::EyeOff
-                        },
-                        text(T::Visibility),
-                        false,
-                        false,
-                    )
-                })
-                .inner
-                .clicked()
-            {
-                self.execute(Command::SetSketchVisibility {
-                    id: record.id,
-                    visible: !record.visible,
-                });
-            }
-            if icons::entry(ui, icons::Icon::Sketch, &record.sketch.name, active).clicked() {
-                self.begin_sketch(part, record.id);
-            }
-        });
-    }
-
     pub(super) fn display_bounds(&self) -> Bounds {
         self.current().scene_bounds.unwrap_or(EMPTY_BOUNDS)
     }
@@ -420,7 +380,7 @@ impl Editor {
             for record in part
                 .sketches
                 .iter()
-                .filter(|s| s.visible && Some((s.id, occurrence.placement)) != active)
+                .filter(|s| part.shows_sketch(s) && Some((s.id, occurrence.placement)) != active)
             {
                 visible |= !record.sketch.points.is_empty();
                 let frame = Frame {
@@ -448,11 +408,9 @@ impl Editor {
             }
         }
         // Rascunhos de referência: coordenadas da montagem, cor própria e traço mais fino.
-        for record in doc
-            .reference_sketches()
-            .iter()
-            .filter(|s| s.visible && Some((s.id, Placement::default())) != active)
-        {
+        for record in doc.reference_sketches().iter().filter(|s| {
+            doc.shows_reference_sketch(s) && Some((s.id, Placement::default())) != active
+        }) {
             visible |= !record.sketch.points.is_empty();
             let frame = Frame {
                 camera: self.viewport.camera.clone(),
@@ -479,24 +437,40 @@ impl Editor {
         }
         visible
     }
-    /// A origem pertence à peça em construção; na montagem, usa o referencial
-    /// global. Os planos só são escolhidos enquanto o seletor está ativo.
+    /// Eixos das origens visíveis na árvore: a da montagem e a de cada peça com a pasta
+    /// Origem visível, em todas as ocorrências. Ao escolher o plano de um rascunho, os
+    /// planos aparecem na origem do destino e só então podem ser clicados.
     pub(super) fn origin_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
-        let picking = self.current().plane_pick.is_some();
-        if !self.current().origin_visible && !picking {
+        let document = self.current().session.document();
+        let mut origins = Vec::new();
+        if document.shows_origin() {
+            origins.push(Placement::default());
+        }
+        if let Ok(occurrences) = document.occurrences() {
+            for occurrence in occurrences
+                .iter()
+                .filter(|o| self.current().view.in_isolation(o))
+            {
+                if document
+                    .instance(occurrence.instance)
+                    .and_then(|i| document.part(i.part))
+                    .is_some_and(|p| p.folders.origin)
+                {
+                    origins.push(occurrence.placement);
+                }
+            }
+        }
+        let picker = self.current().plane_pick.as_ref().map(|p| p.placement);
+        let picking = picker.is_some();
+        if let Some(placement) = picker
+            && !origins.contains(&placement)
+        {
+            origins.push(placement);
+        }
+        if origins.is_empty() {
             return false;
         }
-        let placement = self
-            .current()
-            .plane_pick
-            .as_ref()
-            .map(|p| p.placement)
-            .or_else(|| {
-                self.current()
-                    .active_part
-                    .and_then(|p| part_placement(self.current(), p).ok())
-            })
-            .unwrap_or_default();
+        let placement = picker.unwrap_or_default();
         let bounds = self.display_bounds();
         let scale = bounds.size().into_iter().fold(0_f64, f64::max);
         let size = (scale * 0.3).clamp(10., 60.);
@@ -568,7 +542,11 @@ impl Editor {
                 }
             }
         }
-        if let Some(origin) = screen([0.; 3]) {
+        for frame in origins {
+            let screen = |point| project(camera, bounds, response.rect, frame.apply(point));
+            let Some(origin) = screen([0.; 3]) else {
+                continue;
+            };
             for (axis, label, color) in [
                 ([size, 0., 0.], "X", theme::DANGER),
                 ([0., size, 0.], "Y", theme::GREEN),
@@ -621,7 +599,7 @@ pub(super) fn document_bounds(document: &Document, view: &ViewState) -> Bounds {
                 .instance(occurrence.instance)
                 .and_then(|i| document.part(i.part))
             {
-                for record in part.sketches.iter().filter(|s| s.visible) {
+                for record in part.sketches.iter().filter(|s| part.shows_sketch(s)) {
                     let sketch = &record.sketch;
                     for point in &sketch.points {
                         include(
@@ -642,7 +620,11 @@ pub(super) fn document_bounds(document: &Document, view: &ViewState) -> Bounds {
         }
     }
     // Rascunhos de referência já estão em coordenadas da montagem.
-    for record in document.reference_sketches().iter().filter(|s| s.visible) {
+    for record in document
+        .reference_sketches()
+        .iter()
+        .filter(|s| document.shows_reference_sketch(s))
+    {
         let sketch = &record.sketch;
         for point in &sketch.points {
             include(sketch.plane.world(point.position));

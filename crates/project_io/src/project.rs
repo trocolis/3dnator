@@ -16,6 +16,8 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
+/// Versão 15: visibilidade das pastas da árvore (`folders` no projeto e em cada peça).
+/// Ausente, vale o padrão: tudo visível, exceto a origem das peças.
 /// Versão 14: rascunhos de referência da montagem (`reference_sketches`), fora das peças.
 /// Versão 13: configurações do documento (casas decimais exibidas) e miniatura PNG opcional
 /// (`thumbnail.png`). Versões anteriores usam as configurações padrão e não têm miniatura.
@@ -24,7 +26,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 11: cotas associativas das folhas, com caminhos e referências topológicas estáveis.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 14;
+pub const FORMAT_VERSION: u32 = 15;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -54,6 +56,12 @@ struct Manifest {
     settings: nator_document::Settings,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reference_sketches: Vec<SketchRecordData>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    folders: nator_document::ProjectFolders,
+}
+/// Campos opcionais com valor padrão não são gravados.
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -69,6 +77,8 @@ struct PartRecord {
     features: Vec<nator_document::features::Feature>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     history_marker: Option<usize>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    folders: nator_document::PartFolders,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -358,6 +368,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             parameters: part.parameters,
             features: part.features,
             history_marker: part.history_marker,
+            folders: part.folders,
         });
     }
     // A miniatura é opcional e só é conferida quanto ao tamanho e à assinatura PNG.
@@ -433,6 +444,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 .collect(),
         )
         .map_err(error)?;
+    document.restore_folders(manifest.folders);
     Ok(document)
 }
 
@@ -547,6 +559,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                 parameters: p.parameters.clone(),
                 features: p.features.clone(),
                 history_marker: p.history_marker,
+                folders: p.folders,
                 sketches: p
                     .sketches
                     .iter()
@@ -575,6 +588,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .collect(),
         sheets: document.sheets().to_vec(),
         settings: document.settings(),
+        folders: document.folders(),
         reference_sketches: document
             .reference_sketches()
             .iter()
@@ -945,6 +959,35 @@ mod tests {
                 .len(),
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn folder_visibility_round_trips_and_defaults_when_absent() -> Result<(), Box<dyn Error>> {
+        use nator_document::Folder;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("pastas.3dnator");
+        let mut doc = document()?;
+        let part = doc.parts()[0].id;
+        // Padrão: tudo visível, exceto a origem das peças; nada é gravado.
+        assert!(!doc.folder_visible(Folder::PartOrigin(part))?);
+        write_project(&path, &doc)?;
+        let mut archive = ZipArchive::new(File::open(&path)?)?;
+        let mut manifest = String::new();
+        archive
+            .by_name("manifest.json")?
+            .read_to_string(&mut manifest)?;
+        assert!(!manifest.contains("\"folders\""));
+        doc.set_folder_visible(Folder::Bodies(part), false)?;
+        doc.set_folder_visible(Folder::PartOrigin(part), true)?;
+        doc.set_folder_visible(Folder::ReferenceSketches, false)?;
+        let second = directory.path().join("pastas-2.3dnator");
+        write_project(&second, &doc)?;
+        let reopened = read_project(&second)?;
+        assert!(!reopened.folder_visible(Folder::Bodies(part))?);
+        assert!(reopened.folder_visible(Folder::PartOrigin(part))?);
+        assert!(!reopened.folder_visible(Folder::ReferenceSketches)?);
+        assert!(reopened.folder_visible(Folder::Parts)?);
         Ok(())
     }
 

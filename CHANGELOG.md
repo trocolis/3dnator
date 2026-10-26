@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Árvore do projeto
+
+- Raiz **Projeto** com **Peças**, **Rascunhos** (de referência) e **Origem**; cada peça com **Corpos**, **Sub-peças**, **Rascunhos** e **Origem**, recursivamente. Pastas vazias dentro das peças não aparecem.
+- Olho em todos os nós. A visibilidade das pastas é do documento (`ProjectFolders`, `PartFolders`, comando `SetFolderVisibility` com desfazer) e se combina com a de cada elemento, que é preservada; elementos ocultos por um nó acima aparecem esmaecidos. Cena, seleção, folhas e exportações seguem a visibilidade efetiva.
+- Origem por peça, oculta por padrão, desenhada em cada ocorrência; a origem do projeto passa a ser gravada.
+- Lápis de edição em cada peça: entra na edição (construção), abre o nó e troca a faixa para Modelo; clicado de novo, volta à montagem. Substitui o círculo de ativação.
+- Formato `.3dnator` versão 15, com `folders` opcional no projeto e nas peças.
+
 ### Refinamento da aba Montagem
 
 - A faixa perde o bloco fixo "Projeto" em todas as abas; ficam só os grupos de ferramentas.

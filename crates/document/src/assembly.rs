@@ -327,7 +327,7 @@ impl Document {
             for i in doc
                 .instances
                 .iter()
-                .filter(|i| i.parent == parent && i.visible)
+                .filter(|i| i.parent == parent && doc.shows_instance(i))
             {
                 if out.len() >= MAX_ELEMENTS {
                     return Err(DocumentError(
@@ -392,7 +392,7 @@ impl Document {
                 .and_then(|i| self.part(i.part))
                 .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
             let mut bounds: Option<Bounds> = None;
-            for body in part.bodies.iter().filter(|b| b.visible) {
+            for body in part.shown_bodies() {
                 let local = body.geometry.mesh().bounds();
                 for corner in 0..8 {
                     let p = std::array::from_fn(|k| {
@@ -644,6 +644,62 @@ mod tests {
     }
 
     #[test]
+    fn folder_visibility_combines_with_each_element() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Pastas")?;
+        let bracket = || -> Result<Arc<MeshAsset>, Box<dyn Error>> {
+            Ok(Arc::new(MeshAsset::new(
+                nator_geometry::reference_bracket()?
+            )))
+        };
+        let (part, body) = doc.add_mesh(None, "Suporte".into(), bracket()?)?;
+        let (inner, _) = doc.add_mesh(None, "Interna".into(), bracket()?)?;
+        let nested = doc
+            .instances()
+            .iter()
+            .find(|i| i.part == inner)
+            .ok_or("Instância ausente")?
+            .id;
+        doc.reparent(nested, Some(part))?;
+        let triangles = |doc: &Document| -> Result<usize, Box<dyn Error>> {
+            Ok(doc
+                .scene()?
+                .map(|scene| scene.mesh.triangles().len())
+                .unwrap_or(0))
+        };
+        let full = triangles(&doc)?;
+        assert_eq!(doc.occurrences()?.len(), 2);
+        // Origem das peças oculta por padrão; as demais pastas, visíveis.
+        assert!(!doc.folder_visible(Folder::PartOrigin(part))?);
+        assert!(doc.shows_origin());
+        // Subpeças ocultas: a ocorrência interna sai da cena, sem mudar a instância.
+        doc.set_folder_visible(Folder::Subparts(part), false)?;
+        assert_eq!(doc.occurrences()?.len(), 1);
+        assert_eq!(triangles(&doc)? * 2, full);
+        assert!(doc.instance(nested).ok_or("Instância ausente")?.visible);
+        // Corpos ocultos: a escolha de cada corpo (que o histórico usa) é preservada.
+        doc.set_folder_visible(Folder::Bodies(part), false)?;
+        assert_eq!(triangles(&doc)?, 0);
+        assert!(doc.body(body).ok_or("Corpo ausente")?.visible);
+        doc.set_folder_visible(Folder::Subparts(part), true)?;
+        doc.set_folder_visible(Folder::Bodies(part), true)?;
+        assert_eq!(triangles(&doc)?, full);
+        // Peças, ou o projeto inteiro, ocultam todas as ocorrências da raiz.
+        doc.set_folder_visible(Folder::Parts, false)?;
+        assert!(doc.occurrences()?.is_empty());
+        doc.set_folder_visible(Folder::Parts, true)?;
+        let mut layout = nator_sketch::Sketch::new("Layout", nator_sketch::Plane::xy());
+        layout.add_point([0., 0.])?;
+        let reference = doc.add_reference_sketch(layout)?;
+        let record = doc.sketch(reference).ok_or("Rascunho ausente")?.clone();
+        assert!(doc.shows_reference_sketch(&record));
+        doc.set_folder_visible(Folder::Project, false)?;
+        assert!(doc.occurrences()?.is_empty());
+        assert!(!doc.shows_origin() && !doc.shows_reference_sketch(&record));
+        assert!(doc.folder_visible(Folder::Parts)?);
+        Ok(())
+    }
+
+    #[test]
     fn new_components_slide_beside_the_existing_ones() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Lado a lado")?;
         let (part, _) = doc.add_mesh(
@@ -762,7 +818,7 @@ impl Document {
             let part = self
                 .part(instance.part)
                 .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
-            for body in part.bodies.iter().filter(|b| b.visible) {
+            for body in part.shown_bodies() {
                 let pose = occurrence
                     .placement
                     .compose(body.placement)

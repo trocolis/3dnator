@@ -28,7 +28,7 @@ pub fn generate(
             let part = context
                 .part(instance.part)
                 .ok_or_else(|| DocumentError("Peça ausente.".into()))?;
-            for body in part.bodies.iter().filter(|b| b.visible) {
+            for body in part.shown_bodies() {
                 if let Some(bytes) = &body.brep {
                     let placement = occurrence
                         .placement

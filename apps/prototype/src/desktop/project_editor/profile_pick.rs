@@ -99,7 +99,7 @@ impl Editor {
         for record in part
             .sketches
             .iter()
-            .filter(|s| s.visible || Some(s.id) == current)
+            .filter(|s| part.shows_sketch(s) || Some(s.id) == current)
         {
             let Ok(regions) = profiles::regions(&record.sketch) else {
                 continue;

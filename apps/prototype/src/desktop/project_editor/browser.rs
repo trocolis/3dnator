@@ -61,23 +61,6 @@ fn item(ui: &mut egui::Ui, icon: Icon, label: T) -> bool {
     .inner
 }
 
-/// Botão de ativação da peça (construção), à esquerda do nome.
-pub(super) fn activation(ui: &mut egui::Ui, active: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(18.), egui::Sense::click());
-    let center = rect.center();
-    ui.painter().circle_stroke(
-        center,
-        5.5,
-        egui::Stroke::new(1.3, if active { theme::ACCENT } else { theme::MUTED }),
-    );
-    if active {
-        ui.painter().circle_filled(center, 3., theme::ACCENT);
-    } else if response.hovered() {
-        ui.painter().circle_filled(center, 2.5, theme::BLUE_FILL);
-    }
-    response.on_hover_text(text(if active { T::LeavePart } else { T::EditPart }))
-}
-
 /// Menu de uma instância (componente).
 pub(super) fn instance_menu(
     ui: &mut egui::Ui,
@@ -320,13 +303,20 @@ impl Editor {
     pub(super) fn apply_menu_action(&mut self, context: &egui::Context, action: MenuAction) {
         let tab = self.current().id;
         match action {
+            // Entrar na edição de uma peça leva da faixa Montagem à Modelo; sair, de volta.
             MenuAction::Activate(part) => {
                 self.current_mut().active_part = Some(part);
                 self.finish_sketch();
+                if self.shell.tab == shell::RibbonTab::Assembly {
+                    self.shell.tab = shell::RibbonTab::Model;
+                }
             }
             MenuAction::Deactivate => {
                 self.current_mut().active_part = None;
                 self.finish_sketch();
+                if self.shell.tab == shell::RibbonTab::Model {
+                    self.shell.tab = shell::RibbonTab::Assembly;
+                }
             }
             MenuAction::Select(items) => self.current_mut().select_many(items, false),
             MenuAction::Move(items) => {

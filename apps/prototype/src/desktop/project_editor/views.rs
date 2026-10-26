@@ -110,20 +110,17 @@ impl Editor {
         }
     }
     pub(super) fn tree(&mut self, ui: &mut egui::Ui) {
-        let document = self.current().session.document().clone();
-        let mut selection = None;
-        let mut command = None;
-        let mut activate = None;
-        let mut action = None;
-        let mut edit_reference = None;
         let menu = self.menu_context();
         let busy = self.busy();
+        let mut intents = Vec::new();
         egui::Panel::left("tree")
-            .default_size(235.)
+            .default_size(270.)
             .min_size(190.)
-            .max_size(390.)
+            .max_size(420.)
             .frame(theme::panel_frame())
             .show(ui, |ui| {
+                let tab = self.current();
+                let document = tab.session.document();
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(text(T::Project)).strong().size(14.))
                         .on_hover_text(text(T::PrototypeNotice));
@@ -136,369 +133,96 @@ impl Editor {
                     });
                 });
                 ui.separator();
-                let active = self.current().active_part.and_then(|p| document.part(p));
-                if let Some(part) = active {
-                    ui.label(
-                        egui::RichText::new(&part.name)
-                            .strong()
-                            .color(theme::ACCENT),
-                    );
-                    if ui.button(text(T::LeavePart)).clicked() {
-                        self.current_mut().active_part = None;
-                        self.finish_sketch();
-                    }
-                } else {
-                    theme::section(ui, text(T::Assembly));
-                }
-                ui.horizontal(|ui| {
-                    if icons::button(
-                        ui,
-                        if self.current().origin_visible {
-                            icons::Icon::Eye
-                        } else {
-                            icons::Icon::EyeOff
-                        },
-                        text(T::Visibility),
-                        false,
-                        false,
-                    )
-                    .clicked()
-                    {
-                        self.current_mut().origin_visible = !self.current().origin_visible;
-                    }
-                    ui.label(text(T::Origin));
-                });
-                if document.instances().is_empty() {
-                    ui.add_space(16.);
-                    ui.label(egui::RichText::new(text(T::BrowserEmpty)).strong());
-                    ui.label(egui::RichText::new(text(T::StartSketch)).color(theme::MUTED));
+                // Peça em edição: nome e saída rápida, além do lápis na árvore.
+                if let Some(part) = tab.active_part.and_then(|p| document.part(p)) {
+                    ui.horizontal(|ui| {
+                        let width = (ui.available_width() - 30.).max(40.);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(width, 24.),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(18.),
+                                    egui::Sense::hover(),
+                                );
+                                icons::paint(ui.painter(), rect, icons::Icon::Edit, true);
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&part.name)
+                                            .strong()
+                                            .color(theme::ACCENT),
+                                    )
+                                    .truncate(),
+                                );
+                            },
+                        );
+                        if icons::tree_button(ui, icons::Icon::Close, text(T::LeavePart), false)
+                            .clicked()
+                        {
+                            intents.push(project_tree::Intent::LeavePart);
+                        }
+                    });
+                    ui.separator();
                 }
                 egui::ScrollArea::vertical()
                     .id_salt("project_browser")
                     .show(ui, |ui| {
-                        // Rascunhos de referência da montagem, antes das peças.
-                        if !document.reference_sketches().is_empty() {
-                            theme::section(
-                                ui,
-                                &format!(
-                                    "{} ({})",
-                                    text(T::ReferenceSketches),
-                                    document.reference_sketches().len()
-                                ),
-                            );
-                        }
-                        for record in document.reference_sketches() {
-                            let editing = self
-                                .current()
-                                .sketch_edit
-                                .as_ref()
-                                .is_some_and(|w| w.id == record.id);
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .add_enabled_ui(!busy && !editing, |ui| {
-                                        icons::button(
-                                            ui,
-                                            if record.visible {
-                                                icons::Icon::Eye
-                                            } else {
-                                                icons::Icon::EyeOff
-                                            },
-                                            text(T::Visibility),
-                                            false,
-                                            false,
-                                        )
-                                    })
-                                    .inner
-                                    .clicked()
-                                {
-                                    command = Some(Command::SetSketchVisibility {
-                                        id: record.id,
-                                        visible: !record.visible,
-                                    });
-                                }
-                                let response = icons::entry(
-                                    ui,
-                                    icons::Icon::ReferenceSketch,
-                                    &record.sketch.name,
-                                    editing,
-                                )
-                                .on_hover_text(text(T::ReferenceSketchHint));
-                                if response.clicked() && !busy {
-                                    edit_reference = Some(record.id);
-                                }
-                                response.context_menu(|ui| {
-                                    ui.add_enabled_ui(!busy, |ui| {
-                                        if ui.button(text(T::EditFeatureShort)).clicked() {
-                                            edit_reference = Some(record.id);
-                                            ui.close();
-                                        }
-                                        if ui.button(text(T::DeleteFeature)).clicked() {
-                                            command = Some(Command::RemoveSketch { id: record.id });
-                                            ui.close();
-                                        }
-                                    });
-                                });
-                            });
-                        }
-                        for instance in document.instances().iter().filter(|i| i.parent.is_none()) {
-                            let Some(part) = document.part(instance.part) else {
-                                continue;
-                            };
-                            egui::collapsing_header::CollapsingState::load_with_default_open(
-                                ui.ctx(),
-                                egui::Id::new(("part_node", self.current().id, instance.id.0)),
-                                true,
-                            )
-                            .show_header(ui, |ui| {
-                                if ui
-                                    .add_enabled_ui(!busy, |ui| {
-                                        icons::button(
-                                            ui,
-                                            if instance.visible {
-                                                icons::Icon::Eye
-                                            } else {
-                                                icons::Icon::EyeOff
-                                            },
-                                            text(T::Visibility),
-                                            false,
-                                            false,
-                                        )
-                                    })
-                                    .inner
-                                    .clicked()
-                                {
-                                    command = Some(Command::SetInstanceVisibility {
-                                        id: instance.id,
-                                        visible: !instance.visible,
-                                    });
-                                }
-                                if browser::activation(ui, menu.active == Some(part.id)).clicked()
-                                    && !busy
-                                {
-                                    action = Some(if menu.active == Some(part.id) {
-                                        browser::MenuAction::Deactivate
-                                    } else {
-                                        browser::MenuAction::Activate(part.id)
-                                    });
-                                }
-                                let response = icons::entry(
-                                    ui,
-                                    icons::Icon::Cube,
-                                    &instance.name,
-                                    self.current().is_selected(Selection::Instance(instance.id)),
-                                )
-                                .on_hover_text(&part.name);
-                                if response.clicked() {
-                                    selection = Some(Selection::Instance(instance.id));
-                                }
-                                if response.double_clicked() && !busy {
-                                    activate = Some(part.id);
-                                }
-                                response.context_menu(|ui| {
-                                    ui.add_enabled_ui(!busy, |ui| {
-                                        if let Some(a) =
-                                            browser::instance_menu(ui, &menu, instance, &part.name)
-                                        {
-                                            action = Some(a);
-                                        }
-                                    });
-                                });
-                            })
-                            .body(|ui| {
-                                self.child_tree(ui, &document, part.id, 0, &mut selection);
-                                if !part.sketches.is_empty() {
-                                    theme::section(
-                                        ui,
-                                        &format!(
-                                            "{} ({})",
-                                            text(T::SketchesGroup),
-                                            part.sketches.len()
-                                        ),
-                                    );
-                                }
-                                for sketch in &part.sketches {
-                                    self.sketch_tree_entry(ui, part.id, sketch);
-                                }
-                                if !part.bodies.is_empty() {
-                                    theme::section(
-                                        ui,
-                                        &format!(
-                                            "{} ({})",
-                                            text(T::SolidBodies),
-                                            part.bodies.len()
-                                        ),
-                                    );
-                                }
-                                for body in &part.bodies {
-                                    ui.horizontal(|ui| {
-                                        if ui
-                                            .add_enabled_ui(!busy, |ui| {
-                                                icons::button(
-                                                    ui,
-                                                    if body.visible {
-                                                        icons::Icon::Eye
-                                                    } else {
-                                                        icons::Icon::EyeOff
-                                                    },
-                                                    text(T::Visibility),
-                                                    false,
-                                                    false,
-                                                )
-                                            })
-                                            .inner
-                                            .clicked()
-                                        {
-                                            command = Some(Command::SetBodyVisibility {
-                                                id: body.id,
-                                                visible: !body.visible,
-                                            });
-                                        }
-                                        let target = Selection::Body {
-                                            part: part.id,
-                                            id: body.id,
-                                        };
-                                        let response = icons::entry(
-                                            ui,
-                                            icons::Icon::Cube,
-                                            &body.name,
-                                            self.current().is_selected(target),
-                                        );
-                                        if response.clicked() {
-                                            selection = Some(target);
-                                        }
-                                        if response.double_clicked() && !busy {
-                                            activate = Some(part.id);
-                                        }
-                                        response.context_menu(|ui| {
-                                            ui.add_enabled_ui(!busy, |ui| {
-                                                if let Some(a) =
-                                                    browser::body_menu(ui, &menu, part.id, body)
-                                                {
-                                                    action = Some(a);
-                                                }
-                                            });
-                                        });
-                                    });
-                                }
-                            });
-                        }
-                        // Grupos organizacionais: clique seleciona os membros.
-                        if !document.groups().is_empty() {
-                            ui.separator();
-                            theme::section(
-                                ui,
-                                &format!("{} ({})", text(T::Groups), document.groups().len()),
-                            );
-                        }
-                        for group in document.groups() {
-                            let members = group
-                                .members
-                                .iter()
-                                .map(|id| Selection::Instance(*id))
-                                .collect::<Vec<_>>();
-                            let chosen = !members.is_empty()
-                                && members.iter().all(|m| self.current().is_selected(*m));
-                            let response =
-                                icons::entry(ui, icons::Icon::Group, &group.name, chosen)
-                                    .on_hover_text(format!(
-                                        "{} {}",
-                                        group.members.len(),
-                                        text(T::SelectedCount)
-                                    ));
-                            if response.clicked() {
-                                action = Some(browser::MenuAction::Select(members));
-                            }
-                            response.context_menu(|ui| {
-                                ui.add_enabled_ui(!busy, |ui| {
-                                    if let Some(a) = browser::group_menu(ui, group) {
-                                        action = Some(a);
-                                    }
-                                });
-                            });
-                        }
-                        // Análises da aba: corte de seção (controle visual, fora do documento).
-                        if let Some(cut) = self.current().section {
-                            ui.separator();
-                            theme::section(ui, text(T::AnalysesGroup));
-                            ui.horizontal(|ui| {
-                                if icons::button(
-                                    ui,
-                                    if cut.visible {
-                                        icons::Icon::Eye
-                                    } else {
-                                        icons::Icon::EyeOff
-                                    },
-                                    text(T::Visibility),
-                                    false,
-                                    false,
-                                )
-                                .clicked()
-                                    && let Some(section) = &mut self.current_mut().section
-                                {
-                                    section.visible = !section.visible;
-                                }
-                                let response = icons::entry(
-                                    ui,
-                                    icons::Icon::Section,
-                                    text(T::SectionAnalysis),
-                                    self.section_edit.is_some(),
-                                );
-                                if response.double_clicked() {
-                                    self.open_section();
-                                }
-                                response.context_menu(|ui| {
-                                    if ui.button(text(T::EditFeatureShort)).clicked() {
-                                        self.open_section();
-                                        ui.close();
-                                    }
-                                    if ui.button(text(T::DeleteFeature)).clicked() {
-                                        self.current_mut().section = None;
-                                        self.section_edit = None;
-                                        ui.close();
-                                    }
-                                });
-                            });
-                        }
-                        if !document.sheets().is_empty() {
-                            ui.separator();
-                            theme::section(ui, text(T::DocumentGroup));
-                        }
-                        for sheet in document.sheets() {
-                            if icons::entry(
-                                ui,
-                                icons::Icon::Drawing,
-                                &sheet.specification.title,
-                                false,
-                            )
-                            .clicked()
-                            {
-                                self.open_drawing(Some(sheet.clone()));
-                            }
-                        }
+                        let mut tree = project_tree::Tree::new(
+                            document,
+                            tab,
+                            &menu,
+                            busy,
+                            self.section_edit.is_some(),
+                        );
+                        tree.show(ui);
+                        intents.append(&mut tree.intents);
                     });
             });
-        if let Some(selection) = selection {
-            // Ctrl+clique alterna o elemento, como na área 3D.
-            if ui.input(|i| i.modifiers.command) {
-                self.current_mut().toggle(selection);
-            } else {
-                self.current_mut().select(Some(selection));
+        for intent in intents {
+            self.apply_tree_intent(ui, intent);
+        }
+    }
+    fn apply_tree_intent(&mut self, ui: &egui::Ui, intent: project_tree::Intent) {
+        use project_tree::Intent;
+        match intent {
+            Intent::Select(selection) => {
+                // Ctrl+clique alterna o elemento, como na área 3D.
+                if ui.input(|i| i.modifiers.command) {
+                    self.current_mut().toggle(selection);
+                } else {
+                    self.current_mut().select(Some(selection));
+                }
             }
-        }
-        if let Some(part) = activate {
-            self.current_mut().active_part = Some(part);
-            self.current_mut().sketch_edit = None;
-        }
-        if let Some(command) = command {
-            self.execute(command);
-        }
-        if let Some(action) = action.or(self.pending_menu.take()) {
-            self.apply_menu_action(ui.ctx(), action);
-        }
-        if let Some(id) = edit_reference {
-            self.finish_sketch();
-            self.current_mut().active_part = None;
-            self.begin_reference_sketch(id);
+            Intent::Command(command) => self.execute(*command),
+            Intent::Menu(action) => self.apply_menu_action(ui.ctx(), action),
+            Intent::EditPart(part, node) => {
+                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    node,
+                    true,
+                );
+                state.set_open(true);
+                state.store(ui.ctx());
+                self.apply_menu_action(ui.ctx(), browser::MenuAction::Activate(part));
+            }
+            Intent::LeavePart => self.apply_menu_action(ui.ctx(), browser::MenuAction::Deactivate),
+            Intent::EditSketch(part, id) => self.begin_sketch(part, id),
+            Intent::EditReference(id) => {
+                self.finish_sketch();
+                self.current_mut().active_part = None;
+                self.begin_reference_sketch(id);
+            }
+            Intent::ToggleSection => {
+                if let Some(section) = &mut self.current_mut().section {
+                    section.visible = !section.visible;
+                }
+            }
+            Intent::OpenSection => self.open_section(),
+            Intent::RemoveSection => {
+                self.current_mut().section = None;
+                self.section_edit = None;
+            }
+            Intent::OpenDrawing(sheet) => self.open_drawing(Some(*sheet)),
         }
     }
     pub(super) fn properties(&mut self, ui: &mut egui::Ui) {

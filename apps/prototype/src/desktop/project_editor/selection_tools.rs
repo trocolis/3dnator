@@ -179,7 +179,7 @@ impl Editor {
             else {
                 continue;
             };
-            for body in part.bodies.iter().filter(|b| b.visible) {
+            for body in part.shown_bodies() {
                 let pose = occurrence
                     .placement
                     .compose(body.placement)

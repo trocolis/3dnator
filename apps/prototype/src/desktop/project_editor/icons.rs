@@ -77,6 +77,10 @@ pub(super) enum Icon {
     CutBody,
     IntersectBody,
     NewBody,
+    Part,
+    Edit,
+    Origin,
+    Project,
 }
 
 /// Elementos geométricos mantêm proporção e traço em qualquer tamanho de botão.
@@ -645,6 +649,42 @@ pub(super) fn paint_with_ink(
                 p.line(&[[12., 9.], [12., 17.]], p.accent);
             }
         }
+        Icon::Part => {
+            // Componente: bloco com o marcador de peça no canto.
+            p.cube();
+            p.face(&[[15., 15.], [22., 15.], [22., 22.], [15., 22.]], p.fill);
+            p.line(&[[15., 18.5], [22., 18.5]], p.accent);
+        }
+        Icon::Edit => {
+            p.face(
+                &[[15., 4.], [20., 9.], [9., 20.], [4., 20.], [4., 15.]],
+                p.fill,
+            );
+            p.line(&[[13., 6.], [18., 11.]], p.ink);
+            p.line(&[[4., 15.], [9., 20.]], p.accent);
+        }
+        Icon::Origin => {
+            p.line(&[[5., 19.], [21., 19.]], p.ink);
+            p.line(&[[5., 19.], [5., 3.]], p.ink);
+            p.line(&[[5., 19.], [15., 9.]], p.accent);
+            p.circle(5., 19., 2.5, p.accent);
+        }
+        Icon::Project => {
+            p.line(
+                &[
+                    [16., 3.],
+                    [5., 3.],
+                    [5., 21.],
+                    [20., 21.],
+                    [20., 7.],
+                    [16., 3.],
+                ],
+                p.ink,
+            );
+            p.face(&[[8., 12.], [12.5, 10.], [17., 12.], [12.5, 14.]], p.fill);
+            p.face(&[[8., 12.], [12.5, 14.], [12.5, 18.], [8., 16.]], p.fill);
+            p.face(&[[12.5, 14.], [17., 12.], [17., 16.], [12.5, 18.]], p.fill);
+        }
         Icon::NewBody => {
             p.cube();
             p.face(
@@ -730,8 +770,59 @@ pub(super) fn button(
     response.on_hover_text(label)
 }
 
+/// Botão compacto das linhas da árvore (visibilidade, edição), na altura de uma linha.
+pub(super) fn tree_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    let response = ui.add(
+        egui::Button::new("")
+            .min_size(egui::Vec2::splat(24.))
+            .selected(selected)
+            .frame(selected),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    if ui.is_rect_visible(response.rect) {
+        if response.hovered() && ui.is_enabled() {
+            ui.painter().rect_filled(response.rect, 4, theme::BLUE_FILL);
+        }
+        paint(
+            ui.painter(),
+            egui::Rect::from_center_size(response.rect.center(), egui::Vec2::splat(16.)),
+            icon,
+            ui.is_enabled(),
+        );
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            response.rect,
+            4,
+            egui::Stroke::new(1.5, theme::ACCENT),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response.on_hover_text(label)
+}
+
 /// Linha de árvore com ícone, foco de teclado e elipse para nomes longos.
 pub(super) fn entry(ui: &mut egui::Ui, icon: Icon, label: &str, selected: bool) -> egui::Response {
+    entry_styled(ui, icon, label, selected, false)
+}
+
+/// Como `entry`; `dimmed` esmaece o rótulo de um elemento oculto (por ele ou por um nó
+/// acima dele na árvore).
+pub(super) fn entry_styled(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+    dimmed: bool,
+) -> egui::Response {
+    let ink = if dimmed { theme::MUTED } else { theme::INK };
     let response = ui.add(
         egui::Button::new("")
             .min_size(egui::vec2(ui.available_width().max(40.), 27.))
@@ -752,7 +843,7 @@ pub(super) fn entry(ui: &mut egui::Ui, icon: Icon, label: &str, selected: bool) 
     let mut job = egui::text::LayoutJob::simple(
         label.to_owned(),
         egui::FontId::proportional(13.),
-        theme::INK,
+        ink,
         (response.rect.width() - 34.).max(1.),
     );
     job.wrap.max_rows = 1;
@@ -763,7 +854,7 @@ pub(super) fn entry(ui: &mut egui::Ui, icon: Icon, label: &str, selected: bool) 
             response.rect.center().y - galley.size().y / 2.,
         ),
         galley,
-        theme::INK,
+        ink,
     );
     if response.has_focus() {
         ui.painter().rect_stroke(

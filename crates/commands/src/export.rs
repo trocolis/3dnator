@@ -69,11 +69,11 @@ pub fn step_scene(
         let piece = doc
             .part(part)
             .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
-        let mut visible = piece.bodies.iter().any(|b| b.visible);
+        let mut visible = piece.shown_bodies().next().is_some();
         for child in doc
             .instances()
             .iter()
-            .filter(|i| i.parent == Some(part) && i.visible)
+            .filter(|i| i.parent == Some(part) && doc.shows_instance(i))
         {
             visible |= keep(doc, child.part, retained)?;
         }
@@ -93,7 +93,7 @@ pub fn step_scene(
         _ => doc
             .instances()
             .iter()
-            .filter(|i| i.parent.is_none() && i.visible)
+            .filter(|i| i.parent.is_none() && doc.shows_instance(i))
             .map(|i| (i.part, i.placement, i.name.clone(), i.color))
             .collect(),
     };
@@ -120,9 +120,7 @@ pub fn step_scene(
             Ok(StepPart {
                 name: p.name.clone(),
                 bodies: p
-                    .bodies
-                    .iter()
-                    .filter(|b| b.visible)
+                    .shown_bodies()
                     .map(body_data)
                     .collect::<Result<Vec<_>, _>>()?,
             })
@@ -140,7 +138,7 @@ pub fn step_scene(
             });
         }
     }
-    for i in doc.instances().iter().filter(|i| i.visible) {
+    for i in doc.instances().iter().filter(|i| doc.shows_instance(i)) {
         if let Some(parent) = i.parent.and_then(|p| indices.get(&p))
             && let Some(part) = indices.get(&i.part)
         {
@@ -332,13 +330,7 @@ pub fn plan(doc: &Document, scope: Scope, quality: Quality) -> Result<Vec<File>,
     };
     let visible_bodies = |part: PartId| -> Vec<BodyId> {
         doc.part(part)
-            .map(|p| {
-                p.bodies
-                    .iter()
-                    .filter(|b| b.visible)
-                    .map(|b| b.id)
-                    .collect()
-            })
+            .map(|p| p.shown_bodies().map(|b| b.id).collect())
             .unwrap_or_default()
     };
     match scope {
