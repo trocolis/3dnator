@@ -39,11 +39,12 @@ pub(crate) fn render_ui_scenario(
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
         | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import"
-        | "menu-new-part" | "menu-move" | "menu-copy" | "reference-align" | "reference-sketch" => {}
+        | "menu-new-part" | "menu-move" | "menu-copy" | "reference-align" | "reference-sketch"
+        | "copy-beside" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside."
                     .into(),
             );
         }
@@ -417,7 +418,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 [-60., 30., 0.],
             );
         }
-        "move" | "align" | "assembly-ribbon" => {
+        "move" | "align" | "assembly-ribbon" | "copy-beside" => {
             editor.current_mut().active_part = None;
             let document = editor.current().session.document();
             // Uma instância com corpos visíveis, a mais interna disponível.
@@ -438,6 +439,17 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                     editor.set_move_for_capture([25., 0., 10.], [0., 0., 30.]);
                 }
                 "align" => editor.open_align(navigation::PickMode::Vertex),
+                "copy-beside" => {
+                    // Nova instância e cópia independente: ambas ao lado da original.
+                    editor.execute(Command::DuplicateInstance { id: instance });
+                    editor.execute(Command::CloneInstance {
+                        id: instance,
+                        name: text(T::CopyIndependent).into(),
+                    });
+                    editor
+                        .current_mut()
+                        .select(Some(Selection::Instance(instance)));
+                }
                 _ => {}
             }
         }
@@ -886,6 +898,85 @@ mod tests {
         assert!(nator_geometry::dot(plane.normal(), [0., 0., 1.]) > 1. - 1e-8);
         assert_eq!(editor.texture, texture);
         assert!(editor.scene.is_some());
+        Ok(())
+    }
+    /// Digitar no campo X do Mover e confirmar com Enter: o primeiro Enter só conclui o
+    /// valor; o segundo aplica o movimento com o valor digitado.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn move_panel_values_can_be_typed() -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Mover digitando")?)?;
+        session.execute(Command::ImportMesh {
+            destination: None,
+            name: "Suporte".into(),
+            geometry: std::sync::Arc::new(nator_document::MeshAsset::new(
+                nator_geometry::reference_bracket()?,
+            )),
+        })?;
+        let mut editor = Editor::from_gpu(state, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        let instance = editor.current().session.document().instances()[0].id;
+        settle(&mut editor, &context)?;
+        editor.current_mut().selected = vec![Selection::Instance(instance)];
+        editor.open_move();
+        frame(&mut editor, &context, Vec::new())?;
+        // Campo X da translação: o primeiro texto "0,00" do painel, de cima para baixo.
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280., 820.),
+            )),
+            time: Some(context.input(|i| i.time) + 1. / 60.),
+            ..Default::default()
+        };
+        let output = context.run_ui(input, |ui| editor.draw(ui));
+        let mut fields = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(t) if t.galley.job.text == "0,00" => {
+                    Some(t.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        fields.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
+        let field = *fields.first().ok_or("Campo X ausente")?;
+        click(&mut editor, &context, field)?;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("12,5".into())],
+        )?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        assert!(
+            editor.assembly_panel.is_some(),
+            "Enter no campo não deve fechar o painel"
+        );
+        settle(&mut editor, &context)?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        settle(&mut editor, &context)?;
+        assert!(editor.assembly_panel.is_none(), "{}", editor.status);
+        let moved = editor
+            .current()
+            .session
+            .document()
+            .instance(instance)
+            .ok_or("Instância ausente")?
+            .placement
+            .translation_mm();
+        assert!((moved[0] - 12.5).abs() < 1e-9, "{moved:?}");
         Ok(())
     }
     fn frame(

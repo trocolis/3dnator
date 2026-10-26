@@ -1,6 +1,6 @@
 //! Hierarquia de definições, ocorrências e grupos organizacionais sem vínculos geométricos.
 use super::*;
-use nator_geometry::Point3;
+use nator_geometry::{Bounds, Point3};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -382,7 +382,132 @@ impl Document {
             [0.; 3]
         }))
     }
+    /// Caixa no mundo dos corpos visíveis de cada ocorrência visível, com o caminho e a
+    /// origem da ocorrência. Ocorrências sem corpos (peças vazias) não têm caixa.
+    fn occurrence_boxes(&self) -> Result<Vec<(Occurrence, Option<Bounds>)>, DocumentError> {
+        let mut out = Vec::new();
+        for occurrence in self.occurrences()? {
+            let part = self
+                .instance(occurrence.instance)
+                .and_then(|i| self.part(i.part))
+                .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+            let mut bounds: Option<Bounds> = None;
+            for body in part.bodies.iter().filter(|b| b.visible) {
+                let local = body.geometry.mesh().bounds();
+                for corner in 0..8 {
+                    let p = std::array::from_fn(|k| {
+                        if corner >> k & 1 == 0 {
+                            local.min[k]
+                        } else {
+                            local.max[k]
+                        }
+                    });
+                    let world = occurrence.placement.apply(body.placement.apply(p));
+                    bounds = Some(match bounds {
+                        None => Bounds {
+                            min: world,
+                            max: world,
+                        },
+                        Some(b) => Bounds {
+                            min: std::array::from_fn(|k| b.min[k].min(world[k])),
+                            max: std::array::from_fn(|k| b.max[k].max(world[k])),
+                        },
+                    });
+                }
+            }
+            out.push((occurrence, bounds));
+        }
+        Ok(out)
+    }
+    /// Desloca as instâncias dadas ao longo de +X do mundo, todas juntas, até que fiquem
+    /// a uma pequena folga das demais ocorrências visíveis. Usado ao criar, importar ou
+    /// copiar componentes, para que não apareçam sobrepostos. Sem sobreposição, nada muda.
+    pub fn place_beside(&mut self, ids: &[InstanceId]) -> Result<(), DocumentError> {
+        let boxes = self.occurrence_boxes()?;
+        let moving = |o: &Occurrence| o.path.iter().any(|i| ids.contains(i));
+        let union = |a: Option<Bounds>, b: Bounds| {
+            Some(match a {
+                None => b,
+                Some(a) => Bounds {
+                    min: std::array::from_fn(|k| a.min[k].min(b.min[k])),
+                    max: std::array::from_fn(|k| a.max[k].max(b.max[k])),
+                },
+            })
+        };
+        let mut item: Option<Bounds> = None;
+        let mut origin = None;
+        let mut obstacles = Vec::new();
+        let mut scene: Option<Bounds> = None;
+        for (occurrence, bounds) in &boxes {
+            if moving(occurrence) {
+                origin.get_or_insert(occurrence.placement.apply([0.; 3]));
+                if let Some(b) = bounds {
+                    item = union(item, *b);
+                }
+            } else if let Some(b) = bounds {
+                obstacles.push(*b);
+                scene = union(scene, *b);
+            }
+        }
+        // Peça vazia: a origem da ocorrência ocupa o lugar de um ponto.
+        let Some(item) = item.or(origin.map(|p| Bounds { min: p, max: p })) else {
+            return Ok(());
+        };
+        let largest = |b: Bounds| b.size().into_iter().fold(0_f64, f64::max);
+        let reference = if largest(item) > 0. {
+            largest(item)
+        } else {
+            scene.map(largest).unwrap_or(0.)
+        };
+        let gap = (0.1 * reference).clamp(SPACING.0, SPACING.1);
+        let near = |a: Bounds, b: &Bounds| {
+            (0..3).all(|k| a.min[k] < b.max[k] + gap && a.max[k] + gap > b.min[k])
+        };
+        let mut dx = 0_f64;
+        // Cada passo ultrapassa ao menos um obstáculo; o deslocamento só cresce.
+        for _ in 0..=obstacles.len() {
+            let shifted = Bounds {
+                min: [item.min[0] + dx, item.min[1], item.min[2]],
+                max: [item.max[0] + dx, item.max[1], item.max[2]],
+            };
+            let push = obstacles
+                .iter()
+                .filter(|o| near(shifted, o))
+                .map(|o| o.max[0] + gap - item.min[0])
+                .fold(f64::NEG_INFINITY, f64::max);
+            if push == f64::NEG_INFINITY {
+                break;
+            }
+            dx = push;
+        }
+        if dx <= 0. {
+            return Ok(());
+        }
+        for id in ids {
+            // Deslocamento no mundo convertido para o sistema do pai da instância.
+            let Some((occurrence, _)) = boxes.iter().find(|(o, _)| o.instance == *id) else {
+                continue;
+            };
+            let local = self
+                .instance(*id)
+                .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+                .placement;
+            let parent = occurrence
+                .placement
+                .compose(local.inverse().map_err(|e| DocumentError(e.to_string()))?)
+                .map_err(|e| DocumentError(e.to_string()))?;
+            let delta = parent.inverse_vector([dx, 0., 0.]);
+            self.instance_mut(*id)?.placement = local
+                .translated(delta)
+                .map_err(|e| DocumentError(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
+
+/// Folga mínima e máxima, em mm, entre um componente posicionado ao lado e os vizinhos;
+/// entre esses limites, um décimo da maior dimensão do componente.
+const SPACING: (f64, f64) = (5., 100.);
 
 #[cfg(test)]
 mod tests {
@@ -515,6 +640,84 @@ mod tests {
         // Ocorrências recusadas (bloqueadas) não entram na lista.
         let only_far = doc.pick_all_with(ray, |o| o.instance != near)?;
         assert_eq!(only_far.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn new_components_slide_beside_the_existing_ones() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Lado a lado")?;
+        let (part, _) = doc.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let first = doc.instances()[0].id;
+        let world = |doc: &Document, id: InstanceId| -> Result<Bounds, Box<dyn Error>> {
+            doc.occurrence_boxes()?
+                .into_iter()
+                .find(|(o, _)| o.instance == id)
+                .and_then(|(_, b)| b)
+                .ok_or_else(|| "Caixa ausente".into())
+        };
+        let original = world(&doc, first)?;
+        let gap = (0.1 * original.size().into_iter().fold(0_f64, f64::max)).clamp(5., 100.);
+        // Cópia na mesma posição: vai para a direita, com a folga, sem mudar Y nem Z.
+        let second = doc.add_instance(part, None, Placement::default())?;
+        doc.place_beside(&[second])?;
+        let placed = world(&doc, second)?;
+        assert!((placed.min[0] - (original.max[0] + gap)).abs() < 1e-9);
+        assert_eq!(
+            (placed.min[1], placed.min[2]),
+            (original.min[1], original.min[2])
+        );
+        // A terceira passa pelas duas.
+        let third = doc.add_instance(part, None, Placement::default())?;
+        doc.place_beside(&[third])?;
+        assert!((world(&doc, third)?.min[0] - (placed.max[0] + gap)).abs() < 1e-9);
+        // Sem sobreposição, nada muda.
+        let away = Placement::new([0., 500., 0.], [0.; 3])?;
+        let distant = doc.add_instance(part, None, away)?;
+        doc.place_beside(&[distant])?;
+        assert_eq!(
+            doc.instance(distant)
+                .ok_or("Instância ausente")?
+                .placement
+                .translation_mm(),
+            [0., 500., 0.]
+        );
+        // Peça vazia: a origem fica à direita de tudo, na altura da origem.
+        let empty = doc.create_part("Vazia".into())?;
+        let instance = doc
+            .instances()
+            .iter()
+            .find(|i| i.part == empty)
+            .ok_or("Instância ausente")?
+            .id;
+        doc.place_beside(&[instance])?;
+        let origin = doc
+            .instance(instance)
+            .ok_or("Instância ausente")?
+            .placement
+            .translation_mm();
+        assert!(origin[0] > world(&doc, third)?.max[0]);
+        assert_eq!((origin[1], origin[2]), (0., 0.));
+        // Subpeça de um pai girado: o deslocamento é aplicado no mundo, em +X.
+        let parent = doc.create_part("Conjunto".into())?;
+        let holder = doc
+            .instances()
+            .iter()
+            .find(|i| i.part == parent)
+            .ok_or("Instância ausente")?
+            .id;
+        doc.instance_mut(holder)?.placement =
+            Placement::new([0., -400., 0.], [0., 0., std::f64::consts::FRAC_PI_2])?;
+        let inner = doc.add_instance(part, Some(parent), Placement::default())?;
+        let sibling = doc.add_instance(part, Some(parent), Placement::default())?;
+        let before = world(&doc, sibling)?;
+        doc.place_beside(&[sibling])?;
+        let after = world(&doc, sibling)?;
+        assert!(after.min[0] > world(&doc, inner)?.max[0]);
+        assert!((after.min[1] - before.min[1]).abs() < 1e-9);
         Ok(())
     }
 }

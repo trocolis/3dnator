@@ -541,21 +541,15 @@ impl Editor {
         }));
     }
 
-    /// Instância nova da mesma definição, na mesma posição (como copiar e colar).
+    /// Instância nova da mesma definição, ao lado da original.
     pub(super) fn duplicate_selection(&mut self, context: &egui::Context) {
-        let document = self.current().session.document();
         let commands = self
             .current()
             .selected
             .iter()
             .filter_map(|s| match s {
-                Selection::Instance(id) => document.instance(*id),
+                Selection::Instance(id) => Some(Command::DuplicateInstance { id: *id }),
                 _ => None,
-            })
-            .map(|i| Command::AddInstance {
-                part: i.part,
-                parent: i.parent,
-                placement: i.placement,
             })
             .collect();
         if let Some(command) = batch("Nova instância compartilhada", commands) {
@@ -782,7 +776,7 @@ impl Editor {
             },
         };
         let (icon, title) = match &panel {
-            Panel::Move(_) => (Icon::Move, T::MoveCopyTool),
+            Panel::Move(_) => (Icon::Move, T::MoveMenu),
             Panel::Align(d) => match d.kind {
                 navigation::PickMode::Face => (Icon::FaceToFace, T::MoveFaceToFace),
                 navigation::PickMode::Edge => (Icon::EdgeToEdge, T::MoveEdgeToEdge),
@@ -815,6 +809,8 @@ impl Editor {
             self.preview_command(tab, None, None, None);
             return;
         }
+        // Valores digitados neste quadro já estão no rascunho: o comando é refeito com eles.
+        let command = self.panel_command(&panel);
         if outcome.ok
             && let Some(command) = command
         {
@@ -1075,8 +1071,32 @@ impl Editor {
                     delta = (delta + 540.).rem_euclid(360.) - 180.;
                     let sign = if dot(AXES[k], view) >= 0. { 1. } else { -1. };
                     let mut r = drag.rotation;
-                    r[k] = (drag.rotation[k] + sign * delta).round();
+                    r[k] = snap_rotation(drag.rotation[k] + sign * delta);
                     draft.rotation = r;
+                    // Ângulo junto ao cursor, destacado quando fixado num múltiplo de 45°.
+                    let snapped = r[k].rem_euclid(ROTATION_SNAP.0) == 0.;
+                    let label = format!("{}°", nator_drawing::format_fixed(r[k], 0));
+                    let at = position + egui::vec2(16., -18.);
+                    let galley = painter.layout_no_wrap(
+                        label,
+                        egui::FontId::proportional(13.),
+                        if snapped {
+                            egui::Color32::WHITE
+                        } else {
+                            theme::INK
+                        },
+                    );
+                    let frame = egui::Rect::from_min_size(at, galley.size()).expand(4.);
+                    painter.rect_filled(
+                        frame,
+                        4,
+                        if snapped {
+                            colors[k]
+                        } else {
+                            egui::Color32::from_white_alpha(230)
+                        },
+                    );
+                    painter.galley(at, galley, theme::INK);
                 }
                 Handle::Free => {
                     let aspect = f64::from(rect.aspect_ratio());
@@ -1205,17 +1225,35 @@ fn item_name(document: &Document, item: Selection) -> String {
     }
 }
 
-fn number_row(ui: &mut egui::Ui, label: &str, values: &mut Point3, suffix: &str, speed: f64) {
-    panel::row(ui, label, |ui| {
+/// Fixação da rotação pelo manipulador: múltiplos de 45° capturam o anel a menos de 4°;
+/// fora disso, o ângulo anda em passos de 1°.
+const ROTATION_SNAP: (f64, f64) = (45., 4.);
+
+fn snap_rotation(degrees: f64) -> f64 {
+    let nearest = (degrees / ROTATION_SNAP.0).round() * ROTATION_SNAP.0;
+    if (degrees - nearest).abs() <= ROTATION_SNAP.1 {
+        nearest
+    } else {
+        degrees.round()
+    }
+}
+
+/// Três campos digitáveis (X, Y, Z) com a precisão de exibição do documento.
+fn number_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    values: &mut Point3,
+    quantity: panel::Quantity,
+    document: &Document,
+) {
+    let decimals = usize::from(document.settings().display_decimals);
+    panel::row(ui, &format!("{label} ({})", quantity.unit()), |ui| {
         ui.spacing_mut().item_spacing.x = 3.;
-        for value in values.iter_mut() {
-            ui.add(
-                egui::DragValue::new(value)
-                    .speed(speed)
-                    .max_decimals(3)
-                    .suffix(suffix)
-                    .range(-1e7..=1e7),
-            );
+        let width = ((ui.available_width() - 6.) / 3. - 8.).clamp(44., 90.);
+        for (axis, value) in values.iter_mut().enumerate() {
+            panel::number(ui, (label, axis), value, quantity, decimals, width)
+                .on_hover_text(AXIS_NAMES[axis]);
+            *value = value.clamp(-1e7, 1e7);
         }
     });
 }
@@ -1240,10 +1278,16 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         ui,
         text(T::TranslationField),
         &mut d.translation,
-        " mm",
-        0.5,
+        panel::Quantity::Length,
+        document,
     );
-    number_row(ui, text(T::RotationField), &mut d.rotation, "°", 1.);
+    number_row(
+        ui,
+        text(T::RotationField),
+        &mut d.rotation,
+        panel::Quantity::Angle,
+        document,
+    );
     panel::row(ui, text(T::PivotField), |ui| {
         panel::choice(
             ui,
@@ -1422,7 +1466,13 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
         ui.add(egui::DragValue::new(&mut d.count).range(2..=1000))
     });
     if d.circular {
-        number_row(ui, text(T::OriginField), &mut d.origin, " mm", 0.5);
+        number_row(
+            ui,
+            text(T::OriginField),
+            &mut d.origin,
+            panel::Quantity::Length,
+            document,
+        );
         panel::row(ui, text(T::TotalAngle), |ui| {
             panel::expression(ui, &mut d.angle)
         });
@@ -1461,6 +1511,22 @@ fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ring_rotation_snaps_near_multiples_of_45_degrees() {
+        for (raw, snapped) in [
+            (2.6, 0.),
+            (-3.9, 0.),
+            (43.2, 45.),
+            (88.5, 90.),
+            (138.9, 135.),
+            (-178., -180.),
+            (30.4, 30.),
+            (61.6, 62.),
+        ] {
+            assert_eq!(snap_rotation(raw), snapped, "{raw}");
+        }
+    }
 
     #[test]
     fn world_moves_become_local_placements_under_rotated_parents()

@@ -97,9 +97,14 @@ pub enum Command {
         parent: Option<PartId>,
         placement: Placement,
     },
+    /// Peça nova e independente a partir da instância, posicionada ao lado dela.
     CloneInstance {
         id: InstanceId,
         name: String,
+    },
+    /// Nova instância da mesma definição, posicionada ao lado da original.
+    DuplicateInstance {
+        id: InstanceId,
     },
     ReparentInstance {
         id: InstanceId,
@@ -194,7 +199,7 @@ pub enum Command {
     RemoveSketch {
         id: SketchId,
     },
-    /// Peça nova e vazia, com uma instância na raiz da montagem.
+    /// Peça nova e vazia, com uma instância na raiz da montagem, ao lado das existentes.
     CreatePart {
         name: String,
     },
@@ -203,7 +208,7 @@ pub enum Command {
         settings: nator_document::Settings,
     },
     /// Cópia independente de uma definição de outro documento aberto, inserida na raiz da
-    /// montagem ou como subpeça de `parent`.
+    /// montagem ou como subpeça de `parent`, em `placement` ou ao lado, se sobrepuser.
     InsertPart {
         source: Arc<Document>,
         part: PartId,
@@ -305,6 +310,7 @@ impl Command {
             Self::PatternInstance { .. } => "Padrão de instâncias",
             Self::MirrorInstance { .. } => "Espelhar instância como nova peça",
             Self::CloneInstance { .. } => "Clonar peça independente",
+            Self::DuplicateInstance { .. } => "Nova instância",
             Self::ReparentInstance { .. } => "Organizar subpeça",
             Self::RemoveInstance { .. } => "Remover instância",
             Self::CreateGroup { .. } => "Criar grupo organizacional",
@@ -340,7 +346,19 @@ impl Command {
                 path,
                 destination,
                 name,
-            } => return Ok(assembly::import_step(doc, &path, destination, name)?),
+            } => {
+                // As raízes importadas vão juntas para o lado das ocorrências existentes.
+                let before = doc.instances().iter().map(|i| i.id).collect::<Vec<_>>();
+                let effect = assembly::import_step(doc, &path, destination, name)?;
+                let roots = doc
+                    .instances()
+                    .iter()
+                    .filter(|i| i.parent == destination && !before.contains(&i.id))
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+                doc.place_beside(&roots)?;
+                return Ok(effect);
+            }
             Self::SetSheet {
                 id,
                 target,
@@ -364,6 +382,7 @@ impl Command {
                     .into());
                 }
                 let (part, body) = doc.add_mesh(destination, name, geometry)?;
+                place_new_part(doc, destination, part)?;
                 let imported = doc.body_mut(body)?;
                 imported.brep = Some(brep);
                 // A geometria importada nunca é recalculada: nomes posicionais são estáveis.
@@ -510,6 +529,16 @@ impl Command {
                 let part = doc.clone_part(source.part, name)?;
                 let copy = doc.add_instance(part, source.parent, source.placement)?;
                 doc.instance_mut(copy)?.color = source.color;
+                doc.place_beside(&[copy])?;
+            }
+            Self::DuplicateInstance { id } => {
+                let source = doc
+                    .instance(id)
+                    .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+                    .clone();
+                let copy = doc.add_instance(source.part, source.parent, source.placement)?;
+                doc.instance_mut(copy)?.color = source.color;
+                doc.place_beside(&[copy])?;
             }
             Self::ReparentInstance { id, parent } => doc.reparent(id, parent)?,
             Self::RemoveInstance { id } => doc.remove_instance(id)?,
@@ -588,6 +617,7 @@ impl Command {
                 geometry,
             } => {
                 let (part, body) = doc.add_mesh(destination, name, geometry)?;
+                place_new_part(doc, destination, part)?;
                 return Ok(Effect::Imported { part, body });
             }
             Self::RenamePart { id, name } => {
@@ -669,6 +699,7 @@ impl Command {
             Self::RemoveSketch { id } => doc.remove_sketch(id)?,
             Self::CreatePart { name } => {
                 let part = doc.create_part(name)?;
+                place_new_part(doc, None, part)?;
                 return Ok(Effect::PartCreated { part });
             }
             Self::InsertPart {
@@ -684,11 +715,31 @@ impl Command {
                     .into());
                 }
                 let copy = doc.import_part(&source, part)?;
-                doc.add_instance(copy, parent, placement)?;
+                let instance = doc.add_instance(copy, parent, placement)?;
+                doc.place_beside(&[instance])?;
             }
         }
         Ok(Effect::Changed)
     }
+}
+
+/// Peça nova na raiz (sem destino de construção): sua instância vai para o lado das
+/// ocorrências existentes. Corpos acrescentados a uma peça ficam onde foram lidos.
+fn place_new_part(
+    doc: &mut Document,
+    destination: Option<PartId>,
+    part: PartId,
+) -> Result<(), DocumentError> {
+    if destination.is_some() {
+        return Ok(());
+    }
+    let instances = doc
+        .instances()
+        .iter()
+        .filter(|i| i.part == part)
+        .map(|i| i.id)
+        .collect::<Vec<_>>();
+    doc.place_beside(&instances)
 }
 
 /// Acrescenta uma operação ao histórico da peça e devolve o corpo resultante.

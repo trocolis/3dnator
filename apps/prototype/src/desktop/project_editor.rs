@@ -1201,10 +1201,15 @@ impl Editor {
                     text(T::Reference).into(),
                 )
             } else {
+                // Os filtros dos diálogos no Linux distinguem maiúsculas: "PECA.STEP" também
+                // precisa aparecer.
                 let (label, extensions): (_, &[&str]) = match source {
-                    ImportSource::Step => (text(T::StepFilter), &["step", "stp"]),
-                    ImportSource::Stl => (text(T::StlFilter), &["stl"]),
-                    _ => (text(T::ModelFilter), &["stl", "step", "stp"]),
+                    ImportSource::Step => (text(T::StepFilter), &["step", "stp", "STEP", "STP"]),
+                    ImportSource::Stl => (text(T::StlFilter), &["stl", "STL"]),
+                    _ => (
+                        text(T::ModelFilter),
+                        &["stl", "step", "stp", "STL", "STEP", "STP"],
+                    ),
                 };
                 let Some(path) = rfd::FileDialog::new()
                     .add_filter(label, extensions)

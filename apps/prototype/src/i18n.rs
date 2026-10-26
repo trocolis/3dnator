@@ -34,8 +34,6 @@ pub enum Text {
     SearchHint,
     NoMatchingTools,
     ChooseActivePart,
-    DesignWorkspace,
-    ModelingWorkspace,
     CreateGroupLabel,
     ModifyGroup,
     ArrangeGroup,
@@ -503,6 +501,7 @@ pub enum Text {
     CopyIndependentHint,
     CopyPatternHint,
     ReferenceSketchHint,
+    StepNeedsKernel,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -541,8 +540,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SearchHint => "Digite uma ferramenta…",
         Text::NoMatchingTools => "Nenhuma ferramenta encontrada.",
         Text::ChooseActivePart => "Selecione uma peça e use Construir nesta peça.",
-        Text::DesignWorkspace => "Projeto",
-        Text::ModelingWorkspace => "Modelagem 3D",
         Text::CreateGroupLabel => "Criar",
         Text::ModifyGroup => "Modificar",
         Text::ArrangeGroup => "Organizar",
@@ -949,8 +946,8 @@ pub fn text(key: Text) -> &'static str {
         Text::RectangularInstancePattern => "Padrão retangular de componentes",
         Text::MirrorComponent => "Espelhar componente",
         Text::ObjectsField => "Objetos",
-        Text::TranslationField => "Translação X / Y / Z",
-        Text::RotationField => "Rotação X / Y / Z",
+        Text::TranslationField => "Translação",
+        Text::RotationField => "Rotação",
         Text::PivotField => "Pivô",
         Text::PivotCenter => "Centro de massa",
         Text::PivotOrigin => "Origem do primeiro elemento",
@@ -1040,7 +1037,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ReferenceGroup => "Referência",
         Text::PartsGroup => "Peças",
         Text::NewPartName => "Peça",
-        Text::EmptyPartHint => "Peça vazia na raiz da montagem, já ativa para construção.",
+        Text::EmptyPartHint => "Peça vazia ao lado das existentes, já ativa para construção.",
         Text::StepPartHint => {
             "Cada definição do arquivo vira uma peça independente, com cores e hierarquia."
         }
@@ -1057,11 +1054,16 @@ pub fn text(key: Text) -> &'static str {
         Text::MovePointHint => {
             "Pontos coincidentes; aceita pontos de rascunhos de referência como destino."
         }
-        Text::CopyInstanceHint => "Mesma definição, na mesma posição: editar uma altera todas.",
-        Text::CopyIndependentHint => "Peça nova com histórico próprio, sem vínculo com a original.",
+        Text::CopyInstanceHint => "Mesma definição, ao lado da original: editar uma altera todas.",
+        Text::CopyIndependentHint => {
+            "Peça nova ao lado da original, com histórico próprio e sem vínculo."
+        }
         Text::CopyPatternHint => {
             "Instâncias repetidas em padrão retangular ou circular, reunidas num grupo."
         }
         Text::ReferenceSketchHint => "Rascunho da montagem para posicionar peças; não gera corpos.",
+        Text::StepNeedsKernel => {
+            "Indisponível: este executável foi compilado sem o núcleo OCCT (--features occt)."
+        }
     }
 }

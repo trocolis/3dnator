@@ -750,44 +750,6 @@ impl Editor {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 3.;
-                            ui.vertical(|ui| {
-                                ui.set_min_width(90.);
-                                ui.set_max_width(90.);
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(90., 34.),
-                                    egui::Sense::hover(),
-                                );
-                                icons::paint(
-                                    ui.painter(),
-                                    egui::Rect::from_center_size(
-                                        rect.center(),
-                                        egui::Vec2::splat(28.),
-                                    ),
-                                    if sketch.is_some() {
-                                        Icon::Sketch
-                                    } else {
-                                        Icon::Cube
-                                    },
-                                    true,
-                                );
-                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                    ui.label(
-                                        egui::RichText::new(text(T::DesignWorkspace))
-                                            .strong()
-                                            .color(theme::ACCENT),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(text(if sketch.is_some() {
-                                            T::Sketch
-                                        } else {
-                                            T::ModelingWorkspace
-                                        }))
-                                        .small()
-                                        .color(theme::MUTED),
-                                    );
-                                });
-                            });
-                            ui.separator();
                             self.ribbon_groups(ui);
                         });
                     });
@@ -906,6 +868,15 @@ impl Editor {
                 ui.set_width(300.);
                 for (action, name, hint) in menu.items {
                     let enabled = self.action_enabled(*action);
+                    // Item indisponível por falta do núcleo: o motivo substitui a descrição.
+                    let (hint, hint_color) = if !enabled
+                        && *action == Action::NewPartStep
+                        && !nator_kernel::is_available()
+                    {
+                        (T::StepNeedsKernel, theme::WARNING)
+                    } else {
+                        (*hint, theme::MUTED)
+                    };
                     let row = ui
                         .add_enabled_ui(enabled, |ui| {
                             let (rect, row) =
@@ -927,9 +898,9 @@ impl Editor {
                                 ink,
                             );
                             let mut job = egui::text::LayoutJob::simple(
-                                text(*hint).to_owned(),
+                                text(hint).to_owned(),
                                 egui::FontId::proportional(10.5),
-                                theme::MUTED,
+                                hint_color,
                                 rect.width() - 48.,
                             );
                             job.wrap.max_rows = 2;
@@ -937,9 +908,10 @@ impl Editor {
                             ui.painter().galley(
                                 egui::pos2(rect.left() + 42., rect.top() + 24.),
                                 galley,
-                                theme::MUTED,
+                                hint_color,
                             );
-                            row.on_hover_text(text(*hint))
+                            row.on_hover_text(text(hint))
+                                .on_disabled_hover_text(text(hint))
                         })
                         .inner;
                     if row.clicked() && enabled {

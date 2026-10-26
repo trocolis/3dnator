@@ -99,10 +99,8 @@ pub(super) fn instance_menu(
         action = Some(MenuAction::Move(vec![target]));
     }
     if item(ui, Icon::NewBody, T::NewInstanceTool) {
-        action = Some(MenuAction::Command(Box::new(Command::AddInstance {
-            part: instance.part,
-            parent: instance.parent,
-            placement: instance.placement,
+        action = Some(MenuAction::Command(Box::new(Command::DuplicateInstance {
+            id: instance.id,
         })));
     }
     if item(ui, Icon::Boolean, T::CloneTool) {

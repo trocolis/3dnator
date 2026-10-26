@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Refinamento da aba Montagem
+
+- A faixa perde o bloco fixo "Projeto" em todas as abas; ficam só os grupos de ferramentas.
+- Peças novas (vazias, STEP, STL ou de outro projeto), novas instâncias e cópias independentes surgem ao lado das ocorrências visíveis, deslocadas em +X com folga de um décimo da maior dimensão (5 a 100 mm), sem sobreposição. As raízes de um STEP vão juntas. `Document::place_beside` e o comando `DuplicateInstance` (Nova instância ao lado da original).
+- **Criar a partir de STEP** explica no próprio menu quando o executável foi compilado sem OCCT, e os diálogos de importação aceitam extensões em maiúsculas.
+- Painel **Mover** (título só "Mover"): campos de translação e rotação digitáveis, com seleção do valor ao clicar, vírgula decimal, unidades e contas, e destaque de texto inválido. Enter dentro de um campo conclui o valor sem confirmar o painel; antes, o Enter confirmava com o valor anterior e descartava o digitado.
+- Os anéis de rotação do manipulador fixam nos múltiplos de 45° a menos de 4°, com o ângulo mostrado junto ao cursor.
+
 ### Fluxo próprio da aba Montagem
 
 - **Montagem** passa a ser a primeira aba da faixa e a aberta por padrão, com o fluxo na ordem de trabalho: Rascunho de referência; Nova peça ▾ (criar nova peça, a partir de STEP, a partir de STL); Mover ▾ (movimento livre, face a face, aresta a aresta, ponto a ponto); Copiar ▾ (nova instância, cópia independente, padrão de repetição); Agrupar e Desagrupar. Os menus mostram ícone e explicação de cada subopção.
