@@ -16,6 +16,8 @@ pub struct PreparedMesh {
     vertices: Vec<u8>,
     /// Vértices opacos no início do buffer; os demais são translúcidos.
     opaque_vertices: usize,
+    /// Vértices do plano de sombra suave sob a base da cena.
+    ground_shadow: Vec<u8>,
 }
 
 /// Estilos de exibição gravados nos bits 8 a 15 do atributo de arestas (ver `view.wgsl`).
@@ -99,14 +101,42 @@ impl PreparedMesh {
                 vertices.push(255);
             }
         }
+        let min_z = ((mesh.bounds().min[2] - center[2]) / scale) as f32 - 0.002;
+        let half_x = ((mesh.bounds().size()[0] * 0.5) / scale) as f32;
+        let half_y = ((mesh.bounds().size()[1] * 0.5) / scale) as f32;
+        let rx = (half_x * 1.5).max(0.1);
+        let ry = (half_y * 1.5).max(0.1);
+
+        // Quad de sombra suave de contato: 2 triângulos (6 vértices) no plano da base.
+        // A normal carrega as coordenadas paramétricas (-1 a 1) para cálculo do decaimento radial no shader.
+        let mut ground_shadow = Vec::with_capacity(6 * VERTEX_BYTES);
+        let shadow_quad = [
+            ([-rx, -ry], [-1.0_f32, -1.0_f32]),
+            ([rx, -ry], [1.0_f32, -1.0_f32]),
+            ([rx, ry], [1.0_f32, 1.0_f32]),
+            ([-rx, -ry], [-1.0_f32, -1.0_f32]),
+            ([rx, ry], [1.0_f32, 1.0_f32]),
+            ([-rx, ry], [-1.0_f32, 1.0_f32]),
+        ];
+        for (pos, local) in shadow_quad {
+            ground_shadow.extend_from_slice(&(pos[0]).to_le_bytes());
+            ground_shadow.extend_from_slice(&(pos[1]).to_le_bytes());
+            ground_shadow.extend_from_slice(&(min_z).to_le_bytes());
+            ground_shadow.extend_from_slice(&(local[0]).to_le_bytes());
+            ground_shadow.extend_from_slice(&(local[1]).to_le_bytes());
+            ground_shadow.extend_from_slice(&(0.0_f32).to_le_bytes());
+            ground_shadow.extend_from_slice(&0_u32.to_le_bytes());
+            ground_shadow.extend_from_slice(&[0, 0, 0, 255]);
+        }
         Ok(Self {
             vertices,
             opaque_vertices: opaque_triangles * 3,
+            ground_shadow,
         })
     }
     /// Bytes que serão enviados à GPU.
     pub fn gpu_bytes(&self) -> usize {
-        self.vertices.len()
+        self.vertices.len() + self.ground_shadow.len()
     }
 }
 
@@ -356,6 +386,8 @@ pub struct Viewport {
     pub show_triangles: bool,
     /// Arestas vivas (dobras, bordas abertas); ligadas por padrão.
     pub show_edges: bool,
+    /// Sombras opcionais (iluminação direcional com faces opostas sombreadas e sombra de apoio); desligadas por padrão.
+    pub show_shadows: bool,
     color: wgpu::Texture,
     view: wgpu::TextureView,
     depth: wgpu::TextureView,
@@ -363,11 +395,15 @@ pub struct Viewport {
     triangles: wgpu::Buffer,
     vertex_count: u32,
     opaque_count: u32,
+    shadow_triangles: wgpu::Buffer,
+    shadow_count: u32,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     surface_pipeline: wgpu::RenderPipeline,
     /// Corpos translúcidos: mistura de cores e sem escrita de profundidade.
     translucent_pipeline: wgpu::RenderPipeline,
+    /// Sombra de apoio suave sob o modelo.
+    shadow_pipeline: wgpu::RenderPipeline,
 }
 
 /// Uniforme do shader: matriz 4×4 da câmera seguida de quatro opções de exibição.
@@ -491,6 +527,45 @@ impl Viewport {
         };
         let surface_pipeline = pipeline(false);
         let translucent_pipeline = pipeline(true);
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Sombra de contato"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("shadow_vertex"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_BYTES as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Uint32,3=>Unorm8x4],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("shadow_fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let (color, view, depth) = targets(device, [1, 1]);
         let empty = || {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -504,6 +579,7 @@ impl Viewport {
             camera: Camera::default(),
             show_triangles: false,
             show_edges: true,
+            show_shadows: false,
             color,
             view,
             depth,
@@ -511,10 +587,13 @@ impl Viewport {
             triangles: empty(),
             vertex_count: 0,
             opaque_count: 0,
+            shadow_triangles: empty(),
+            shadow_count: 0,
             uniform,
             bind_group,
             surface_pipeline,
             translucent_pipeline,
+            shadow_pipeline,
         };
         viewport.set_mesh(device, mesh)?;
         Ok(viewport)
@@ -531,8 +610,15 @@ impl Viewport {
             usage: wgpu::BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
+        self.shadow_triangles = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Sombra vazia"),
+            size: 24,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
         self.vertex_count = 0;
         self.opaque_count = 0;
+        self.shadow_count = 0;
     }
 
     pub fn set_prepared_mesh(
@@ -548,8 +634,14 @@ impl Viewport {
             contents: &mesh.vertices,
             usage: wgpu::BufferUsages::VERTEX,
         });
+        self.shadow_triangles = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Sombra de contato"),
+            contents: &mesh.ground_shadow,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         self.vertex_count = (mesh.vertices.len() / VERTEX_BYTES) as u32;
         self.opaque_count = (mesh.opaque_vertices as u32).min(self.vertex_count);
+        self.shadow_count = (mesh.ground_shadow.len() / VERTEX_BYTES) as u32;
         self.camera = Camera::default();
         self.camera
             .fit(f64::from(self.size[0]) / f64::from(self.size[1]));
@@ -588,7 +680,12 @@ impl Viewport {
             .camera
             .matrix(f64::from(self.size[0]) / f64::from(self.size[1]));
         let flag = |on: bool| if on { 1. } else { 0. };
-        let options = [flag(self.show_triangles), flag(self.show_edges), 0., 0.];
+        let options = [
+            flag(self.show_triangles),
+            flag(self.show_edges),
+            flag(self.show_shadows),
+            0.,
+        ];
         queue.write_buffer(
             &self.uniform,
             0,
@@ -623,6 +720,11 @@ impl Viewport {
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
+            if self.show_shadows && self.shadow_count > 0 {
+                pass.set_pipeline(&self.shadow_pipeline);
+                pass.set_vertex_buffer(0, self.shadow_triangles.slice(..));
+                pass.draw(0..self.shadow_count, 0..1);
+            }
             pass.set_pipeline(&self.surface_pipeline);
             pass.set_vertex_buffer(0, self.triangles.slice(..));
             pass.draw(0..self.opaque_count, 0..1);
@@ -834,5 +936,18 @@ mod tests {
                 center
             )) > 0.
         );
+    }
+
+    #[test]
+    fn optional_shadows_generate_ground_contact_buffer() -> Result<(), String> {
+        let mesh = nator_geometry::reference_bracket().map_err(|e| e.to_string())?;
+        let prepared = PreparedMesh::new(&mesh)?;
+        // 6 vértices para os 2 triângulos do quad de apoio
+        assert_eq!(prepared.ground_shadow.len(), 6 * VERTEX_BYTES);
+        assert_eq!(
+            prepared.gpu_bytes(),
+            prepared.vertices.len() + 6 * VERTEX_BYTES
+        );
+        Ok(())
     }
 }

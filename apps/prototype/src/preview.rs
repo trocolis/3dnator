@@ -133,6 +133,11 @@ pub fn render(path: &Path, projection: Projection) -> Result<(), Box<dyn Error>>
     viewport.show_triangles = false;
     viewport.render(&device, &queue);
     let capture = read_texture(&device, &queue, viewport.color_texture())?;
+    // As sombras opcionais ativam sombreamento direcional nas faces opostas e apoio suave no chão
+    viewport.show_shadows = true;
+    viewport.render(&device, &queue);
+    let shadowed = read_texture(&device, &queue, viewport.color_texture())?;
+    viewport.show_shadows = false;
     if let Some(error) = pollster::block_on(scope.pop()) {
         return Err(format!("Falha de validação wgpu: {error}").into());
     }
@@ -143,6 +148,11 @@ pub fn render(path: &Path, projection: Projection) -> Result<(), Box<dyn Error>>
     let triangulation_pixels = surface_pixels.saturating_sub(wireframe.surface_pixels());
     if triangulation_pixels == 0 {
         return Err("A triangulação ativada não alterou a imagem.".into());
+    }
+    let regular_brightness = capture.brightness_over(&capture);
+    let shadow_brightness = shadowed.brightness_over(&capture);
+    if shadow_brightness >= regular_brightness {
+        return Err("A ativação de sombras não produziu sombreamento na imagem.".into());
     }
     // O mesmo modelo no pipeline translúcido mistura a superfície com o fundo escuro.
     let mesh = reference_bracket()?;

@@ -14,7 +14,7 @@ Pendências conhecidas, por etapa:
 4. **Montagem:** espelhamento de peças com subpeças implementado, preservando definições compartilhadas, grupos internos e histórico independente; validação manual dos fluxos ainda pendente conforme a base técnica. Alinhamento contínuo por restrições não faz parte do escopo inicial.
 5. **Documentação técnica:** vistas HLR, cortes precisos do B-rep e cotas associativas reposicionáveis implementados, com curvas discretizadas a 0,01 mm; malhas e contextos mistos mantêm métodos aproximados identificados. Múltiplos cortes, orientação da folha, resolução PNG e cotas ligadas a faces e arestas estáveis com reposicionamento no papel implementados.
 
-Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais ainda não foram implementadas.
+Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais com sombreamento direcional e apoio suave no plano de base implementadas.
 
 ## 1. Base técnica
 

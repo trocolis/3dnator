@@ -36,7 +36,20 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - Interseções calculadas sobre cada corpo CAD posicionado, sem alterar sua geometria, com curvas amostradas pelo mesmo controle de desvio usado em HLR. Os dados de corte são preparados uma vez e reutilizados nas vistas e nos traços dos planos.
 - Preservados furos internos e grupos por corpo na hachura; sobreposições de peças distintas não viram vazios artificiais. A legenda distingue a precisão das vistas e dos cortes.
 - 83 testes sem OCCT e 113 com OCCT aprovados; formatação e Clippy aprovados. `target/codex-validation/precise-sections-001/` contém relatório, projeto, STEP e folha PNG/PDF com cortes A–A/B–B da montagem. Imagem inspecionada.
-- Próximas tarefas funcionais: cotas associativas reposicionáveis e sombras opcionais; depois preparação de distribuição. Formato de projeto mantido em 10.
+
+### Cotas associativas reposicionáveis
+
+- Amarração a referências estáveis de faces e arestas do B-rep e caminhos de ocorrência em montagens. Apoios geométricos exatos (centroides, centros e raios de cilindros e esferas, extremidades e centros de arcos) calculados pelo núcleo OCCT.
+- Medição de comprimentos, raios, diâmetros, distâncias entre faces paralelas e ângulos entre faces planas (com arcos em projeção ortogonal e chamadas em vistas inclinadas).
+- Tolerância a alterações do modelo: referências removidas mantêm a cota com aviso explícito de revisão pendente, sem abortar a regeneração. Reposicionamento interativo por arraste de alças na folha sem reexecutar o núcleo CAD nem travar a interface. Formato `.3dnator` versão 11 com migração compatível.
+- 86 testes sem OCCT e 117 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. Ensaios `--validate-project`, `--validate-sketch`, `--validate-editor`, `--validate-part` e `--validate-step` aprovados.
+
+### Sombras opcionais no renderizador
+
+- Sombras opcionais e desligadas por padrão, ativáveis nas opções de visualização da área 3D (`Sombras`).
+- Iluminação direcional com faces opostas sombreadas e luz suave de preenchimento, combinada com sombra de contato suave no plano de apoio da cena gerada com decaimento quadrático, sem alocação de mapas de sombra pesados e mantendo leveza para GPUs integradas.
+- 87 testes sem OCCT e 118 com OCCT aprovados; formatação e Clippy sem avisos. Ensaios `--render-preview` e `--render-perspective-preview` verificados pelo wgpu/Vulkan confirmando sombreamento e decaimento de brilho.
+- Próxima etapa: preparação de distribuição e empacotamento das bibliotecas nativas.
 
 ## Critério de trabalho
 

@@ -1,5 +1,6 @@
 // Matriz da câmera e opções de exibição:
-// `options.x > 0.5` mostra a triangulação; `options.y > 0.5` mostra as arestas vivas.
+// `options.x > 0.5` mostra a triangulação; `options.y > 0.5` mostra as arestas vivas;
+// `options.z > 0.5` ativa as sombras opcionais (iluminação direcional com faces opostas sombreadas).
 struct View {
     transform: mat4x4<f32>,
     options: vec4<f32>,
@@ -45,7 +46,20 @@ struct VertexOutput {
 
 @fragment fn surface_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light = normalize(vec3<f32>(0.4, -0.6, 1.0));
-    let intensity = 0.38 + 0.62 * abs(dot(normalize(input.normal), light));
+    let n = normalize(input.normal);
+    let n_dot_l = dot(n, light);
+
+    // Iluminação convencional sem sombras: ilumina ambos os lados igualmente
+    let unshadowed = 0.38 + 0.62 * abs(n_dot_l);
+
+    // Iluminação com sombras: faces opostas entram em sombra direcional,
+    // preservando luz ambiente suave e preenchimento secundário
+    let fill_light = normalize(vec3<f32>(-0.3, 0.4, -0.5));
+    let direct = max(n_dot_l, 0.0);
+    let fill = max(dot(n, fill_light), 0.0) * 0.15;
+    let shadowed = 0.28 + 0.72 * direct + fill;
+
+    let intensity = mix(unshadowed, shadowed, view.options.z);
     let surface = input.color * intensity;
     // Derivadas calculadas fora de desvios, como exige a uniformidade do WGSL.
     let width = fwidth(input.barycentric);
@@ -71,4 +85,26 @@ struct VertexOutput {
         return vec4<f32>(color, 0.4);
     }
     return vec4<f32>(color, 1.0);
+}
+
+struct ShadowOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) local: vec2<f32>,
+}
+
+@vertex fn shadow_vertex(input: VertexInput) -> ShadowOutput {
+    var output: ShadowOutput;
+    output.position = view.transform * vec4<f32>(input.position, 1.0);
+    output.local = input.normal.xy;
+    return output;
+}
+
+@fragment fn shadow_fragment(input: ShadowOutput) -> @location(0) vec4<f32> {
+    let dist = length(input.local);
+    if (dist > 1.0) {
+        discard;
+    }
+    let falloff = 1.0 - smoothstep(0.0, 1.0, dist);
+    let alpha = falloff * falloff * 0.55 * view.options.z;
+    return vec4<f32>(0.02, 0.025, 0.035, alpha);
 }
