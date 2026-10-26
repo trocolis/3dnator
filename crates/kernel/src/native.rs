@@ -5,7 +5,7 @@
 //! `naming`). Toda operação produz os nomes do resultado a partir do histórico registrado
 //! pela ponte, de modo que referências do histórico paramétrico sobrevivam a mudanças de cota.
 
-use super::KernelError;
+use super::{EdgeMeasure, FaceKind, FaceMeasure, KernelError, MassProperties};
 use crate::{
     hole::{self, HoleGeometry},
     naming::{self, Inheritance, Origin},
@@ -63,6 +63,10 @@ unsafe extern "C" {
     fn nator_origins_size(body: *const c_void) -> usize;
     fn nator_origins_copy(body: *const c_void, output: *mut i32, length: usize) -> bool;
     fn nator_mirror(body: *const c_void, origin: *const f64, normal: *const f64) -> *mut c_void;
+    fn nator_properties(body: *const c_void, output: *mut f64) -> bool;
+    fn nator_face_measure(body: *const c_void, index: usize, output: *mut f64) -> bool;
+    fn nator_edge_measure(body: *const c_void, index: usize, output: *mut f64) -> bool;
+    fn nator_distance(a: *const c_void, b: *const c_void, output: *mut f64) -> bool;
     fn nator_half_space(body: *const c_void, origin: *const f64, normal: *const f64)
     -> *mut c_void;
 }
@@ -676,6 +680,71 @@ impl Solid {
                     modified_suffix: None,
                 },
             )
+    }
+
+    /// Volume, área e centro de massa (densidade uniforme).
+    pub fn properties(&self) -> Result<MassProperties, KernelError> {
+        let mut out = [0.; 5];
+        // SAFETY: destino de cinco doubles válido durante a chamada.
+        if !unsafe { nator_properties(self.pointer.as_ptr(), out.as_mut_ptr()) } {
+            return Err(last_error());
+        }
+        Ok(MassProperties {
+            volume: out[0],
+            area: out[1],
+            center: [out[2], out[3], out[4]],
+        })
+    }
+
+    pub fn face_measure(&self, index: usize) -> Result<FaceMeasure, KernelError> {
+        let mut out = [0.; 8];
+        // SAFETY: destino de oito doubles; a ponte valida o índice.
+        if !unsafe { nator_face_measure(self.pointer.as_ptr(), index, out.as_mut_ptr()) } {
+            return Err(last_error());
+        }
+        let kind = match out[1] as i32 {
+            0 => FaceKind::Plane {
+                normal: [out[3], out[4], out[5]],
+                offset: out[6],
+            },
+            1 => FaceKind::Cylinder { radius: out[2] },
+            2 => FaceKind::Cone,
+            3 => FaceKind::Sphere { radius: out[2] },
+            4 => FaceKind::Torus {
+                major_radius: out[2],
+            },
+            _ => FaceKind::Other,
+        };
+        Ok(FaceMeasure { area: out[0], kind })
+    }
+
+    pub fn edge_measure(&self, index: usize) -> Result<EdgeMeasure, KernelError> {
+        let mut out = [0.; 3];
+        // SAFETY: destino de três doubles; a ponte valida o índice.
+        if !unsafe { nator_edge_measure(self.pointer.as_ptr(), index, out.as_mut_ptr()) } {
+            return Err(last_error());
+        }
+        Ok(EdgeMeasure {
+            length: out[0],
+            straight: out[1] == 0.,
+            radius: (out[1] == 1.).then_some(out[2]),
+        })
+    }
+
+    /// Menor distância até outro sólido e os pontos mais próximos em cada um.
+    pub fn distance(&self, other: &Self) -> Result<(f64, Point3, Point3), KernelError> {
+        let mut out = [0.; 7];
+        // SAFETY: dois sólidos vivos nesta thread e destino de sete doubles.
+        if !unsafe {
+            nator_distance(
+                self.pointer.as_ptr(),
+                other.pointer.as_ptr(),
+                out.as_mut_ptr(),
+            )
+        } {
+            return Err(last_error());
+        }
+        Ok((out[0], [out[1], out[2], out[3]], [out[4], out[5], out[6]]))
     }
 
     pub fn volume(&self) -> Result<f64, KernelError> {

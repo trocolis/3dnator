@@ -61,6 +61,8 @@ struct Tab {
     recovery_state: Option<u64>,
     picked: Option<nator_document::assembly::Pick>,
     measurements: Vec<Point3>,
+    /// Clique de referência para ângulo entre faces e distância entre corpos.
+    reference: Option<nator_document::assembly::Pick>,
     drag_start: Option<egui::Pos2>,
 }
 impl Tab {
@@ -105,6 +107,7 @@ impl Tab {
             recovery_state: None,
             picked: None,
             measurements: Vec::new(),
+            reference: None,
             drag_start: None,
         })
     }
@@ -210,6 +213,11 @@ enum Outcome {
         state: u64,
     },
     Exported,
+    Measured {
+        tab: u64,
+        revision: u64,
+        lines: Vec<String>,
+    },
     Cancelled,
 }
 struct Worker {
@@ -243,6 +251,8 @@ pub struct Editor {
     alignment: Option<(u64, u64, nator_document::assembly::Pick)>,
     move_freely: bool,
     rotate_angle: f64,
+    /// Linhas do último relatório de medição, já formatadas para exibição.
+    measure_report: Vec<String>,
 }
 
 impl Editor {
@@ -297,6 +307,7 @@ impl Editor {
             alignment: None,
             move_freely: false,
             rotate_angle: 15.,
+            measure_report: Vec::new(),
         })
     }
     fn busy(&self) -> bool {
@@ -614,6 +625,18 @@ impl Editor {
                 self.status = text(T::RecoverySaved).into();
             }
             Ok(Outcome::Exported) => self.status = text(T::Exported).into(),
+            Ok(Outcome::Measured {
+                tab,
+                revision,
+                lines,
+            }) => {
+                if self
+                    .find_tab(tab)
+                    .is_some_and(|t| t.session.revision() == revision)
+                {
+                    self.measure_report = lines;
+                }
+            }
         }
     }
     fn ensure_scene(&mut self, context: &egui::Context) {

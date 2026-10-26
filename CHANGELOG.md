@@ -29,6 +29,7 @@
 - Vista em corte A–A com contornos fechados e hachura a 45°, e traço do plano de corte com as letras de identificação nas vistas ortogonais.
 - Legenda com revisão e data editáveis; cotas com vírgula decimal e sem zeros supérfluos.
 - Notas de rosca derivadas dos furos do histórico na legenda da folha.
+- Ferramenta Medir com volume, área e centro de massa (densidade uniforme), área, raio e diâmetro de faces, comprimento e raio de arestas, ângulo e distância entre faces paralelas e distância mínima entre corpos; exata no B-rep e aproximada, com aviso, em malhas.
 
 ### Referências estáveis
 

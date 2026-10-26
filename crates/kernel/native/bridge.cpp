@@ -26,6 +26,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
@@ -522,6 +523,106 @@ Shape* nator_half_space(const Shape* body, const double* origin, const double* n
             throw std::runtime_error("Falha ao construir o semiespaço da divisão.");
         }
         shape.value = prism.Shape();
+    });
+}
+
+// Propriedades de massa com densidade uniforme: volume, área e centro de massa (5 doubles).
+bool nator_properties(const Shape* body, double* output) noexcept {
+    return guarded([&] {
+        GProp_GProps volume;
+        BRepGProp::VolumeProperties(body->value, volume);
+        GProp_GProps surface;
+        BRepGProp::SurfaceProperties(body->value, surface);
+        const gp_Pnt center = volume.CentreOfMass();
+        output[0] = volume.Mass();
+        output[1] = surface.Mass();
+        output[2] = center.X();
+        output[3] = center.Y();
+        output[4] = center.Z();
+    });
+}
+
+// Medidas de uma face (8 doubles): área, tipo (0 plano, 1 cilindro, 2 cone, 3 esfera,
+// 4 toro, 5 outro), raio (cilindro/esfera/toro maior; 0 nos demais) e, para planos, a
+// normal e um ponto do plano.
+bool nator_face_measure(const Shape* body, std::size_t index, double* output) noexcept {
+    return guarded([&] {
+        const auto faces = map_of(body->value, TopAbs_FACE);
+        if (index >= static_cast<std::size_t>(faces.Extent())) {
+            throw std::runtime_error("Face inexistente.");
+        }
+        const TopoDS_Face face = TopoDS::Face(faces(static_cast<int>(index) + 1));
+        GProp_GProps properties;
+        BRepGProp::SurfaceProperties(face, properties);
+        BRepAdaptor_Surface surface(face);
+        std::fill(output, output + 8, 0.0);
+        output[0] = properties.Mass();
+        switch (surface.GetType()) {
+            case GeomAbs_Plane: {
+                const gp_Pln plane = surface.Plane();
+                gp_Dir normal = plane.Axis().Direction();
+                if (face.Orientation() == TopAbs_REVERSED) {
+                    normal.Reverse();
+                }
+                output[1] = 0;
+                output[2] = 0;
+                output[3] = normal.X();
+                output[4] = normal.Y();
+                output[5] = normal.Z();
+                // Distância assinada do plano à origem ao longo da normal.
+                output[6] = gp_Vec(plane.Location().XYZ()).Dot(gp_Vec(normal));
+                break;
+            }
+            case GeomAbs_Cylinder:
+                output[1] = 1;
+                output[2] = surface.Cylinder().Radius();
+                break;
+            case GeomAbs_Cone:
+                output[1] = 2;
+                break;
+            case GeomAbs_Sphere:
+                output[1] = 3;
+                output[2] = surface.Sphere().Radius();
+                break;
+            case GeomAbs_Torus:
+                output[1] = 4;
+                output[2] = surface.Torus().MajorRadius();
+                break;
+            default:
+                output[1] = 5;
+        }
+    });
+}
+
+// Medidas de uma aresta (3 doubles): comprimento, tipo (0 reta, 1 círculo, 2 outra) e raio.
+bool nator_edge_measure(const Shape* body, std::size_t index, double* output) noexcept {
+    return guarded([&] {
+        const TopoDS_Edge edge = edge_at(body, index);
+        GProp_GProps properties;
+        BRepGProp::LinearProperties(edge, properties);
+        BRepAdaptor_Curve curve(edge);
+        output[0] = properties.Mass();
+        output[1] = curve.GetType() == GeomAbs_Line ? 0 : curve.GetType() == GeomAbs_Circle ? 1 : 2;
+        output[2] = curve.GetType() == GeomAbs_Circle ? curve.Circle().Radius() : 0;
+    });
+}
+
+// Menor distância entre dois sólidos e os pontos mais próximos (7 doubles).
+bool nator_distance(const Shape* a, const Shape* b, double* output) noexcept {
+    return guarded([&] {
+        BRepExtrema_DistShapeShape distance(a->value, b->value);
+        if (!distance.IsDone() || distance.NbSolution() == 0) {
+            throw std::runtime_error("Não foi possível medir a distância entre os corpos.");
+        }
+        const gp_Pnt p = distance.PointOnShape1(1);
+        const gp_Pnt q = distance.PointOnShape2(1);
+        output[0] = distance.Value();
+        output[1] = p.X();
+        output[2] = p.Y();
+        output[3] = p.Z();
+        output[4] = q.X();
+        output[5] = q.Y();
+        output[6] = q.Z();
     });
 }
 

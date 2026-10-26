@@ -27,6 +27,49 @@ mod native;
 #[cfg(feature = "occt")]
 pub use native::{Solid, version};
 
+/// Propriedades de massa com densidade uniforme, em mm, mm² e mm³.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MassProperties {
+    pub volume: f64,
+    pub area: f64,
+    pub center: [f64; 3],
+}
+
+/// Superfície de uma face do B-rep.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FaceKind {
+    /// Plano com normal para fora e distância assinada à origem ao longo dela.
+    Plane {
+        normal: [f64; 3],
+        offset: f64,
+    },
+    Cylinder {
+        radius: f64,
+    },
+    Cone,
+    Sphere {
+        radius: f64,
+    },
+    Torus {
+        major_radius: f64,
+    },
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceMeasure {
+    pub area: f64,
+    pub kind: FaceKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeMeasure {
+    pub length: f64,
+    pub straight: bool,
+    /// Raio de arestas circulares.
+    pub radius: Option<f64>,
+}
+
 /// Nomes posicionais (`{dono}:f{i}`) para sólidos importados, que nunca são recalculados.
 pub fn indexed_face_names(owner: &str, count: usize) -> Vec<String> {
     naming::indexed_names(owner, count)

@@ -289,3 +289,113 @@ fn mirrored_solid_instance_keeps_its_own_parametric_history() -> Result<()> {
     assert!((volume(&session, output)? - 60. * 40. * 8.).abs() < 1e-3);
     Ok(())
 }
+
+/// Medidas exatas no B-rep: propriedades de massa, raio de um furo e distância entre peças.
+#[test]
+fn exact_measurements_on_solids() -> Result<()> {
+    use nator_commands::measure::{self, Topology};
+    use nator_document::assembly::Pick;
+    let mut session = Session::new(Document::new("Medição")?)?;
+    let (part, body) = plate(&mut session)?;
+    let properties = measure::body_properties(session.document(), body)?;
+    assert!(properties.exact);
+    assert!((properties.volume_mm3 - 60. * 40. * 8.).abs() < 1e-6);
+    assert!((properties.area_mm2 - (2. * 2400. + 2. * 480. + 2. * 320.)).abs() < 1e-6);
+    for (actual, expected) in properties.center_mm.iter().zip([30., 20., 4.]) {
+        assert!((actual - expected).abs() < 1e-9);
+    }
+    // Furo passante Ø6 no centro: a face cilíndrica mede raio 3.
+    let mut positions = Sketch::new("Furo", Plane::xy());
+    let circle = positions.add_circle([30., 20.], 3., false)?;
+    let center = match positions.entity(circle)?.curve {
+        Curve::Circle { center, .. } => center,
+        _ => return Err("Centro ausente".into()),
+    };
+    let (_, holes) = sketch(&mut session, Some(part), positions)?;
+    let drilled = feature(
+        &mut session,
+        part,
+        "Furo",
+        Operation::Hole {
+            base: body,
+            sketch: holes,
+            points: vec![center],
+            spec: HoleSpec {
+                diameter: "6 mm".into(),
+                depth: None,
+                head: HoleHeadSpec::Simple,
+                tip_angle: None,
+                reverse: true,
+                thread: None,
+            },
+        },
+    )?;
+    let doc = session.document();
+    let record = doc.body(drilled).ok_or("Corpo ausente")?;
+    let wall = record
+        .face_names
+        .iter()
+        .position(|n| n.ends_with(":hole0:wall"))
+        .ok_or("Parede do furo ausente")? as u32;
+    let triangle = record
+        .geometry
+        .triangle_faces()
+        .ok_or("Malha sem faces")?
+        .iter()
+        .position(|f| *f == wall)
+        .ok_or("Triângulo da parede ausente")?;
+    let pick = |point: [f64; 3]| Pick {
+        instance: doc.instances()[0].id,
+        part,
+        body: drilled,
+        triangle,
+        point,
+        normal: [1., 0., 0.],
+        vertices: [[0.; 3]; 3],
+        placement: nator_geometry::Placement::default(),
+    };
+    match measure::topology(doc, &pick([33., 20., 4.]), false)? {
+        Topology::Face {
+            radius_mm,
+            planar,
+            area_mm2,
+            ..
+        } => {
+            assert!(!planar);
+            assert!((radius_mm.ok_or("Raio ausente")? - 3.).abs() < 1e-9);
+            assert!((area_mm2 - 2. * PI * 3. * 8.).abs() < 1e-6);
+        }
+        other => return Err(format!("Medida inesperada: {other:?}").into()),
+    }
+    // A aresta circular da boca do furo, perto do topo (z = 8), tem raio 3.
+    match measure::topology(doc, &pick([33., 20., 7.9]), true)? {
+        Topology::Edge {
+            radius_mm,
+            length_mm,
+            ..
+        } => {
+            assert!((radius_mm.ok_or("Raio ausente")? - 3.).abs() < 1e-9);
+            assert!((length_mm - 2. * PI * 3.).abs() < 1e-6);
+        }
+        other => return Err(format!("Medida inesperada: {other:?}").into()),
+    }
+    // Duas instâncias da placa afastadas 100 mm em X ficam a 40 mm uma da outra.
+    session.execute(Command::AddInstance {
+        part,
+        parent: None,
+        placement: nator_geometry::Placement::new([100., 0., 0.], [0.; 3])?,
+    })?;
+    let doc = session.document();
+    let at = |instance: usize| Pick {
+        instance: doc.instances()[instance].id,
+        part,
+        body,
+        triangle: 0,
+        point: [0.; 3],
+        normal: [0., 0., 1.],
+        vertices: [[0.; 3]; 3],
+        placement: doc.instances()[instance].placement,
+    };
+    assert!((measure::body_distance(doc, &at(0), &at(1))? - 40.).abs() < 1e-9);
+    Ok(())
+}

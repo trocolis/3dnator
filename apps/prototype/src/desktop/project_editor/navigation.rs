@@ -42,6 +42,118 @@ pub(super) fn snap_pick(p: &mut Pick, mode: PickMode) {
         PickMode::Face => {}
     }
 }
+/// Relatório de medição da seleção: propriedades do corpo, face/aresta (sólidos) e, com uma
+/// referência, ângulo entre faces e distância mínima entre corpos.
+fn measure_lines(
+    doc: &Document,
+    pick: &Pick,
+    mode: PickMode,
+    assembly: bool,
+    reference: Option<&Pick>,
+) -> Vec<String> {
+    use nator_commands::measure::{self, Topology};
+    use nator_drawing::format_mm as mm;
+    let mut lines = Vec::new();
+    match measure::body_properties(doc, pick.body) {
+        Ok(p) => {
+            // Na montagem, o centro vai para a origem da montagem; na construção, da peça.
+            let c = if assembly {
+                pick.placement.apply(p.center_mm)
+            } else {
+                p.center_mm
+            };
+            lines.push(format!("{}: {} mm³", text(T::Volume), mm(p.volume_mm3)));
+            lines.push(format!("{}: {} mm²", text(T::Area), mm(p.area_mm2)));
+            lines.push(format!(
+                "{} ({}): {} | {} | {}",
+                text(T::CenterOfMass),
+                text(T::UniformDensity),
+                mm(c[0]),
+                mm(c[1]),
+                mm(c[2])
+            ));
+            lines.push(
+                text(if p.exact {
+                    T::ExactMeasure
+                } else {
+                    T::ApproximateMeasure
+                })
+                .into(),
+            );
+        }
+        Err(error) => lines.push(error.to_string()),
+    }
+    if mode != PickMode::Vertex {
+        let radius = |r: f64| {
+            format!(
+                "{}: {} mm | {}: {} mm",
+                text(T::RadiusLabel),
+                mm(r),
+                text(T::DiameterLabel),
+                mm(2. * r)
+            )
+        };
+        match measure::topology(doc, pick, mode == PickMode::Edge) {
+            Ok(Topology::Face {
+                name,
+                area_mm2,
+                radius_mm,
+                ..
+            }) => {
+                lines.push(format!(
+                    "{} {name}: {} mm²",
+                    text(T::FaceLabel),
+                    mm(area_mm2)
+                ));
+                lines.extend(radius_mm.map(radius));
+            }
+            Ok(Topology::Edge {
+                faces,
+                length_mm,
+                radius_mm,
+            }) => {
+                lines.push(format!(
+                    "{} {} × {}: {} {} mm",
+                    text(T::EdgeLabel),
+                    faces[0],
+                    faces[1],
+                    text(T::Length),
+                    mm(length_mm)
+                ));
+                lines.extend(radius_mm.map(radius));
+            }
+            Err(error) => lines.push(error.to_string()),
+        }
+    }
+    if let Some(reference) = reference {
+        if mode == PickMode::Face
+            && let Ok(pair) = measure::face_pair(reference, pick)
+        {
+            lines.push(format!(
+                "{}: {}°",
+                text(T::AngleLabel),
+                mm(pair.angle_rad.to_degrees())
+            ));
+            if let Some(distance) = pair.parallel_distance_mm {
+                lines.push(format!(
+                    "{}: {} mm",
+                    text(T::ParallelDistance),
+                    mm(distance)
+                ));
+            }
+        }
+        if reference.body != pick.body || reference.instance != pick.instance {
+            match measure::body_distance(doc, reference, pick) {
+                Ok(distance) => {
+                    lines.push(format!("{}: {} mm", text(T::MinDistance), mm(distance)));
+                }
+                Err(error) => lines.push(error.to_string()),
+            }
+        }
+    }
+    lines
+}
+
 impl Editor {
     pub(super) fn viewport_actions(&mut self, ui: &egui::Ui, response: &egui::Response) {
         if response.drag_started_by(egui::PointerButton::Primary) {
@@ -197,6 +309,36 @@ impl Editor {
                     points.clear();
                 }
                 points.push(pick.point);
+            }
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!self.busy(), egui::Button::new(text(T::MeasureSelection)))
+                    .clicked()
+                {
+                    let document = self.current().session.document().clone();
+                    let tab = self.current().id;
+                    let revision = self.current().session.revision();
+                    let mode = self.pick_mode;
+                    let assembly = self.current().active_part.is_none();
+                    let reference = self.current().reference.clone();
+                    let pick = pick.clone();
+                    // Medidas exatas consultam o núcleo: ficam fora da thread da interface.
+                    self.start(ui.ctx(), None, move || {
+                        let lines =
+                            measure_lines(&document, &pick, mode, assembly, reference.as_ref());
+                        Ok(Outcome::Measured {
+                            tab,
+                            revision,
+                            lines,
+                        })
+                    });
+                }
+                if ui.button(text(T::SetReference)).clicked() {
+                    self.current_mut().reference = Some(pick.clone());
+                }
+            });
+            for line in &self.measure_report {
+                ui.small(line);
             }
             if ui.button(text(T::AlignmentSource)).clicked() {
                 self.alignment = Some((

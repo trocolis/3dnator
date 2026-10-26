@@ -1,5 +1,6 @@
 //! Transações de documento, separadas do futuro histórico de operações paramétricas.
 mod features;
+pub mod measure;
 use nator_document::{
     BodyId, Document, DocumentError, InstanceId, MeshAsset, PartId, SketchId, validate_name,
 };
