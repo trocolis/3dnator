@@ -95,7 +95,7 @@ impl Editor {
                 ui,
                 icons::Icon::Cube,
                 &child.name,
-                self.current().selection == Some(Selection::Instance(child.id)),
+                self.current().is_selected(Selection::Instance(child.id)),
             )
             .clicked()
             {
@@ -112,7 +112,7 @@ impl Editor {
                             ui,
                             icons::Icon::Cube,
                             &b.name,
-                            self.current().selection == Some(target),
+                            self.current().is_selected(target),
                         )
                         .clicked()
                         {

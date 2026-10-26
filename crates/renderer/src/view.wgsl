@@ -12,7 +12,7 @@ struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     // Bits 0-2: a aresta oposta ao canto k é viva (dobra acentuada ou borda aberta).
-    // Bits 8-15: estilo (0 normal, 1 esmaecido, 2 transparente; ver STYLE_* em lib.rs).
+    // Bits 8-15: estilo (0 normal, 1 esmaecido, 2 transparente, 3 selecionado; ver STYLE_*).
     @location(2) edges: u32,
     @location(3) color: vec4<f32>,
 }
@@ -74,10 +74,14 @@ struct VertexOutput {
     let triangulation = max(max(near.x, near.y), near.z) * view.options.x;
     let crease_near = near * flags;
     let crease = max(max(crease_near.x, crease_near.y), crease_near.z) * view.options.y;
-    var color = mix(surface, vec3<f32>(0.11, 0.16, 0.20), triangulation);
-    color = mix(color, vec3<f32>(0.05, 0.06, 0.07), crease);
-    // Estilos translúcidos são desenhados depois dos opacos, sem escrever profundidade.
     let style = (input.edges >> 8u) & 255u;
+    // Seleção: superfície tingida de azul e arestas vivas azuis, com a profundidade normal.
+    let selected = select(0.0, 1.0, style == 3u);
+    let tinted = mix(surface, vec3<f32>(0.24, 0.56, 0.94) * intensity + vec3<f32>(0.10), 0.32 * selected);
+    let edge_color = mix(vec3<f32>(0.05, 0.06, 0.07), vec3<f32>(0.06, 0.36, 0.78), selected);
+    var color = mix(tinted, vec3<f32>(0.11, 0.16, 0.20), triangulation);
+    color = mix(color, edge_color, crease);
+    // Estilos translúcidos são desenhados depois dos opacos, sem escrever profundidade.
     if (style == 1u) {
         // Esmaecido: cor próxima do fundo, para destacar a peça em construção.
         return vec4<f32>(mix(color, view.background.rgb, 0.55), 0.35);

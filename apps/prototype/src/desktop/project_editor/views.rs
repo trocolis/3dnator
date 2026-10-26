@@ -64,7 +64,6 @@ impl Editor {
     }
     pub(super) fn tree(&mut self, ui: &mut egui::Ui) {
         let document = self.current().session.document().clone();
-        let selected = self.current().selection;
         let mut selection = None;
         let mut command = None;
         let mut activate = None;
@@ -163,7 +162,7 @@ impl Editor {
                                     ui,
                                     icons::Icon::Cube,
                                     &part.name,
-                                    selected == Some(Selection::Instance(instance.id)),
+                                    self.current().is_selected(Selection::Instance(instance.id)),
                                 );
                                 if response.clicked() {
                                     selection = Some(Selection::Instance(instance.id));
@@ -229,7 +228,7 @@ impl Editor {
                                             ui,
                                             icons::Icon::Cube,
                                             &body.name,
-                                            selected == Some(target),
+                                            self.current().is_selected(target),
                                         );
                                         if response.clicked() {
                                             selection = Some(target);
@@ -260,7 +259,12 @@ impl Editor {
                     });
             });
         if let Some(selection) = selection {
-            self.current_mut().select(Some(selection));
+            // Ctrl+clique alterna o elemento, como na área 3D.
+            if ui.input(|i| i.modifiers.command) {
+                self.current_mut().toggle(selection);
+            } else {
+                self.current_mut().select(Some(selection));
+            }
         }
         if let Some(part) = activate {
             self.current_mut().active_part = Some(part);
@@ -546,11 +550,14 @@ impl Editor {
                 );
                 response.clone().on_hover_text(text(T::Navigation));
                 self.canvas_rect = response.rect;
-                // Com o campo Perfil ativo, o clique escolhe a região do rascunho.
+                // Com o campo Perfil ativo, o clique escolhe a região do rascunho; janela e
+                // pressão longa são gestos de seleção que substituem o clique simples.
                 let profile = self.profile_overlay(ui, &response);
+                let gesture = self.selection_gestures(ui, &response);
                 if self.current().sketch_edit.is_none()
                     && self.current().plane_pick.is_none()
                     && !profile
+                    && !gesture
                 {
                     self.viewport_actions(ui, &response);
                 }
@@ -625,6 +632,8 @@ impl Editor {
                         theme::MUTED,
                     );
                 }
+                self.update_hover(ui, &response);
+                self.draw_highlights(ui, response.rect);
                 self.measure_overlay(ui, response.rect);
                 self.current_mut().camera = self.viewport.camera.clone();
             });

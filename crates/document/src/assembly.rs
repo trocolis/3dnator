@@ -371,6 +371,33 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn picking_lists_every_body_along_the_ray_nearest_first() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Sobrepostos")?;
+        let (part, _) = doc.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let far = doc.add_instance(part, None, Placement::new([0., 0., -100.], [0.; 3])?)?;
+        let near = doc.instances()[0].id;
+        // Raio de cima para baixo sobre a base do suporte (60 × 25 mm).
+        let ray = nator_geometry::query::Ray {
+            origin: [30., 12., 500.],
+            direction: [0., 0., -1.],
+        };
+        let hits = doc.pick_all_with(ray, |_| true)?;
+        assert_eq!(
+            hits.iter().map(|h| h.instance).collect::<Vec<_>>(),
+            [near, far]
+        );
+        assert!(hits[0].point[2] > hits[1].point[2]);
+        assert_eq!(doc.pick(ray)?.map(|p| p.instance), Some(near));
+        // Ocorrências recusadas (bloqueadas) não entram na lista.
+        let only_far = doc.pick_all_with(ray, |o| o.instance != near)?;
+        assert_eq!(only_far.len(), 1);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -396,8 +423,16 @@ impl Document {
         ray: nator_geometry::query::Ray,
         allowed: impl Fn(&Occurrence) -> bool,
     ) -> Result<Option<Pick>, DocumentError> {
-        let mut nearest = f64::INFINITY;
-        let mut result = None;
+        Ok(self.pick_all_with(ray, allowed)?.into_iter().next())
+    }
+    /// Todos os corpos atravessados pelo raio, do mais próximo ao mais distante, com o primeiro
+    /// ponto de cada corpo em cada ocorrência. Serve à escolha entre elementos sobrepostos.
+    pub fn pick_all_with(
+        &self,
+        ray: nator_geometry::query::Ray,
+        allowed: impl Fn(&Occurrence) -> bool,
+    ) -> Result<Vec<Pick>, DocumentError> {
+        let mut hits = Vec::new();
         for occurrence in self.occurrences()?.into_iter().filter(|o| allowed(o)) {
             let instance = self
                 .instance(occurrence.instance)
@@ -417,28 +452,35 @@ impl Document {
                     origin,
                     direction: nator_geometry::sub(end, origin),
                 };
-                if let Some(hit) = body.geometry.mesh().ray_hit(local)
-                    && hit.distance < nearest
-                {
-                    nearest = hit.distance;
+                if let Some(hit) = body.geometry.mesh().ray_hit(local) {
                     let zero = pose.apply([0.; 3]);
-                    result = Some(Pick {
-                        instance: instance.id,
-                        part: part.id,
-                        body: body.id,
-                        triangle: hit.triangle,
-                        point: pose.apply(hit.point),
-                        normal: nator_geometry::sub(pose.apply(hit.normal), zero),
-                        vertices: body
-                            .geometry
-                            .mesh()
-                            .triangle_points(body.geometry.mesh().triangles()[hit.triangle])
-                            .map(|p| pose.apply(p)),
-                        placement: occurrence.placement,
-                    });
+                    let point = pose.apply(hit.point);
+                    // A distância ao longo do raio do mundo ordena os corpos de todas as poses.
+                    let distance =
+                        nator_geometry::dot(nator_geometry::sub(point, ray.origin), ray.direction)
+                            / nator_geometry::dot(ray.direction, ray.direction)
+                                .max(f64::MIN_POSITIVE);
+                    hits.push((
+                        distance,
+                        Pick {
+                            instance: instance.id,
+                            part: part.id,
+                            body: body.id,
+                            triangle: hit.triangle,
+                            point,
+                            normal: nator_geometry::sub(pose.apply(hit.normal), zero),
+                            vertices: body
+                                .geometry
+                                .mesh()
+                                .triangle_points(body.geometry.mesh().triangles()[hit.triangle])
+                                .map(|p| pose.apply(p)),
+                            placement: occurrence.placement,
+                        },
+                    ));
                 }
             }
         }
-        Ok(result)
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Ok(hits.into_iter().map(|(_, pick)| pick).collect())
     }
 }

@@ -36,18 +36,50 @@ pub(crate) fn render_ui_scenario(
     scenario: &str,
 ) -> Result<(), Box<dyn Error>> {
     match scenario {
-        "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" => {}
+        "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
+        | "hover-edge" | "select-body" | "window" | "assembly-select" => {}
         _ => {
-            return Err("Cenários: timeline, timeline-menu, extrude, edit-last, failure.".into());
+            return Err(
+                "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
+                 hover-edge, select-body, window, assembly-select."
+                    .into(),
+            );
         }
     }
     let menu = scenario == "timeline-menu";
+    let pointer = scenario.to_owned();
     render_with(
         project,
         output,
         size,
         |editor| scenario_setup(editor, scenario),
         move |editor, frame| {
+            let canvas = editor.canvas_rect;
+            let target = canvas.center() + egui::vec2(-60., 40.);
+            match pointer.as_str() {
+                "hover-face" | "hover-edge" if frame >= 2 => {
+                    return vec![egui::Event::PointerMoved(target)];
+                }
+                // Janela da direita para a esquerda, mantida aberta para a captura.
+                "window" if frame >= 2 => {
+                    let start = canvas.center() + egui::vec2(160., 110.);
+                    let mut events = vec![egui::Event::PointerMoved(if frame == 2 {
+                        start
+                    } else {
+                        canvas.center() + egui::vec2(-90., -60.)
+                    })];
+                    if frame == 2 {
+                        events.push(egui::Event::PointerButton {
+                            pos: start,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        });
+                    }
+                    return events;
+                }
+                _ => {}
+            }
             // Clique secundário na primeira operação abre o menu de contexto.
             match editor.timeline.tiles.first() {
                 Some((_, rect)) if menu && (frame == 2 || frame == 3) => {
@@ -110,6 +142,14 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
     let part = editor
         .current()
         .active_part
+        .or_else(|| {
+            let document = editor.current().session.document();
+            document
+                .parts()
+                .iter()
+                .find(|p| !p.bodies.is_empty())
+                .map(|p| p.id)
+        })
         .ok_or("O projeto não tem peça para o cenário.")?;
     let features = editor
         .current()
@@ -166,6 +206,42 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
         "edit-last" => {
             let feature = features.last().ok_or("Peça sem operações.")?.clone();
             editor.feature_edit = Some(feature_editor::Draft::edit(tab, part, feature));
+        }
+        "hover-face" | "hover-edge" | "window" => {
+            editor.current_mut().select(None);
+            editor.pick_mode = if scenario == "hover-edge" {
+                navigation::PickMode::Edge
+            } else {
+                navigation::PickMode::Face
+            };
+        }
+        "select-body" => {
+            let body = editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .and_then(|p| p.bodies.iter().find(|b| b.visible))
+                .map(|b| b.id)
+                .ok_or("Peça sem corpo visível.")?;
+            editor
+                .current_mut()
+                .select(Some(Selection::Body { part, id: body }));
+        }
+        "assembly-select" => {
+            editor.current_mut().active_part = None;
+            let instance = editor
+                .current()
+                .session
+                .document()
+                .instances()
+                .iter()
+                .find(|i| i.parent.is_none())
+                .map(|i| i.id)
+                .ok_or("Projeto sem instâncias.")?;
+            editor
+                .current_mut()
+                .select(Some(Selection::Instance(instance)));
         }
         "failure" => {
             // Uma edição que quebra a última operação abre a decisão do usuário.

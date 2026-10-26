@@ -47,6 +47,14 @@ Quando uma edição (cota de rascunho, parâmetro, operação, reordenação ou 
 
 Nenhuma referência perdida é substituída por outra face ou aresta: a decisão é sempre do usuário.
 
+## Seleção na área 3D
+
+- **Pré-seleção:** o elemento sob o cursor é realçado em azul claro antes do clique, com o nome numa etiqueta. Na peça em construção, o modo de seleção das propriedades decide entre face, aresta e vértice; fora dela, a unidade é o componente inteiro. Com um painel aberto, o campo ativo decide (arestas, faces ou corpos), e outras peças não são realçadas. A pré-seleção é desligada acima de 400 mil triângulos na cena.
+- **Seleção:** corpos e componentes selecionados ficam tingidos de azul, com arestas vivas azuis, desenhados pela GPU com profundidade. Faces e arestas escolhidas e as referências do painel aparecem realçadas sobre o modelo.
+- **Ctrl+clique** acrescenta ou retira um elemento, na área 3D e na árvore. Clicar no vazio limpa a seleção.
+- **Janela:** arraste com o botão esquerdo a partir de um ponto livre. Da esquerda para a direita (contorno azul), entram só os elementos inteiramente contidos; da direita para a esquerda (tracejado verde), os tocados. Com Ctrl, a janela acrescenta à seleção. Na montagem, a unidade é a instância; na construção, o corpo da peça ativa.
+- **Sobrepostos:** segure o botão esquerdo parado sobre o modelo para listar todos os elementos sob o cursor, do mais próximo ao mais distante. Percorrer a lista realça cada um; o clique seleciona (com Ctrl, alterna). Esc ou um clique fora fecha a lista.
+
 ## Painéis de comando
 
 As operações de construção abrem um painel ancorado à área 3D, à esquerda do cubo de orientação: cabeçalho com ícone e nome, campos rotulados e rodapé com o estado da prévia, **OK** e **Cancelar**. Enter confirma; Esc cancela.
@@ -90,7 +98,7 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
-Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`), que não alteram o projeto de origem:
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`), que não alteram o projeto de origem:
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude

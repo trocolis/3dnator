@@ -105,6 +105,14 @@ pub enum Style {
     /// Esmaecido, como as outras peças durante a construção de uma peça.
     Dimmed,
     Transparent,
+    /// Selecionado: opaco, com destaque de cor.
+    Selected,
+}
+impl Style {
+    /// Estilos desenhados depois dos opacos, sem escrever profundidade.
+    pub fn is_translucent(self) -> bool {
+        matches!(self, Self::Dimmed | Self::Transparent)
+    }
 }
 
 /// Acúmulo de uma parte da cena (opaca ou translúcida) antes da concatenação.
@@ -723,6 +731,15 @@ impl Document {
         &self,
         style: impl Fn(&assembly::Occurrence, PartId) -> Option<Style>,
     ) -> Result<Option<Scene>, DocumentError> {
+        self.scene_styled_bodies(|occurrence, part, _| style(occurrence, part))
+    }
+
+    /// Como `scene_styled`, com o estilo escolhido também por corpo (por exemplo, para
+    /// destacar o corpo selecionado na peça em construção).
+    pub fn scene_styled_bodies(
+        &self,
+        style: impl Fn(&assembly::Occurrence, PartId, BodyId) -> Option<Style>,
+    ) -> Result<Option<Scene>, DocumentError> {
         self.validate()?;
         // Dois grupos (opacos e translúcidos), concatenados no fim.
         let mut groups: [SceneGroup; 2] = Default::default();
@@ -733,16 +750,16 @@ impl Document {
             let part = self
                 .part(instance.part)
                 .ok_or_else(|| DocumentError("Peça da instância inexistente.".into()))?;
-            let Some(look) = style(&occurrence, part.id) else {
-                continue;
-            };
-            let group = &mut groups[usize::from(look != Style::Normal)];
             let occurrence_color = occurrence
                 .path
                 .iter()
                 .filter_map(|id| self.instance(*id).and_then(|i| i.color))
                 .next_back();
             for body in part.bodies.iter().filter(|b| b.visible) {
+                let Some(look) = style(&occurrence, part.id, body.id) else {
+                    continue;
+                };
+                let group = &mut groups[usize::from(look.is_translucent())];
                 let mesh = body.geometry.mesh();
                 let base = u32::try_from(group.vertices.len())
                     .map_err(|_| DocumentError("Cena com vértices excessivos.".into()))?;

@@ -25,6 +25,8 @@ pub const STYLE_NORMAL: u8 = 0;
 /// Esmaecido: cor puxada para o fundo e quase transparente.
 pub const STYLE_DIMMED: u8 = 1;
 pub const STYLE_TRANSPARENT: u8 = 2;
+/// Selecionado: opaco, tingido de azul e com arestas vivas azuis.
+pub const STYLE_SELECTED: u8 = 3;
 impl PreparedMesh {
     /// Analisa as arestas vivas da malha. Para cenas do documento, prefira
     /// `with_creases`, que reaproveita a análise feita uma vez por geometria.

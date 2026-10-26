@@ -658,6 +658,14 @@ impl Draft {
     pub(super) fn sketch(&self) -> Option<SketchId> {
         self.sketch
     }
+    /// Corpo base cujas arestas ou faces estão escolhidas.
+    pub(super) fn base(&self) -> Option<BodyId> {
+        self.base
+    }
+    /// Arestas e faces escolhidas no corpo base, para o realce na área 3D.
+    pub(super) fn references(&self) -> impl Iterator<Item = &Kept> {
+        self.kept_topology.iter().chain(&self.extra_topology)
+    }
     /// Região do perfil escolhida por clique no rascunho.
     pub(super) fn choose_region(&mut self, sketch: SketchId, boundary: Vec<u64>) {
         self.sketch = Some(sketch);

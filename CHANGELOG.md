@@ -14,6 +14,14 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Seleção na área 3D
+
+- Pré-seleção sob o cursor conforme o contexto: face, aresta ou vértice na peça em construção (pelo modo de seleção), componente inteiro na montagem e, com um painel aberto, o tipo pedido pelo campo ativo (arestas, faces ou corpos). Uma etiqueta mostra o nome do elemento.
+- Corpos e componentes selecionados são tingidos de azul na GPU, com arestas vivas azuis e profundidade correta; faces e arestas escolhidas e as referências do painel ficam realçadas sobre o modelo.
+- Ctrl+clique acrescenta ou retira elementos da seleção, na área 3D e na árvore.
+- Seleção por janela: da esquerda para a direita seleciona os elementos inteiramente contidos; da direita para a esquerda, os tocados (tracejado verde). Ctrl acrescenta.
+- Segurar o botão esquerdo abre a lista dos elementos sobrepostos sob o cursor, com realce ao percorrê-la.
+
 ### Rascunhos no viewport CAD
 
 - Edição integrada ao mesmo viewport 3D, preservando o modelo, a navegação e o cubo de orientação. A câmera se alinha suavemente ao plano; cursor, grade, entidades, cotas e capturas usam o mesmo referencial, incluindo ocorrências rotacionadas na montagem.

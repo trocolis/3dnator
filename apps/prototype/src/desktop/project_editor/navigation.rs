@@ -221,18 +221,12 @@ impl Editor {
                 bounds,
                 f64::from(response.rect.aspect_ratio()),
             );
-            let mut document = self.current().session.document().clone();
+            let document = self.picking_document();
             let tab = self.current().id;
             let revision = self.current().session.revision();
             let mode = self.pick_mode;
+            let additive = ui.input(|i| i.modifiers.command);
             let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
-            // Ao editar uma operação, as seleções valem para o histórico até antes dela,
-            // onde estão os corpos e faces que ela consome.
-            if let Some(draft) = &self.feature_edit
-                && let Some(output) = draft.output()
-            {
-                live_preview::roll_back(&mut document, draft.part(), output, true);
-            }
             let view = self.current().view.clone();
             self.start(ui.ctx(), None, move || {
                 let pick = document
@@ -264,6 +258,7 @@ impl Editor {
                     revision,
                     pick,
                     mode,
+                    additive,
                     topology,
                 })
             });

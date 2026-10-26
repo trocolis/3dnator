@@ -423,6 +423,7 @@ pub enum Text {
     CombineTool,
     RectangularPattern,
     SolidBodyRequired,
+    SelectOtherTitle,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -875,5 +876,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SolidBodyRequired => {
             "Selecione um sólido CAD; corpos de malha não participam de operações."
         }
+        Text::SelectOtherTitle => "Selecionar entre sobrepostos",
     }
 }

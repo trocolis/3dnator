@@ -4,11 +4,13 @@ mod command_panel;
 mod drawing_editor;
 mod export_editor;
 mod feature_editor;
+mod highlight;
 mod icons;
 mod live_preview;
 mod navigation;
 mod parameter_editor;
 mod profile_pick;
+mod selection_tools;
 mod shell;
 mod sketch_editor;
 mod sketch_scene;
@@ -50,7 +52,7 @@ pub fn run() -> Result<(), eframe::Error> {
     )
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Selection {
     Instance(InstanceId),
     Body { part: PartId, id: BodyId },
@@ -63,6 +65,10 @@ pub(super) struct ViewState {
     isolated: Option<HashSet<InstanceId>>,
     transparent: HashSet<InstanceId>,
     locked: HashSet<InstanceId>,
+    /// Seleção destacada na cena: ocorrências que passam por uma instância selecionada e
+    /// corpos selecionados na peça em construção.
+    selected_instances: HashSet<InstanceId>,
+    selected_bodies: HashSet<BodyId>,
     version: u64,
 }
 impl ViewState {
@@ -102,6 +108,44 @@ impl ViewState {
             _ => Style::Normal,
         })
     }
+    /// Destaque de seleção sobre o estilo base; elementos translúcidos continuam translúcidos.
+    fn highlight(
+        &self,
+        occurrence: &nator_document::assembly::Occurrence,
+        body: BodyId,
+        style: nator_document::Style,
+    ) -> nator_document::Style {
+        let chosen = self.selected_bodies.contains(&body)
+            || occurrence
+                .path
+                .iter()
+                .any(|i| self.selected_instances.contains(i));
+        if chosen && !style.is_translucent() {
+            nator_document::Style::Selected
+        } else {
+            style
+        }
+    }
+    /// Atualiza o destaque a partir da seleção da aba; só invalida a cena se mudar.
+    fn set_selection(&mut self, selected: &[Selection]) {
+        let mut instances = HashSet::new();
+        let mut bodies = HashSet::new();
+        for item in selected {
+            match *item {
+                Selection::Instance(id) => {
+                    instances.insert(id);
+                }
+                Selection::Body { id, .. } => {
+                    bodies.insert(id);
+                }
+            }
+        }
+        if instances != self.selected_instances || bodies != self.selected_bodies {
+            self.selected_instances = instances;
+            self.selected_bodies = bodies;
+            self.touched();
+        }
+    }
     /// Ocorrências bloqueadas ou fora do isolamento não podem ser selecionadas na área 3D.
     fn pickable(&self, occurrence: &nator_document::assembly::Occurrence) -> bool {
         self.in_isolation(occurrence) && !occurrence.path.iter().any(|i| self.locked.contains(i))
@@ -125,7 +169,10 @@ struct Tab {
     path: Option<PathBuf>,
     camera: Camera,
     scene_bounds: Option<nator_geometry::Bounds>,
+    /// Elemento principal da seleção, mostrado nas propriedades.
     selection: Option<Selection>,
+    /// Todos os elementos selecionados (Ctrl+clique, seleção por janela), incluindo o principal.
+    selected: Vec<Selection>,
     active_part: Option<PartId>,
     sketch_edit: Option<sketch_editor::Workspace>,
     plane_pick: Option<sketch_scene::PlanePicker>,
@@ -177,6 +224,7 @@ impl Tab {
             camera: Camera::default(),
             scene_bounds: None,
             selection: None,
+            selected: Vec::new(),
             active_part: None,
             sketch_edit: None,
             plane_pick: None,
@@ -197,7 +245,49 @@ impl Tab {
         })
     }
     fn select(&mut self, selection: Option<Selection>) {
+        self.selected = selection.into_iter().collect();
         self.selection = selection;
+        self.refresh_selection();
+    }
+    /// Ctrl+clique: acrescenta ou retira um elemento, que passa a ser o principal.
+    fn toggle(&mut self, item: Selection) {
+        if let Some(index) = self.selected.iter().position(|s| *s == item) {
+            self.selected.remove(index);
+            self.selection = self.selected.last().copied();
+        } else {
+            self.selected.push(item);
+            self.selection = Some(item);
+        }
+        self.refresh_selection();
+    }
+    /// Seleção por janela: substitui ou, com Ctrl, acrescenta.
+    fn select_many(&mut self, items: Vec<Selection>, additive: bool) {
+        if !additive {
+            self.selected.clear();
+        }
+        for item in items {
+            if !self.selected.contains(&item) {
+                self.selected.push(item);
+            }
+        }
+        self.selection = self.selected.last().copied();
+        self.refresh_selection();
+    }
+    fn is_selected(&self, item: Selection) -> bool {
+        self.selected.contains(&item)
+    }
+    /// Descarta elementos que deixaram de existir e atualiza campos e destaque.
+    fn refresh_selection(&mut self) {
+        let document = self.session.document();
+        self.selected.retain(|item| match *item {
+            Selection::Instance(id) => document.instance(id).is_some(),
+            Selection::Body { id, .. } => document.body(id).is_some(),
+        });
+        if self.selection.is_some_and(|s| !self.selected.contains(&s)) {
+            self.selection = self.selected.last().copied();
+        }
+        self.view.set_selection(&self.selected);
+        let selection = self.selection;
         let values = match selection {
             Some(Selection::Body { id, .. }) => self
                 .session
@@ -233,7 +323,7 @@ impl Tab {
         {
             self.active_part = None;
         }
-        self.select(self.selection);
+        self.refresh_selection();
         if self
             .sketch_edit
             .as_ref()
@@ -250,6 +340,8 @@ enum Outcome {
         revision: u64,
         pick: Option<nator_document::assembly::Pick>,
         mode: navigation::PickMode,
+        /// Ctrl pressionado no clique: alterna o elemento na seleção.
+        additive: bool,
         /// Referência escolhida para o diálogo de operações, quando ele esperava um clique.
         topology: Option<Result<feature_editor::Kept, String>>,
     },
@@ -366,6 +458,11 @@ pub struct Editor {
     preview: live_preview::LivePreview,
     /// Área 3D do último quadro, para ancorar os painéis de comando.
     canvas_rect: egui::Rect,
+    /// Pré-seleção sob o cursor e dados de realce por geometria.
+    hover: Option<highlight::Hover>,
+    highlight_cache: highlight::Cache,
+    /// Janela de seleção, pressão longa e lista de sobrepostos.
+    gestures: selection_tools::SelectionGestures,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -376,7 +473,10 @@ fn prepare_scene(
 ) -> Result<Option<(Mesh, PreparedMesh)>, String> {
     use nator_document::Style;
     let Some(scene) = document
-        .scene_styled(|occurrence, part| view.style(document, occurrence, part, active))
+        .scene_styled_bodies(|occurrence, part, body| {
+            view.style(document, occurrence, part, active)
+                .map(|style| view.highlight(occurrence, body, style))
+        })
         .map_err(|e| e.to_string())?
     else {
         return Ok(None);
@@ -388,6 +488,7 @@ fn prepare_scene(
             Style::Normal => nator_renderer::STYLE_NORMAL,
             Style::Dimmed => nator_renderer::STYLE_DIMMED,
             Style::Transparent => nator_renderer::STYLE_TRANSPARENT,
+            Style::Selected => nator_renderer::STYLE_SELECTED,
         })
         .collect::<Vec<_>>();
     let prepared = PreparedMesh::with_appearance(
@@ -461,6 +562,9 @@ impl Editor {
             resolving: None,
             preview: live_preview::LivePreview::default(),
             canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.)),
+            hover: None,
+            highlight_cache: highlight::Cache::default(),
+            gestures: selection_tools::SelectionGestures::default(),
         })
     }
     fn busy(&self) -> bool {
@@ -589,11 +693,14 @@ impl Editor {
                 revision,
                 pick,
                 mode,
+                additive,
                 topology,
             }) => {
                 let current = self
                     .find_tab(tab)
                     .is_some_and(|t| t.session.revision() == revision);
+                // Com um painel esperando, o clique pertence ao campo de seleção ativo.
+                let consumed = topology.is_some();
                 if current
                     && let (Some(result), Some(p), Some(draft)) =
                         (topology, pick.as_ref(), self.feature_edit.as_mut())
@@ -611,20 +718,25 @@ impl Editor {
                 }
                 if let Some(target) = self
                     .find_tab(tab)
-                    .filter(|t| t.session.revision() == revision)
+                    .filter(|t| t.session.revision() == revision && !consumed)
                 {
                     if let Some(mut p) = pick {
                         navigation::snap_pick(&mut p, mode);
-                        target.select(Some(if target.active_part == Some(p.part) {
+                        let item = if target.active_part == Some(p.part) {
                             Selection::Body {
                                 part: p.part,
                                 id: p.body,
                             }
                         } else {
                             Selection::Instance(p.instance)
-                        }));
+                        };
+                        if additive {
+                            target.toggle(item);
+                        } else {
+                            target.select(Some(item));
+                        }
                         target.picked = Some(p);
-                    } else {
+                    } else if !additive {
                         target.picked = None;
                         target.select(None);
                     }
@@ -1287,6 +1399,7 @@ impl Editor {
         self.parameter_dialog(ui.ctx());
         self.command_palette(ui.ctx());
         self.timeline_dialogs(ui.ctx());
+        self.select_other_popup(ui.ctx());
         self.finish_preview_frame();
         window_frame::resize_handles(ui);
         self.maybe_recover(ui.ctx());
