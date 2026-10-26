@@ -137,9 +137,122 @@ pub fn mirror(
     Ok(created)
 }
 
+/// Copia uma entidade aplicando uma transformação rígida que preserva a orientação
+/// (translação ou rotação). Pontos novos são criados; a cópia não fica vinculada ao original.
+fn copy_rigid(sketch: &mut Sketch, id: u64, transform: &dyn Fn(Point2) -> Point2) -> Result<u64> {
+    let entity = sketch.entity(id)?.clone();
+    match entity.curve {
+        Curve::Line { start, end } => sketch.add_line(
+            transform(sketch.point(start)?),
+            transform(sketch.point(end)?),
+            entity.construction,
+        ),
+        Curve::Circle { center, radius } => sketch.add_circle(
+            transform(sketch.point(center)?),
+            radius,
+            entity.construction,
+        ),
+        Curve::Arc {
+            center,
+            start,
+            end,
+            clockwise,
+        } => {
+            let center = sketch.add_point(transform(sketch.point(center)?))?;
+            let start = sketch.add_point(transform(sketch.point(start)?))?;
+            let end = sketch.add_point(transform(sketch.point(end)?))?;
+            sketch.add_curve(
+                Curve::Arc {
+                    center,
+                    start,
+                    end,
+                    clockwise,
+                },
+                entity.construction,
+            )
+        }
+    }
+}
+
+fn pattern_count(count: usize) -> Result<()> {
+    if !(2..=100).contains(&count) {
+        return Err(SketchError(
+            "O padrão do rascunho deve ter entre 2 e 100 ocorrências.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Padrão linear: `count` ocorrências (incluindo o original) ao longo de `direction`,
+/// espaçadas de `spacing` mm. Devolve as entidades criadas.
+pub fn pattern_linear(
+    sketch: &mut Sketch,
+    ids: &[u64],
+    direction: Point2,
+    count: usize,
+    spacing: f64,
+) -> Result<Vec<u64>> {
+    pattern_count(count)?;
+    let length = distance(direction, [0.; 2]);
+    if length < 1e-9 || !spacing.is_finite() || spacing.abs() < 1e-9 {
+        return Err(SketchError(
+            "Direção e espaçamento do padrão devem ser não nulos.".into(),
+        ));
+    }
+    let step = scale(direction, spacing / length);
+    let mut created = Vec::new();
+    for k in 1..count {
+        let offset = scale(step, k as f64);
+        for id in ids {
+            created.push(copy_rigid(sketch, *id, &|p| add(p, offset))?);
+        }
+    }
+    Ok(created)
+}
+
+/// Padrão circular: `count` ocorrências distribuídas por igual em volta de `center`.
+pub fn pattern_circular(
+    sketch: &mut Sketch,
+    ids: &[u64],
+    center: Point2,
+    count: usize,
+) -> Result<Vec<u64>> {
+    pattern_count(count)?;
+    let mut created = Vec::new();
+    for k in 1..count {
+        let (s, c) = (std::f64::consts::TAU * k as f64 / count as f64).sin_cos();
+        let rotate = |p: Point2| {
+            let v = sub(p, center);
+            add(center, [c * v[0] - s * v[1], s * v[0] + c * v[1]])
+        };
+        for id in ids {
+            created.push(copy_rigid(sketch, *id, &rotate)?);
+        }
+    }
+    Ok(created)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linear_and_circular_patterns_copy_entities_rigidly() -> Result<()> {
+        let mut sketch = Sketch::new("Padrões", Plane::xy());
+        let hole = sketch.add_circle([10., 5.], 2., false)?;
+        let copies = pattern_linear(&mut sketch, &[hole], [1., 0.], 3, 15.)?;
+        assert_eq!(copies.len(), 2);
+        assert_eq!(sketch.circle(copies[1])?, ([40., 5.], 2.));
+        let spoke = sketch.add_line([1., 0.], [4., 0.], false)?;
+        let ring = pattern_circular(&mut sketch, &[spoke], [0., 0.], 4)?;
+        let (a, b) = sketch.line(ring[0])?;
+        assert!(distance(a, [0., 1.]) < 1e-12 && distance(b, [0., 4.]) < 1e-12);
+        sketch.validate()?;
+        assert!(pattern_linear(&mut sketch, &[hole], [0., 0.], 3, 5.).is_err());
+        assert!(pattern_circular(&mut sketch, &[hole], [0., 0.], 1).is_err());
+        Ok(())
+    }
+
     #[test]
     fn trim_preserves_the_unselected_pieces() -> Result<()> {
         let mut sketch = Sketch::new("Aparar", Plane::xy());

@@ -36,6 +36,8 @@ pub enum Text {
     Angle,
     TopologyIndex,
     KeptReference,
+    SketchLinearPattern,
+    SketchCircularPattern,
     HoleTool,
     LinearPattern,
     CircularPattern,
@@ -318,6 +320,10 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::KeptReference => "Referência atual (mantida enquanto o índice não for alterado)",
         Text::PickInViewport => "Selecionar na área 3D",
+        Text::SketchLinearPattern => {
+            "Padrão linear ao longo da segunda linha (espaçamento = valor)"
+        }
+        Text::SketchCircularPattern => "Padrão circular em volta do centro do segundo",
         Text::HoleTool => "Furo",
         Text::LinearPattern => "Padrão linear",
         Text::CircularPattern => "Padrão circular",

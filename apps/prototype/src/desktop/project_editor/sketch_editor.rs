@@ -32,6 +32,8 @@ pub(super) struct Workspace {
     dimension: f64,
     dimension_expression: String,
     reference: bool,
+    /// Ocorrências dos padrões do rascunho (o espaçamento usa `dimension`).
+    pattern_count: usize,
 }
 impl Workspace {
     pub fn new(id: SketchId) -> Self {
@@ -53,6 +55,7 @@ impl Workspace {
             projected: vec![[0., 0.]],
             dimension: 10.,
             dimension_expression: "10 mm".into(),
+            pattern_count: 3,
             reference: false,
         }
     }
@@ -469,6 +472,47 @@ impl Editor {
                                 issue = Some(error.to_string());
                             }
                             submit = true;
+                        }
+                    }
+                }
+                // Padrões: a primeira seleção é repetida; a segunda define direção ou centro.
+                if selected.len() == 2 {
+                    ui.add(
+                        egui::DragValue::new(&mut work.pattern_count)
+                            .range(2..=100)
+                            .prefix(format!("{} ", text(T::PatternCount))),
+                    );
+                    let linear = sketch.line(selected[1]).ok();
+                    let center = sketch.radial(selected[1]).ok().map(|(c, _)| c);
+                    if let Some((a, b)) = linear
+                        && ui
+                            .add_enabled(!busy, egui::Button::new(text(T::SketchLinearPattern)))
+                            .clicked()
+                    {
+                        match nator_sketch::tools::pattern_linear(
+                            &mut sketch,
+                            &selected[..1],
+                            nator_sketch::sub(b, a),
+                            work.pattern_count,
+                            work.dimension,
+                        ) {
+                            Ok(_) => submit = true,
+                            Err(e) => issue = Some(e.to_string()),
+                        }
+                    }
+                    if let Some(center) = center
+                        && ui
+                            .add_enabled(!busy, egui::Button::new(text(T::SketchCircularPattern)))
+                            .clicked()
+                    {
+                        match nator_sketch::tools::pattern_circular(
+                            &mut sketch,
+                            &selected[..1],
+                            center,
+                            work.pattern_count,
+                        ) {
+                            Ok(_) => submit = true,
+                            Err(e) => issue = Some(e.to_string()),
                         }
                     }
                 }
