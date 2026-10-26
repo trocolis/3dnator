@@ -173,6 +173,19 @@ pub enum Command {
     RemoveBody {
         id: BodyId,
     },
+    /// Cópia independente do corpo na mesma peça, sem histórico, na posição local dada.
+    CopyBody {
+        id: BodyId,
+        placement: Placement,
+    },
+    RenameInstance {
+        id: InstanceId,
+        name: String,
+    },
+    RenameGroup {
+        id: nator_document::GroupId,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -285,6 +298,9 @@ impl Command {
             Self::MoveBody { .. } => "Posicionar corpo",
             Self::MoveInstance { .. } => "Posicionar instância",
             Self::RemoveBody { .. } => "Excluir corpo",
+            Self::CopyBody { .. } => "Copiar corpo",
+            Self::RenameInstance { .. } => "Renomear instância",
+            Self::RenameGroup { .. } => "Renomear grupo",
         }
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
@@ -587,6 +603,27 @@ impl Command {
                 }
                 doc.remove_body(id)?;
             }
+            Self::CopyBody { id, placement } => {
+                let part = doc
+                    .parts()
+                    .iter()
+                    .find(|p| p.bodies.iter().any(|b| b.id == id))
+                    .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+                if nator_document::features::inactive_outputs(part).contains(&id) {
+                    return Err(DocumentError(
+                        "O resultado de uma operação inativa não pode ser copiado.".into(),
+                    )
+                    .into());
+                }
+                let part = part.id;
+                let body = doc.copy_body(id, placement)?;
+                return Ok(Effect::Imported { part, body });
+            }
+            Self::RenameInstance { id, name } => {
+                validate_name(&name)?;
+                doc.instance_mut(id)?.name = name;
+            }
+            Self::RenameGroup { id, name } => doc.rename_group(id, name)?,
         }
         Ok(Effect::Changed)
     }
@@ -1145,6 +1182,69 @@ mod tests {
         let (a, b) = (world(0)?, world(1)?);
         assert!((a.min[0] + b.max[0]).abs() < 1e-9 && (a.max[0] + b.min[0]).abs() < 1e-9);
         assert!((a.min[1] - b.min[1]).abs() < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn copied_bodies_and_renamed_occurrences_are_independent_and_undoable()
+    -> Result<(), Box<dyn Error>> {
+        let mut session = Session::new(Document::new("Cópias")?)?;
+        session.execute(import()?)?;
+        let part = session.document().parts()[0].id;
+        let body = session.document().parts()[0].bodies[0].id;
+        let instance = session.document().instances()[0].id;
+        let placement = Placement::new([0., 40., 0.], [0.; 3])?;
+        let Effect::Imported { body: copy, .. } = session.execute(Command::CopyBody {
+            id: body,
+            placement,
+        })?
+        else {
+            return Err("Cópia sem corpo novo".into());
+        };
+        let doc = session.document();
+        assert_eq!(doc.part(part).ok_or("Peça ausente")?.bodies.len(), 2);
+        let copied = doc.body(copy).ok_or("Cópia ausente")?;
+        assert_eq!(copied.placement, placement);
+        assert!(Arc::ptr_eq(
+            &copied.geometry,
+            &doc.body(body).ok_or("Corpo ausente")?.geometry
+        ));
+        session.execute(Command::RenameInstance {
+            id: instance,
+            name: "Suporte esquerdo".into(),
+        })?;
+        assert_eq!(
+            session
+                .document()
+                .instance(instance)
+                .ok_or("Instância ausente")?
+                .name,
+            "Suporte esquerdo"
+        );
+        // A definição mantém o nome; renomear a ocorrência não renomeia a peça.
+        assert_eq!(
+            session.document().part(part).ok_or("Peça ausente")?.name,
+            "Suporte"
+        );
+        let second = session.document().instances()[0].id;
+        session.execute(Command::AddInstance {
+            part,
+            parent: None,
+            placement: Placement::new([100., 0., 0.], [0.; 3])?,
+        })?;
+        let third = session.document().instances()[1].id;
+        session.execute(Command::CreateGroup {
+            name: "Pares".into(),
+            members: vec![second, third],
+        })?;
+        let group = session.document().groups()[0].id;
+        session.execute(Command::RenameGroup {
+            id: group,
+            name: "Laterais".into(),
+        })?;
+        assert_eq!(session.document().groups()[0].name, "Laterais");
+        assert!(session.undo());
+        assert_eq!(session.document().groups()[0].name, "Pares");
         Ok(())
     }
 

@@ -14,6 +14,14 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Montagem e posicionamento
+
+- Painel **Mover/Copiar** com manipulador 3D (setas por eixo, anéis de rotação e centro livre), campos de translação e rotação no mundo, pivô no centro de massa ou na origem, cópia como nova instância ou corpo independente e prévia ao vivo. Vários elementos se movem em uma só ação de desfazer, inclusive dentro de pais rotacionados.
+- Painel **Alinhar** por face, aresta ou vértice, sem restrição permanente; padrões retangular e circular e espelhamento de componentes em painéis com prévia.
+- Aba Montagem reorganizada em Componente, Posicionar, Padrões, Organizar e Documentar; Modelo ganha Combinar, Dividir corpo e Mover/Copiar. O antigo diálogo de organização foi substituído.
+- Árvore com botão de ativação da peça, nomes de ocorrência, menus de contexto para componentes, corpos e grupos, seção de grupos e renomeação de ocorrências, definições, corpos e grupos.
+- Novos comandos `CopyBody`, `RenameInstance` e `RenameGroup`.
+
 ### Seleção na área 3D
 
 - Pré-seleção sob o cursor conforme o contexto: face, aresta ou vértice na peça em construção (pelo modo de seleção), componente inteiro na montagem e, com um painel aberto, o tipo pedido pelo campo ativo (arestas, faces ou corpos). Uma etiqueta mostra o nome do elemento.

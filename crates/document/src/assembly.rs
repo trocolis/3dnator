@@ -103,6 +103,51 @@ impl Document {
         }
         Ok(())
     }
+    pub fn rename_group(&mut self, id: GroupId, name: String) -> Result<(), DocumentError> {
+        validate_name(&name)?;
+        self.groups
+            .iter_mut()
+            .find(|g| g.id == id)
+            .ok_or_else(|| DocumentError("Grupo inexistente.".into()))?
+            .name = name;
+        Ok(())
+    }
+    /// Cópia independente de um corpo na mesma peça, sem histórico: o B-rep e a malha são
+    /// compartilhados até uma edição, e os nomes de faces passam ao novo dono, para que
+    /// operações futuras sobre a cópia não confundam suas faces com as do original.
+    pub fn copy_body(&mut self, id: BodyId, placement: Placement) -> Result<BodyId, DocumentError> {
+        let source = self
+            .body(id)
+            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?
+            .clone();
+        let part = self
+            .parts
+            .iter()
+            .find(|p| p.bodies.iter().any(|b| b.id == id))
+            .map(|p| p.id)
+            .ok_or_else(|| DocumentError("Peça do corpo inexistente.".into()))?;
+        let copy = self.allocate_body_id()?;
+        let map = HashMap::from([(id, copy)]);
+        let face_names = Arc::new(
+            source
+                .face_names
+                .iter()
+                .map(|n| super::features::remap_face_name(n, &map))
+                .collect(),
+        );
+        self.add_body(
+            part,
+            Body {
+                id: copy,
+                name: format!("{} (cópia)", source.name),
+                face_names,
+                placement,
+                visible: true,
+                ..source
+            },
+        )?;
+        Ok(copy)
+    }
     pub fn remove_group(&mut self, id: GroupId) -> Result<(), DocumentError> {
         if !self.groups.iter().any(|g| g.id == id) {
             return Err(DocumentError("Grupo inexistente.".into()));

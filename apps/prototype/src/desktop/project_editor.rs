@@ -1,4 +1,6 @@
 mod assembly_editor;
+mod assembly_tools;
+mod browser;
 pub(crate) mod capture;
 mod command_panel;
 mod drawing_editor;
@@ -294,12 +296,11 @@ impl Tab {
                 .document()
                 .body(id)
                 .map(|b| (b.name.clone(), b.placement)),
-            Some(Selection::Instance(id)) => self.session.document().instance(id).and_then(|i| {
-                self.session
-                    .document()
-                    .part(i.part)
-                    .map(|p| (p.name.clone(), i.placement))
-            }),
+            Some(Selection::Instance(id)) => self
+                .session
+                .document()
+                .instance(id)
+                .map(|i| (i.name.clone(), i.placement)),
             None => None,
         };
         if let Some((name, placement)) = values {
@@ -438,7 +439,6 @@ pub struct Editor {
     recoveries: Vec<PathBuf>,
     show_recovery: bool,
     parameters_edit: Option<parameter_editor::Draft>,
-    assembly_edit: Option<assembly_editor::Draft>,
     feature_edit: Option<feature_editor::Draft>,
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
@@ -463,6 +463,11 @@ pub struct Editor {
     highlight_cache: highlight::Cache,
     /// Janela de seleção, pressão longa e lista de sobrepostos.
     gestures: selection_tools::SelectionGestures,
+    /// Painel de montagem ou posicionamento aberto.
+    assembly_panel: Option<assembly_tools::Panel>,
+    /// Renomeação pela árvore e ação escolhida num menu de subnível.
+    rename: Option<browser::RenameDraft>,
+    pending_menu: Option<browser::MenuAction>,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -547,7 +552,6 @@ impl Editor {
             show_recovery: !recoveries.is_empty(),
             recoveries,
             parameters_edit: None,
-            assembly_edit: None,
             feature_edit: None,
             drawing_edit: None,
             export_edit: None,
@@ -565,6 +569,9 @@ impl Editor {
             hover: None,
             highlight_cache: highlight::Cache::default(),
             gestures: selection_tools::SelectionGestures::default(),
+            assembly_panel: None,
+            rename: None,
+            pending_menu: None,
         })
     }
     fn busy(&self) -> bool {
@@ -1392,14 +1399,15 @@ impl Editor {
         }
         self.canvas(ui);
         self.dialogs(ui.ctx());
-        self.assembly_dialog(ui.ctx());
         self.feature_dialog(ui.ctx());
+        self.assembly_panel(ui.ctx());
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
         self.command_palette(ui.ctx());
         self.timeline_dialogs(ui.ctx());
         self.select_other_popup(ui.ctx());
+        self.browser_rename_dialog(ui.ctx());
         self.finish_preview_frame();
         window_frame::resize_handles(ui);
         self.maybe_recover(ui.ctx());

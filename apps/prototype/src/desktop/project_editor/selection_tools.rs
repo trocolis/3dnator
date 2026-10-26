@@ -50,6 +50,7 @@ impl Editor {
                 .feature_edit
                 .as_ref()
                 .is_none_or(|d| d.field().is_none())
+            && self.assembly_panel.is_none()
             && !self.busy()
     }
 

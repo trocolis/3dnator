@@ -63,6 +63,8 @@ pub(super) enum Icon {
     Symmetric,
     ToFace,
     Flip,
+    Align,
+    Group,
     Join,
     CutBody,
     IntersectBody,
@@ -543,6 +545,20 @@ pub(super) fn paint_with_ink(
                     p.face(&[[10., 10.], [14., 10.], [14., 17.], [10., 17.]], p.accent);
                 }
             }
+        }
+        Icon::Align => {
+            p.face(&[[3., 3.], [10., 3.], [10., 10.], [3., 10.]], p.fill);
+            p.face(&[[14., 14.], [21., 14.], [21., 21.], [14., 21.]], p.fill);
+            p.arrow([10., 10.], [14., 14.]);
+            p.line(&[[3., 12.], [21., 12.]], p.ink);
+        }
+        Icon::Group => {
+            p.line(&[[2., 6.], [2., 2.], [6., 2.]], p.accent);
+            p.line(&[[18., 2.], [22., 2.], [22., 6.]], p.accent);
+            p.line(&[[22., 18.], [22., 22.], [18., 22.]], p.accent);
+            p.line(&[[6., 22.], [2., 22.], [2., 18.]], p.accent);
+            p.face(&[[5., 6.], [12., 6.], [12., 12.], [5., 12.]], p.fill);
+            p.face(&[[12., 12.], [19., 12.], [19., 18.], [12., 18.]], p.fill);
         }
         Icon::NewBody => {
             p.cube();

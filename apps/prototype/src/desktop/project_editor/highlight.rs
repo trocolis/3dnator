@@ -31,7 +31,7 @@ impl Overlay {
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty() && self.triangles.is_empty() && self.points.is_empty()
     }
-    fn extend(&mut self, other: Overlay) {
+    pub(super) fn extend(&mut self, other: Overlay) {
         self.segments.extend(other.segments);
         self.triangles.extend(other.triangles);
         self.points.extend(other.points);

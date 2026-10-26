@@ -6,7 +6,7 @@ A organização visual usa como referência o shell compacto do SolidCraft e seu
 
 - **Barra superior:** menu Arquivo, salvar, desfazer/refazer, projetos em abas, novo projeto e busca. À direita ficam minimizar, maximizar/restaurar e fechar o aplicativo, substituindo a barra de título nativa. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar.
 - **Modelo:** novo rascunho com seleção de plano, extrusão, revolução, furo, arredondamento, chanfro, casca, espelhamento, padrão linear e parâmetros. As operações abrem seu editor com a ferramenta já escolhida; perfil e corpo são sugeridos pelo contexto e continuam sujeitos à confirmação.
-- **Montagem:** organização de instâncias, ferramentas de repetição e acesso à documentação/exportação. Os controles completos de clones, grupos e padrões permanecem no diálogo de montagem.
+- **Montagem:** grupos Componente (nova instância compartilhada, clone independente), Posicionar (Mover/Copiar, Alinhar), Padrões (retangular, circular, espelhar componente), Organizar (agrupar, desagrupar) e Documentar (folha técnica, STEP). Na aba Modelo, Modificar também oferece Combinar, Dividir corpo e Mover/Copiar corpos.
 - **Inserir:** importação STL/STEP, suporte de referência, rascunhos XY/XZ/YZ ou na face selecionada e exportação. O arquivo próprio continua sendo o meio de preservar o histórico.
 - **Inspecionar:** medição da seleção, folha técnica, parâmetros e exportação. Medir exige um elemento capturado na área 3D; os resultados exatos continuam sendo preparados em segundo plano.
 - **Vista:** enquadramento, orientações, projeção, sombras, triangulação e visibilidade dos painéis. A pequena faixa sobre a área 3D mantém os atalhos de câmera fora da região de seleção.
@@ -55,9 +55,16 @@ Nenhuma referência perdida é substituída por outra face ou aresta: a decisão
 - **Janela:** arraste com o botão esquerdo a partir de um ponto livre. Da esquerda para a direita (contorno azul), entram só os elementos inteiramente contidos; da direita para a esquerda (tracejado verde), os tocados. Com Ctrl, a janela acrescenta à seleção. Na montagem, a unidade é a instância; na construção, o corpo da peça ativa.
 - **Sobrepostos:** segure o botão esquerdo parado sobre o modelo para listar todos os elementos sob o cursor, do mais próximo ao mais distante. Percorrer a lista realça cada um; o clique seleciona (com Ctrl, alterna). Esc ou um clique fora fecha a lista.
 
+## Montagem e posicionamento
+
+- **Árvore:** cada componente mostra o olho de visibilidade, o botão de ativação (círculo preenchido na peça em construção; clicar ativa ou volta à montagem) e o nome da ocorrência, com a definição na dica. O botão direito abre o menu do componente: ativar, Mover/Copiar, nova instância, clone independente, padrões, espelhar, inserir dentro de outra peça, agrupar a seleção, isolar, transparente, selecionável, ocultar/mostrar, renomear a ocorrência ou a definição e excluir. Corpos têm Mover/Copiar, ocultar/mostrar, exportar STL, renomear e excluir. A seção **Grupos** lista os grupos: o clique seleciona os membros; o menu move, renomeia ou desagrupa.
+- **Mover/Copiar:** o campo Objetos recebe instâncias (montagem) ou corpos da peça ativa (construção), a partir da seleção ou de cliques. O manipulador aparece no pivô: setas transladam por eixo, anéis giram (passos de 1°) e o centro move livremente no plano da tela; durante o arraste, o contorno dos elementos acompanha o cursor e a prévia completa é calculada ao soltar. Os campos de translação e rotação (eixos do mundo, rotação X→Y→Z pelo pivô) podem ser digitados. O pivô é o centro de massa ou a origem do primeiro elemento. **Criar cópia** gera novas instâncias da mesma definição ou corpos independentes, sem histórico. Vários elementos (por exemplo, todos os membros de um grupo) movem-se em uma só ação de desfazer.
+- **Alinhar:** escolha o tipo (face, aresta ou vértice), clique na geometria do elemento que se move e depois na de destino. Faces ficam opostas e coplanares no ponto clicado; arestas, paralelas; vértices, coincidentes. **Inverter direção** troca o sentido. Não cria restrição permanente.
+- **Padrões e espelhamento de componentes:** painéis com o componente, tipo, direção ou eixo, quantidade e espaçamento ou ângulo; o padrão compartilha a definição e reúne as instâncias num grupo. O espelhamento cria uma peça nova e independente.
+
 ## Painéis de comando
 
-As operações de construção abrem um painel ancorado à área 3D, à esquerda do cubo de orientação: cabeçalho com ícone e nome, campos rotulados e rodapé com o estado da prévia, **OK** e **Cancelar**. Enter confirma; Esc cancela.
+As operações de construção e de montagem abrem um painel ancorado ao canto superior esquerdo da área 3D (pode ser arrastado): cabeçalho com ícone e nome, campos rotulados e rodapé com o estado da prévia, **OK** e **Cancelar**. Enter confirma; Esc cancela.
 
 - **Campos de seleção** (Perfil, Arestas, Faces, Corpo, Corpo alvo, Corpo ferramenta, Face limite) mostram a quantidade escolhida e um × para limpar. O campo ativo, em azul, recebe os cliques no modelo. Arestas e faces alternam: clicar de novo numa já escolhida a retira. Clicar em outro corpo recomeça a seleção.
 - **Perfil na área 3D:** com o campo Perfil ativo, as regiões fechadas dos rascunhos visíveis (e do rascunho escolhido, mesmo oculto) aparecem levemente sombreadas; a região sob o cursor é realçada e o clique a escolhe. Regiões dentro de furos continuam acessíveis.
@@ -98,7 +105,7 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
-Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`), que não alteram o projeto de origem:
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`), que não alteram o projeto de origem:
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude

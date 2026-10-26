@@ -37,11 +37,12 @@ pub(crate) fn render_ui_scenario(
 ) -> Result<(), Box<dyn Error>> {
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
-        | "hover-edge" | "select-body" | "window" | "assembly-select" => {}
+        | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
+        | "assembly-ribbon" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon."
                     .into(),
             );
         }
@@ -98,22 +99,25 @@ pub(crate) fn render_ui_scenario(
             }
         },
         |editor| {
-            editor.feature_edit.is_none() || editor.preview.shown != 0 || {
-                let command = editor.feature_edit.as_ref().and_then(|d| {
-                    editor
-                        .current()
-                        .session
-                        .document()
-                        .part(d.part())
-                        .map(|p| d.preview_key(p))
-                });
-                command.is_some_and(|c| {
-                    matches!(
-                        editor.preview_status(&c),
-                        live_preview::PreviewStatus::Failed(_)
-                    )
-                })
-            }
+            (editor.feature_edit.is_none() && editor.assembly_panel.is_none())
+                || editor.preview.shown != 0
+                || (editor.assembly_panel.is_some() && editor.preview_idle())
+                || {
+                    let command = editor.feature_edit.as_ref().and_then(|d| {
+                        editor
+                            .current()
+                            .session
+                            .document()
+                            .part(d.part())
+                            .map(|p| d.preview_key(p))
+                    });
+                    command.is_some_and(|c| {
+                        matches!(
+                            editor.preview_status(&c),
+                            live_preview::PreviewStatus::Failed(_)
+                        )
+                    })
+                }
         },
     )
 }
@@ -227,6 +231,30 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(Some(Selection::Body { part, id: body }));
+        }
+        "move" | "align" | "assembly-ribbon" => {
+            editor.current_mut().active_part = None;
+            let document = editor.current().session.document();
+            // Uma instância com corpos visíveis, a mais interna disponível.
+            let instance = document
+                .instances()
+                .iter()
+                .rev()
+                .find(|i| document.part(i.part).is_some_and(|p| !p.bodies.is_empty()))
+                .map(|i| i.id)
+                .ok_or("Projeto sem instâncias com corpos.")?;
+            editor
+                .current_mut()
+                .select(Some(Selection::Instance(instance)));
+            editor.shell.tab = shell::RibbonTab::Assembly;
+            match scenario {
+                "move" => {
+                    editor.open_move();
+                    editor.set_move_for_capture([25., 0., 10.], [0., 0., 30.]);
+                }
+                "align" => editor.open_align(),
+                _ => {}
+            }
         }
         "assembly-select" => {
             editor.current_mut().active_part = None;

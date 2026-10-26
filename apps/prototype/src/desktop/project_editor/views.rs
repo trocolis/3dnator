@@ -67,6 +67,8 @@ impl Editor {
         let mut selection = None;
         let mut command = None;
         let mut activate = None;
+        let mut action = None;
+        let menu = self.menu_context();
         let busy = self.busy();
         egui::Panel::left("tree")
             .default_size(235.)
@@ -158,18 +160,37 @@ impl Editor {
                                         visible: !instance.visible,
                                     });
                                 }
+                                if browser::activation(ui, menu.active == Some(part.id)).clicked()
+                                    && !busy
+                                {
+                                    action = Some(if menu.active == Some(part.id) {
+                                        browser::MenuAction::Deactivate
+                                    } else {
+                                        browser::MenuAction::Activate(part.id)
+                                    });
+                                }
                                 let response = icons::entry(
                                     ui,
                                     icons::Icon::Cube,
-                                    &part.name,
+                                    &instance.name,
                                     self.current().is_selected(Selection::Instance(instance.id)),
-                                );
+                                )
+                                .on_hover_text(&part.name);
                                 if response.clicked() {
                                     selection = Some(Selection::Instance(instance.id));
                                 }
                                 if response.double_clicked() && !busy {
                                     activate = Some(part.id);
                                 }
+                                response.context_menu(|ui| {
+                                    ui.add_enabled_ui(!busy, |ui| {
+                                        if let Some(a) =
+                                            browser::instance_menu(ui, &menu, instance, &part.name)
+                                        {
+                                            action = Some(a);
+                                        }
+                                    });
+                                });
                             })
                             .body(|ui| {
                                 self.child_tree(ui, &document, part.id, 0, &mut selection);
@@ -236,8 +257,51 @@ impl Editor {
                                         if response.double_clicked() && !busy {
                                             activate = Some(part.id);
                                         }
+                                        response.context_menu(|ui| {
+                                            ui.add_enabled_ui(!busy, |ui| {
+                                                if let Some(a) =
+                                                    browser::body_menu(ui, &menu, part.id, body)
+                                                {
+                                                    action = Some(a);
+                                                }
+                                            });
+                                        });
                                     });
                                 }
+                            });
+                        }
+                        // Grupos organizacionais: clique seleciona os membros.
+                        if !document.groups().is_empty() {
+                            ui.separator();
+                            theme::section(
+                                ui,
+                                &format!("{} ({})", text(T::Groups), document.groups().len()),
+                            );
+                        }
+                        for group in document.groups() {
+                            let members = group
+                                .members
+                                .iter()
+                                .map(|id| Selection::Instance(*id))
+                                .collect::<Vec<_>>();
+                            let chosen = !members.is_empty()
+                                && members.iter().all(|m| self.current().is_selected(*m));
+                            let response =
+                                icons::entry(ui, icons::Icon::Group, &group.name, chosen)
+                                    .on_hover_text(format!(
+                                        "{} {}",
+                                        group.members.len(),
+                                        text(T::SelectedCount)
+                                    ));
+                            if response.clicked() {
+                                action = Some(browser::MenuAction::Select(members));
+                            }
+                            response.context_menu(|ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    if let Some(a) = browser::group_menu(ui, group) {
+                                        action = Some(a);
+                                    }
+                                });
                             });
                         }
                         if !document.sheets().is_empty() {
@@ -272,6 +336,9 @@ impl Editor {
         }
         if let Some(command) = command {
             self.execute(command);
+        }
+        if let Some(action) = action.or(self.pending_menu.take()) {
+            self.apply_menu_action(ui.ctx(), action);
         }
     }
     pub(super) fn properties(&mut self, ui: &mut egui::Ui) {
@@ -331,8 +398,8 @@ impl Editor {
                                     Some(Selection::Body { id, .. }) => {
                                         Some(Command::RenameBody { id, name })
                                     }
-                                    Some(Selection::Instance(_)) => {
-                                        Some(Command::RenamePart { id: part, name })
+                                    Some(Selection::Instance(id)) => {
+                                        Some(Command::RenameInstance { id, name })
                                     }
                                     None => None,
                                 };
@@ -552,12 +619,18 @@ impl Editor {
                 self.canvas_rect = response.rect;
                 // Com o campo Perfil ativo, o clique escolhe a região do rascunho; janela e
                 // pressão longa são gestos de seleção que substituem o clique simples.
+                // O manipulador e os painéis de montagem têm prioridade sobre a seleção comum.
+                let gizmo = self.move_gizmo(ui, &response);
+                let assembly = !gizmo && self.assembly_pick(&response);
                 let profile = self.profile_overlay(ui, &response);
                 let gesture = self.selection_gestures(ui, &response);
                 if self.current().sketch_edit.is_none()
                     && self.current().plane_pick.is_none()
                     && !profile
                     && !gesture
+                    && !gizmo
+                    && !assembly
+                    && self.assembly_panel.is_none()
                 {
                     self.viewport_actions(ui, &response);
                 }

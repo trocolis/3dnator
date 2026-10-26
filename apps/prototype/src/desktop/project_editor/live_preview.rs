@@ -98,6 +98,23 @@ impl Editor {
         }
     }
 
+    /// Mantém a prévia atual neste quadro sem trocar o comando (por exemplo, durante o
+    /// arraste de um manipulador).
+    pub(super) fn keep_preview(&mut self) {
+        self.preview.requested = true;
+    }
+
+    /// Nenhuma prévia pedida ou calculando: o painel não tem comando completo ou já terminou.
+    pub(super) fn preview_idle(&self) -> bool {
+        match &self.preview.request {
+            None => true,
+            Some(request) => {
+                self.preview.failed.as_ref().map(|(k, _)| k) == Some(&request.key)
+                    || self.preview.ready.as_ref().map(|(k, _)| k) == Some(&request.key)
+            }
+        }
+    }
+
     /// Situação da pré-visualização do comando dado, se for o atual.
     pub(super) fn preview_status(&self, command: &Command) -> PreviewStatus<'_> {
         let key = key(command);

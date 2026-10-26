@@ -28,13 +28,10 @@ pub(super) struct Outcome {
     pub cancel: bool,
 }
 
-/// Posição inicial: parte superior direita da área 3D, à esquerda do cubo de orientação e
-/// abaixo da faixa de câmera, para não cobrir a navegação.
+/// Posição inicial: canto superior esquerdo da área 3D, abaixo da faixa de câmera. Deixa
+/// livres o centro, onde o modelo costuma estar enquadrado, e o cubo de orientação.
 pub(super) fn default_position(canvas: egui::Rect) -> egui::Pos2 {
-    egui::pos2(
-        (canvas.right() - WIDTH - 185.).max(canvas.left() + 8.),
-        canvas.top() + 44.,
-    )
+    egui::pos2(canvas.left() + 10., canvas.top() + 44.)
 }
 
 /// Identificação do painel: chave de memória, ícone e nome da ferramenta.

@@ -69,7 +69,14 @@ enum Action {
     SketchYZ,
     SketchFace,
     Solid(SolidTool),
-    Assembly,
+    MoveCopy,
+    Align,
+    NewInstance,
+    CloneInstance,
+    InstancePattern(bool),
+    InstanceMirror,
+    Group,
+    Ungroup,
     Parameters,
     Measure,
     Drawing,
@@ -105,7 +112,15 @@ impl Action {
             Self::SketchYZ => T::SketchYZ,
             Self::SketchFace => T::SketchOnFace,
             Self::Solid(tool) => tool.label(),
-            Self::Assembly => T::AssemblyTools,
+            Self::MoveCopy => T::MoveCopyTool,
+            Self::Align => T::AlignTool,
+            Self::NewInstance => T::NewInstanceTool,
+            Self::CloneInstance => T::CloneTool,
+            Self::InstancePattern(false) => T::RectangularInstancePattern,
+            Self::InstancePattern(true) => T::CircularInstancePattern,
+            Self::InstanceMirror => T::MirrorComponent,
+            Self::Group => T::GroupTool,
+            Self::Ungroup => T::UngroupTool,
             Self::Parameters => T::Parameters,
             Self::Measure => T::MeasureSelection,
             Self::Drawing => T::Drawing,
@@ -130,6 +145,10 @@ impl Action {
             Self::Solid(SolidTool::Fillet) => T::FilletShort,
             Self::Solid(SolidTool::Mirror) => T::MirrorShort,
             Self::SketchTool(sketch_editor::Tool::Arc) => T::ArcShort,
+            Self::InstancePattern(false) => T::RectangularPattern,
+            Self::InstancePattern(true) => T::CircularPattern,
+            Self::InstanceMirror => T::MirrorShort,
+            Self::ExportStep => T::StepShort,
             _ => self.label(),
         }
     }
@@ -160,7 +179,13 @@ impl Action {
                 SolidTool::Split => Icon::Split,
                 SolidTool::Join | SolidTool::Cut | SolidTool::Intersect => Icon::Boolean,
             },
-            Self::Assembly => Icon::Move,
+            Self::MoveCopy => Icon::Move,
+            Self::Align => Icon::Align,
+            Self::NewInstance => Icon::NewBody,
+            Self::CloneInstance => Icon::Boolean,
+            Self::InstancePattern(_) => Icon::Pattern,
+            Self::InstanceMirror => Icon::Mirror,
+            Self::Group | Self::Ungroup => Icon::Group,
             Self::Parameters => Icon::Parameters,
             Self::Measure => Icon::Measure,
             Self::Drawing => Icon::Drawing,
@@ -217,7 +242,15 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::CircularPattern),
     Action::Solid(SolidTool::Mirror),
     Action::Solid(SolidTool::Split),
-    Action::Assembly,
+    Action::MoveCopy,
+    Action::Align,
+    Action::NewInstance,
+    Action::CloneInstance,
+    Action::InstancePattern(false),
+    Action::InstancePattern(true),
+    Action::InstanceMirror,
+    Action::Group,
+    Action::Ungroup,
     Action::Parameters,
     Action::Drawing,
     Action::Measure,
@@ -268,6 +301,29 @@ impl Editor {
                         .is_some_and(|w| w.pending.is_some())
             }
             Action::Parameters => editable && self.current().active_part.is_some(),
+            Action::NewInstance
+            | Action::CloneInstance
+            | Action::Group
+            | Action::InstancePattern(_)
+            | Action::InstanceMirror => {
+                editable
+                    && self.current().sketch_edit.is_none()
+                    && (self
+                        .current()
+                        .selected
+                        .iter()
+                        .any(|s| matches!(s, Selection::Instance(_)))
+                        || matches!(action, Action::InstancePattern(_) | Action::InstanceMirror))
+            }
+            Action::Ungroup => {
+                editable
+                    && self.current().session.document().groups().iter().any(|g| {
+                        g.members
+                            .iter()
+                            .any(|m| self.current().is_selected(Selection::Instance(*m)))
+                    })
+            }
+            Action::MoveCopy | Action::Align => editable && self.current().sketch_edit.is_none(),
             Action::NewSketch | Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 editable && self.current().sketch_edit.is_none()
             }
@@ -396,9 +452,14 @@ impl Editor {
             }
             Action::SketchFace => self.sketch_on_selected_face(context),
             Action::Solid(tool) => self.open_feature_tool(tool),
-            Action::Assembly => {
-                self.assembly_edit = Some(assembly_editor::Draft::new(self.current().id))
-            }
+            Action::MoveCopy => self.open_move(),
+            Action::Align => self.open_align(),
+            Action::NewInstance => self.duplicate_selection(context),
+            Action::CloneInstance => self.clone_selection(context),
+            Action::InstancePattern(circular) => self.open_instance_pattern(circular),
+            Action::InstanceMirror => self.open_instance_mirror(),
+            Action::Group => self.group_selection(context),
+            Action::Ungroup => self.ungroup_selection(context),
             Action::Parameters => self.open_parameters(),
             Action::Measure => {
                 self.shell.properties_visible = true;
@@ -751,6 +812,9 @@ impl Editor {
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
                         Action::Solid(SolidTool::Shell),
+                        Action::Solid(SolidTool::Join),
+                        Action::Solid(SolidTool::Split),
+                        Action::MoveCopy,
                     ],
                 );
                 self.ribbon_group(
@@ -759,21 +823,28 @@ impl Editor {
                     &[
                         Action::Solid(SolidTool::Mirror),
                         Action::Solid(SolidTool::LinearPattern),
+                        Action::Solid(SolidTool::CircularPattern),
                     ],
                 );
                 self.ribbon_group(ui, T::ManageGroup, &[Action::Parameters]);
             }
             RibbonTab::Assembly => {
-                self.ribbon_group(ui, T::ArrangeGroup, &[Action::Assembly]);
                 self.ribbon_group(
                     ui,
-                    T::ModelTab,
+                    T::ComponentField,
+                    &[Action::NewInstance, Action::CloneInstance],
+                );
+                self.ribbon_group(ui, T::PositionGroup, &[Action::MoveCopy, Action::Align]);
+                self.ribbon_group(
+                    ui,
+                    T::PatternsGroup,
                     &[
-                        Action::Solid(SolidTool::Mirror),
-                        Action::Solid(SolidTool::LinearPattern),
-                        Action::Solid(SolidTool::CircularPattern),
+                        Action::InstancePattern(false),
+                        Action::InstancePattern(true),
+                        Action::InstanceMirror,
                     ],
                 );
+                self.ribbon_group(ui, T::ArrangeGroup, &[Action::Group, Action::Ungroup]);
                 self.ribbon_group(ui, T::DocumentGroup, &[Action::Drawing, Action::ExportStep]);
             }
             RibbonTab::Insert => {
