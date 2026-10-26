@@ -24,6 +24,18 @@ impl Capture {
             .filter(|p| p[0] > 60 && p[1] > 60 && p[2] > 60)
             .count()
     }
+    /// Soma do brilho (R + G + B) nos pixels que são superfície em `mask`, uma captura
+    /// do mesmo tamanho.
+    pub(crate) fn brightness_over(&self, mask: &Capture) -> u64 {
+        self.pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(mask.pixels.as_chunks::<4>().0)
+            .filter(|(_, m)| m[0] > 60 && m[1] > 60 && m[2] > 60)
+            .map(|(p, _)| u64::from(p[0]) + u64::from(p[1]) + u64::from(p[2]))
+            .sum()
+    }
     pub(crate) fn write_png(&self, path: &Path) -> Result<(), Box<dyn Error>> {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
@@ -130,11 +142,27 @@ pub fn render(path: &Path) -> Result<(), Box<dyn Error>> {
     if triangulation_pixels == 0 {
         return Err("A triangulação ativada não alterou a imagem.".into());
     }
+    // O mesmo modelo no pipeline translúcido mistura a superfície com o fundo escuro.
+    let mesh = reference_bracket()?;
+    let (_, creases) = mesh.edge_analysis(Some(std::f64::consts::FRAC_PI_6));
+    let styles = vec![nator_renderer::STYLE_TRANSPARENT; mesh.triangles().len()];
+    let translucent = nator_renderer::PreparedMesh::with_styles(&mesh, &creases, &styles, 0)?;
+    let camera = viewport.camera.clone();
+    viewport.set_prepared_mesh(&device, &translucent)?;
+    viewport.camera = camera;
+    viewport.render(&device, &queue);
+    let faded = read_texture(&device, &queue, viewport.color_texture())?;
+    // Fração do brilho da superfície que resta com o modelo translúcido sobre o fundo escuro.
+    let transparency_ratio =
+        faded.brightness_over(&capture) as f64 / capture.brightness_over(&capture).max(1) as f64;
+    if transparency_ratio > 0.85 {
+        return Err("O estilo transparente não alterou a imagem.".into());
+    }
     capture.write_png(path)?;
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"preview":path,"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
+            &serde_json::json!({"preview":path,"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"transparency_brightness_ratio":transparency_ratio,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
         )?
     );
     Ok(())

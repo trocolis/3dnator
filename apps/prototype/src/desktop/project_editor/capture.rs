@@ -4,7 +4,8 @@ use std::{error::Error, path::Path};
 
 pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
     let document = read_project(project)?;
-    let scene = document.scene()?;
+    // Mesma preparação estilizada da janela, com o estado visual inicial da aba.
+    let scene = prepare_scene(&document, &ViewState::default(), None)?;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
@@ -32,13 +33,16 @@ pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dy
     editor.switch(0);
     editor.recoveries.clear();
     editor.show_recovery = false;
-    if let Some(scene) = &scene {
-        let prepared = PreparedMesh::with_creases(&scene.mesh, &scene.creases)?;
-        editor.viewport.set_prepared_mesh(&device, &prepared)?;
-        editor.current_mut().scene_bounds = Some(scene.mesh.bounds());
-    }
-    editor.scene = scene.map(|s| s.mesh);
-    editor.rendered = Some((editor.current().id, editor.current().session.revision()));
+    let mesh = match scene {
+        Some((mesh, prepared)) => {
+            editor.viewport.set_prepared_mesh(&device, &prepared)?;
+            editor.current_mut().scene_bounds = Some(mesh.bounds());
+            Some(mesh)
+        }
+        None => None,
+    };
+    editor.scene = mesh;
+    editor.rendered = Some(editor.scene_key());
     if let Some(part) = editor.current().session.document().parts().first()
         && let Some(body) = part.bodies.first()
     {

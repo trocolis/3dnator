@@ -28,9 +28,11 @@ Executada em paralelo ao Codex até o encerramento dele. A partir daí, cada inc
 7. Etapa 4: padrões e espelhamento de instâncias e rascunho em face selecionada.
 8. Etapa 5: corte A–A hachurado, revisão, data e notas de rosca nas folhas, ferramenta Medir com medidas exatas no B-rep.
 9. Exportação STL com escopo, qualidade e resumo antes de gravar.
+10. Arredondamento e chanfro de várias arestas, chanfro por ângulo, casca com várias faces e para fora; extrusão até uma face e com resultado combinado.
+11. Controles visuais: isolamento, transparência, bloqueio de seleção e esmaecimento na construção.
 
-Ao fim: 86 testes aprovados com OCCT e 67 sem, clippy sem avisos nas duas configurações, ensaios de linha de comando aprovados.
+Ao fim: 90 testes aprovados com OCCT e 68 sem, clippy sem avisos nas duas configurações, ensaios de linha de comando aprovados.
 
 ## Pendências
 
-Ver a seção Situação atual de [ROADMAP.md](../ROADMAP.md): Windows e Ubuntu (CI não executada), máquina de referência, interação real com a janela, controles visuais (isolamento, transparência, bloqueio, esmaecimento, perspectiva) e refinamentos de arredondamento, chanfro, casca, extrusão e folhas.
+Ver a seção Situação atual de [ROADMAP.md](../ROADMAP.md): Windows e Ubuntu (CI não executada), máquina de referência, interação real com a janela, perspectiva e sombras, importação STEP com cores e montagem, espelhamento de peças com subpeças e folhas com HLR exato.

@@ -50,6 +50,7 @@
 
 ### Visualização e desempenho
 
+- Isolamento da seleção, transparência e bloqueio de seleção por instância, e esmaecimento das outras peças durante a construção: controles visuais da aba, sem alterar geometria, histórico ou visibilidade gravada. Corpos translúcidos são desenhados depois dos opacos, com mistura de cores.
 - Arestas vivas (dobras acima de 30°, bordas abertas) exibidas por padrão, calculadas uma vez por geometria.
 - Triangulação e arestas desenhadas no shader por coordenadas baricêntricas, sem buffer de linhas: a memória da GPU por triângulo caiu de 216 para 84 bytes.
 - Vértices de coordenadas idênticas são fundidos na importação STL e na tesselação, sem alterar a geometria. Uma malha fechada passa de 72 para cerca de 12 bytes por triângulo, também no arquivo de projeto.

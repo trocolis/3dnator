@@ -14,7 +14,7 @@ Pendências conhecidas, por etapa:
 4. **Montagem:** espelhamento de peças que contêm subpeças; alinhamento contínuo por restrições não faz parte do escopo inicial.
 5. **Documentação técnica:** folhas derivadas da malha de exibição (remoção aproximada de linhas ocultas, sem HLR exato do B-rep); cotas apenas gerais e não reposicionáveis; uma vista em corte por folha.
 
-Interface: isolamento, transparência, bloqueio de seleção, esmaecimento das outras peças na construção, projeção em perspectiva e sombras ainda não foram implementados.
+Interface: projeção em perspectiva e sombras opcionais ainda não foram implementadas.
 
 ## 1. Base técnica
 

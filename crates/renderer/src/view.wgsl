@@ -9,7 +9,8 @@ struct View {
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    // Bit k: a aresta oposta ao canto k é viva (dobra acentuada ou borda aberta).
+    // Bits 0-2: a aresta oposta ao canto k é viva (dobra acentuada ou borda aberta).
+    // Bits 8-15: estilo (0 normal, 1 esmaecido, 2 transparente; ver STYLE_* em lib.rs).
     @location(2) edges: u32,
 }
 struct VertexOutput {
@@ -55,5 +56,14 @@ struct VertexOutput {
     let crease = max(max(crease_near.x, crease_near.y), crease_near.z) * view.options.y;
     var color = mix(surface, vec3<f32>(0.11, 0.16, 0.20), triangulation);
     color = mix(color, vec3<f32>(0.05, 0.06, 0.07), crease);
+    // Estilos translúcidos são desenhados depois dos opacos, sem escrever profundidade.
+    let style = (input.edges >> 8u) & 255u;
+    if (style == 1u) {
+        // Esmaecido: cor próxima do fundo, para destacar a peça em construção.
+        return vec4<f32>(mix(color, vec3<f32>(0.075, 0.09, 0.11), 0.55), 0.35);
+    }
+    if (style == 2u) {
+        return vec4<f32>(color, 0.4);
+    }
     return vec4<f32>(color, 1.0);
 }

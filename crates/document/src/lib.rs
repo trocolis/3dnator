@@ -94,10 +94,33 @@ impl MeshAsset {
     }
 }
 
-/// Cena de exibição: malha em coordenadas de montagem e arestas vivas por triângulo.
+/// Estilo de exibição de um corpo na cena. É um controle visual: não altera geometria,
+/// histórico nem a visibilidade gravada no documento.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    Normal,
+    /// Esmaecido, como as outras peças durante a construção de uma peça.
+    Dimmed,
+    Transparent,
+}
+
+/// Acúmulo de uma parte da cena (opaca ou translúcida) antes da concatenação.
+#[derive(Default)]
+struct SceneGroup {
+    vertices: Vec<nator_geometry::Point3>,
+    triangles: Vec<[u32; 3]>,
+    creases: Vec<u8>,
+    styles: Vec<Style>,
+}
+
+/// Cena de exibição: malha em coordenadas de montagem, arestas vivas e estilo por triângulo.
+/// Os triângulos opacos vêm primeiro (`opaque_triangles`), para que os translúcidos sejam
+/// desenhados depois deles.
 pub struct Scene {
     pub mesh: Mesh,
     pub creases: Vec<u8>,
+    pub styles: Vec<Style>,
+    pub opaque_triangles: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -651,10 +674,18 @@ impl Document {
     /// Cena com as arestas vivas já analisadas em cada geometria: transformações rígidas
     /// preservam ângulos, então a máscara de cada corpo vale em qualquer posição.
     pub fn scene(&self) -> Result<Option<Scene>, DocumentError> {
+        self.scene_styled(|_, _| Some(Style::Normal))
+    }
+
+    /// Cena com estilo escolhido por ocorrência e peça; `None` omite a ocorrência (isolamento),
+    /// sem alterar a visibilidade gravada no documento.
+    pub fn scene_styled(
+        &self,
+        style: impl Fn(&assembly::Occurrence, PartId) -> Option<Style>,
+    ) -> Result<Option<Scene>, DocumentError> {
         self.validate()?;
-        let mut vertices = Vec::new();
-        let mut triangles = Vec::new();
-        let mut creases = Vec::new();
+        // Dois grupos (opacos e translúcidos), concatenados no fim.
+        let mut groups: [SceneGroup; 2] = Default::default();
         for occurrence in self.occurrences()? {
             let instance = self
                 .instance(occurrence.instance)
@@ -662,31 +693,80 @@ impl Document {
             let part = self
                 .part(instance.part)
                 .ok_or_else(|| DocumentError("Peça da instância inexistente.".into()))?;
+            let Some(look) = style(&occurrence, part.id) else {
+                continue;
+            };
+            let group = &mut groups[usize::from(look != Style::Normal)];
             for body in part.bodies.iter().filter(|b| b.visible) {
                 let mesh = body.geometry.mesh();
-                let base = u32::try_from(vertices.len())
+                let base = u32::try_from(group.vertices.len())
                     .map_err(|_| DocumentError("Cena com vértices excessivos.".into()))?;
-                vertices.extend(
+                group.vertices.extend(
                     mesh.vertices()
                         .iter()
                         .map(|point| occurrence.placement.apply(body.placement.apply(*point))),
                 );
-                triangles.extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
-                creases.extend_from_slice(body.geometry.creases());
+                group
+                    .triangles
+                    .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
+                group.creases.extend_from_slice(body.geometry.creases());
+                group
+                    .styles
+                    .extend(std::iter::repeat_n(look, mesh.triangles().len()));
             }
         }
-        if triangles.is_empty() {
-            Ok(None)
-        } else {
-            let mesh = Mesh::new(vertices, triangles).map_err(|e| DocumentError(e.to_string()))?;
-            Ok(Some(Scene { mesh, creases }))
+        let [mut scene, translucent] = groups;
+        let opaque_triangles = scene.triangles.len();
+        let offset = u32::try_from(scene.vertices.len())
+            .map_err(|_| DocumentError("Cena com vértices excessivos.".into()))?;
+        scene.vertices.extend(translucent.vertices);
+        scene
+            .triangles
+            .extend(translucent.triangles.iter().map(|t| t.map(|i| i + offset)));
+        if scene.triangles.is_empty() {
+            return Ok(None);
         }
+        scene.creases.extend(translucent.creases);
+        scene.styles.extend(translucent.styles);
+        let mesh =
+            Mesh::new(scene.vertices, scene.triangles).map_err(|e| DocumentError(e.to_string()))?;
+        Ok(Some(Scene {
+            mesh,
+            creases: scene.creases,
+            styles: scene.styles,
+            opaque_triangles,
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn styled_scene_orders_opaque_first_and_omits_isolated_out() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Estilos")?;
+        let asset = Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?));
+        let (part, _) = doc.add_mesh(None, "Suporte".into(), Arc::clone(&asset))?;
+        let second = doc.add_instance(part, None, Placement::new([100., 0., 0.], [0.; 3])?)?;
+        let third = doc.add_instance(part, None, Placement::new([200., 0., 0.], [0.; 3])?)?;
+        let scene = doc
+            .scene_styled(|occurrence, _| match occurrence.instance {
+                id if id == second => Some(Style::Transparent),
+                id if id == third => None,
+                _ => Some(Style::Normal),
+            })?
+            .ok_or("Cena ausente")?;
+        assert_eq!(scene.mesh.triangles().len(), 40);
+        assert_eq!(scene.opaque_triangles, 20);
+        assert_eq!(scene.styles[0], Style::Normal);
+        assert_eq!(scene.styles[39], Style::Transparent);
+        // A instância isolada fora da cena não entra na caixa envolvente.
+        assert_eq!(scene.mesh.bounds().max[0], 160.);
+        // O documento continua com as três instâncias visíveis.
+        assert!(doc.instances().iter().all(|i| i.visible));
+        Ok(())
+    }
 
     #[test]
     fn prevents_vertex_amplification_by_instances() -> Result<(), Box<dyn Error>> {

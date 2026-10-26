@@ -363,9 +363,18 @@ pub struct Pick {
 }
 impl Document {
     pub fn pick(&self, ray: nator_geometry::query::Ray) -> Result<Option<Pick>, DocumentError> {
+        self.pick_with(ray, |_| true)
+    }
+    /// Seleção que ignora ocorrências recusadas por `allowed` (bloqueio de seleção ou
+    /// isolamento), mesmo que estejam visíveis.
+    pub fn pick_with(
+        &self,
+        ray: nator_geometry::query::Ray,
+        allowed: impl Fn(&Occurrence) -> bool,
+    ) -> Result<Option<Pick>, DocumentError> {
         let mut nearest = f64::INFINITY;
         let mut result = None;
-        for occurrence in self.occurrences()? {
+        for occurrence in self.occurrences()?.into_iter().filter(|o| allowed(o)) {
             let instance = self
                 .instance(occurrence.instance)
                 .ok_or_else(|| DocumentError("Instância inexistente.".into()))?;

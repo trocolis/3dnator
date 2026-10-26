@@ -14,7 +14,15 @@ const VERTEX_BYTES: usize = 28;
 /// desenhadas no shader, sem buffers de linhas.
 pub struct PreparedMesh {
     vertices: Vec<u8>,
+    /// Vértices opacos no início do buffer; os demais são translúcidos.
+    opaque_vertices: usize,
 }
+
+/// Estilos de exibição gravados nos bits 8 a 15 do atributo de arestas (ver `view.wgsl`).
+pub const STYLE_NORMAL: u8 = 0;
+/// Esmaecido: cor puxada para o fundo e quase transparente.
+pub const STYLE_DIMMED: u8 = 1;
+pub const STYLE_TRANSPARENT: u8 = 2;
 impl PreparedMesh {
     /// Analisa as arestas vivas da malha. Para cenas do documento, prefira
     /// `with_creases`, que reaproveita a análise feita uma vez por geometria.
@@ -25,8 +33,24 @@ impl PreparedMesh {
 
     /// `creases[i]` marca as arestas vivas do triângulo i (bit k: aresta oposta ao canto k).
     pub fn with_creases(mesh: &Mesh, creases: &[u8]) -> Result<Self, String> {
-        if creases.len() != mesh.triangles().len() {
+        Self::with_styles(mesh, creases, &[], mesh.triangles().len())
+    }
+
+    /// Como `with_creases`, com um estilo por triângulo (`STYLE_*`; vazio = todos normais).
+    /// Os primeiros `opaque_triangles` são desenhados opacos; os demais, translúcidos e
+    /// depois deles, como exige a mistura de cores.
+    pub fn with_styles(
+        mesh: &Mesh,
+        creases: &[u8],
+        styles: &[u8],
+        opaque_triangles: usize,
+    ) -> Result<Self, String> {
+        let count = mesh.triangles().len();
+        if creases.len() != count {
             return Err("Arestas vivas não correspondem aos triângulos da cena.".into());
+        }
+        if (!styles.is_empty() && styles.len() != count) || opaque_triangles > count {
+            return Err("Estilos não correspondem aos triângulos da cena.".into());
         }
         let center = mesh.bounds().center();
         let scale = mesh.bounds().size().into_iter().fold(0_f64, f64::max);
@@ -34,7 +58,9 @@ impl PreparedMesh {
             return Err("A malha não possui extensão visível.".into());
         }
         let mut vertices = Vec::with_capacity(mesh.triangles().len() * 3 * VERTEX_BYTES);
-        for (triangle, mask) in mesh.triangles().iter().zip(creases) {
+        for (index, (triangle, mask)) in mesh.triangles().iter().zip(creases).enumerate() {
+            let style = styles.get(index).copied().unwrap_or(STYLE_NORMAL);
+            let attribute = u32::from(*mask) | (u32::from(style) << 8);
             let points = mesh.triangle_points(*triangle);
             let normal = cross(sub(points[1], points[0]), sub(points[2], points[0]));
             let length = norm(normal);
@@ -47,10 +73,13 @@ impl PreparedMesh {
                 for v in normal {
                     vertices.extend_from_slice(&((v / length) as f32).to_le_bytes());
                 }
-                vertices.extend_from_slice(&u32::from(*mask).to_le_bytes());
+                vertices.extend_from_slice(&attribute.to_le_bytes());
             }
         }
-        Ok(Self { vertices })
+        Ok(Self {
+            vertices,
+            opaque_vertices: opaque_triangles * 3,
+        })
     }
     /// Bytes que serão enviados à GPU.
     pub fn gpu_bytes(&self) -> usize {
@@ -207,9 +236,12 @@ pub struct Viewport {
     size: [u32; 2],
     triangles: wgpu::Buffer,
     vertex_count: u32,
+    opaque_count: u32,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     surface_pipeline: wgpu::RenderPipeline,
+    /// Corpos translúcidos: mistura de cores e sem escrita de profundidade.
+    translucent_pipeline: wgpu::RenderPipeline,
 }
 
 /// Uniforme do shader: matriz 4×4 da câmera seguida de quatro opções de exibição.
@@ -290,8 +322,10 @@ impl Viewport {
             label: Some("Superfície neutra"),
             source: wgpu::ShaderSource::Wgsl(include_str!("view.wgsl").into()),
         });
-        let surface_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Superfícies"),
+        let pipeline =
+            |translucent: bool| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(if translucent { "Superfícies translúcidas" } else { "Superfícies" }),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -310,7 +344,7 @@ impl Viewport {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(true),
+                depth_write_enabled: Some(!translucent),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -322,13 +356,16 @@ impl Viewport {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: COLOR_FORMAT,
-                    blend: None,
+                    blend: translucent.then_some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
             multiview_mask: None,
             cache: None,
-        });
+        })
+            };
+        let surface_pipeline = pipeline(false);
+        let translucent_pipeline = pipeline(true);
         let (color, view, depth) = targets(device, [1, 1]);
         let empty = || {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -348,9 +385,11 @@ impl Viewport {
             size: [1, 1],
             triangles: empty(),
             vertex_count: 0,
+            opaque_count: 0,
             uniform,
             bind_group,
             surface_pipeline,
+            translucent_pipeline,
         };
         viewport.set_mesh(device, mesh)?;
         Ok(viewport)
@@ -368,6 +407,7 @@ impl Viewport {
             mapped_at_creation: false,
         });
         self.vertex_count = 0;
+        self.opaque_count = 0;
     }
 
     pub fn set_prepared_mesh(
@@ -384,6 +424,7 @@ impl Viewport {
             usage: wgpu::BufferUsages::VERTEX,
         });
         self.vertex_count = (mesh.vertices.len() / VERTEX_BYTES) as u32;
+        self.opaque_count = (mesh.opaque_vertices as u32).min(self.vertex_count);
         self.camera = Camera::default();
         self.camera
             .fit(f64::from(self.size[0]) / f64::from(self.size[1]));
@@ -459,7 +500,11 @@ impl Viewport {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_pipeline(&self.surface_pipeline);
             pass.set_vertex_buffer(0, self.triangles.slice(..));
-            pass.draw(0..self.vertex_count, 0..1);
+            pass.draw(0..self.opaque_count, 0..1);
+            if self.opaque_count < self.vertex_count {
+                pass.set_pipeline(&self.translucent_pipeline);
+                pass.draw(self.opaque_count..self.vertex_count, 0..1);
+            }
         }
         queue.submit([encoder.finish()]);
     }

@@ -15,6 +15,7 @@ use nator_geometry::{Mesh, Placement, Point3, reference_bracket};
 use nator_project_io::{read_project, recovery_directory, recovery_files, write_project};
 use nator_renderer::{Camera, PreparedMesh, Viewport, wgpu};
 use std::{
+    collections::HashSet,
     path::PathBuf,
     sync::{
         Arc,
@@ -44,6 +45,67 @@ enum Selection {
     Body { part: PartId, id: BodyId },
 }
 
+/// Isolamento, transparência e bloqueio de seleção por instância. Cada mudança incrementa
+/// `version`, que faz parte da chave da cena exibida.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ViewState {
+    isolated: Option<HashSet<InstanceId>>,
+    transparent: HashSet<InstanceId>,
+    locked: HashSet<InstanceId>,
+    version: u64,
+}
+impl ViewState {
+    fn touched(&mut self) {
+        self.version = self.version.wrapping_add(1);
+    }
+    fn in_isolation(&self, occurrence: &nator_document::assembly::Occurrence) -> bool {
+        self.isolated
+            .as_ref()
+            .is_none_or(|set| occurrence.path.iter().any(|i| set.contains(i)))
+    }
+    /// Estilo de uma ocorrência. Na construção de uma peça, as demais ficam esmaecidas,
+    /// salvo as subpeças dela (alguma instância do caminho é da peça ativa).
+    fn style(
+        &self,
+        document: &Document,
+        occurrence: &nator_document::assembly::Occurrence,
+        part: PartId,
+        active: Option<PartId>,
+    ) -> Option<nator_document::Style> {
+        use nator_document::Style;
+        if !self.in_isolation(occurrence) {
+            return None;
+        }
+        if occurrence.path.iter().any(|i| self.transparent.contains(i)) {
+            return Some(Style::Transparent);
+        }
+        let inside = |active: PartId| {
+            part == active
+                || occurrence
+                    .path
+                    .iter()
+                    .any(|i| document.instance(*i).is_some_and(|i| i.part == active))
+        };
+        Some(match active {
+            Some(active) if !inside(active) => Style::Dimmed,
+            _ => Style::Normal,
+        })
+    }
+    /// Ocorrências bloqueadas ou fora do isolamento não podem ser selecionadas na área 3D.
+    fn pickable(&self, occurrence: &nator_document::assembly::Occurrence) -> bool {
+        self.in_isolation(occurrence) && !occurrence.path.iter().any(|i| self.locked.contains(i))
+    }
+}
+
+/// Identifica a cena exibida: muda com a revisão, o estado visual e a peça em construção.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SceneKey {
+    tab: u64,
+    revision: u64,
+    view: u64,
+    active: Option<PartId>,
+}
+
 struct Tab {
     id: u64,
     session: Session,
@@ -64,6 +126,8 @@ struct Tab {
     measurements: Vec<Point3>,
     /// Clique de referência para ângulo entre faces e distância entre corpos.
     reference: Option<nator_document::assembly::Pick>,
+    /// Controles visuais da aba: não entram no documento nem no desfazer.
+    view: ViewState,
     drag_start: Option<egui::Pos2>,
 }
 impl Tab {
@@ -109,6 +173,7 @@ impl Tab {
             picked: None,
             measurements: Vec::new(),
             reference: None,
+            view: ViewState::default(),
             drag_start: None,
         })
     }
@@ -204,8 +269,7 @@ enum Outcome {
         close_after: bool,
     },
     Scene {
-        tab: u64,
-        revision: u64,
+        key: SceneKey,
         mesh: Option<Mesh>,
         prepared: Option<PreparedMesh>,
     },
@@ -241,8 +305,8 @@ pub struct Editor {
     worker: Option<Worker>,
     status: String,
     scene: Option<Mesh>,
-    rendered: Option<(u64, u64)>,
-    requested: Option<(u64, u64)>,
+    rendered: Option<SceneKey>,
+    requested: Option<SceneKey>,
     import_scale: f64,
     pending_close: Option<u64>,
     want_exit: bool,
@@ -260,6 +324,33 @@ pub struct Editor {
     rotate_angle: f64,
     /// Linhas do último relatório de medição, já formatadas para exibição.
     measure_report: Vec<String>,
+}
+
+/// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
+fn prepare_scene(
+    document: &Document,
+    view: &ViewState,
+    active: Option<PartId>,
+) -> Result<Option<(Mesh, PreparedMesh)>, String> {
+    use nator_document::Style;
+    let Some(scene) = document
+        .scene_styled(|occurrence, part| view.style(document, occurrence, part, active))
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(None);
+    };
+    let styles = scene
+        .styles
+        .iter()
+        .map(|style| match style {
+            Style::Normal => nator_renderer::STYLE_NORMAL,
+            Style::Dimmed => nator_renderer::STYLE_DIMMED,
+            Style::Transparent => nator_renderer::STYLE_TRANSPARENT,
+        })
+        .collect::<Vec<_>>();
+    let prepared =
+        PreparedMesh::with_styles(&scene.mesh, &scene.creases, &styles, scene.opaque_triangles)?;
+    Ok(Some((scene.mesh, prepared)))
 }
 
 impl Editor {
@@ -591,12 +682,11 @@ impl Editor {
                 }
             }
             Ok(Outcome::Scene {
-                tab,
-                revision,
+                key,
                 mesh,
                 prepared,
             }) => {
-                if self.current().id == tab && self.current().session.revision() == revision {
+                if self.scene_key() == key {
                     let mut camera = self.current().camera.clone();
                     let new_bounds = mesh.as_ref().map(Mesh::bounds);
                     if let Some(bounds) = new_bounds {
@@ -619,7 +709,7 @@ impl Editor {
                                 self.current_mut().scene_bounds = Some(bounds);
                             }
                             self.scene = mesh;
-                            self.rendered = Some((tab, revision));
+                            self.rendered = Some(key);
                             self.viewport.camera = camera;
                         }
                         Err(error) => self.status = error,
@@ -656,26 +746,32 @@ impl Editor {
             }
         }
     }
+    fn scene_key(&self) -> SceneKey {
+        SceneKey {
+            tab: self.current().id,
+            revision: self.current().session.revision(),
+            view: self.current().view.version,
+            active: self.current().active_part,
+        }
+    }
     fn ensure_scene(&mut self, context: &egui::Context) {
-        let target = (self.current().id, self.current().session.revision());
-        if self.rendered == Some(target) || self.requested == Some(target) || self.busy() {
+        let key = self.scene_key();
+        if self.rendered == Some(key) || self.requested == Some(key) || self.busy() {
             return;
         }
         self.viewport.clear(&self.gpu.device);
         self.scene = None;
-        self.requested = Some(target);
+        self.requested = Some(key);
         let document = self.current().session.document().clone();
+        let view = self.current().view.clone();
         self.start(context, None, move || {
-            // As arestas vivas já foram analisadas uma vez por geometria no documento.
-            let scene = document.scene().map_err(|e| e.to_string())?;
-            let prepared = scene
-                .as_ref()
-                .map(|s| PreparedMesh::with_creases(&s.mesh, &s.creases))
-                .transpose()?;
-            let mesh = scene.map(|s| s.mesh);
+            let scene = prepare_scene(&document, &view, key.active)?;
+            let (mesh, prepared) = match scene {
+                Some((mesh, prepared)) => (Some(mesh), Some(prepared)),
+                None => (None, None),
+            };
             Ok(Outcome::Scene {
-                tab: target.0,
-                revision: target.1,
+                key,
                 mesh,
                 prepared,
             })

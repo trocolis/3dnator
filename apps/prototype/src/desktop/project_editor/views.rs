@@ -419,6 +419,7 @@ impl Editor {
                 } else {
                     ui.label(text(T::SelectElement));
                 }
+                self.visual_controls(ui, selection);
                 if let Some(Selection::Body { id, .. }) = selection {
                     if let Some(body) = document.body(id) {
                         ui.separator();

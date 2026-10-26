@@ -155,6 +155,46 @@ fn measure_lines(
 }
 
 impl Editor {
+    /// Isolamento, transparência e bloqueio de seleção da instância selecionada. São controles
+    /// visuais da aba: não alteram geometria, histórico nem a visibilidade gravada.
+    pub(super) fn visual_controls(&mut self, ui: &mut egui::Ui, selection: Option<Selection>) {
+        ui.separator();
+        ui.label(text(T::VisualControls));
+        let view = &mut self.current_mut().view;
+        if let Some(Selection::Instance(id)) = selection {
+            ui.horizontal(|ui| {
+                if ui.button(text(T::Isolate)).clicked() {
+                    view.isolated = Some(HashSet::from([id]));
+                    view.touched();
+                }
+                let mut transparent = view.transparent.contains(&id);
+                if ui
+                    .checkbox(&mut transparent, text(T::TransparentToggle))
+                    .changed()
+                {
+                    if transparent {
+                        view.transparent.insert(id);
+                    } else {
+                        view.transparent.remove(&id);
+                    }
+                    view.touched();
+                }
+                let mut locked = view.locked.contains(&id);
+                if ui.checkbox(&mut locked, text(T::LockSelection)).changed() {
+                    if locked {
+                        view.locked.insert(id);
+                    } else {
+                        view.locked.remove(&id);
+                    }
+                    view.touched();
+                }
+            });
+        }
+        if view.isolated.is_some() && ui.button(text(T::ExitIsolation)).clicked() {
+            view.isolated = None;
+            view.touched();
+        }
+    }
     pub(super) fn viewport_actions(&mut self, ui: &egui::Ui, response: &egui::Response) {
         if response.drag_started_by(egui::PointerButton::Primary) {
             self.current_mut().drag_start = ui.input(|i| i.pointer.press_origin());
@@ -185,8 +225,11 @@ impl Editor {
             let revision = self.current().session.revision();
             let mode = self.pick_mode;
             let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
+            let view = self.current().view.clone();
             self.start(ui.ctx(), None, move || {
-                let pick = document.pick(ray).map_err(|e| e.to_string())?;
+                let pick = document
+                    .pick_with(ray, |occurrence| view.pickable(occurrence))
+                    .map_err(|e| e.to_string())?;
                 // Com o diálogo de operações esperando, o clique vira referência por nomes.
                 let topology = awaiting.zip(pick.as_ref()).map(|(kind, p)| {
                     match kind {
