@@ -348,8 +348,13 @@ fn prepare_scene(
             Style::Transparent => nator_renderer::STYLE_TRANSPARENT,
         })
         .collect::<Vec<_>>();
-    let prepared =
-        PreparedMesh::with_styles(&scene.mesh, &scene.creases, &styles, scene.opaque_triangles)?;
+    let prepared = PreparedMesh::with_appearance(
+        &scene.mesh,
+        &scene.creases,
+        &styles,
+        scene.opaque_triangles,
+        &scene.colors,
+    )?;
     Ok(Some((scene.mesh, prepared)))
 }
 

@@ -12,7 +12,7 @@ cargo run -p nator-prototype --features occt --locked
 
 A janela começa com um projeto vazio. Use **Inserir suporte em L** ou **Importar STL** para criar uma peça com um corpo. Na árvore, selecione a peça/corpo e use **Construir nesta peça**: importações seguintes acrescentam corpos à definição ativa. **Voltar à montagem** faz a próxima importação criar outra peça.
 
-A árvore permite selecionar, mostrar/ocultar peças e corpos. As propriedades oferecem renomeação, posicionamento X/Y/Z em milímetros, rotação em graus e exclusão de corpos. Posições de corpos são locais à peça; posições de instâncias são relativas à montagem. Corpos só podem ser editados na peça ativa em construção; instâncias são posicionadas na montagem. A área 3D permite selecionar geometria, medir e capturar referências de faces e arestas para operações.
+A árvore permite selecionar, mostrar/ocultar peças e corpos. As propriedades oferecem cor sólida, renomeação, posicionamento X/Y/Z em milímetros, rotação em graus e exclusão de corpos. Posições de corpos são locais à peça; posições de instâncias são relativas à montagem. Corpos só podem ser editados na peça ativa em construção; instâncias são posicionadas na montagem. A área 3D permite selecionar geometria, medir e capturar referências de faces e arestas para operações.
 
 Projetos abrem em abas. Cada aba mantém documento, seleção, câmera, contexto e sequência de desfazer/refazer próprios. Há um único conjunto de buffers GPU para a aba ativa. A representação da cena ainda combina malhas das instâncias, sem instanciamento gráfico otimizado.
 
@@ -37,7 +37,7 @@ Sólidos recebem uma operação final de espelhamento no histórico de cada defi
 
 ## Salvar e recuperar
 
-**Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 7, independente da versão do aplicativo, com migração de projetos anteriores.
+**Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 8, independente da versão do aplicativo, com migração de projetos anteriores.
 
 A gravação temporária é validada antes de substituir o projeto anterior. A recuperação é gravada separadamente, após dois segundos de inatividade e disponibilidade da thread de trabalho, e é oferecida ao iniciar a aplicação. Uma cópia recuperada precisa ser salva explicitamente. `NATOR_RECOVERY_DIR` permite escolher o diretório das cópias.
 

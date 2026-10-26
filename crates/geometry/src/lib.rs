@@ -8,6 +8,20 @@ pub use placement::Placement;
 
 pub type Point3 = [f64; 3];
 
+/// Cor sólida sRGB, com três canais inteiros de 0 a 255. Não representa material ou
+/// transparência; esses controles de exibição permanecem independentes da cor do corpo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RgbColor([u8; 3]);
+impl RgbColor {
+    pub const NEUTRAL: Self = Self([173, 184, 194]);
+    pub const fn new(channels: [u8; 3]) -> Self {
+        Self(channels)
+    }
+    pub const fn channels(self) -> [u8; 3] {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryError(pub String);
 

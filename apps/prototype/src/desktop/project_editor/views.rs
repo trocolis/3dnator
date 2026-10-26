@@ -422,6 +422,24 @@ impl Editor {
                 self.visual_controls(ui, selection);
                 if let Some(Selection::Body { id, .. }) = selection {
                     if let Some(body) = document.body(id) {
+                        ui.add_enabled_ui(!busy && editable_body, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(text(T::BodyColor));
+                                let mut channels = body
+                                    .color
+                                    .unwrap_or(nator_geometry::RgbColor::NEUTRAL)
+                                    .channels();
+                                if ui.color_edit_button_srgb(&mut channels).changed() {
+                                    command = Some(Command::SetBodyColor {
+                                        id,
+                                        color: Some(nator_geometry::RgbColor::new(channels)),
+                                    });
+                                }
+                            });
+                            if body.color.is_some() && ui.button(text(T::NeutralColor)).clicked() {
+                                command = Some(Command::SetBodyColor { id, color: None });
+                            }
+                        });
                         ui.separator();
                         ui.label(text(T::Dimensions));
                         for (axis, value) in ["X", "Y", "Z"]

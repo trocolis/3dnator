@@ -1,5 +1,9 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — cores sólidas (26/10/2026)
+
+79 testes sem OCCT e 102 com OCCT aprovados. Formatação e Clippy com avisos negados aprovados nas duas configurações. A regressão nova verifica comando de cor, cena, clonagem, salvamento/reabertura e desfazer/refazer. A captura `target/codex-validation/colors-001.png` verificou por leitura real de pixels 31.727 pixels da cor de teste, além de triangulação e transparência. Formato de projeto 8; projetos antigos permanecem com a cor neutra. O buffer passa de 84 para 96 bytes por triângulo; medições históricas de memória anteriores a essa mudança não foram repetidas.
+
 ## Continuação 0.3.0 — espelhamento de conjuntos (26/10/2026)
 
 - Testes do workspace: 78 aprovados sem OCCT e 101 com OCCT 7.9.3. Formatação e Clippy com avisos negados aprovados nas duas configurações.

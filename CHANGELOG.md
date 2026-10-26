@@ -53,6 +53,7 @@
 
 ### Visualização e desempenho
 
+- Cores sólidas sRGB editáveis por corpo, com desfazer/refazer, herança nas operações e preservação na clonagem e no salvamento. Formato `.3dnator` versão 8; projetos anteriores usam a cor neutra. A renderização passa a usar 96 bytes por triângulo, incluindo a cor.
 - Projeção em perspectiva opcional, com seletor na área 3D e câmera independente por aba; seleção, medições, movimento livre, zoom no cursor e enquadramento acompanham a projeção. A vista ortográfica continua sendo o padrão. Captura reproduzível por `--render-perspective-preview`.
 - Isolamento da seleção, transparência e bloqueio de seleção por instância, e esmaecimento das outras peças durante a construção: controles visuais da aba, sem alterar geometria, histórico ou visibilidade gravada. Corpos translúcidos são desenhados depois dos opacos, com mistura de cores.
 - Arestas vivas (dobras acima de 30°, bordas abertas) exibidas por padrão, calculadas uma vez por geometria.

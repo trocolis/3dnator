@@ -106,6 +106,10 @@ pub enum Command {
         id: BodyId,
         name: String,
     },
+    SetBodyColor {
+        id: BodyId,
+        color: Option<nator_geometry::RgbColor>,
+    },
     SetBodyVisibility {
         id: BodyId,
         visible: bool,
@@ -157,6 +161,7 @@ impl Command {
             Self::ImportMesh { .. } => "Importar corpo de malha",
             Self::RenamePart { .. } => "Renomear peça",
             Self::RenameBody { .. } => "Renomear corpo",
+            Self::SetBodyColor { .. } => "Alterar cor do corpo",
             Self::SetBodyVisibility { .. } | Self::SetInstanceVisibility { .. } => {
                 "Alterar visibilidade"
             }
@@ -352,6 +357,7 @@ impl Command {
                 validate_name(&name)?;
                 doc.body_mut(id)?.name = name;
             }
+            Self::SetBodyColor { id, color } => doc.body_mut(id)?.color = color,
             Self::SetBodyVisibility { id, visible } => doc.body_mut(id)?.visible = visible,
             Self::SetInstanceVisibility { id, visible } => doc.instance_mut(id)?.visible = visible,
             Self::MoveBody { id, placement } => {
@@ -399,6 +405,13 @@ fn add_feature(
     let output = doc.allocate_body_id()?;
     let operation = features::normalize(doc, part, operation)?;
     let built = features::construct(doc, part, output, &operation)?;
+    // Refinamentos herdam a aparência da entrada principal. Uma edição explícita da cor
+    // de um resultado permanece independente e não é sobrescrita pelo recálculo.
+    let color = operation
+        .inputs()
+        .first()
+        .and_then(|id| doc.body(*id))
+        .and_then(|b| b.color);
     doc.add_body(
         part,
         nator_document::Body {
@@ -409,6 +422,7 @@ fn add_feature(
             face_names: built.faces,
             placement: Placement::default(),
             visible: true,
+            color,
         },
     )?;
     for input in operation.inputs() {
@@ -642,6 +656,55 @@ mod tests {
         assert!(session.is_dirty());
         assert!(session.undo());
         assert!(!session.is_dirty());
+        Ok(())
+    }
+
+    #[test]
+    fn body_color_survives_saving_cloning_and_undo() -> Result<(), Box<dyn Error>> {
+        let mut session = Session::new(Document::new("Cores")?)?;
+        session.execute(import()?)?;
+        let body = session.document().parts()[0].bodies[0].id;
+        let instance = session.document().instances()[0].id;
+        let color = nator_geometry::RgbColor::new([220, 35, 70]);
+        session.execute(Command::SetBodyColor {
+            id: body,
+            color: Some(color),
+        })?;
+        assert!(
+            session
+                .document()
+                .scene()?
+                .ok_or("Cena ausente")?
+                .colors
+                .iter()
+                .all(|c| *c == color)
+        );
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("cores.3dnator");
+        nator_project_io::write_project(&path, session.document())?;
+        assert_eq!(
+            nator_project_io::read_project(&path)?
+                .body(body)
+                .ok_or("Corpo ausente")?
+                .color,
+            Some(color)
+        );
+        session.execute(Command::CloneInstance {
+            id: instance,
+            name: "Variação".into(),
+        })?;
+        assert_eq!(session.document().parts()[1].bodies[0].color, Some(color));
+        assert!(session.undo());
+        assert!(session.undo());
+        assert_eq!(
+            session.document().body(body).ok_or("Corpo ausente")?.color,
+            None
+        );
+        assert!(session.redo());
+        assert_eq!(
+            session.document().body(body).ok_or("Corpo ausente")?.color,
+            Some(color)
+        );
         Ok(())
     }
     fn import() -> Result<Command, Box<dyn Error>> {

@@ -2,6 +2,13 @@
 
 Autorização do usuário: continuar todas as etapas sem solicitar acompanhamento.
 
+## Continuação autônoma — cores e intercâmbio (26/10/2026)
+
+- Reafirmada a autorização de seguir todas as etapas sem monitoramento, preservando os limites de publicação e as validações externas ao ambiente.
+- Cores sRGB por corpo integradas ao documento, aos comandos e à cena, com editor nas propriedades e herança nas operações. Formato de projeto 8 com leitura das versões 1 a 7 usando a cor neutra.
+- 79 testes sem OCCT e 102 com OCCT aprovados; captura wgpu em perspectiva confirmou 31.727 pixels com a cor de teste aplicada, além de triangulação e transparência.
+- Próxima frente: importação/exportação STEP com nomes, cores e hierarquia pelo XCAF do OCCT; depois documentação técnica e sombras opcionais.
+
 ## Critério de trabalho
 
 Concluir incrementos verificáveis, preservar decisões já aprovadas, executar os testes pertinentes e atualizar este registro. Não publicar o repositório, não substituir malhas por sólidos simulados e não declarar validações que não foram executadas.

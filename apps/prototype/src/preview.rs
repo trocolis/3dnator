@@ -160,11 +160,35 @@ pub fn render(path: &Path, projection: Projection) -> Result<(), Box<dyn Error>>
     if transparency_ratio > 0.85 {
         return Err("O estilo transparente não alterou a imagem.".into());
     }
+    // A cor percorre o mesmo buffer por vértice e o shader usado nas cenas importadas.
+    let colors = vec![nator_geometry::RgbColor::new([230, 35, 25]); mesh.triangles().len()];
+    let colored = nator_renderer::PreparedMesh::with_appearance(
+        &mesh,
+        &creases,
+        &[],
+        mesh.triangles().len(),
+        &colors,
+    )?;
+    let camera = viewport.camera.clone();
+    viewport.set_prepared_mesh(&device, &colored)?;
+    viewport.camera = camera;
+    viewport.render(&device, &queue);
+    let colored_capture = read_texture(&device, &queue, viewport.color_texture())?;
+    let colored_pixels = colored_capture
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[0] > 80 && p[0] > p[1].saturating_mul(2) && p[0] > p[2].saturating_mul(2))
+        .count();
+    if colored_pixels < 1000 {
+        return Err("A cor do corpo não chegou ao renderizador.".into());
+    }
     capture.write_png(path)?;
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"preview":path,"projection":format!("{projection:?}"),"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"transparency_brightness_ratio":transparency_ratio,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
+            &serde_json::json!({"preview":path,"projection":format!("{projection:?}"),"adapter":info.name,"backend":format!("{:?}",info.backend),"colored_pixels":colored_pixels,"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"transparency_brightness_ratio":transparency_ratio,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
         )?
     );
     Ok(())

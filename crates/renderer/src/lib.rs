@@ -1,16 +1,16 @@
 //! Visualização ortográfica e em perspectiva. Nenhuma operação CAD é realizada pela GPU.
 
-use nator_geometry::{Bounds, Mesh, Point3, cross, dot, norm, sub};
+use nator_geometry::{Bounds, Mesh, Point3, RgbColor, cross, dot, norm, sub};
 use wgpu::util::DeviceExt;
 
 pub use wgpu;
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// Bytes por vértice enviado à GPU: posição e normal em f32 e a máscara de arestas vivas.
-const VERTEX_BYTES: usize = 28;
+/// Bytes por vértice enviado à GPU: posição e normal em f32, máscara de arestas vivas e cor RGBA8.
+const VERTEX_BYTES: usize = 32;
 
 /// Preparação CPU pode ocorrer na thread de trabalho; a interface só faz o upload.
-/// Cada triângulo ocupa 84 bytes (três vértices). Triangulação e arestas vivas são
+/// Cada triângulo ocupa 96 bytes (três vértices). Triangulação e arestas vivas são
 /// desenhadas no shader, sem buffers de linhas.
 pub struct PreparedMesh {
     vertices: Vec<u8>,
@@ -45,7 +45,22 @@ impl PreparedMesh {
         styles: &[u8],
         opaque_triangles: usize,
     ) -> Result<Self, String> {
+        Self::with_appearance(mesh, creases, styles, opaque_triangles, &[])
+    }
+
+    /// Cores sólidas por triângulo; a quantização de exibição usa sRGB de oito bits por
+    /// canal e acrescenta quatro bytes ao vértice, sem duplicar geometria no documento.
+    pub fn with_appearance(
+        mesh: &Mesh,
+        creases: &[u8],
+        styles: &[u8],
+        opaque_triangles: usize,
+        colors: &[RgbColor],
+    ) -> Result<Self, String> {
         let count = mesh.triangles().len();
+        if !colors.is_empty() && colors.len() != count {
+            return Err("Cores não correspondem aos triângulos da cena.".into());
+        }
         if creases.len() != count {
             return Err("Arestas vivas não correspondem aos triângulos da cena.".into());
         }
@@ -74,6 +89,14 @@ impl PreparedMesh {
                     vertices.extend_from_slice(&((v / length) as f32).to_le_bytes());
                 }
                 vertices.extend_from_slice(&attribute.to_le_bytes());
+                vertices.extend_from_slice(
+                    &colors
+                        .get(index)
+                        .copied()
+                        .unwrap_or(RgbColor::NEUTRAL)
+                        .channels(),
+                );
+                vertices.push(255);
             }
         }
         Ok(Self {
@@ -425,9 +448,8 @@ impl Viewport {
             label: Some("Superfície neutra"),
             source: wgpu::ShaderSource::Wgsl(include_str!("view.wgsl").into()),
         });
-        let pipeline =
-            |translucent: bool| {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = |translucent: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(if translucent { "Superfícies translúcidas" } else { "Superfícies" }),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -437,7 +459,7 @@ impl Viewport {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: VERTEX_BYTES as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Uint32],
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Uint32,3=>Unorm8x4],
                 })],
             },
             primitive: wgpu::PrimitiveState {
@@ -466,7 +488,7 @@ impl Viewport {
             multiview_mask: None,
             cache: None,
         })
-            };
+        };
         let surface_pipeline = pipeline(false);
         let translucent_pipeline = pipeline(true);
         let (color, view, depth) = targets(device, [1, 1]);

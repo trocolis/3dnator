@@ -1,6 +1,6 @@
 //! Documento independente da interface. Corpos mantêm malhas locais compartilhadas por Arc.
 //! Instâncias referenciam definições de peças; nunca duplicam a geometria automaticamente.
-use nator_geometry::{Mesh, Placement, Topology};
+use nator_geometry::{Mesh, Placement, RgbColor, Topology};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 pub mod assembly;
 pub mod features;
@@ -111,6 +111,7 @@ struct SceneGroup {
     triangles: Vec<[u32; 3]>,
     creases: Vec<u8>,
     styles: Vec<Style>,
+    colors: Vec<RgbColor>,
 }
 
 /// Cena de exibição: malha em coordenadas de montagem, arestas vivas e estilo por triângulo.
@@ -120,6 +121,7 @@ pub struct Scene {
     pub mesh: Mesh,
     pub creases: Vec<u8>,
     pub styles: Vec<Style>,
+    pub colors: Vec<RgbColor>,
     pub opaque_triangles: usize,
 }
 
@@ -134,6 +136,8 @@ pub struct Body {
     pub face_names: Arc<Vec<String>>,
     pub placement: Placement,
     pub visible: bool,
+    /// Cor sólida definida pelo usuário ou importada; ausência usa a aparência neutra.
+    pub color: Option<RgbColor>,
 }
 
 /// Limite de faces nomeadas por corpo, coerente com o limite de topologia do núcleo.
@@ -455,6 +459,7 @@ impl Document {
             face_names: Arc::default(),
             placement: Placement::default(),
             visible: true,
+            color: None,
         });
         Ok((part, body))
     }
@@ -710,6 +715,10 @@ impl Document {
                     .triangles
                     .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
                 group.creases.extend_from_slice(body.geometry.creases());
+                group.colors.extend(std::iter::repeat_n(
+                    body.color.unwrap_or(RgbColor::NEUTRAL),
+                    mesh.triangles().len(),
+                ));
                 group
                     .styles
                     .extend(std::iter::repeat_n(look, mesh.triangles().len()));
@@ -728,12 +737,14 @@ impl Document {
         }
         scene.creases.extend(translucent.creases);
         scene.styles.extend(translucent.styles);
+        scene.colors.extend(translucent.colors);
         let mesh =
             Mesh::new(scene.vertices, scene.triangles).map_err(|e| DocumentError(e.to_string()))?;
         Ok(Some(Scene {
             mesh,
             creases: scene.creases,
             styles: scene.styles,
+            colors: scene.colors,
             opaque_triangles,
         }))
     }

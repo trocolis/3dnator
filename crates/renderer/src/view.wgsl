@@ -12,6 +12,7 @@ struct VertexInput {
     // Bits 0-2: a aresta oposta ao canto k é viva (dobra acentuada ou borda aberta).
     // Bits 8-15: estilo (0 normal, 1 esmaecido, 2 transparente; ver STYLE_* em lib.rs).
     @location(2) edges: u32,
+    @location(3) color: vec4<f32>,
 }
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -23,6 +24,7 @@ struct VertexOutput {
     // a espessura do traço deve permanecer constante em pixels ao longo do triângulo.
     @location(1) @interpolate(linear) barycentric: vec3<f32>,
     @location(2) @interpolate(flat) edges: u32,
+    @location(3) @interpolate(flat) color: vec3<f32>,
 }
 
 @vertex fn vertex_main(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
@@ -37,13 +39,14 @@ struct VertexOutput {
         select(0.0, 1.0, corner == 2u),
     );
     output.edges = input.edges;
+    output.color = input.color.rgb;
     return output;
 }
 
 @fragment fn surface_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let light = normalize(vec3<f32>(0.4, -0.6, 1.0));
     let intensity = 0.38 + 0.62 * abs(dot(normalize(input.normal), light));
-    let surface = vec3<f32>(0.68, 0.72, 0.76) * intensity;
+    let surface = input.color * intensity;
     // Derivadas calculadas fora de desvios, como exige a uniformidade do WGSL.
     let width = fwidth(input.barycentric);
     // Proximidade de cada aresta: 1 sobre a aresta, 0 a ~1,2 px dela.

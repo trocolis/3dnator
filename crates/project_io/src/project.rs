@@ -5,7 +5,7 @@ use nator_document::{
     Body, BodyId, Document, Instance, InstanceId, MAX_ELEMENTS, MAX_SCENE_TRIANGLES, MeshAsset,
     Part, PartId, SketchId, SketchRecord,
 };
-use nator_geometry::{Mesh, Placement, Point3};
+use nator_geometry::{Mesh, Placement, Point3, RgbColor};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -16,9 +16,9 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-/// Versão 7: nomes estáveis de faces por corpo e referências de região/aresta/face por
-/// identidade de origem. Versões anteriores são migradas na leitura (`migrate_to_7`).
-pub const FORMAT_VERSION: u32 = 7;
+/// Versão 8: cor sólida sRGB opcional por corpo. Projetos anteriores usam a cor neutra;
+/// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
+pub const FORMAT_VERSION: u32 = 8;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -71,6 +71,8 @@ struct BodyRecord {
     id: u64,
     name: String,
     visible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color_srgb: Option<[u8; 3]>,
     placement: PlacementRecord,
     mesh_path: String,
     #[serde(default)]
@@ -316,6 +318,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 MeshAsset::new(mesh)
             };
             bodies.push(Body {
+                color: body.color_srgb.map(RgbColor::new),
                 brep,
                 face_names: Arc::new(body.face_names),
                 id: BodyId(body.id),
@@ -496,6 +499,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                     .bodies
                     .iter()
                     .map(|b| BodyRecord {
+                        color_srgb: b.color.map(RgbColor::channels),
                         id: b.id.0,
                         name: b.name.clone(),
                         visible: b.visible,

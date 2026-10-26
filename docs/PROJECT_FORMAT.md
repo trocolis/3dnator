@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 7
+# Formato de projeto — versão interna 8
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 7; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 8; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -18,6 +18,7 @@ O manifesto registra `format = "3dnator"`, `schema_version`, versão do aplicati
 Cada peça contém:
 
 - corpos: identificador, nome, visibilidade, transformação local, caminho da malha, caminho opcional do B-rep e, desde a versão 7, `face_names`;
+- desde a versão 8, `color_srgb` opcional por corpo, com três canais inteiros de 0 a 255; ausência usa a aparência neutra;
 - rascunhos: plano, pontos, entidades, restrições e expressões das cotas;
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
 - histórico de operações (`features`), cada uma com nome, corpo resultante e operação.
@@ -77,6 +78,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 7 → 8: `color_srgb` ausente assume `None`, preservando a aparência neutra dos projetos anteriores. A cor não altera malhas, B-rep ou referências.
 - Versões 1 a 6: campos acrescentados ao longo dessas versões (rascunhos, parâmetros, histórico, B-rep, subconjuntos, grupos, folhas) são opcionais e assumem valores vazios quando ausentes.
 - 6 → 7 (`migrate_to_7`): antes da desserialização tipada, a região numérica de extrusões/revoluções vira `{"Index": n}`, e o par `edge`/`face` + `signature` de arredondamento, chanfro e casca vira `{"Index": {"index": n, "signature": s}}`. Um histórico com campos ausentes é rejeitado inteiro, sem migração parcial.
 
