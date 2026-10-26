@@ -190,6 +190,14 @@ pub enum Command {
     SetSettings {
         settings: nator_document::Settings,
     },
+    /// Cópia independente de uma definição de outro documento aberto, inserida na raiz da
+    /// montagem ou como subpeça de `parent`.
+    InsertPart {
+        source: Arc<Document>,
+        part: PartId,
+        parent: Option<PartId>,
+        placement: Placement,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -306,6 +314,7 @@ impl Command {
             Self::RenameInstance { .. } => "Renomear instância",
             Self::RenameGroup { .. } => "Renomear grupo",
             Self::SetSettings { .. } => "Alterar configurações do documento",
+            Self::InsertPart { .. } => "Inserir peça de outro projeto",
         }
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
@@ -630,6 +639,21 @@ impl Command {
             }
             Self::RenameGroup { id, name } => doc.rename_group(id, name)?,
             Self::SetSettings { settings } => doc.set_settings(settings)?,
+            Self::InsertPart {
+                source,
+                part,
+                parent,
+                placement,
+            } => {
+                if source.id() == doc.id() {
+                    return Err(DocumentError(
+                        "Para repetir uma peça do mesmo projeto, use uma nova instância.".into(),
+                    )
+                    .into());
+                }
+                let copy = doc.import_part(&source, part)?;
+                doc.add_instance(copy, parent, placement)?;
+            }
         }
         Ok(Effect::Changed)
     }
@@ -1251,6 +1275,48 @@ mod tests {
         assert_eq!(session.document().groups()[0].name, "Laterais");
         assert!(session.undo());
         assert_eq!(session.document().groups()[0].name, "Pares");
+        Ok(())
+    }
+
+    #[test]
+    fn parts_from_another_project_are_inserted_as_independent_copies() -> Result<(), Box<dyn Error>>
+    {
+        let mut source = Session::new(Document::new("Origem")?)?;
+        source.execute(import()?)?;
+        let part = source.document().parts()[0].id;
+        let mut target = Session::new(Document::new("Destino")?)?;
+        target.execute(import()?)?;
+        let host = target.document().parts()[0].id;
+        let shared = Arc::new(source.document().clone());
+        target.execute(Command::InsertPart {
+            source: Arc::clone(&shared),
+            part,
+            parent: Some(host),
+            placement: Placement::new([0., 0., 40.], [0.; 3])?,
+        })?;
+        let doc = target.document();
+        assert_eq!(doc.parts().len(), 2);
+        let inserted = doc
+            .instances()
+            .iter()
+            .find(|i| i.parent == Some(host))
+            .ok_or("Subpeça ausente")?;
+        assert_ne!(inserted.part, part);
+        assert!(doc.scene_mesh()?.ok_or("Cena ausente")?.bounds().max[2] > 40.);
+        // A origem não é alterada e o mesmo projeto não insere a si mesmo.
+        assert_eq!(source.document().parts().len(), 1);
+        assert!(
+            source
+                .execute(Command::InsertPart {
+                    source: shared,
+                    part,
+                    parent: None,
+                    placement: Placement::default(),
+                })
+                .is_err()
+        );
+        assert!(target.undo());
+        assert_eq!(target.document().parts().len(), 1);
         Ok(())
     }
 

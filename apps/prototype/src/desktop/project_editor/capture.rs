@@ -38,11 +38,11 @@ pub(crate) fn render_ui_scenario(
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
-        | "assembly-ribbon" | "section" | "repair" | "recovery" => {}
+        | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert."
                     .into(),
             );
         }
@@ -239,6 +239,16 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(Some(Selection::Body { part, id: body }));
+        }
+        "insert" => {
+            // Do projeto auxiliar, inserir uma peça do projeto capturado.
+            let source = editor.current().id;
+            editor.switch(1);
+            editor.shell.tab = shell::RibbonTab::Insert;
+            editor.open_insert_part();
+            if let Some(draft) = editor.insert_part.as_mut() {
+                draft.choose_for_capture(source, part);
+            }
         }
         "repair" => {
             // Rascunho pendente com uma duplicata e uma folga de 0,3 mm, fora do perfil.

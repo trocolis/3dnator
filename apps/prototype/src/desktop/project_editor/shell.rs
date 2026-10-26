@@ -78,6 +78,7 @@ enum Action {
     Group,
     Ungroup,
     Section,
+    InsertPart,
     Parameters,
     Measure,
     Drawing,
@@ -123,6 +124,7 @@ impl Action {
             Self::Group => T::GroupTool,
             Self::Ungroup => T::UngroupTool,
             Self::Section => T::SectionAnalysis,
+            Self::InsertPart => T::InsertFromProject,
             Self::Parameters => T::Parameters,
             Self::Measure => T::MeasureSelection,
             Self::Drawing => T::Drawing,
@@ -151,6 +153,7 @@ impl Action {
             Self::InstancePattern(true) => T::CircularPattern,
             Self::InstanceMirror => T::MirrorShort,
             Self::ExportStep => T::StepShort,
+            Self::SketchFace => T::SketchFaceShort,
             _ => self.label(),
         }
     }
@@ -189,6 +192,7 @@ impl Action {
             Self::InstanceMirror => Icon::Mirror,
             Self::Group | Self::Ungroup => Icon::Group,
             Self::Section => Icon::Section,
+            Self::InsertPart => Icon::Import,
             Self::Parameters => Icon::Parameters,
             Self::Measure => Icon::Measure,
             Self::Drawing => Icon::Drawing,
@@ -255,6 +259,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Group,
     Action::Ungroup,
     Action::Section,
+    Action::InsertPart,
     Action::Parameters,
     Action::Drawing,
     Action::Measure,
@@ -328,6 +333,9 @@ impl Editor {
                     })
             }
             Action::MoveCopy | Action::Align => editable && self.current().sketch_edit.is_none(),
+            Action::InsertPart => {
+                editable && self.current().sketch_edit.is_none() && self.tabs.len() > 1
+            }
             Action::NewSketch | Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 editable && self.current().sketch_edit.is_none()
             }
@@ -465,6 +473,7 @@ impl Editor {
             Action::InstanceMirror => self.open_instance_mirror(),
             Action::Group => self.group_selection(context),
             Action::Section => self.open_section(),
+            Action::InsertPart => self.open_insert_part(),
             Action::Ungroup => self.ungroup_selection(context),
             Action::Parameters => self.open_parameters(),
             Action::Measure => {
@@ -854,7 +863,11 @@ impl Editor {
                 self.ribbon_group(ui, T::DocumentGroup, &[Action::Drawing, Action::ExportStep]);
             }
             RibbonTab::Insert => {
-                self.ribbon_group(ui, T::ImportGroup, &[Action::Import, Action::Reference]);
+                self.ribbon_group(
+                    ui,
+                    T::ImportGroup,
+                    &[Action::Import, Action::InsertPart, Action::Reference],
+                );
                 self.ribbon_group(
                     ui,
                     T::SketchPlanes,

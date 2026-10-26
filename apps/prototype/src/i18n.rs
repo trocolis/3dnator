@@ -460,6 +460,14 @@ pub enum Text {
     RepairHint,
     DisplayDecimals,
     DisplayDecimalsHint,
+    InsertFromProject,
+    NoOtherProjects,
+    SourceProject,
+    PartsField,
+    SubpartsCount,
+    InsertIntoPart,
+    InsertAtRoot,
+    SketchFaceShort,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -961,5 +969,15 @@ pub fn text(key: Text) -> &'static str {
         Text::DisplayDecimalsHint => {
             "Afeta medidas, propriedades e parâmetros na interface; a precisão interna não muda."
         }
+        Text::InsertFromProject => "Peça de outro projeto",
+        Text::NoOtherProjects => "Abra outro projeto em uma aba para inserir peças dele.",
+        Text::SourceProject => "Projeto de origem",
+        Text::PartsField => "Peças disponíveis",
+        Text::SubpartsCount => "subpeças",
+        Text::InsertIntoPart => "A cópia entra como subpeça de",
+        Text::InsertAtRoot => {
+            "A cópia entra na raiz da montagem, independente do arquivo de origem."
+        }
+        Text::SketchFaceShort => "Na face",
     }
 }

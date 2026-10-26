@@ -14,6 +14,10 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Peças de outro projeto
+
+- **Peça de outro projeto** (aba Inserir): escolhe um projeto aberto em outra aba e uma de suas definições, copiada para o projeto ativo como peças novas e independentes, com subpeças, compartilhamento interno e grupos do conjunto. Na construção, a cópia entra como subpeça da peça ativa; na montagem, na raiz. O arquivo de origem não é vinculado nem alterado.
+
 ### Precisão de exibição e miniatura
 
 - Casas decimais de exibição (0 a 6) como configuração do documento, escolhidas pela barra de status e aplicadas a medidas, dimensões, coordenadas e parâmetros. Comando `SetSettings` com desfazer; a precisão interna não muda.

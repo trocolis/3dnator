@@ -162,7 +162,8 @@ impl Document {
         self.validate_assembly()?;
         let mut map = HashMap::new();
         let mut instances = HashMap::new();
-        let id = self.clone_definition(source, &mut map, &mut instances)?;
+        let snapshot = self.clone();
+        let id = self.clone_definition(&snapshot, source, &mut map, &mut instances)?;
         self.part_mut(id)?.name = name;
         // Grupos internos pertencem à organização do conjunto clonado. Só copiamos
         // grupos inteiramente contidos nele; grupos do nível externo não ganham membros
@@ -185,8 +186,11 @@ impl Document {
         }
         Ok(id)
     }
+    /// Copia uma definição de `from` (este documento ou outro) e suas subpeças com
+    /// identificadores novos. Definições repetidas na hierarquia são copiadas uma vez.
     fn clone_definition(
         &mut self,
+        from: &Document,
         source: PartId,
         map: &mut HashMap<PartId, PartId>,
         instances: &mut HashMap<InstanceId, InstanceId>,
@@ -194,7 +198,7 @@ impl Document {
         if let Some(id) = map.get(&source) {
             return Ok(*id);
         }
-        let mut part = self
+        let mut part = from
             .part(source)
             .ok_or_else(|| DocumentError("Peça inexistente.".into()))?
             .clone();
@@ -228,7 +232,7 @@ impl Document {
             feature.remap(&body_map, &sketch_map)?;
         }
         self.parts.push(part);
-        let children = self
+        let children = from
             .instances
             .iter()
             .filter(|i| i.parent == Some(source))
@@ -239,8 +243,34 @@ impl Document {
             instances.insert(child.id, instance);
             child.id = instance;
             child.parent = Some(id);
-            child.part = self.clone_definition(child.part, map, instances)?;
+            child.part = self.clone_definition(from, child.part, map, instances)?;
             self.instances.push(child);
+        }
+        Ok(id)
+    }
+    /// Importa a definição `part` de outro documento como peças novas e independentes,
+    /// sem vínculo com o arquivo de origem. Subpeças repetidas continuam compartilhando a
+    /// definição copiada; grupos internos ao conjunto vêm junto.
+    pub fn import_part(&mut self, from: &Document, part: PartId) -> Result<PartId, DocumentError> {
+        from.validate_assembly()?;
+        let mut map = HashMap::new();
+        let mut instances = HashMap::new();
+        let id = self.clone_definition(from, part, &mut map, &mut instances)?;
+        let groups = from
+            .groups
+            .iter()
+            .filter(|g| !g.members.is_empty())
+            .filter_map(|g| {
+                let members = g
+                    .members
+                    .iter()
+                    .map(|id| instances.get(id).copied())
+                    .collect::<Option<Vec<_>>>()?;
+                Some((g.name.clone(), members))
+            })
+            .collect::<Vec<_>>();
+        for (name, members) in groups {
+            self.add_group(name, members)?;
         }
         Ok(id)
     }
@@ -416,6 +446,50 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn importing_from_another_document_copies_definitions_independently()
+    -> Result<(), Box<dyn Error>> {
+        // Origem: conjunto com duas instâncias da mesma subpeça, agrupadas.
+        let mut source = Document::new("Origem")?;
+        let assembly = source.create_part("Conjunto".into())?;
+        let (child, body) = source.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let first = source.instances()[1].id;
+        source.reparent(first, Some(assembly))?;
+        let second = source.add_instance(
+            child,
+            Some(assembly),
+            Placement::new([80., 0., 0.], [0.; 3])?,
+        )?;
+        source.add_group("Par".into(), vec![first, second])?;
+        // Destino com identificadores que colidiriam com os da origem.
+        let mut target = Document::new("Destino")?;
+        target.create_part("Existente".into())?;
+        let imported = target.import_part(&source, assembly)?;
+        target.add_instance(imported, None, Placement::default())?;
+        target.validate()?;
+        assert_eq!(target.parts().len(), 3);
+        let children = target
+            .instances()
+            .iter()
+            .filter(|i| i.parent == Some(imported))
+            .collect::<Vec<_>>();
+        assert_eq!(children.len(), 2);
+        // As duas ocorrências continuam compartilhando uma única definição copiada.
+        assert_eq!(children[0].part, children[1].part);
+        assert_ne!(children[0].part, child);
+        assert_eq!(target.groups().len(), 1);
+        // A origem não muda; alterar a cópia não afeta a definição original.
+        let copied = children[0].part;
+        target.part_mut(copied)?.bodies[0].name = "Somente na cópia".into();
+        assert_eq!(source.body(body).ok_or("Corpo ausente")?.name, "Suporte");
+        assert_eq!(source.parts().len(), 2);
+        Ok(())
+    }
+
     #[test]
     fn picking_lists_every_body_along_the_ray_nearest_first() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Sobrepostos")?;

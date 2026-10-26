@@ -8,6 +8,7 @@ mod export_editor;
 mod feature_editor;
 mod highlight;
 mod icons;
+mod insert_part;
 mod live_preview;
 mod navigation;
 mod parameter_editor;
@@ -479,6 +480,8 @@ pub struct Editor {
     sketch_repair: Option<sketch_repair::RepairDraft>,
     /// Miniaturas de projetos em disco (recuperação), por caminho.
     thumbnails: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
+    /// Inserção de peça de outra aba.
+    insert_part: Option<insert_part::InsertDraft>,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -586,6 +589,7 @@ impl Editor {
             section_edit: None,
             sketch_repair: None,
             thumbnails: std::collections::HashMap::new(),
+            insert_part: None,
         })
     }
     fn busy(&self) -> bool {
@@ -1417,6 +1421,7 @@ impl Editor {
         self.assembly_panel(ui.ctx());
         self.section_panel(ui.ctx());
         self.sketch_repair_panel(ui.ctx());
+        self.insert_part_panel(ui.ctx());
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
