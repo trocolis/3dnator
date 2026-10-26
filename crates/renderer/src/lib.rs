@@ -6,41 +6,55 @@ use wgpu::util::DeviceExt;
 pub use wgpu;
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
+/// Bytes por vértice enviado à GPU: posição e normal em f32 e a máscara de arestas vivas.
+const VERTEX_BYTES: usize = 28;
+
 /// Preparação CPU pode ocorrer na thread de trabalho; a interface só faz o upload.
+/// Cada triângulo ocupa 84 bytes (três vértices). Triangulação e arestas vivas são
+/// desenhadas no shader, sem buffers de linhas.
 pub struct PreparedMesh {
     vertices: Vec<u8>,
-    lines: Vec<u8>,
 }
 impl PreparedMesh {
+    /// Analisa as arestas vivas da malha. Para cenas do documento, prefira
+    /// `with_creases`, que reaproveita a análise feita uma vez por geometria.
     pub fn new(mesh: &Mesh) -> Result<Self, String> {
-        let triangle_bytes = mesh.triangles().len() * 3 * 24;
+        let (_, creases) = mesh.edge_analysis(Some(std::f64::consts::FRAC_PI_6));
+        Self::with_creases(mesh, &creases)
+    }
+
+    /// `creases[i]` marca as arestas vivas do triângulo i (bit k: aresta oposta ao canto k).
+    pub fn with_creases(mesh: &Mesh, creases: &[u8]) -> Result<Self, String> {
+        if creases.len() != mesh.triangles().len() {
+            return Err("Arestas vivas não correspondem aos triângulos da cena.".into());
+        }
         let center = mesh.bounds().center();
         let scale = mesh.bounds().size().into_iter().fold(0_f64, f64::max);
         if scale <= 0. {
             return Err("A malha não possui extensão visível.".into());
         }
-        let mut vertices = Vec::with_capacity(triangle_bytes);
-        let mut lines = Vec::with_capacity(triangle_bytes * 2);
-        for triangle in mesh.triangles() {
+        let mut vertices = Vec::with_capacity(mesh.triangles().len() * 3 * VERTEX_BYTES);
+        for (triangle, mask) in mesh.triangles().iter().zip(creases) {
             let points = mesh.triangle_points(*triangle);
             let normal = cross(sub(points[1], points[0]), sub(points[2], points[0]));
-            let normal = normal.map(|v| (v / norm(normal)) as f32);
-            let records = points.map(|p| {
-                float_bytes(
-                    sub(p, center)
-                        .map(|v| (v / scale) as f32)
-                        .into_iter()
-                        .chain(normal),
-                )
-            });
-            for record in &records {
-                vertices.extend_from_slice(record);
-            }
-            for index in [0, 1, 1, 2, 2, 0] {
-                lines.extend_from_slice(&records[index]);
+            let length = norm(normal);
+            for point in points {
+                // Coordenadas normalizadas pela caixa da cena: f32 mantém a precisão visual
+                // mesmo para modelos longe da origem.
+                for v in sub(point, center) {
+                    vertices.extend_from_slice(&((v / scale) as f32).to_le_bytes());
+                }
+                for v in normal {
+                    vertices.extend_from_slice(&((v / length) as f32).to_le_bytes());
+                }
+                vertices.extend_from_slice(&u32::from(*mask).to_le_bytes());
             }
         }
-        Ok(Self { vertices, lines })
+        Ok(Self { vertices })
+    }
+    /// Bytes que serão enviados à GPU.
+    pub fn gpu_bytes(&self) -> usize {
+        self.vertices.len()
     }
 }
 
@@ -185,19 +199,21 @@ impl Camera {
 pub struct Viewport {
     pub camera: Camera,
     pub show_triangles: bool,
+    /// Arestas vivas (dobras, bordas abertas); ligadas por padrão.
+    pub show_edges: bool,
     color: wgpu::Texture,
     view: wgpu::TextureView,
     depth: wgpu::TextureView,
     size: [u32; 2],
     triangles: wgpu::Buffer,
-    lines: wgpu::Buffer,
     vertex_count: u32,
-    line_count: u32,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     surface_pipeline: wgpu::RenderPipeline,
-    line_pipeline: wgpu::RenderPipeline,
 }
+
+/// Uniforme do shader: matriz 4×4 da câmera seguida de quatro opções de exibição.
+const UNIFORM_BYTES: u64 = 80;
 
 fn float_bytes(values: impl IntoIterator<Item = f32>) -> Vec<u8> {
     values.into_iter().flat_map(f32::to_le_bytes).collect()
@@ -240,7 +256,7 @@ impl Viewport {
     pub fn new(device: &wgpu::Device, mesh: &Mesh) -> Result<Self, String> {
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Câmera"),
-            size: 64,
+            size: UNIFORM_BYTES,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -248,7 +264,7 @@ impl Viewport {
             label: Some("Câmera"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -274,59 +290,45 @@ impl Viewport {
             label: Some("Superfície neutra"),
             source: wgpu::ShaderSource::Wgsl(include_str!("view.wgsl").into()),
         });
-        let pipeline = |lines| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(if lines {
-                    "Triangulação"
-                } else {
-                    "Superfícies"
-                }),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vertex_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(wgpu::VertexBufferLayout {
-                        array_stride: 24,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3],
-                    })],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: if lines {
-                        wgpu::PrimitiveTopology::LineList
-                    } else {
-                        wgpu::PrimitiveTopology::TriangleList
-                    },
-                    cull_mode: None,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: Some(!lines),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: Default::default(),
-                    bias: wgpu::DepthBiasState {
-                        // O bias só é suportado em triângulos; afasta a superfície das linhas.
-                        constant: if lines { 0 } else { 1 },
-                        ..Default::default()
-                    },
-                }),
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some(if lines { "line_main" } else { "surface_main" }),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: COLOR_FORMAT,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+        let surface_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Superfícies"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vertex_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_BYTES as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Uint32],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("surface_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let (color, view, depth) = targets(device, [1, 1]);
         let empty = || {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -339,18 +341,16 @@ impl Viewport {
         let mut viewport = Self {
             camera: Camera::default(),
             show_triangles: false,
+            show_edges: true,
             color,
             view,
             depth,
             size: [1, 1],
             triangles: empty(),
-            lines: empty(),
             vertex_count: 0,
-            line_count: 0,
             uniform,
             bind_group,
-            surface_pipeline: pipeline(false),
-            line_pipeline: pipeline(true),
+            surface_pipeline,
         };
         viewport.set_mesh(device, mesh)?;
         Ok(viewport)
@@ -361,18 +361,13 @@ impl Viewport {
     }
 
     pub fn clear(&mut self, device: &wgpu::Device) {
-        let empty = || {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Cena vazia"),
-                size: 24,
-                usage: wgpu::BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            })
-        };
-        self.triangles = empty();
-        self.lines = empty();
+        self.triangles = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cena vazia"),
+            size: 24,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
         self.vertex_count = 0;
-        self.line_count = 0;
     }
 
     pub fn set_prepared_mesh(
@@ -380,22 +375,15 @@ impl Viewport {
         device: &wgpu::Device,
         mesh: &PreparedMesh,
     ) -> Result<(), String> {
-        if mesh.lines.len() as u64 > device.limits().max_buffer_size {
+        if mesh.vertices.len() as u64 > device.limits().max_buffer_size {
             return Err("Malha grande demais para os buffers desta GPU.".into());
         }
-        // Substituir os buffers somente após preparar ambos os conjuntos de dados.
         self.triangles = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Superfícies"),
             contents: &mesh.vertices,
             usage: wgpu::BufferUsages::VERTEX,
         });
-        self.lines = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Triangulação"),
-            contents: &mesh.lines,
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        self.vertex_count = (mesh.vertices.len() / 24) as u32;
-        self.line_count = (mesh.lines.len() / 24) as u32;
+        self.vertex_count = (mesh.vertices.len() / VERTEX_BYTES) as u32;
         self.camera = Camera::default();
         self.camera
             .fit(f64::from(self.size[0]) / f64::from(self.size[1]));
@@ -430,13 +418,15 @@ impl Viewport {
     }
 
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let matrix = self
+            .camera
+            .matrix(f64::from(self.size[0]) / f64::from(self.size[1]));
+        let flag = |on: bool| if on { 1. } else { 0. };
+        let options = [flag(self.show_triangles), flag(self.show_edges), 0., 0.];
         queue.write_buffer(
             &self.uniform,
             0,
-            &float_bytes(
-                self.camera
-                    .matrix(f64::from(self.size[0]) / f64::from(self.size[1])),
-            ),
+            &float_bytes(matrix.into_iter().chain(options)),
         );
         let mut encoder = device.create_command_encoder(&Default::default());
         {
@@ -470,11 +460,6 @@ impl Viewport {
             pass.set_pipeline(&self.surface_pipeline);
             pass.set_vertex_buffer(0, self.triangles.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
-            if self.show_triangles {
-                pass.set_pipeline(&self.line_pipeline);
-                pass.set_vertex_buffer(0, self.lines.slice(..));
-                pass.draw(0..self.line_count, 0..1);
-            }
         }
         queue.submit([encoder.finish()]);
     }

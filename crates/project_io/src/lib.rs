@@ -88,7 +88,10 @@ pub fn decode_stl(bytes: &[u8], scale_to_mm: f64) -> Result<Mesh, ImportError> {
     let triangles = (0..(vertices.len() / 3) as u32)
         .map(|i| [i * 3, i * 3 + 1, i * 3 + 2])
         .collect();
-    Mesh::new(vertices, triangles).map_err(|e| ImportError(e.to_string()))
+    // O STL repete cada vértice em cada triângulo; a fusão exata não altera a geometria.
+    Ok(Mesh::new(vertices, triangles)
+        .map_err(|e| ImportError(e.to_string()))?
+        .welded())
 }
 
 fn decode_ascii(text: &str, scale: f64) -> Result<Vec<[f64; 3]>, ImportError> {

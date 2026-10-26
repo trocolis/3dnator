@@ -15,6 +15,29 @@ Validação em Linux x86_64 (Arch, Rust 1.99.1, GCC 16.2.1) com OCCT 7.9.3 extra
 | Janela real em Wayland (GPU Intel UHD/NVIDIA) | Abre e permanece estável por 20 s; interação não testada |
 | Windows, Ubuntu (OCCT 7.6) e diálogos nativos | Pendentes; workflows preparados |
 
+### Medições de leveza (`--benchmark`, release)
+
+Notebook com Intel Core i5-11400H, 16 GB de RAM, GPU integrada Intel UHD (Tiger Lake GT1, Mesa 26.2.5, Vulkan) e GPU dedicada GeForce GTX 1650. A integrada é a referência do ROADMAP e é escolhida por padrão. Cada cenário roda em processo próprio, com a área 3D em 1280 × 800 e 120 quadros de órbita contínua; o tempo de quadro inclui a espera pela GPU.
+
+| Cenário | Triângulos | Abrir projeto | Quadro médio / p95 (integrada) | Quadro médio (dedicada) | RSS em repouso / pico (integrada) |
+| --- | --- | --- | --- | --- | --- |
+| Peça simples (suporte OCCT com furo e arredondamento) | 280 | 0,1 ms | 0,66 / 0,74 ms | 0,06 ms | 146 / 148 MiB |
+| 400 instâncias da peça | 112 mil | 1,0 ms | 3,71 / 5,01 ms | 0,15 ms | 151 / 159 MiB |
+| Malha STL importada (toro, 50 MB) | 1 milhão | 330 ms | 8,56 / 9,15 ms | 1,43 ms | 232 / 312 MiB |
+
+- Importar o STL de 1 milhão de triângulos leva 268 ms, e a análise de topologia e arestas vivas, 272 ms. O projeto resultante tem 6,5 MB.
+- Recalcular o histórico do suporte (rascunho, extrusão, furo, corte e arredondamento) leva 20,7 ms por mudança de parâmetro; a construção inicial, 27 ms.
+- Cerca de 145 MiB do RSS em repouso são o processo com o driver Vulkan e os buffers da GPU integrada, que usa a memória do sistema.
+
+Antes das otimizações deste incremento, a mesma malha de 1 milhão de triângulos tinha pico de 575 MiB, abria em 507 ms e levava 211 ms para preparar os dados da GPU. As mudanças foram:
+
+- remover o buffer de linhas da triangulação: as linhas agora são desenhadas no shader por coordenadas baricêntricas, o que eliminou 144 bytes por triângulo;
+- fundir vértices idênticos na importação STL e na tesselação: a malha passou de 72 para cerca de 12 bytes por triângulo na CPU e no arquivo;
+- calcular as arestas vivas uma vez por geometria, em vez de a cada exibição;
+- gravar os vértices da GPU sem uma alocação por vértice.
+
+Esses números valem para uma máquina mais forte que a referência de 8 GB com GPU integrada. A medição na própria máquina de referência ainda está pendente.
+
 O cenário clássico de nomeação topológica foi verificado: o arredondamento do canto interno do suporte permanece na mesma aresta quando a espessura muda de 6 para 9 mm, e o volume confere com (1 − π/4)·r²·L. Substituir o canto por uma diagonal faz o recálculo falhar com "Referência perdida", sem aplicar o arredondamento em outra aresta e sem alterar o documento.
 
 ## Incremento 0.2.0 — 26/10/2026

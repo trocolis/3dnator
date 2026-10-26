@@ -631,7 +631,11 @@ impl Solid {
         let triangles = (0..(length / 9) as u32)
             .map(|i| [i * 3, i * 3 + 1, i * 3 + 2])
             .collect();
-        let mesh = Mesh::new(vertices, triangles).map_err(|e| KernelError(e.to_string()))?;
+        // Os nós das arestas são idênticos nas faces vizinhas; fundi-los fecha a malha
+        // sem alterar coordenadas. A ordem dos triângulos (e `faces`) é preservada.
+        let mesh = Mesh::new(vertices, triangles)
+            .map_err(|e| KernelError(e.to_string()))?
+            .welded();
         Ok((mesh, faces))
     }
 }

@@ -44,16 +44,25 @@ impl fmt::Display for DocumentError {
 }
 impl Error for DocumentError {}
 
+/// Ângulo a partir do qual uma dobra da malha é exibida como aresta (30°).
+pub const CREASE_ANGLE_RAD: f64 = std::f64::consts::FRAC_PI_6;
+
 /// A análise das arestas ocorre uma vez por geometria, fora do redesenho da interface.
 #[derive(Debug)]
 pub struct MeshAsset {
     mesh: Mesh,
     topology: Topology,
+    /// Arestas vivas por triângulo (ver `Mesh::edge_analysis`), usadas na exibição.
+    creases: Vec<u8>,
 }
 impl MeshAsset {
     pub fn new(mesh: Mesh) -> Self {
-        let topology = mesh.topology();
-        Self { mesh, topology }
+        let (topology, creases) = mesh.edge_analysis(Some(CREASE_ANGLE_RAD));
+        Self {
+            mesh,
+            topology,
+            creases,
+        }
     }
     pub fn mesh(&self) -> &Mesh {
         &self.mesh
@@ -61,6 +70,15 @@ impl MeshAsset {
     pub fn topology(&self) -> Topology {
         self.topology
     }
+    pub fn creases(&self) -> &[u8] {
+        &self.creases
+    }
+}
+
+/// Cena de exibição: malha em coordenadas de montagem e arestas vivas por triângulo.
+pub struct Scene {
+    pub mesh: Mesh,
+    pub creases: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -571,9 +589,16 @@ impl Document {
 
     /// A cena é derivada. Posições de montagem nunca são gravadas nos vértices locais.
     pub fn scene_mesh(&self) -> Result<Option<Mesh>, DocumentError> {
+        Ok(self.scene()?.map(|scene| scene.mesh))
+    }
+
+    /// Cena com as arestas vivas já analisadas em cada geometria: transformações rígidas
+    /// preservam ângulos, então a máscara de cada corpo vale em qualquer posição.
+    pub fn scene(&self) -> Result<Option<Scene>, DocumentError> {
         self.validate()?;
         let mut vertices = Vec::new();
         let mut triangles = Vec::new();
+        let mut creases = Vec::new();
         for occurrence in self.occurrences()? {
             let instance = self
                 .instance(occurrence.instance)
@@ -591,14 +616,14 @@ impl Document {
                         .map(|point| occurrence.placement.apply(body.placement.apply(*point))),
                 );
                 triangles.extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
+                creases.extend_from_slice(body.geometry.creases());
             }
         }
         if triangles.is_empty() {
             Ok(None)
         } else {
-            Mesh::new(vertices, triangles)
-                .map(Some)
-                .map_err(|e| DocumentError(e.to_string()))
+            let mesh = Mesh::new(vertices, triangles).map_err(|e| DocumentError(e.to_string()))?;
+            Ok(Some(Scene { mesh, creases }))
         }
     }
 }

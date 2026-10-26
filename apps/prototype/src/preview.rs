@@ -112,8 +112,10 @@ pub fn render(path: &Path) -> Result<(), Box<dyn Error>> {
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let mut viewport = Viewport::new(&device, &reference_bracket()?)?;
     viewport.resize(&device, [960, 640]);
+    // A triangulação é desenhada no shader: ativá-la precisa escurecer pixels da superfície.
     viewport.show_triangles = true;
     viewport.render(&device, &queue);
+    let wireframe = read_texture(&device, &queue, viewport.color_texture())?;
     viewport.show_triangles = false;
     viewport.render(&device, &queue);
     let capture = read_texture(&device, &queue, viewport.color_texture())?;
@@ -124,11 +126,15 @@ pub fn render(path: &Path) -> Result<(), Box<dyn Error>> {
     if surface_pixels < 1000 {
         return Err("A captura não contém uma superfície visível suficiente.".into());
     }
+    let triangulation_pixels = surface_pixels.saturating_sub(wireframe.surface_pixels());
+    if triangulation_pixels == 0 {
+        return Err("A triangulação ativada não alterou a imagem.".into());
+    }
     capture.write_png(path)?;
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"preview":path,"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
+            &serde_json::json!({"preview":path,"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
         )?
     );
     Ok(())

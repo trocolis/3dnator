@@ -69,6 +69,15 @@ cargo run -p nator-prototype --locked -- --render-project-preview target/project
 
 Os PNGs devem ter destinos novos. A captura da interface carrega o projeto, seleciona seu primeiro corpo e acrescenta uma aba auxiliar vazia apenas para a visualização. Não modifica o projeto de origem nem grava recuperação. Essas capturas não substituem o teste interativo de teclado, mouse ou diálogos do sistema.
 
+## Medições de leveza
+
+```sh
+cargo run --release -p nator-prototype --features occt -- --benchmark target/bench/run-001
+NATOR_BENCH_GPU=high cargo run --release -p nator-prototype --features occt -- --benchmark target/bench/run-002
+```
+
+Mede abertura de projeto, preparação da cena, envio à GPU, tempo de quadro em órbita contínua e memória (RSS atual e pico, no Linux) nos cenários de peça simples, malha STL importada de 1 milhão de triângulos e 400 instâncias, além do recálculo paramétrico quando o OCCT está habilitado. Cada cenário roda em um processo filho, para que o pico de memória seja por cenário. A GPU integrada é preferida por padrão; `NATOR_BENCH_GPU=high` escolhe a dedicada. O relatório inclui CPU, memória total, adaptador, driver e perfil de compilação. Resultados em [VALIDATION.md](VALIDATION.md).
+
 ## OCCT e STEP
 
 O SDK OCCT continua opcional e externo. A ponte usa CMake e bibliotecas compartilhadas OCCT 7.x (alvo 7.6 a 7.9), com API Rust própria. Configure `OpenCASCADE_DIR` para a pasta de `OpenCASCADEConfig.cmake`, ou `CMAKE_PREFIX_PATH` para o prefixo de instalação, além do caminho de bibliotecas do sistema. No Windows, a pasta dos DLLs precisa estar no PATH.

@@ -605,8 +605,13 @@ impl Editor {
         self.requested = Some(target);
         let document = self.current().session.document().clone();
         self.start(context, None, move || {
-            let mesh = document.scene_mesh().map_err(|e| e.to_string())?;
-            let prepared = mesh.as_ref().map(PreparedMesh::new).transpose()?;
+            // As arestas vivas já foram analisadas uma vez por geometria no documento.
+            let scene = document.scene().map_err(|e| e.to_string())?;
+            let prepared = scene
+                .as_ref()
+                .map(|s| PreparedMesh::with_creases(&s.mesh, &s.creases))
+                .transpose()?;
+            let mesh = scene.map(|s| s.mesh);
             Ok(Outcome::Scene {
                 tab: target.0,
                 revision: target.1,

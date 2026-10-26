@@ -7,6 +7,8 @@ use std::{
 };
 
 #[cfg(feature = "desktop")]
+mod benchmark;
+#[cfg(feature = "desktop")]
 mod desktop;
 mod editor_validation;
 #[cfg(feature = "desktop")]
@@ -15,6 +17,8 @@ mod part_validation;
 #[cfg(feature = "desktop")]
 mod preview;
 mod project_validation;
+#[cfg(feature = "occt")]
+mod reference_part;
 mod sketch_validation;
 mod validation;
 
@@ -44,7 +48,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         [command] if command == "--help" || command == "-h" => {
             println!(
-                "3dnator — protótipo {}\n\nSem argumentos: abrir editor de projetos.\n--inspect ARQUIVO.stl: inspecionar malha (coordenadas assumidas em mm).\n--export-reference ARQUIVO.stl: exportar suporte em L de referência.\n--validate DIRETORIO_NOVO: validar OCCT e gerar relatório e arquivos.\n--validate-project DIRETORIO_NOVO: validar salvamento, recuperação e comandos.\n--validate-sketch DIRETORIO_NOVO: validar restrições, expressões e recálculo.\n--validate-part DIRETORIO_NOVO: validar a peça de referência com OCCT (cotas, recálculo, STEP/STL).\n--validate-editor DIRETORIO_NOVO: validar montagem e folhas PNG/PDF.\n--render-project-preview PROJETO IMAGEM.png: capturar o editor real.\n--inspect-project ARQUIVO.3dnator: inspecionar projeto.\n--render-preview ARQUIVO.png: capturar renderizador (requer desktop).\n--version: informar versão e disponibilidade do núcleo.\n\nSTL aceita ASCII ou binário. STEP e operações CAD exigem --features occt.\nRascunhos, parâmetros, montagem e folhas disponíveis no protótipo.",
+                "3dnator — protótipo {}\n\nSem argumentos: abrir editor de projetos.\n--inspect ARQUIVO.stl: inspecionar malha (coordenadas assumidas em mm).\n--export-reference ARQUIVO.stl: exportar suporte em L de referência.\n--validate DIRETORIO_NOVO: validar OCCT e gerar relatório e arquivos.\n--validate-project DIRETORIO_NOVO: validar salvamento, recuperação e comandos.\n--validate-sketch DIRETORIO_NOVO: validar restrições, expressões e recálculo.\n--validate-part DIRETORIO_NOVO: validar a peça de referência com OCCT (cotas, recálculo, STEP/STL).\n--validate-editor DIRETORIO_NOVO: validar montagem e folhas PNG/PDF.\n--render-project-preview PROJETO IMAGEM.png: capturar o editor real.\n--inspect-project ARQUIVO.3dnator: inspecionar projeto.\n--render-preview ARQUIVO.png: capturar renderizador (requer desktop).\n--benchmark DIRETORIO_NOVO: medir abertura, memória, navegação e recálculo (use --release).\n--version: informar versão e disponibilidade do núcleo.\n\nSTL aceita ASCII ou binário. STEP e operações CAD exigem --features occt.\nRascunhos, parâmetros, montagem e folhas disponíveis no protótipo.",
                 env!("CARGO_PKG_VERSION")
             );
             Ok(())
@@ -101,6 +105,12 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         #[cfg(feature = "desktop")]
         [command, path] if command == "--render-preview" => preview::render(Path::new(path)),
+        #[cfg(feature = "desktop")]
+        [command, path] if command == "--benchmark" => benchmark::run(Path::new(path)),
+        #[cfg(feature = "desktop")]
+        [command, name, path] if command == "--benchmark-scenario" => {
+            benchmark::scenario(&name.to_string_lossy(), Path::new(path))
+        }
         #[cfg(feature = "desktop")]
         [command, project, output] if command == "--render-project-preview" => {
             desktop::render_project(Path::new(project), Path::new(output))

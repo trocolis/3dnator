@@ -17,6 +17,14 @@
 - Formato `.3dnator` versão 7, com nomes de faces por corpo e migração explícita das referências por índice das versões anteriores.
 - Seleção de região no editor de operações por lista com área e furos, em vez de índice numérico.
 
+### Visualização e desempenho
+
+- Arestas vivas (dobras acima de 30°, bordas abertas) exibidas por padrão, calculadas uma vez por geometria.
+- Triangulação e arestas desenhadas no shader por coordenadas baricêntricas, sem buffer de linhas: a memória da GPU por triângulo caiu de 216 para 84 bytes.
+- Vértices de coordenadas idênticas são fundidos na importação STL e na tesselação, sem alterar a geometria. Uma malha fechada passa de 72 para cerca de 12 bytes por triângulo, também no arquivo de projeto.
+- Comando `--benchmark` mede abertura, memória, navegação e recálculo, com cada cenário em processo próprio e GPU integrada por padrão. Na malha de 1 milhão de triângulos, o pico de memória caiu de 575 para 312 MiB e a abertura, de 507 para 330 ms.
+- Ensaio `--validate-part` do critério de entrega da etapa 2 com o núcleo real.
+
 ### Núcleo CAD
 
 - Corrigida a ordem dos componentes OCCT no CMake, que impedia a configuração com qualquer SDK 7.x.

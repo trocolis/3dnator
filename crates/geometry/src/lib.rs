@@ -102,40 +102,123 @@ impl Mesh {
         triangle.map(|index| self.vertices[index as usize])
     }
 
+    /// Identificador de posição de cada vértice: vértices com coordenadas idênticas (bit a
+    /// bit, com -0 igual a +0) recebem o mesmo identificador. Não há tolerância.
+    fn point_ids(&self) -> Vec<u32> {
+        let mut point_ids = HashMap::with_capacity(self.vertices.len());
+        self.vertices
+            .iter()
+            .map(|p| {
+                let next = point_ids.len() as u32;
+                *point_ids.entry(position_key(*p)).or_insert(next)
+            })
+            .collect()
+    }
+
+    /// Funde vértices de coordenadas idênticas, sem tolerância. A geometria não muda: só os
+    /// índices passam a compartilhar posições. STL repete cada vértice em cada triângulo
+    /// (72 bytes por triângulo em f64); uma malha fechada fundida usa cerca de 12.
+    pub fn welded(self) -> Mesh {
+        let ids = self.point_ids();
+        let count = ids.iter().map(|id| *id as usize + 1).max().unwrap_or(0);
+        if count == self.vertices.len() {
+            return self;
+        }
+        let mut vertices = vec![[0.; 3]; count];
+        for (index, id) in ids.iter().enumerate() {
+            vertices[*id as usize] = self.vertices[index];
+        }
+        let triangles = self
+            .triangles
+            .iter()
+            .map(|t| t.map(|i| ids[i as usize]))
+            .collect();
+        Mesh {
+            vertices,
+            triangles,
+            bounds: self.bounds,
+        }
+    }
+
     /// Usa coordenadas exatas para reconhecer vértices repetidos no STL, sem solda por tolerância.
     /// Uma borda quase coincidente permanece aberta e precisa de reparo explícito.
     pub fn topology(&self) -> Topology {
-        let mut point_ids = HashMap::new();
-        let mut next_id = 0_u64;
-        let ids: Vec<u64> = self
-            .vertices
-            .iter()
-            .map(|p| {
-                let key = p.map(|x| if x == 0.0 { 0 } else { x.to_bits() });
-                *point_ids.entry(key).or_insert_with(|| {
-                    let id = next_id;
-                    next_id += 1;
-                    id
+        self.edge_analysis(None).0
+    }
+
+    /// Topologia e arestas vivas em uma única passada pelas arestas.
+    ///
+    /// A máscara tem um byte por triângulo: o bit k marca a aresta oposta ao canto k (entre
+    /// os cantos k+1 e k+2), a convenção das coordenadas baricêntricas do shader. Uma aresta
+    /// é viva quando as normais dos dois triângulos vizinhos diferem mais que `crease_rad`,
+    /// quando é borda aberta ou quando é compartilhada por mais de dois triângulos.
+    pub fn edge_analysis(&self, crease_rad: Option<f64>) -> (Topology, Vec<u8>) {
+        let ids = self.point_ids();
+        let limit = crease_rad.map(f64::cos);
+        let normals = limit.map(|_| {
+            self.triangles
+                .iter()
+                .map(|t| {
+                    let [a, b, c] = self.triangle_points(*t);
+                    let n = cross(sub(b, a), sub(c, a));
+                    n.map(|v| v / norm(n))
                 })
-            })
-            .collect();
-        let mut edges: HashMap<(u64, u64), (usize, i64)> = HashMap::new();
-        for t in &self.triangles {
-            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-                let (a, b) = (ids[a as usize], ids[b as usize]);
-                let entry = edges.entry((a.min(b), a.max(b))).or_default();
-                entry.0 += 1;
-                entry.1 += if a < b { 1 } else { -1 };
+                .collect::<Vec<_>>()
+        });
+        let mut mask = vec![
+            0_u8;
+            if limit.is_some() {
+                self.triangles.len()
+            } else {
+                0
+            }
+        ];
+        let bit = |local: usize| 1_u8 << ((local + 2) % 3);
+        // Por aresta: primeira ocorrência (triângulo·3 + aresta local), contagem e saldo de
+        // sentido (+1/-1), que é zero quando os dois triângulos têm orientação coerente.
+        let mut edges: HashMap<u64, (u32, u32, i32)> =
+            HashMap::with_capacity(self.triangles.len() * 2);
+        for (index, t) in self.triangles.iter().enumerate() {
+            for local in 0..3 {
+                let a = ids[t[local] as usize];
+                let b = ids[t[(local + 1) % 3] as usize];
+                let key = (u64::from(a.min(b)) << 32) | u64::from(a.max(b));
+                let entry = edges
+                    .entry(key)
+                    .or_insert(((index * 3 + local) as u32, 0, 0));
+                entry.1 += 1;
+                entry.2 += if a < b { 1 } else { -1 };
+                if entry.1 > 1
+                    && let (Some(limit), Some(normals)) = (limit, &normals)
+                {
+                    let first = (entry.0 / 3) as usize;
+                    // Dobra acentuada ou aresta não manifold: os dois lados são marcados.
+                    if entry.1 > 2 || dot(normals[first], normals[index]) < limit {
+                        mask[first] |= bit((entry.0 % 3) as usize);
+                        mask[index] |= bit(local);
+                    }
+                }
             }
         }
-        Topology {
-            boundary_edges: edges.values().filter(|(count, _)| *count == 1).count(),
-            non_manifold_edges: edges.values().filter(|(count, _)| *count > 2).count(),
-            inconsistent_edges: edges
-                .values()
-                .filter(|(count, direction)| *count == 2 && *direction != 0)
-                .count(),
+        let mut topology = Topology {
+            boundary_edges: 0,
+            non_manifold_edges: 0,
+            inconsistent_edges: 0,
+        };
+        for (first, count, direction) in edges.into_values() {
+            match count {
+                1 => {
+                    topology.boundary_edges += 1;
+                    if limit.is_some() {
+                        mask[(first / 3) as usize] |= bit((first % 3) as usize);
+                    }
+                }
+                2 if direction != 0 => topology.inconsistent_edges += 1,
+                2 => {}
+                _ => topology.non_manifold_edges += 1,
+            }
         }
+        (topology, mask)
     }
 
     /// Centroide volumétrico da malha fechada, calculado por tetraedros orientados.
@@ -186,6 +269,11 @@ impl Topology {
     pub fn has_closed_oriented_edges(self) -> bool {
         self.boundary_edges == 0 && self.non_manifold_edges == 0 && self.inconsistent_edges == 0
     }
+}
+
+/// Chave de igualdade exata de posição; -0 e +0 são a mesma coordenada.
+fn position_key(p: Point3) -> [u64; 3] {
+    p.map(|x| if x == 0.0 { 0 } else { x.to_bits() })
 }
 
 pub fn add(a: Point3, b: Point3) -> Point3 {
@@ -266,6 +354,62 @@ mod tests {
         triangles[0].swap(0, 1);
         let reversed = Mesh::new(mesh.vertices().to_vec(), triangles)?;
         assert!(reversed.topology().inconsistent_edges > 0);
+        Ok(())
+    }
+
+    /// Como chega de um STL: três vértices próprios por triângulo.
+    fn triangle_soup(mesh: &Mesh) -> Result<Mesh, GeometryError> {
+        let vertices = mesh
+            .triangles()
+            .iter()
+            .flat_map(|t| mesh.triangle_points(*t))
+            .collect();
+        let triangles = (0..mesh.triangles().len() as u32)
+            .map(|i| [i * 3, i * 3 + 1, i * 3 + 2])
+            .collect();
+        Mesh::new(vertices, triangles)
+    }
+
+    #[test]
+    fn welding_shares_identical_positions_without_changing_geometry() -> Result<(), Box<dyn Error>>
+    {
+        let soup = triangle_soup(&reference_bracket()?)?;
+        assert_eq!(soup.vertices().len(), 60);
+        let welded = soup.clone().welded();
+        // O prisma em L tem 12 cantos distintos.
+        assert_eq!(welded.vertices().len(), 12);
+        assert_eq!(welded.triangles().len(), soup.triangles().len());
+        assert_eq!(welded.signed_volume(), soup.signed_volume());
+        assert!(welded.topology().has_closed_oriented_edges());
+        // Fundir de novo não altera nada.
+        assert_eq!(welded.clone().welded().vertices(), welded.vertices());
+        Ok(())
+    }
+
+    #[test]
+    fn creases_mark_sharp_edges_on_both_sides_and_skip_coplanar_diagonals()
+    -> Result<(), Box<dyn Error>> {
+        let mesh = reference_bracket()?;
+        let (topology, mask) = mesh.edge_analysis(Some(30_f64.to_radians()));
+        assert!(topology.has_closed_oriented_edges());
+        // 18 arestas do prisma (6 em cada tampa e 6 laterais), marcadas nos dois triângulos.
+        // As diagonais das tampas e das laterais são coplanares e não aparecem.
+        let bits = mask.iter().map(|m| m.count_ones()).sum::<u32>();
+        assert_eq!(bits, 36);
+        // A máscara não depende de os vértices estarem fundidos.
+        assert_eq!(
+            triangle_soup(&mesh)?
+                .edge_analysis(Some(30_f64.to_radians()))
+                .1,
+            mask
+        );
+        // Uma face removida deixa bordas abertas, que também são desenhadas.
+        let mut triangles = mesh.triangles().to_vec();
+        triangles.pop();
+        let open = Mesh::new(mesh.vertices().to_vec(), triangles)?;
+        let (topology, mask) = open.edge_analysis(Some(30_f64.to_radians()));
+        assert!(topology.boundary_edges > 0);
+        assert!(mask.iter().map(|m| m.count_ones()).sum::<u32>() > 30);
         Ok(())
     }
 }
