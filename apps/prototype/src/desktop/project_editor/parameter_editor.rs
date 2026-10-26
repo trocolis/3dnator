@@ -43,13 +43,21 @@ impl Editor {
         }
         let document = tab.session.document().clone();
         let revision = tab.session.revision();
+        let retry = command.clone();
         self.start(context, None, move || {
-            PreparedCommand::new(document, revision, command)
-                .map(|command| Outcome::Prepared {
+            match PreparedCommand::new(document, revision, command) {
+                Ok(command) => Ok(Outcome::Prepared {
                     tab: tab_id,
                     command,
-                })
-                .map_err(|e| e.to_string())
+                }),
+                // Falhas atribuídas a uma operação viram decisão do usuário, não só status.
+                Err(error) if error.failure.is_some() => Ok(Outcome::Rejected {
+                    tab: tab_id,
+                    command: retry,
+                    error,
+                }),
+                Err(error) => Err(error.to_string()),
+            }
         });
     }
     pub(super) fn parameter_dialog(&mut self, context: &egui::Context) {

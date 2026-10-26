@@ -52,6 +52,21 @@ pub(super) enum Icon {
     Trim,
     Folder,
     Panel,
+    First,
+    Previous,
+    Next,
+    Last,
+    Delete,
+    Warning,
+    OneSide,
+    TwoSides,
+    Symmetric,
+    ToFace,
+    Flip,
+    Join,
+    CutBody,
+    IntersectBody,
+    NewBody,
 }
 
 /// Elementos geométricos mantêm proporção e traço em qualquer tamanho de botão.
@@ -432,6 +447,111 @@ pub(super) fn paint_with_ink(
         Icon::Panel => {
             p.face(&[[2., 4.], [22., 4.], [22., 20.], [2., 20.]], p.fill);
             p.line(&[[15., 4.], [15., 20.]], p.ink);
+        }
+        // Controles de reprodução da linha do tempo: barra indica o limite do histórico.
+        Icon::First | Icon::Last => {
+            let mirror = |x: f32| if icon == Icon::Last { 24. - x } else { x };
+            p.line(&[[mirror(5.), 5.], [mirror(5.), 19.]], p.ink);
+            p.face(
+                &[[mirror(19.), 5.], [mirror(8.), 12.], [mirror(19.), 19.]],
+                p.fill,
+            );
+        }
+        Icon::Previous | Icon::Next => {
+            let mirror = |x: f32| if icon == Icon::Next { 24. - x } else { x };
+            p.face(
+                &[[mirror(17.), 5.], [mirror(6.), 12.], [mirror(17.), 19.]],
+                p.fill,
+            );
+        }
+        Icon::Delete => {
+            p.line(&[[4., 6.], [20., 6.]], p.ink);
+            p.line(&[[9., 6.], [9., 3.], [15., 3.], [15., 6.]], p.ink);
+            p.face(&[[6., 6.], [18., 6.], [17., 21.], [7., 21.]], p.fill);
+            p.line(&[[10., 10.], [10., 17.]], p.accent);
+            p.line(&[[14., 10.], [14., 17.]], p.accent);
+        }
+        Icon::Warning => {
+            p.face(
+                &[[12., 2.], [22., 21.], [2., 21.]],
+                egui::Color32::from_rgb(255, 226, 160),
+            );
+            p.line(&[[12., 8.], [12., 15.]], theme::WARNING);
+            p.circle(12., 18., 0.8, theme::WARNING);
+        }
+        // Direções da extrusão: o plano do perfil é a linha horizontal.
+        Icon::OneSide | Icon::TwoSides | Icon::Symmetric => {
+            let base = if icon == Icon::OneSide { 19. } else { 14. };
+            p.line(&[[3., base], [21., base]], p.ink);
+            p.arrow([12., base], [12., 3.]);
+            match icon {
+                Icon::TwoSides => p.arrow([12., base], [12., 19.]),
+                Icon::Symmetric => p.arrow([12., base], [12., 24.]),
+                _ => {}
+            }
+        }
+        Icon::ToFace => {
+            p.line(&[[3., 20.], [21., 20.]], p.ink);
+            p.face(&[[3., 3.], [21., 3.], [21., 6.], [3., 6.]], p.fill);
+            p.arrow([12., 20.], [12., 7.]);
+        }
+        Icon::Flip => {
+            p.arrow([8., 18.], [8., 4.]);
+            p.arrow([16., 6.], [16., 20.]);
+        }
+        // Resultado de operações entre corpos.
+        Icon::Join | Icon::CutBody | Icon::IntersectBody => {
+            let left = [[3., 6.], [14., 6.], [14., 17.], [3., 17.]];
+            match icon {
+                Icon::Join => {
+                    p.face(
+                        &[
+                            [3., 6.],
+                            [14., 6.],
+                            [14., 10.],
+                            [21., 10.],
+                            [21., 21.],
+                            [10., 21.],
+                            [10., 17.],
+                            [3., 17.],
+                        ],
+                        p.fill,
+                    );
+                    p.line(&[[15., 15.5], [19., 15.5]], p.accent);
+                    p.line(&[[17., 13.5], [17., 17.5]], p.accent);
+                }
+                Icon::CutBody => {
+                    p.face(&left, p.fill);
+                    p.line(
+                        &[[10., 10.], [21., 10.], [21., 21.], [10., 21.], [10., 10.]],
+                        p.accent,
+                    );
+                    p.face(
+                        &[[10., 10.], [14., 10.], [14., 17.], [10., 17.]],
+                        egui::Color32::WHITE,
+                    );
+                }
+                _ => {
+                    p.line(
+                        &[[3., 6.], [14., 6.], [14., 17.], [3., 17.], [3., 6.]],
+                        p.ink,
+                    );
+                    p.line(
+                        &[[10., 10.], [21., 10.], [21., 21.], [10., 21.], [10., 10.]],
+                        p.ink,
+                    );
+                    p.face(&[[10., 10.], [14., 10.], [14., 17.], [10., 17.]], p.accent);
+                }
+            }
+        }
+        Icon::NewBody => {
+            p.cube();
+            p.face(
+                &[[14., 14.], [22., 14.], [22., 22.], [14., 22.]],
+                egui::Color32::WHITE,
+            );
+            p.line(&[[18., 15.5], [18., 20.5]], p.accent);
+            p.line(&[[15.5, 18.], [20.5, 18.]], p.accent);
         }
     }
 }

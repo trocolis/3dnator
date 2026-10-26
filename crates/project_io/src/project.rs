@@ -16,10 +16,12 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
+/// Versão 12: operações suprimidas e marcador do histórico por peça. Versões anteriores
+/// abrem com todas as operações ativas e sem marcador (campos ausentes).
 /// Versão 11: cotas associativas das folhas, com caminhos e referências topológicas estáveis.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -58,6 +60,8 @@ struct PartRecord {
     parameters: nator_document::parameters::Parameters,
     #[serde(default)]
     features: Vec<nator_document::features::Feature>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    history_marker: Option<usize>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -346,6 +350,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 .collect(),
             parameters: part.parameters,
             features: part.features,
+            history_marker: part.history_marker,
         });
     }
     if archive.len() != expected_names.len()
@@ -490,6 +495,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                 name: p.name.clone(),
                 parameters: p.parameters.clone(),
                 features: p.features.clone(),
+                history_marker: p.history_marker,
                 sketches: p
                     .sketches
                     .iter()

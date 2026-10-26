@@ -171,6 +171,14 @@ fn mirror_bodies(
     let piece = doc
         .part(part)
         .ok_or_else(|| DocumentError("Peça espelhada ausente.".into()))?;
+    // A reflexão entra no fim do histórico de cada definição. Operações inativas
+    // continuariam usando os corpos antes da reflexão quando fossem reativadas.
+    if piece.history_marker.is_some() || piece.features.iter().any(|f| f.suppressed) {
+        return Err(DocumentError(format!(
+            "Reative as operações e leve o marcador do histórico de “{}” ao fim antes de espelhar o conjunto.",
+            piece.name
+        )));
+    }
     let consumed = piece
         .features
         .iter()

@@ -231,7 +231,10 @@ impl Editor {
                 .map_err(sketch_error)?;
             let report = solver::solve(&sketch).map_err(sketch_error)?;
             let prepared = if report.status == Status::Conflict {
-                Err(text(T::SketchConflict).into())
+                Err(nator_commands::CommandError {
+                    message: text(T::SketchConflict).into(),
+                    failure: None,
+                })
             } else {
                 PreparedCommand::new(
                     document,
@@ -241,7 +244,6 @@ impl Editor {
                         sketch: report.sketch.clone(),
                     },
                 )
-                .map_err(sketch_error)
             };
             Ok(Outcome::SketchSolved {
                 tab,

@@ -153,6 +153,10 @@ pub struct Part {
     pub sketches: Vec<SketchRecord>,
     pub parameters: parameters::Parameters,
     pub features: Vec<features::Feature>,
+    /// Marcador do histórico: quantidade de operações construídas a partir do início.
+    /// `None` constrói todas. As operações depois do marcador ficam inativas e novas
+    /// operações são inseridas nessa posição, como ao voltar a uma etapa do histórico.
+    pub history_marker: Option<usize>,
 }
 #[derive(Debug, Clone)]
 pub struct Instance {
@@ -361,6 +365,7 @@ impl Document {
             sketches: Vec::new(),
             parameters: parameters::Parameters::default(),
             features: Vec::new(),
+            history_marker: None,
         });
         self.instances.push(Instance {
             parent: None,
@@ -461,6 +466,7 @@ impl Document {
                     sketches: Vec::new(),
                     parameters: parameters::Parameters::default(),
                     features: Vec::new(),
+                    history_marker: None,
                 });
                 self.instances.push(Instance {
                     parent: None,

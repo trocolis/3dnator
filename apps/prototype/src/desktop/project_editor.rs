@@ -1,15 +1,19 @@
 mod assembly_editor;
 pub(crate) mod capture;
+mod command_panel;
 mod drawing_editor;
 mod export_editor;
 mod feature_editor;
 mod icons;
+mod live_preview;
 mod navigation;
 mod parameter_editor;
+mod profile_pick;
 mod shell;
 mod sketch_editor;
 mod sketch_scene;
 mod theme;
+mod timeline;
 mod view_cube;
 mod views;
 mod window_frame;
@@ -111,6 +115,8 @@ struct SceneKey {
     revision: u64,
     view: u64,
     active: Option<PartId>,
+    /// Geração da pré-visualização exibida; zero para a cena do documento.
+    preview: u64,
 }
 
 struct Tab {
@@ -262,12 +268,18 @@ enum Outcome {
         tab: u64,
         command: PreparedCommand,
     },
+    /// Edição recusada por uma falha de recálculo atribuída a uma operação.
+    Rejected {
+        tab: u64,
+        command: Command,
+        error: nator_commands::CommandError,
+    },
     SketchSolved {
         tab: u64,
         revision: u64,
         id: SketchId,
         report: nator_sketch::solver::Report,
-        prepared: Result<PreparedCommand, String>,
+        prepared: Result<PreparedCommand, nator_commands::CommandError>,
     },
     Imported {
         tab: u64,
@@ -346,6 +358,14 @@ pub struct Editor {
     measure_report: Vec<String>,
     /// Disposição da interface; não modifica o documento nem o histórico.
     shell: shell::ShellState,
+    timeline: timeline::TimelineState,
+    /// Edição rejeitada por falha de recálculo, aguardando correção, supressão ou cancelamento.
+    pending_failure: Option<timeline::PendingFailure>,
+    /// Aba cuja falha pendente está sendo resolvida pelo comando em preparação.
+    resolving: Option<u64>,
+    preview: live_preview::LivePreview,
+    /// Área 3D do último quadro, para ancorar os painéis de comando.
+    canvas_rect: egui::Rect,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -436,6 +456,11 @@ impl Editor {
             rotate_angle: 15.,
             measure_report: Vec::new(),
             shell: shell::ShellState::new(),
+            timeline: timeline::TimelineState::default(),
+            pending_failure: None,
+            resolving: None,
+            preview: live_preview::LivePreview::default(),
+            canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.)),
         })
     }
     fn busy(&self) -> bool {
@@ -605,69 +630,12 @@ impl Editor {
                     }
                 }
             }
-            Ok(Outcome::Prepared { tab, command }) => {
-                let mut saved = None;
-                let mut created = None;
-                let mut consumed = false;
-                let active_tab = self.current().id;
-                if let Some(target) = self.find_tab(tab) {
-                    match target.session.commit(command) {
-                        Ok(effect) => {
-                            if let Effect::SketchCreated { part, sketch } = effect {
-                                target.active_part = Some(part);
-                                let mut work = sketch_editor::Workspace::new(sketch);
-                                work.previous_camera = target.camera.clone();
-                                work.placement = target
-                                    .plane_pick
-                                    .as_ref()
-                                    .map(|p| p.placement)
-                                    .unwrap_or_default();
-                                if active_tab != tab {
-                                    target.sketch_edit = Some(work);
-                                    target.plane_pick = None;
-                                }
-                                created = Some((part, sketch));
-                            }
-                            if let Effect::Imported { part, body } = effect {
-                                target.select(Some(Selection::Body { part, id: body }));
-                                consumed = target.sketch_edit.as_ref().is_some_and(|w| {
-                                    target
-                                        .session
-                                        .document()
-                                        .sketch(w.id)
-                                        .is_some_and(|s| !s.visible)
-                                });
-                                if consumed
-                                    && active_tab != tab
-                                    && let Some(work) = target.sketch_edit.take()
-                                {
-                                    target.camera.copy_orientation(&work.previous_camera);
-                                    target.camera_transition = None;
-                                }
-                            }
-                            if let Effect::SheetSaved { id } = effect {
-                                saved = Some(id);
-                            }
-                            target.changed();
-                            self.requested = None;
-                        }
-                        Err(error) => self.status = error.to_string(),
-                    }
-                }
-                if tab == active_tab {
-                    if let Some((part, sketch)) = created {
-                        self.begin_sketch(part, sketch);
-                    }
-                    if consumed {
-                        self.finish_sketch();
-                    }
-                }
-                if let Some(id) = saved
-                    && let Some(draft) = self.drawing_edit.as_mut().filter(|d| d.tab == tab)
-                {
-                    draft.keep_sheet_id(id);
-                }
-            }
+            Ok(Outcome::Prepared { tab, command }) => self.commit_prepared(tab, command),
+            Ok(Outcome::Rejected {
+                tab,
+                command,
+                error,
+            }) => self.reject_command(tab, command, error),
             Ok(Outcome::SketchSolved {
                 tab,
                 revision,
@@ -675,6 +643,7 @@ impl Editor {
                 report,
                 prepared,
             }) => {
+                let mut rejected = None;
                 if let Some(target) = self
                     .find_tab(tab)
                     .filter(|t| t.session.revision() == revision)
@@ -687,18 +656,30 @@ impl Editor {
                         self.status = text(T::SketchConflict).into();
                     } else {
                         work.pending = None;
-                        match prepared.and_then(|command| {
-                            target.session.commit(command).map_err(|e| e.to_string())
-                        }) {
+                        match prepared.and_then(|command| Ok(target.session.commit(command)?)) {
                             Ok(_) => {
                                 target.changed();
                                 self.requested = None;
                             }
                             Err(error) => {
-                                work.pending = Some(report.sketch);
-                                self.status = error.to_string();
+                                work.pending = Some(report.sketch.clone());
+                                rejected = Some((error, report.sketch));
                             }
                         }
+                    }
+                }
+                // A alteração do rascunho quebrou uma operação: ela fica pendente e o
+                // usuário decide entre corrigir, suprimir ou cancelar.
+                if let Some((error, sketch)) = rejected {
+                    self.status = error.to_string();
+                    if let Some(failure) = error.failure {
+                        self.pending_failure = Some(timeline::PendingFailure {
+                            tab,
+                            command: Command::UpdateSketch { id, sketch },
+                            failure,
+                            sketch: Some(id),
+                            fixing: false,
+                        });
                     }
                 }
             }
@@ -796,38 +777,7 @@ impl Editor {
                 prepared,
             }) => {
                 if self.scene_key() == key {
-                    let mut camera = self.current().camera.clone();
-                    let previous = self.current().scene_bounds.or_else(|| {
-                        self.current()
-                            .sketch_edit
-                            .as_ref()
-                            .map(|_| sketch_scene::EMPTY_BOUNDS)
-                    });
-                    if let Some(previous) = previous {
-                        camera.reframe(previous, bounds);
-                        if let Some(transition) = &mut self.current_mut().camera_transition {
-                            transition.from.reframe(previous, bounds);
-                            transition.to.reframe(previous, bounds);
-                        }
-                    } else {
-                        let [w, h] = self.viewport.size();
-                        camera.fit(f64::from(w) / f64::from(h));
-                    }
-                    let result = if let Some(prepared) = prepared {
-                        self.viewport.set_prepared_mesh(&self.gpu.device, &prepared)
-                    } else {
-                        self.viewport.clear(&self.gpu.device);
-                        Ok(())
-                    };
-                    match result {
-                        Ok(()) => {
-                            self.current_mut().scene_bounds = Some(bounds);
-                            self.scene = mesh;
-                            self.rendered = Some(key);
-                            self.viewport.camera = camera;
-                        }
-                        Err(error) => self.status = error,
-                    }
+                    self.show_scene(key, bounds, mesh, prepared);
                 }
             }
             Ok(Outcome::Recovered { tab, state }) => {
@@ -860,12 +810,142 @@ impl Editor {
             }
         }
     }
+    /// Publica um comando preparado na aba de origem, com os efeitos sobre seleção,
+    /// rascunho, folhas e falhas pendentes.
+    fn commit_prepared(&mut self, tab: u64, command: PreparedCommand) {
+        let mut saved = None;
+        let mut created = None;
+        let mut consumed = false;
+        let active_tab = self.current().id;
+        if let Some(target) = self.find_tab(tab) {
+            match target.session.commit(command) {
+                Ok(effect) => {
+                    if let Effect::SketchCreated { part, sketch } = effect {
+                        target.active_part = Some(part);
+                        let mut work = sketch_editor::Workspace::new(sketch);
+                        work.previous_camera = target.camera.clone();
+                        work.placement = target
+                            .plane_pick
+                            .as_ref()
+                            .map(|p| p.placement)
+                            .unwrap_or_default();
+                        if active_tab != tab {
+                            target.sketch_edit = Some(work);
+                            target.plane_pick = None;
+                        }
+                        created = Some((part, sketch));
+                    }
+                    if let Effect::Imported { part, body } = effect {
+                        target.select(Some(Selection::Body { part, id: body }));
+                        consumed = target.sketch_edit.as_ref().is_some_and(|w| {
+                            target
+                                .session
+                                .document()
+                                .sketch(w.id)
+                                .is_some_and(|s| !s.visible)
+                        });
+                        if consumed
+                            && active_tab != tab
+                            && let Some(work) = target.sketch_edit.take()
+                        {
+                            target.camera.copy_orientation(&work.previous_camera);
+                            target.camera_transition = None;
+                        }
+                    }
+                    if let Effect::SheetSaved { id } = effect {
+                        saved = Some(id);
+                    }
+                    target.changed();
+                    self.requested = None;
+                    self.resolve_pending_failure(tab);
+                }
+                Err(error) => self.status = error.to_string(),
+            }
+        }
+        if tab == active_tab {
+            if let Some((part, sketch)) = created {
+                self.begin_sketch(part, sketch);
+            }
+            if consumed {
+                self.finish_sketch();
+            }
+        }
+        if let Some(id) = saved
+            && let Some(draft) = self.drawing_edit.as_mut().filter(|d| d.tab == tab)
+        {
+            draft.keep_sheet_id(id);
+        }
+    }
+    /// Edição recusada: uma falha atribuída a uma operação aguarda a decisão do usuário.
+    fn reject_command(&mut self, tab: u64, command: Command, error: nator_commands::CommandError) {
+        self.resolving = None;
+        self.status = error.to_string();
+        if let Some(failure) = error.failure
+            && self.tabs.iter().any(|t| t.id == tab)
+        {
+            // Uma resolução que falha em outra operação mantém o rascunho pendente.
+            let sketch = self
+                .pending_failure
+                .take_if(|p| p.tab == tab)
+                .and_then(|p| p.sketch);
+            self.pending_failure = Some(timeline::PendingFailure {
+                tab,
+                command,
+                failure,
+                sketch,
+                fixing: false,
+            });
+        }
+    }
+    /// Publica uma cena preparada no viewport, preservando o enquadramento em coordenadas
+    /// do mundo quando os limites mudam.
+    fn show_scene(
+        &mut self,
+        key: SceneKey,
+        bounds: nator_geometry::Bounds,
+        mesh: Option<Mesh>,
+        prepared: Option<PreparedMesh>,
+    ) {
+        let mut camera = self.viewport.camera.clone();
+        let previous = self.current().scene_bounds.or_else(|| {
+            self.current()
+                .sketch_edit
+                .as_ref()
+                .map(|_| sketch_scene::EMPTY_BOUNDS)
+        });
+        if let Some(previous) = previous {
+            camera.reframe(previous, bounds);
+            if let Some(transition) = &mut self.current_mut().camera_transition {
+                transition.from.reframe(previous, bounds);
+                transition.to.reframe(previous, bounds);
+            }
+        } else {
+            let [w, h] = self.viewport.size();
+            camera.fit(f64::from(w) / f64::from(h));
+        }
+        let result = if let Some(prepared) = prepared {
+            self.viewport.set_prepared_mesh(&self.gpu.device, &prepared)
+        } else {
+            self.viewport.clear(&self.gpu.device);
+            Ok(())
+        };
+        match result {
+            Ok(()) => {
+                self.current_mut().scene_bounds = Some(bounds);
+                self.scene = mesh;
+                self.rendered = Some(key);
+                self.viewport.camera = camera;
+            }
+            Err(error) => self.status = error,
+        }
+    }
     fn scene_key(&self) -> SceneKey {
         SceneKey {
             tab: self.current().id,
             revision: self.current().session.revision(),
             view: self.current().view.version,
             active: self.current().active_part,
+            preview: self.preview.shown,
         }
     }
     fn ensure_scene(&mut self, context: &egui::Context) {
@@ -1188,6 +1268,7 @@ impl Editor {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
+        self.poll_preview(ui.ctx());
         self.ensure_scene(ui.ctx());
         self.shortcuts(ui.ctx());
         self.toolbar(ui);
@@ -1205,6 +1286,8 @@ impl Editor {
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
         self.command_palette(ui.ctx());
+        self.timeline_dialogs(ui.ctx());
+        self.finish_preview_frame();
         window_frame::resize_handles(ui);
         self.maybe_recover(ui.ctx());
     }

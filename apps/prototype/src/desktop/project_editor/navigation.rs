@@ -221,11 +221,18 @@ impl Editor {
                 bounds,
                 f64::from(response.rect.aspect_ratio()),
             );
-            let document = self.current().session.document().clone();
+            let mut document = self.current().session.document().clone();
             let tab = self.current().id;
             let revision = self.current().session.revision();
             let mode = self.pick_mode;
             let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
+            // Ao editar uma operação, as seleções valem para o histórico até antes dela,
+            // onde estão os corpos e faces que ela consome.
+            if let Some(draft) = &self.feature_edit
+                && let Some(output) = draft.output()
+            {
+                live_preview::roll_back(&mut document, draft.part(), output, true);
+            }
             let view = self.current().view.clone();
             self.start(ui.ctx(), None, move || {
                 let pick = document
@@ -239,6 +246,15 @@ impl Editor {
                         }
                         feature_editor::Awaiting::Face => {
                             document.face_at(p).map(feature_editor::Kept::Face)
+                        }
+                        feature_editor::Awaiting::Body => {
+                            if document.body(p.body).is_some_and(|b| b.brep.is_some()) {
+                                Ok(feature_editor::Kept::Body(p.body))
+                            } else {
+                                Err(nator_document::DocumentError(
+                                    text(T::SolidBodyRequired).into(),
+                                ))
+                            }
                         }
                     }
                     .map_err(|e| e.to_string())

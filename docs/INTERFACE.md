@@ -26,7 +26,37 @@ A árvore usa ícones, controles de visibilidade, nomes abreviados por elipse e 
 
 Arraste o fundo livre da barra escura para mover a janela. Duplo clique nessa região maximiza ou restaura; as bordas e os cantos redimensionam a janela quando ela não está maximizada. Os botões da barra recebem seus próprios cliques. Fechar o aplicativo aguarda a tarefa em andamento e segue a confirmação de salvamento dos projetos modificados.
 
-Na base, os ícones do histórico paramétrico abrem a edição das operações da peça ativa. Eles representam operações persistidas, enquanto desfazer/refazer continua pertencendo à sessão. O marcador azul indica o fim da sequência; não é um controle de retrocesso do histórico.
+## Linha do tempo do histórico
+
+Na base fica a linha do tempo das operações da peça ativa, como nos CADs de mercado. Ela representa o histórico paramétrico persistido; desfazer/refazer continua pertencendo à sessão e cobre todas as ações abaixo.
+
+- **Reprodução:** os botões ⏮ ◀ ▶ ⏭ movem o marcador do histórico para o início, uma operação para trás, uma para a frente ou para o fim.
+- **Marcador:** a barra azul com alça pode ser arrastada entre as operações para voltar a uma etapa. As operações depois dele ficam esmaecidas e não são construídas; seus resultados ficam ocultos. Novas operações entram na posição do marcador, que avança junto. Avançar o marcador reconstrói as operações reativadas.
+- **Reordenar:** arraste uma operação para outra posição. A ordem só muda se tudo o que ela usa continuar antes dela e tudo o que usa seu resultado continuar depois; caso contrário, uma mensagem nomeia a dependência.
+- **Menu de contexto (botão direito):** editar operação, editar o rascunho do perfil, renomear, suprimir/reativar, mover o marcador para depois da operação e excluir. Duplo clique edita; Delete exclui a operação destacada.
+- **Estados:** operações suprimidas aparecem riscadas em vermelho; as que dependem de uma suprimida ficam acinzentadas, sem construir; as posteriores ao marcador ficam veladas. Suprimir não recalcula o restante; reativar reconstrói o que volta ao histórico.
+- **Excluir com dependentes:** se outras operações usam o resultado, um diálogo lista todas e oferece excluí-las juntas ou cancelar. Sem dependentes, a exclusão é imediata (e reversível por desfazer).
+
+### Falha no recálculo
+
+Quando uma edição (cota de rascunho, parâmetro, operação, reordenação ou reativação) faz uma operação falhar, nada é aplicado e o diálogo **Falha no recálculo** mostra a operação, a mensagem do núcleo e as operações afetadas. Na linha do tempo, a operação que falhou fica em vermelho e as dependentes em laranja; o modelo exibido continua sendo o último resultado válido, anterior à edição pendente.
+
+- **Editar a operação** abre o painel dela; ao aplicar, a correção e a edição pendente entram juntas, em uma só ação de desfazer.
+- **Suprimir e aplicar** aplica a edição suprimindo a operação que falhou (e, por consequência, as dependentes).
+- **Cancelar edição** descarta a edição. Uma alteração de rascunho pendente continua no editor de rascunho até ser corrigida ou cancelada.
+
+Nenhuma referência perdida é substituída por outra face ou aresta: a decisão é sempre do usuário.
+
+## Painéis de comando
+
+As operações de construção abrem um painel ancorado à área 3D, à esquerda do cubo de orientação: cabeçalho com ícone e nome, campos rotulados e rodapé com o estado da prévia, **OK** e **Cancelar**. Enter confirma; Esc cancela.
+
+- **Campos de seleção** (Perfil, Arestas, Faces, Corpo, Corpo alvo, Corpo ferramenta, Face limite) mostram a quantidade escolhida e um × para limpar. O campo ativo, em azul, recebe os cliques no modelo. Arestas e faces alternam: clicar de novo numa já escolhida a retira. Clicar em outro corpo recomeça a seleção.
+- **Perfil na área 3D:** com o campo Perfil ativo, as regiões fechadas dos rascunhos visíveis (e do rascunho escolhido, mesmo oculto) aparecem levemente sombreadas; a região sob o cursor é realçada e o clique a escolhe. Regiões dentro de furos continuam acessíveis.
+- **Extrusão:** direção em um lado, dois lados ou simétrica; extensão por distância (com inversão e deslocamento inicial) ou até uma face plana; resultado como novo corpo, união, corte ou interseção com o corpo alvo. Limites gravados fora desses padrões são preservados como estão.
+- **Demais ferramentas:** revolução (eixo do plano ou linha do rascunho, ângulo ou volta completa), furo (tipo, extensão, ponta, rosca registrada), arredondamento, chanfro (distância igual ou distância e ângulo), casca (para dentro ou para fora), combinar (unir, cortar, interseção), padrões e espelhamento/divisão por plano. O índice topológico manual fica em **Avançado**.
+- **Prévia ao vivo:** a cada alteração, depois de uma breve pausa, o resultado é calculado em segundo plano numa cópia do documento e mostrado no lugar da cena, com o corpo resultante em azul. Ao editar uma operação, a prévia mostra o histórico até ela, e as seleções valem para o modelo antes dela. Erros aparecem no rodapé. **OK** publica o resultado já calculado sem recalcular; se a prévia falhou numa operação posterior, abre-se a decisão de falha no recálculo.
+- Seleções obrigatórias vazias desabilitam o OK. A prévia não entra no desfazer nem altera o documento.
 
 ## Busca, ícones e acessibilidade
 
@@ -60,7 +90,10 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`), que não alteram o projeto de origem:
+
 ```sh
+cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude
 cargo run -p nator-prototype --features occt -- --render-project-preview projeto.3dnator modelo.png
 cargo run -p nator-prototype --features occt -- --render-sketch-preview projeto.3dnator rascunho.png
 cargo run -p nator-prototype --features occt -- --render-project-preview projeto.3dnator compacto.png 900 600

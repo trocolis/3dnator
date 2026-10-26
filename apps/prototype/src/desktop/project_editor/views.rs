@@ -545,7 +545,13 @@ impl Editor {
                         .sense(egui::Sense::click_and_drag()),
                 );
                 response.clone().on_hover_text(text(T::Navigation));
-                if self.current().sketch_edit.is_none() && self.current().plane_pick.is_none() {
+                self.canvas_rect = response.rect;
+                // Com o campo Perfil ativo, o clique escolhe a região do rascunho.
+                let profile = self.profile_overlay(ui, &response);
+                if self.current().sketch_edit.is_none()
+                    && self.current().plane_pick.is_none()
+                    && !profile
+                {
                     self.viewport_actions(ui, &response);
                 }
                 let cube_rect = view_cube::rect(response.rect);

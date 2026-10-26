@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 11
+# Formato de projeto — versão interna 12
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 11; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 12; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -21,7 +21,8 @@ Cada peça contém:
 - desde a versão 8, `color_srgb` opcional por corpo, com três canais inteiros de 0 a 255; ausência usa a aparência neutra;
 - rascunhos: plano fixo, pontos, entidades, restrições, expressões das cotas e visibilidade (usada pelo viewport e pelo olho da árvore);
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
-- histórico de operações (`features`), cada uma com nome, corpo resultante e operação.
+- histórico de operações (`features`), cada uma com nome, corpo resultante, operação e, desde a versão 12, `suppressed` opcional (operação suprimida, com parâmetros preservados);
+- desde a versão 12, `history_marker` opcional: quantidade de operações construídas a partir do início. As posteriores ficam inativas, com a última geometria oculta, e novas operações entram nessa posição. Ausente, todo o histórico é construído; o marcador nunca aponta para o fim (forma canônica).
 
 Cada instância referencia uma definição de peça, a peça pai opcional (subconjuntos) e guarda posição/orientação relativas ao pai. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
 
@@ -80,6 +81,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 11 → 12: operações acrescentam `suppressed` (ausente vale `false`) e peças acrescentam `history_marker` (ausente vale `None`). Projetos anteriores abrem com todo o histórico ativo. Resultados de operações inativas (suprimidas, dependentes de uma suprimida ou posteriores ao marcador) precisam estar ocultos; o leitor rejeita o contrário.
 - 10 → 11: folhas técnicas acrescentam cotas associativas (`annotations`) com referências estáveis de faces e arestas (`DrawingTopologyRef`) e caminhos de ocorrência em montagens. Projetos anteriores desserializam com lista de cotas vazia.
 - 9 → 10: folhas acrescentam `orientation` (padrão `Landscape`), `png_dpi` (150) e `additional_sections` (vazio). O campo `section` continua representando A–A; cortes adicionais guardam identificadores de 1 a 25 e o plano (origem em mm, normal), sem renumeração após remoções. São aceitos até sete cortes adicionais, com identificadores únicos, normais válidas e PNG de 72 a 300 DPI.
 - 8 → 9: `color_srgb` ausente em uma instância assume `None`; geometria, cores de corpos e compartilhamento são preservados.

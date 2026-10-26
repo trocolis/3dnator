@@ -18,17 +18,40 @@ pub(super) struct Built {
     pub faces: Arc<Vec<String>>,
 }
 
-/// Recalcula todo o histórico da peça na ordem. Uma falha interrompe o recálculo e, como
-/// os comandos operam sobre uma cópia candidata, o documento anterior é preservado.
-pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), DocumentError> {
-    let operations = doc
+/// Recalcula na ordem as operações ativas da peça. Operações suprimidas, dependentes de uma
+/// suprimida ou posteriores ao marcador do histórico mantêm a última geometria, oculta. Uma
+/// falha interrompe o recálculo identificando a operação; como os comandos operam sobre uma
+/// cópia candidata, o documento anterior é preservado.
+pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::CommandError> {
+    let piece = doc
         .part(part)
-        .ok_or_else(|| DocumentError("Peça inexistente.".into()))?
+        .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+    let operations = piece
         .features
-        .clone();
-    for feature in operations {
-        let built = construct(doc, part, feature.output, &feature.operation)
-            .map_err(|e| DocumentError(format!("{}: {}", feature.name, e.0)))?;
+        .iter()
+        .cloned()
+        .zip(nator_document::features::states(piece))
+        .collect::<Vec<_>>();
+    for (feature, state) in operations {
+        if !state.is_active() {
+            continue;
+        }
+        let built = construct(doc, part, feature.output, &feature.operation).map_err(|e| {
+            let dependents = doc
+                .part(part)
+                .map(|p| nator_document::features::dependents(p, feature.output))
+                .unwrap_or_default();
+            super::CommandError {
+                message: format!("{}: {}", feature.name, e.0),
+                failure: Some(super::RebuildFailure {
+                    part,
+                    output: feature.output,
+                    name: feature.name.clone(),
+                    message: e.0,
+                    dependents,
+                }),
+            }
+        })?;
         let body = doc.body_mut(feature.output)?;
         body.geometry = built.mesh;
         body.brep = Some(built.brep);
@@ -582,35 +605,96 @@ pub(super) fn construct(
     Err(DocumentError("Construção CAD indisponível.".into()))
 }
 
-/// Excluir uma operação nunca deixa referências silenciosamente apontando para outra geometria.
-pub(super) fn remove(doc: &mut Document, part: PartId, body: BodyId) -> Result<(), DocumentError> {
+/// Excluir uma operação nunca deixa referências silenciosamente apontando para outra geometria:
+/// sem `with_dependents`, a existência de dependentes é um erro que os nomeia; com ele, todas
+/// as dependentes são excluídas na mesma ação.
+pub(super) fn remove(
+    doc: &mut Document,
+    part: PartId,
+    body: BodyId,
+    with_dependents: bool,
+) -> Result<(), DocumentError> {
+    use nator_document::features;
     let piece = doc.part_mut(part)?;
-    if piece
-        .features
-        .iter()
-        .any(|f| f.operation.references().contains(&body))
-    {
-        return Err(DocumentError(
-            "Remova primeiro as operações que dependem deste resultado.".into(),
-        ));
+    if !piece.features.iter().any(|f| f.output == body) {
+        return Err(DocumentError("Operação inexistente.".into()));
     }
-    let inputs = piece
-        .features
-        .iter()
-        .find(|f| f.output == body)
-        .map(|f| f.operation.inputs())
-        .ok_or_else(|| DocumentError("Operação inexistente.".into()))?;
-    piece.features.retain(|f| f.output != body);
-    piece.bodies.retain(|b| b.id != body);
-    for id in inputs {
-        if !piece
+    let dependents = features::dependents(piece, body);
+    if !dependents.is_empty() && !with_dependents {
+        let names = piece
             .features
             .iter()
-            .any(|f| f.operation.inputs().contains(&id))
-            && let Some(b) = piece.bodies.iter_mut().find(|b| b.id == id)
-        {
-            b.visible = true;
-        }
+            .filter(|f| dependents.contains(&f.output))
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(DocumentError(format!(
+            "Operações dependem deste resultado: {names}. Exclua-as também ou cancele."
+        )));
     }
+    let removed = std::iter::once(body)
+        .chain(dependents)
+        .collect::<std::collections::HashSet<_>>();
+    let before = features::hidden_by_history(piece);
+    // O marcador conta operações: descontar as excluídas que estavam antes dele.
+    if let Some(marker) = piece.history_marker {
+        let earlier = piece.features[..marker]
+            .iter()
+            .filter(|f| removed.contains(&f.output))
+            .count();
+        piece.history_marker = Some(marker - earlier);
+    }
+    piece.features.retain(|f| !removed.contains(&f.output));
+    piece.bodies.retain(|b| !removed.contains(&b.id));
+    if piece
+        .history_marker
+        .is_some_and(|marker| marker >= piece.features.len())
+    {
+        piece.history_marker = None;
+    }
+    features::sync_visibility(piece, &before);
+    Ok(())
+}
+
+/// Move a operação `output` para a posição `index`, conferindo que tudo o que ela usa
+/// continue antes dela e que tudo o que usa seu resultado continue depois. Com a ordem válida,
+/// a visibilidade derivada do histórico é ajustada (o marcador conta posições).
+pub(super) fn reorder(
+    piece: &mut nator_document::Part,
+    output: BodyId,
+    index: usize,
+) -> Result<(), DocumentError> {
+    use nator_document::features;
+    let from = piece
+        .features
+        .iter()
+        .position(|f| f.output == output)
+        .ok_or_else(|| DocumentError("Operação inexistente.".into()))?;
+    if index >= piece.features.len() {
+        return Err(DocumentError("Posição do histórico inválida.".into()));
+    }
+    let before = features::hidden_by_history(piece);
+    let feature = piece.features.remove(from);
+    piece.features.insert(index, feature);
+    let producers = piece
+        .features
+        .iter()
+        .map(|f| (f.output, f.name.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut built = std::collections::HashSet::new();
+    for feature in &piece.features {
+        for reference in feature.operation.references() {
+            if let Some(producer) = producers.get(&reference)
+                && !built.contains(&reference)
+            {
+                return Err(DocumentError(format!(
+                    "“{}” usa o resultado de “{producer}”, que ficaria depois dela no histórico.",
+                    feature.name
+                )));
+            }
+        }
+        built.insert(feature.output);
+    }
+    features::sync_visibility(piece, &before);
     Ok(())
 }

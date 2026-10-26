@@ -706,7 +706,8 @@ fn extrusion_until_a_face_and_direct_combination() -> Result<()> {
         session
             .execute(Command::RemoveFeature {
                 part,
-                output: tower_feature
+                output: tower_feature,
+                dependents: false,
             })
             .is_err()
     );

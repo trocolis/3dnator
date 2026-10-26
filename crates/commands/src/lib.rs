@@ -42,9 +42,41 @@ pub enum Command {
         output: BodyId,
         operation: nator_document::features::Operation,
     },
+    /// Exclui a operação e seu resultado. Com `dependents`, exclui também as operações que
+    /// dependem dele; sem isso, a existência de dependentes é um erro explícito.
     RemoveFeature {
         part: PartId,
         output: BodyId,
+        dependents: bool,
+    },
+    /// Suprime ou reativa uma operação, preservando parâmetros e referências.
+    SetFeatureSuppressed {
+        part: PartId,
+        output: BodyId,
+        suppressed: bool,
+    },
+    RenameFeature {
+        part: PartId,
+        output: BodyId,
+        name: String,
+    },
+    /// Move a operação para `index` no histórico, desde que tudo o que ela usa continue
+    /// antes dela e tudo o que usa o seu resultado continue depois.
+    MoveFeature {
+        part: PartId,
+        output: BodyId,
+        index: usize,
+    },
+    /// Quantidade de operações construídas; `None` (ou o fim) reativa todo o histórico.
+    SetHistoryMarker {
+        part: PartId,
+        marker: Option<usize>,
+    },
+    /// Comandos aplicados em uma só ação de desfazer. Os recálculos ficam para o fim, de modo
+    /// que uma edição e a supressão ou correção de outra operação sejam avaliadas juntas.
+    Batch {
+        label: &'static str,
+        commands: Vec<Command>,
     },
     /// Instâncias adicionais da mesma definição, em padrão linear ou circular a partir da
     /// posição da instância de origem, reunidas em um grupo.
@@ -151,6 +183,68 @@ pub enum Effect {
     SheetSaved { id: nator_document::SheetId },
 }
 
+/// Falha do recálculo atribuída a uma operação do histórico. Permite oferecer a correção da
+/// operação, sua supressão ou o cancelamento da edição que a provocou.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RebuildFailure {
+    pub part: PartId,
+    pub output: BodyId,
+    pub name: String,
+    pub message: String,
+    /// Operações que dependem da que falhou, direta ou indiretamente.
+    pub dependents: Vec<BodyId>,
+}
+
+/// Erro de um comando. Falhas de recálculo identificam a operação responsável.
+#[derive(Debug, Clone)]
+pub struct CommandError {
+    pub message: String,
+    pub failure: Option<RebuildFailure>,
+}
+impl std::fmt::Display for CommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+impl std::error::Error for CommandError {}
+impl From<DocumentError> for CommandError {
+    fn from(error: DocumentError) -> Self {
+        Self {
+            message: error.0,
+            failure: None,
+        }
+    }
+}
+
+/// Recálculos pedidos pelos comandos: imediatos, ou reunidos até o fim de um lote.
+struct Rebuilds {
+    deferred: Option<Vec<PartId>>,
+}
+impl Rebuilds {
+    fn immediate() -> Self {
+        Self { deferred: None }
+    }
+    fn deferred() -> Self {
+        Self {
+            deferred: Some(Vec::new()),
+        }
+    }
+    fn request(&mut self, doc: &mut Document, part: PartId) -> Result<(), CommandError> {
+        match &mut self.deferred {
+            Some(parts) => {
+                if !parts.contains(&part) {
+                    parts.push(part);
+                }
+                Ok(())
+            }
+            None => features::rebuild(doc, part),
+        }
+    }
+    fn into_parts(self) -> Vec<PartId> {
+        self.deferred.unwrap_or_default()
+    }
+}
+
 impl Command {
     pub fn label(&self) -> &'static str {
         match self {
@@ -160,6 +254,14 @@ impl Command {
             Self::AddFeature { .. } => "Adicionar operação paramétrica",
             Self::EditFeature { .. } => "Editar operação paramétrica",
             Self::RemoveFeature { .. } => "Remover operação paramétrica",
+            Self::SetFeatureSuppressed {
+                suppressed: true, ..
+            } => "Suprimir operação",
+            Self::SetFeatureSuppressed { .. } => "Reativar operação",
+            Self::RenameFeature { .. } => "Renomear operação",
+            Self::MoveFeature { .. } => "Reordenar histórico",
+            Self::SetHistoryMarker { .. } => "Mover marcador do histórico",
+            Self::Batch { label, .. } => label,
             Self::AddInstance { .. } => "Adicionar instância",
             Self::PatternInstance { .. } => "Padrão de instâncias",
             Self::MirrorInstance { .. } => "Espelhar instância como nova peça",
@@ -185,13 +287,13 @@ impl Command {
             Self::RemoveBody { .. } => "Excluir corpo",
         }
     }
-    fn apply(self, doc: &mut Document) -> Result<Effect, DocumentError> {
+    fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
         match self {
             Self::ImportStep {
                 path,
                 destination,
                 name,
-            } => return assembly::import_step(doc, &path, destination, name),
+            } => return Ok(assembly::import_step(doc, &path, destination, name)?),
             Self::SetSheet {
                 id,
                 target,
@@ -211,7 +313,8 @@ impl Command {
                 if faces == 0 || faces > nator_document::MAX_FACES_PER_BODY {
                     return Err(DocumentError(
                         "Quantidade de faces do sólido importado inválida.".into(),
-                    ));
+                    )
+                    .into());
                 }
                 let (part, body) = doc.add_mesh(destination, name, geometry)?;
                 let imported = doc.body_mut(body)?;
@@ -276,9 +379,75 @@ impl Command {
                     doc.part(part)
                         .ok_or_else(|| DocumentError("Peça inexistente.".into()))?,
                 )?;
-                features::rebuild(doc, part)?;
+                rebuilds.request(doc, part)?;
             }
-            Self::RemoveFeature { part, output } => features::remove(doc, part, output)?,
+            Self::RemoveFeature {
+                part,
+                output,
+                dependents,
+            } => features::remove(doc, part, output, dependents)?,
+            Self::SetFeatureSuppressed {
+                part,
+                output,
+                suppressed,
+            } => {
+                let piece = doc.part_mut(part)?;
+                let before = nator_document::features::hidden_by_history(piece);
+                piece
+                    .features
+                    .iter_mut()
+                    .find(|f| f.output == output)
+                    .ok_or_else(|| DocumentError("Operação inexistente.".into()))?
+                    .suppressed = suppressed;
+                nator_document::features::sync_visibility(piece, &before);
+                // Suprimir não altera as operações que continuam ativas: nenhuma delas usa o
+                // resultado suprimido. Reativar exige reconstruir o que volta ao histórico.
+                if !suppressed {
+                    rebuilds.request(doc, part)?;
+                }
+            }
+            Self::RenameFeature { part, output, name } => {
+                validate_name(&name)?;
+                doc.part_mut(part)?
+                    .features
+                    .iter_mut()
+                    .find(|f| f.output == output)
+                    .ok_or_else(|| DocumentError("Operação inexistente.".into()))?
+                    .name = name;
+            }
+            Self::MoveFeature {
+                part,
+                output,
+                index,
+            } => {
+                features::reorder(doc.part_mut(part)?, output, index)?;
+                rebuilds.request(doc, part)?;
+            }
+            Self::SetHistoryMarker { part, marker } => {
+                let piece = doc.part_mut(part)?;
+                let count = piece.features.len();
+                let previous = piece.history_marker.unwrap_or(count);
+                let marker = marker.filter(|m| *m < count);
+                let before = nator_document::features::hidden_by_history(piece);
+                piece.history_marker = marker;
+                nator_document::features::sync_visibility(piece, &before);
+                // Recuar o marcador não muda as operações anteriores a ele. Avançar traz de
+                // volta operações cuja geometria pode estar desatualizada.
+                if marker.unwrap_or(count) > previous {
+                    rebuilds.request(doc, part)?;
+                }
+            }
+            Self::Batch { commands, .. } => {
+                let mut inner = Rebuilds::deferred();
+                let mut effect = Effect::Changed;
+                for command in commands {
+                    effect = command.apply(doc, &mut inner)?;
+                }
+                for part in inner.into_parts() {
+                    rebuilds.request(doc, part)?;
+                }
+                return Ok(effect);
+            }
             Self::AddInstance {
                 part,
                 parent,
@@ -327,11 +496,12 @@ impl Command {
                         return Err(DocumentError(
                             "A alteração do parâmetro conflita com as restrições do rascunho."
                                 .into(),
-                        ));
+                        )
+                        .into());
                     }
                     record.sketch = report.sketch;
                 }
-                features::rebuild(doc, part_id)?;
+                rebuilds.request(doc, part_id)?;
             }
             Self::AddSketch {
                 destination,
@@ -343,7 +513,8 @@ impl Command {
                 {
                     return Err(DocumentError(
                         "Resolva as restrições antes de criar o rascunho.".into(),
-                    ));
+                    )
+                    .into());
                 }
                 let (part, sketch) = doc.add_sketch(destination, sketch)?;
                 return Ok(Effect::SketchCreated { part, sketch });
@@ -355,7 +526,8 @@ impl Command {
                 {
                     return Err(DocumentError(
                         "Resolva as restrições antes de confirmar o rascunho.".into(),
-                    ));
+                    )
+                    .into());
                 }
                 doc.update_sketch(id, sketch)?;
                 let part = doc
@@ -364,7 +536,7 @@ impl Command {
                     .find(|p| p.sketches.iter().any(|s| s.id == id))
                     .map(|p| p.id)
                     .ok_or_else(|| DocumentError("Peça do rascunho ausente.".into()))?;
-                features::rebuild(doc, part)?;
+                rebuilds.request(doc, part)?;
             }
             Self::ImportMesh {
                 destination,
@@ -394,7 +566,7 @@ impl Command {
                     .find(|p| p.bodies.iter().any(|b| b.id == id))
                     .map(|p| p.id)
                     .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
-                features::rebuild(doc, part)?;
+                rebuilds.request(doc, part)?;
             }
             Self::MoveInstance { id, placement } => doc.instance_mut(id)?.placement = placement,
             Self::RemoveBody { id } => {
@@ -410,7 +582,8 @@ impl Command {
                 {
                     return Err(DocumentError(
                         "O corpo participa do histórico; remova a operação correspondente.".into(),
-                    ));
+                    )
+                    .into());
                 }
                 doc.remove_body(id)?;
             }
@@ -429,6 +602,17 @@ fn add_feature(
     // O identificador vem antes da construção porque os nomes das faces levam o corpo dono;
     // em caso de falha, a cópia candidata do documento é descartada inteira.
     let output = doc.allocate_body_id()?;
+    let piece = doc
+        .part(part)
+        .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+    // A nova operação entra no marcador do histórico e só pode usar resultados construídos.
+    let inactive = nator_document::features::inactive_outputs(piece);
+    if operation.references().iter().any(|b| inactive.contains(b)) {
+        return Err(DocumentError(
+            "A operação usa o resultado de uma operação suprimida ou posterior ao marcador do histórico."
+                .into(),
+        ));
+    }
     let operation = features::normalize(doc, part, operation)?;
     let built = features::construct(doc, part, output, &operation)?;
     // Refinamentos herdam a aparência da entrada principal. Uma edição explícita da cor
@@ -459,13 +643,20 @@ fn add_feature(
     if let Some(sketch) = operation.sketch() {
         doc.sketch_mut(sketch)?.visible = false;
     }
-    doc.part_mut(part)?
-        .features
-        .push(nator_document::features::Feature {
-            name,
-            output,
-            operation,
-        });
+    let piece = doc.part_mut(part)?;
+    let feature = nator_document::features::Feature {
+        name,
+        output,
+        operation,
+        suppressed: false,
+    };
+    match piece.history_marker {
+        Some(marker) => {
+            piece.features.insert(marker, feature);
+            piece.history_marker = Some(marker + 1);
+        }
+        None => piece.features.push(feature),
+    }
     Ok(output)
 }
 
@@ -488,9 +679,9 @@ impl PreparedCommand {
         mut document: Document,
         revision: u64,
         command: Command,
-    ) -> Result<Self, DocumentError> {
+    ) -> Result<Self, CommandError> {
         let label = command.label().to_owned();
-        let effect = command.apply(&mut document)?;
+        let effect = command.apply(&mut document, &mut Rebuilds::immediate())?;
         document.validate()?;
         Ok(Self {
             document,
@@ -498,6 +689,16 @@ impl PreparedCommand {
             effect,
             label,
         })
+    }
+    /// Documento candidato, para pré-visualizar o resultado antes de publicá-lo.
+    pub fn document(&self) -> &Document {
+        &self.document
+    }
+    pub fn effect(&self) -> Effect {
+        self.effect
+    }
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 }
 
@@ -549,9 +750,9 @@ impl Session {
     pub fn redo_label(&self) -> Option<&str> {
         self.redo.last().map(|s| s.label.as_str())
     }
-    pub fn execute(&mut self, command: Command) -> Result<Effect, DocumentError> {
+    pub fn execute(&mut self, command: Command) -> Result<Effect, CommandError> {
         let prepared = PreparedCommand::new(self.document.clone(), self.revision, command)?;
-        self.commit(prepared)
+        Ok(self.commit(prepared)?)
     }
     pub fn commit(&mut self, prepared: PreparedCommand) -> Result<Effect, DocumentError> {
         if prepared.revision != self.revision || prepared.document.id() != self.document.id() {

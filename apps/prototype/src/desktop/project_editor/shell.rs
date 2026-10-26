@@ -859,46 +859,7 @@ impl Editor {
                     self.action_button(ui, Action::Undo, false);
                     self.action_button(ui, Action::Redo, false);
                     ui.separator();
-                    let part = self
-                        .current()
-                        .active_part
-                        .and_then(|id| self.current().session.document().part(id))
-                        .cloned();
-                    if let Some(part) = part.filter(|p| !p.features.is_empty()) {
-                        egui::ScrollArea::horizontal()
-                            .id_salt("feature_timeline")
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    for feature in &part.features {
-                                        let icon = operation_icon(&feature.operation);
-                                        if ui
-                                            .add_enabled_ui(!self.busy(), |ui| {
-                                                icons::button(ui, icon, &feature.name, false, false)
-                                            })
-                                            .inner
-                                            .clicked()
-                                        {
-                                            self.feature_edit = Some(feature_editor::Draft::edit(
-                                                self.current().id,
-                                                part.id,
-                                                feature.clone(),
-                                            ));
-                                        }
-                                    }
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(3., 24.),
-                                        egui::Sense::hover(),
-                                    );
-                                    ui.painter().rect_filled(rect, 1, theme::ACCENT);
-                                });
-                            });
-                    } else {
-                        ui.label(
-                            egui::RichText::new(text(T::TimelineEmpty))
-                                .small()
-                                .color(theme::MUTED),
-                        );
-                    }
+                    self.timeline_strip(ui);
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -1058,23 +1019,6 @@ impl Editor {
             self.shell.search_open = false;
             self.activate_action(context, action);
         }
-    }
-}
-
-fn operation_icon(operation: &nator_document::features::Operation) -> Icon {
-    use nator_document::features::Operation as O;
-    match operation {
-        O::Extrude { .. } => Icon::Extrude,
-        O::Revolve { .. } => Icon::Revolve,
-        O::Hole { .. } => Icon::Hole,
-        O::Fillet { .. } => Icon::Fillet,
-        O::Chamfer { .. } => Icon::Chamfer,
-        O::Shell { .. } => Icon::Shell,
-        O::Boolean { .. } => Icon::Boolean,
-        O::Pattern { .. } => Icon::Pattern,
-        O::Mirror { .. } => Icon::Mirror,
-        O::Split { .. } => Icon::Split,
-        O::Transform { .. } => Icon::Move,
     }
 }
 

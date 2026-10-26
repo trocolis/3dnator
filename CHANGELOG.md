@@ -2,6 +2,18 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Edição do histórico e painéis de comando
+
+- Linha do tempo no estilo dos CADs de mercado: reprodução (início, anterior, próxima, fim), marcador arrastável para voltar a uma etapa, reordenação por arraste com verificação de dependências e menu de contexto com editar, editar perfil, renomear, suprimir/reativar, mover marcador e excluir.
+- Operações suprimidas preservam parâmetros e referências; dependentes de uma suprimida e operações posteriores ao marcador ficam inativas, com resultados ocultos. Novas operações entram no marcador. Suprimir e recuar não recalculam; reativar e avançar reconstroem o necessário.
+- Exclusão com dependentes lista as operações afetadas e oferece excluí-las juntas ou cancelar.
+- Falhas no recálculo identificam a operação e suas dependentes. A edição fica pendente, com o último resultado válido exibido, e o usuário escolhe corrigir a operação, suprimi-la junto da edição ou cancelar. Lotes de comandos aplicam a edição e a resolução em uma só ação, com recálculo único no fim.
+- Formato `.3dnator` versão 12 com `suppressed` por operação e `history_marker` por peça; projetos anteriores abrem com todo o histórico ativo.
+- Painéis de comando ancorados à área 3D substituem a janela de operações: campos de seleção ativos que recebem cliques no modelo (alternando arestas e faces), escolhas por ícone, OK/Cancelar com Enter/Esc e índice topológico em Avançado.
+- Perfis escolhidos com um clique nas regiões fechadas do rascunho, com realce sob o cursor. Extrusão em um lado, dois lados ou simétrica, com inversão, deslocamento inicial e extensão até uma face.
+- Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
+- Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
+
 ### Rascunhos no viewport CAD
 
 - Edição integrada ao mesmo viewport 3D, preservando o modelo, a navegação e o cubo de orientação. A câmera se alinha suavemente ao plano; cursor, grade, entidades, cotas e capturas usam o mesmo referencial, incluindo ocorrências rotacionadas na montagem.

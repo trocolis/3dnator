@@ -13,6 +13,116 @@ pub struct Feature {
     pub name: String,
     pub output: BodyId,
     pub operation: Operation,
+    /// Suprimida pelo usuário: não é construída, mas conserva parâmetros e referências para
+    /// voltar a ser ativada. Operações que dependem dela também deixam de ser construídas.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
+}
+
+/// Situação de uma operação no recálculo da peça.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeatureState {
+    Active,
+    /// Suprimida explicitamente.
+    Suppressed,
+    /// Consome ou consulta o resultado de uma operação inativa; nenhuma outra geometria é
+    /// escolhida no lugar, então ela também fica sem construir.
+    Dependent,
+    /// Posterior ao marcador do histórico (`Part::history_marker`).
+    RolledBack,
+}
+impl FeatureState {
+    pub fn is_active(self) -> bool {
+        self == Self::Active
+    }
+}
+
+/// Estado de cada operação, na ordem do histórico.
+pub fn states(part: &Part) -> Vec<FeatureState> {
+    let marker = part.history_marker.unwrap_or(usize::MAX);
+    let mut inactive = HashSet::new();
+    part.features
+        .iter()
+        .enumerate()
+        .map(|(index, feature)| {
+            let state = if index >= marker {
+                FeatureState::RolledBack
+            } else if feature.suppressed {
+                FeatureState::Suppressed
+            } else if feature
+                .operation
+                .references()
+                .iter()
+                .any(|b| inactive.contains(b))
+            {
+                FeatureState::Dependent
+            } else {
+                FeatureState::Active
+            };
+            if !state.is_active() {
+                inactive.insert(feature.output);
+            }
+            state
+        })
+        .collect()
+}
+
+/// Resultados de operações inativas. Guardam a última geometria construída, mas ficam ocultos
+/// e não participam da cena, de medições nem de exportações.
+pub fn inactive_outputs(part: &Part) -> HashSet<BodyId> {
+    part.features
+        .iter()
+        .zip(states(part))
+        .filter(|(_, state)| !state.is_active())
+        .map(|(f, _)| f.output)
+        .collect()
+}
+
+/// Corpos que o histórico mantém ocultos: resultados inativos e entradas consumidas por
+/// operações ativas.
+pub fn hidden_by_history(part: &Part) -> HashSet<BodyId> {
+    let mut hidden = HashSet::new();
+    for (feature, state) in part.features.iter().zip(states(part)) {
+        if state.is_active() {
+            hidden.extend(feature.operation.inputs());
+        } else {
+            hidden.insert(feature.output);
+        }
+    }
+    hidden
+}
+
+/// Atualiza a visibilidade apenas dos corpos cuja condição no histórico mudou desde `before`
+/// (resultado de `hidden_by_history` antes da edição). Escolhas manuais de visibilidade dos
+/// demais corpos são preservadas; resultados inativos sempre ficam ocultos.
+pub fn sync_visibility(part: &mut Part, before: &HashSet<BodyId>) {
+    let after = hidden_by_history(part);
+    let inactive = inactive_outputs(part);
+    for body in &mut part.bodies {
+        if inactive.contains(&body.id) || (after.contains(&body.id) && !before.contains(&body.id)) {
+            body.visible = false;
+        } else if before.contains(&body.id) && !after.contains(&body.id) {
+            body.visible = true;
+        }
+    }
+}
+
+/// Operações que dependem, direta ou indiretamente, do resultado `output`, na ordem do histórico.
+pub fn dependents(part: &Part, output: BodyId) -> Vec<BodyId> {
+    let mut affected = HashSet::from([output]);
+    let mut result = Vec::new();
+    for feature in &part.features {
+        if feature
+            .operation
+            .references()
+            .iter()
+            .any(|b| affected.contains(b))
+        {
+            affected.insert(feature.output);
+            result.push(feature.output);
+        }
+    }
+    result
 }
 
 /// Região de um rascunho escolhida para extrusão ou revolução.
@@ -381,6 +491,27 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
     if part.features.len() > 256 {
         return Err(DocumentError(
             "Histórico excede 256 operações por peça.".into(),
+        ));
+    }
+    // O marcador no fim seria equivalente a nenhum marcador; exigir a forma canônica evita
+    // dois estados diferentes para o mesmo histórico.
+    if part
+        .history_marker
+        .is_some_and(|marker| marker >= part.features.len())
+    {
+        return Err(DocumentError(
+            "Marcador do histórico fora das operações da peça.".into(),
+        ));
+    }
+    let inactive = inactive_outputs(part);
+    if part
+        .bodies
+        .iter()
+        .any(|b| b.visible && inactive.contains(&b.id))
+    {
+        return Err(DocumentError(
+            "O resultado de uma operação suprimida ou posterior ao marcador não pode ficar visível."
+                .into(),
         ));
     }
     let outputs = part
@@ -780,6 +911,93 @@ mod tests {
         Ok(())
     }
 
+    /// Peça com A → B (transformação de A) → C (padrão de B) e D independente de A.
+    fn chain() -> Result<Part, Box<dyn Error>> {
+        let asset = Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?));
+        let body = |id: u64| Body {
+            id: BodyId(id),
+            name: format!("Corpo {id}"),
+            geometry: Arc::clone(&asset),
+            brep: Some(Arc::new(vec![1])),
+            face_names: Arc::default(),
+            placement: Placement::default(),
+            // Entradas consumidas ficam ocultas, como após criar as operações.
+            visible: id > 11,
+            color: None,
+        };
+        let transform = |base: u64| Operation::Transform {
+            base: BodyId(base),
+            translation: [1., 0., 0.],
+            rotation: [0.; 3],
+        };
+        let feature = |output: u64, operation| Feature {
+            name: format!("Operação {output}"),
+            output: BodyId(output),
+            operation,
+            suppressed: false,
+        };
+        Ok(Part {
+            id: PartId(1),
+            name: "Peça".into(),
+            bodies: (10..14).map(body).collect(),
+            sketches: Vec::new(),
+            parameters: parameters::Parameters::default(),
+            features: vec![
+                feature(11, transform(10)),
+                feature(12, transform(11)),
+                feature(13, transform(10)),
+            ],
+            history_marker: None,
+        })
+    }
+
+    #[test]
+    fn inactive_operations_propagate_and_drive_visibility() -> Result<(), Box<dyn Error>> {
+        let mut part = chain()?;
+        assert_eq!(dependents(&part, BodyId(11)), [BodyId(12)]);
+        let before = hidden_by_history(&part);
+        assert_eq!(before, HashSet::from([BodyId(10), BodyId(11)]));
+        part.features[0].suppressed = true;
+        assert_eq!(
+            states(&part),
+            [
+                FeatureState::Suppressed,
+                FeatureState::Dependent,
+                FeatureState::Active
+            ]
+        );
+        // O usuário ocultou o resultado independente: a escolha é preservada.
+        part.bodies[3].visible = false;
+        sync_visibility(&mut part, &before);
+        let shown = |part: &Part| part.bodies.iter().map(|b| b.visible).collect::<Vec<_>>();
+        // A base continua consumida pela operação ativa 13; 11 e 12 ficam inativos.
+        assert_eq!(shown(&part), [false, false, false, false]);
+        validate(&part)?;
+        // Um resultado inativo visível é rejeitado.
+        part.bodies[2].visible = true;
+        assert!(validate(&part).is_err());
+        part.bodies[2].visible = false;
+        // Marcador depois da primeira operação: as seguintes ficam fora do recálculo.
+        part.features[0].suppressed = false;
+        part.history_marker = Some(1);
+        assert_eq!(
+            states(&part),
+            [
+                FeatureState::Active,
+                FeatureState::RolledBack,
+                FeatureState::RolledBack
+            ]
+        );
+        assert_eq!(
+            inactive_outputs(&part),
+            HashSet::from([BodyId(12), BodyId(13)])
+        );
+        // O marcador no fim não é canônico.
+        part.history_marker = Some(3);
+        assert!(validate(&part).is_err());
+        Ok(())
+    }
+
     #[test]
     fn cloning_moves_face_owners_to_the_new_bodies() -> Result<(), Box<dyn Error>> {
         let bodies = HashMap::from([(BodyId(12), BodyId(40)), (BodyId(3), BodyId(41))]);
@@ -797,6 +1015,7 @@ mod tests {
                 radius: "2 mm".into(),
                 additional_edges: vec![EdgeRef::Between(["b12:e8".into(), "b12:end".into()])],
             },
+            suppressed: false,
         };
         feature.remap(&bodies, &HashMap::new())?;
         let Operation::Fillet {

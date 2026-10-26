@@ -16,7 +16,9 @@ Pendências conhecidas, por etapa:
 4. **Montagem:** espelhamento de peças com subpeças implementado, preservando definições compartilhadas, grupos internos e histórico independente; validação manual dos fluxos ainda pendente conforme a base técnica. Alinhamento contínuo por restrições não faz parte do escopo inicial.
 5. **Documentação técnica:** vistas HLR, cortes precisos do B-rep e cotas associativas reposicionáveis implementados, com curvas discretizadas a 0,01 mm; malhas e contextos mistos mantêm métodos aproximados identificados. Múltiplos cortes, orientação da folha, resolução PNG e cotas ligadas a faces e arestas estáveis com reposicionamento no papel implementados.
 
-Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais com sombreamento direcional e apoio suave no plano de base implementadas.
+Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais com sombreamento direcional e apoio suave no plano de base implementadas. Edição do histórico no padrão dos CADs de mercado (linha do tempo com marcador, supressão, reordenação, exclusão com dependentes e decisão sobre falhas de recálculo) e painéis de comando com prévia ao vivo implementados.
+
+Escopo do README ainda não atendido pela interface: seleção por janela e lista de candidatos sobrepostos, realce de pré-seleção na área 3D, corte de visualização por plano, ferramenta Reparar rascunho, miniatura no `.3dnator`, casas decimais configuráveis e importação de peças entre abas. A montagem ainda usa o diálogo de organização em vez de painéis de comando com manipulador.
 
 ## 1. Base técnica
 

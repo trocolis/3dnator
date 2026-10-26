@@ -12,6 +12,199 @@ pub(crate) fn render_project_at_size(
     size: [u32; 2],
     sketch_mode: bool,
 ) -> Result<(), Box<dyn Error>> {
+    render_with(
+        project,
+        output,
+        size,
+        |editor| {
+            if sketch_mode {
+                open_first_sketch(editor)?;
+            }
+            Ok(())
+        },
+        |_, _| Vec::new(),
+        |_| true,
+    )
+}
+
+/// Capturas de estados da interface usados na revisão visual: linha do tempo, painéis de
+/// comando com prévia e decisão sobre falhas de recálculo. Não alteram o projeto de origem.
+pub(crate) fn render_ui_scenario(
+    project: &Path,
+    output: &Path,
+    size: [u32; 2],
+    scenario: &str,
+) -> Result<(), Box<dyn Error>> {
+    match scenario {
+        "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" => {}
+        _ => {
+            return Err("Cenários: timeline, timeline-menu, extrude, edit-last, failure.".into());
+        }
+    }
+    let menu = scenario == "timeline-menu";
+    render_with(
+        project,
+        output,
+        size,
+        |editor| scenario_setup(editor, scenario),
+        move |editor, frame| {
+            // Clique secundário na primeira operação abre o menu de contexto.
+            match editor.timeline.tiles.first() {
+                Some((_, rect)) if menu && (frame == 2 || frame == 3) => {
+                    let position = rect.center();
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Secondary,
+                            pressed: frame == 2,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ]
+                }
+                _ => Vec::new(),
+            }
+        },
+        |editor| {
+            editor.feature_edit.is_none() || editor.preview.shown != 0 || {
+                let command = editor.feature_edit.as_ref().and_then(|d| {
+                    editor
+                        .current()
+                        .session
+                        .document()
+                        .part(d.part())
+                        .map(|p| d.preview_key(p))
+                });
+                command.is_some_and(|c| {
+                    matches!(
+                        editor.preview_status(&c),
+                        live_preview::PreviewStatus::Failed(_)
+                    )
+                })
+            }
+        },
+    )
+}
+
+fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
+    let sketch = editor
+        .current()
+        .session
+        .document()
+        .parts()
+        .iter()
+        .find_map(|p| p.sketches.first().map(|s| (p.id, s.id, s.sketch.clone())));
+    if let Some((part, id, sketch)) = sketch {
+        let report = nator_sketch::solver::solve(&sketch)?;
+        editor.begin_sketch(part, id);
+        if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
+            work.status = report.status;
+            work.redundant = report.redundant;
+        }
+    }
+    Ok(())
+}
+
+fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    let tab = editor.current().id;
+    let part = editor
+        .current()
+        .active_part
+        .ok_or("O projeto não tem peça para o cenário.")?;
+    let features = editor
+        .current()
+        .session
+        .document()
+        .part(part)
+        .map(|p| p.features.clone())
+        .unwrap_or_default();
+    match scenario {
+        "timeline" | "timeline-menu" => {
+            // Marcador antes da última operação e a segunda suprimida, se houver.
+            if features.len() >= 2 {
+                editor
+                    .current_mut()
+                    .session
+                    .execute(Command::SetHistoryMarker {
+                        part,
+                        marker: Some(features.len() - 1),
+                    })?;
+            }
+            if features.len() >= 3 {
+                editor
+                    .current_mut()
+                    .session
+                    .execute(Command::SetFeatureSuppressed {
+                        part,
+                        output: features[1].output,
+                        suppressed: true,
+                    })?;
+            }
+            let state = editor.current().session.state();
+            editor.current_mut().session.mark_saved(state);
+            editor.current_mut().changed();
+            if let Some(first) = features.first() {
+                editor.timeline.selected = Some((tab, part, first.output));
+            }
+        }
+        "extrude" => {
+            editor.open_feature_tool(feature_editor::Tool::Extrude);
+            let document = editor.current().session.document().clone();
+            let record = document
+                .part(part)
+                .and_then(|p| p.sketches.first())
+                .ok_or("Peça sem rascunho para o perfil.")?;
+            let region = nator_sketch::profiles::regions(&record.sketch)?
+                .into_iter()
+                .next()
+                .ok_or("Rascunho sem região fechada.")?;
+            if let Some(draft) = editor.feature_edit.as_mut() {
+                draft.choose_region(record.id, region.boundary());
+                draft.set_size_for_capture("6 mm");
+            }
+        }
+        "edit-last" => {
+            let feature = features.last().ok_or("Peça sem operações.")?.clone();
+            editor.feature_edit = Some(feature_editor::Draft::edit(tab, part, feature));
+        }
+        "failure" => {
+            // Uma edição que quebra a última operação abre a decisão do usuário.
+            let feature = features.last().ok_or("Peça sem operações.")?.clone();
+            let mut draft = feature_editor::Draft::edit(tab, part, feature);
+            draft.set_size_for_capture("80 mm");
+            let piece = editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça ausente")?
+                .clone();
+            let command = draft.preview_key(&piece);
+            let revision = editor.current().session.revision();
+            match PreparedCommand::new(
+                editor.current().session.document().clone(),
+                revision,
+                command.clone(),
+            ) {
+                Err(error) if error.failure.is_some() => {
+                    editor.reject_command(tab, command, error);
+                }
+                _ => return Err("A edição de teste não falhou no recálculo.".into()),
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn render_with(
+    project: &Path,
+    output: &Path,
+    size: [u32; 2],
+    setup: impl FnOnce(&mut Editor) -> Result<(), Box<dyn Error>>,
+    events: impl Fn(&Editor, usize) -> Vec<egui::Event>,
+    ready: impl Fn(&Editor) -> bool,
+) -> Result<(), Box<dyn Error>> {
     if !(900..=3840).contains(&size[0]) || !(600..=2160).contains(&size[1]) {
         return Err("A captura aceita largura de 900 a 3840 e altura de 600 a 2160 pixels.".into());
     }
@@ -44,23 +237,7 @@ pub(crate) fn render_project_at_size(
         editor.current_mut().select(Some(selection));
         editor.current_mut().active_part = Some(part);
     }
-    if sketch_mode {
-        let sketch = editor
-            .current()
-            .session
-            .document()
-            .parts()
-            .iter()
-            .find_map(|p| p.sketches.first().map(|s| (p.id, s.id, s.sketch.clone())));
-        if let Some((part, id, sketch)) = sketch {
-            let report = nator_sketch::solver::solve(&sketch)?;
-            editor.begin_sketch(part, id);
-            if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
-                work.status = report.status;
-                work.redundant = report.redundant;
-            }
-        }
-    }
+    setup(&mut editor)?;
     // Preparar a cena após escolher o contexto mantém o esmaecimento e a revisão
     // iguais aos da janela, sem iniciar uma reconstrução assíncrona durante a captura.
     let scene = prepare_scene(
@@ -101,12 +278,19 @@ pub(crate) fn render_project_at_size(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    for frame in 0..3 {
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(20);
+    let mut frame = 0;
+    let mut settled = 0;
+    // Pelo menos três quadros; depois, até o cenário ficar pronto e estável o bastante para
+    // concluir as animações de abertura de menus e diálogos.
+    while frame < 3 || settled < 8 {
         let rect =
             egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
         let input = egui::RawInput {
             screen_rect: Some(rect),
-            time: Some(f64::from(frame) / 60.),
+            time: Some(started.elapsed().as_secs_f64()),
+            events: events(&editor, frame),
             ..Default::default()
         };
         let mut output = context.run_ui(input, |ui| editor.draw(ui));
@@ -145,6 +329,19 @@ pub(crate) fn render_project_at_size(
         }
         // As alterações já foram aplicadas; informar isso antes de liberar o FullOutput.
         output.textures_delta.clear();
+        drop(renderer);
+        frame += 1;
+        if frame >= 3 && ready(&editor) && !editor.busy() {
+            settled += 1;
+        } else {
+            settled = 0;
+        }
+        if Instant::now() > deadline {
+            return Err(format!("A captura não estabilizou: {}", editor.status).into());
+        }
+        if frame >= 3 && settled < 8 {
+            std::thread::sleep(Duration::from_millis(30));
+        }
     }
     let image = crate::preview::read_texture(&device, &queue, &texture)?;
     if let Some(error) = pollster::block_on(scope.pop()) {

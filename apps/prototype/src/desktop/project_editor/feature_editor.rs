@@ -1,17 +1,24 @@
-//! Parâmetros da construção; operações nativas são preparadas fora da interface.
+//! Painéis de comando das operações de construção; operações nativas são preparadas e
+//! pré-visualizadas fora da interface.
 //!
-//! A interface escolhe regiões, arestas e faces pela posição atual ou por clique na área
-//! 3D. Ao aplicar, o comando converte essas escolhas em referências estáveis (entidades do
-//! rascunho e nomes de faces), que sobrevivem a mudanças de cota. Ao editar uma operação
-//! existente, a referência gravada é mantida enquanto o usuário não escolher outra.
-use super::*;
+//! Cada ferramenta abre um painel ancorado à área 3D. Campos de seleção ativos recebem os
+//! cliques no modelo: perfis do rascunho, arestas, faces e corpos. Ao aplicar, o comando
+//! converte essas escolhas em referências estáveis (entidades do rascunho e nomes de faces),
+//! que sobrevivem a mudanças de cota. Ao editar uma operação existente, a referência gravada
+//! é mantida enquanto o usuário não escolher outra.
+use super::{
+    command_panel::{self as panel, Footer},
+    icons::Icon,
+    live_preview::PreviewStatus,
+    *,
+};
 use nator_document::features::{
     BooleanMode, Combine, EdgeRef, FaceRef, Feature, HoleHeadSpec, HoleSpec, LinearAxis, Operation,
     PatternLayout, RegionRef, ThreadSpec, UntilFace, signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
 
-/// Ferramentas do diálogo, na ordem exibida.
+/// Ferramentas do painel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Tool {
     Extrude,
@@ -28,45 +35,48 @@ pub(super) enum Tool {
     Mirror,
     Split,
 }
-const TOOLS: [Tool; 13] = [
-    Tool::Extrude,
-    Tool::Revolve,
-    Tool::Join,
-    Tool::Cut,
-    Tool::Intersect,
-    Tool::Fillet,
-    Tool::Chamfer,
-    Tool::Shell,
-    Tool::Hole,
-    Tool::LinearPattern,
-    Tool::CircularPattern,
-    Tool::Mirror,
-    Tool::Split,
-];
 impl Tool {
     pub(super) fn label(self) -> T {
         match self {
             Self::Extrude => T::Extrude,
             Self::Revolve => T::Revolve,
-            Self::Join => T::Join,
-            Self::Cut => T::Cut,
-            Self::Intersect => T::Intersect,
+            Self::Join | Self::Cut | Self::Intersect => T::CombineTool,
             Self::Fillet => T::Fillet,
             Self::Chamfer => T::Chamfer,
             Self::Shell => T::Shell,
             Self::Hole => T::HoleTool,
-            Self::LinearPattern => T::LinearPattern,
+            Self::LinearPattern => T::RectangularPattern,
             Self::CircularPattern => T::CircularPattern,
             Self::Mirror => T::MirrorBody,
             Self::Split => T::SplitBody,
+        }
+    }
+    pub(super) fn icon(self) -> Icon {
+        match self {
+            Self::Extrude => Icon::Extrude,
+            Self::Revolve => Icon::Revolve,
+            Self::Hole => Icon::Hole,
+            Self::Fillet => Icon::Fillet,
+            Self::Chamfer => Icon::Chamfer,
+            Self::Shell => Icon::Shell,
+            Self::Mirror => Icon::Mirror,
+            Self::LinearPattern | Self::CircularPattern => Icon::Pattern,
+            Self::Split => Icon::Split,
+            Self::Join | Self::Cut | Self::Intersect => Icon::Boolean,
         }
     }
     /// Ferramentas que partem de um rascunho de perfil.
     fn uses_profile(self) -> bool {
         matches!(self, Self::Extrude | Self::Revolve)
     }
-    fn uses_topology(self) -> bool {
-        matches!(self, Self::Fillet | Self::Chamfer | Self::Shell)
+    /// Campo que recebe os primeiros cliques ao abrir o painel.
+    fn first_field(self) -> Field {
+        match self {
+            Self::Extrude | Self::Revolve => Field::Profile,
+            Self::Fillet | Self::Chamfer => Field::Edges,
+            Self::Shell => Field::Faces,
+            _ => Field::Base,
+        }
     }
 }
 
@@ -83,17 +93,32 @@ const PLANES: [(&str, [f64; 3]); 3] = [
     ("YZ", [1., 0., 0.]),
 ];
 
-/// Referência topológica gravada na operação em edição ou escolhida na área 3D.
+/// Referência escolhida na área 3D ou gravada na operação em edição.
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum Kept {
     Edge(EdgeRef),
     Face(FaceRef),
+    Body(BodyId),
 }
 
-/// O que o próximo clique na área 3D deve selecionar para o diálogo.
+/// O que o próximo clique na área 3D deve selecionar para o painel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Awaiting {
     Edge,
     Face,
+    Body,
+}
+
+/// Campo de seleção do painel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Field {
+    Profile,
+    Edges,
+    Faces,
+    Base,
+    ToolBody,
+    Target,
+    UntilFace,
 }
 
 /// Eixo da revolução: um eixo do plano do rascunho ou uma linha do rascunho.
@@ -102,6 +127,128 @@ enum RevolveAxis {
     U,
     V,
     Line(u64),
+}
+
+/// Direção da extrusão, como nos CADs de mercado. Os limites gravados continuam sendo
+/// expressões de início e fim a partir do plano do rascunho.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Direction {
+    OneSide,
+    TwoSides,
+    Symmetric,
+}
+
+/// Extrusão como digitada no painel.
+struct ExtrudeDraft {
+    direction: Direction,
+    distance: String,
+    distance2: String,
+    /// Deslocamento do início em relação ao plano do rascunho (um lado).
+    offset: String,
+    flip: bool,
+    to_face: bool,
+    /// Limites gravados que não seguem os padrões do painel: preservados como estão.
+    custom: Option<(String, String)>,
+}
+impl Default for ExtrudeDraft {
+    fn default() -> Self {
+        Self {
+            direction: Direction::OneSide,
+            distance: "10 mm".into(),
+            distance2: "10 mm".into(),
+            offset: "0 mm".into(),
+            flip: false,
+            to_face: false,
+            custom: None,
+        }
+    }
+}
+
+/// Expressão sem parâmetros que vale zero.
+fn is_zero(expression: &str) -> bool {
+    nator_document::parameters::Parameters::default()
+        .evaluate(expression, nator_document::parameters::Dimension::Length)
+        .is_ok_and(|v| v.abs() < 1e-12)
+}
+fn negated(expression: &str) -> Option<&str> {
+    expression.strip_prefix("-(")?.strip_suffix(')')
+}
+fn negate(expression: &str) -> String {
+    negated(expression)
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("-({expression})"))
+}
+
+impl ExtrudeDraft {
+    /// Reconhece os limites gravados pelos padrões do painel; outros ficam personalizados.
+    fn from_limits(from: String, to: String) -> Self {
+        let mut d = Self::default();
+        if let Some(inner) = negated(&from) {
+            if inner == to {
+                d.direction = Direction::Symmetric;
+                d.distance = to;
+            } else {
+                d.direction = Direction::TwoSides;
+                d.distance = to;
+                d.distance2 = inner.to_owned();
+            }
+        } else if is_zero(&from) {
+            match negated(&to) {
+                Some(inner) => {
+                    d.distance = inner.to_owned();
+                    d.flip = true;
+                }
+                None => d.distance = to,
+            }
+        } else if let Some(rest) = to
+            .strip_prefix(&format!("({from}) + ("))
+            .and_then(|r| r.strip_suffix(')'))
+        {
+            d.offset = from.clone();
+            match negated(rest) {
+                Some(inner) => {
+                    d.distance = inner.to_owned();
+                    d.flip = true;
+                }
+                None => d.distance = rest.to_owned(),
+            }
+        } else {
+            d.custom = Some((from, to));
+        }
+        d
+    }
+    /// Expressões de início e fim gravadas na operação.
+    fn limits(&self) -> (String, String) {
+        if let Some((from, to)) = &self.custom {
+            return (from.clone(), to.clone());
+        }
+        match self.direction {
+            Direction::OneSide => {
+                let distance = if self.flip {
+                    negate(&self.distance)
+                } else {
+                    self.distance.clone()
+                };
+                if is_zero(&self.offset) {
+                    ("0 mm".into(), distance)
+                } else {
+                    (
+                        self.offset.clone(),
+                        format!("({}) + ({distance})", self.offset),
+                    )
+                }
+            }
+            Direction::Symmetric => (negate(&self.distance), self.distance.clone()),
+            Direction::TwoSides => {
+                let (a, b) = if self.flip {
+                    (&self.distance2, &self.distance)
+                } else {
+                    (&self.distance, &self.distance2)
+                };
+                (negate(b), a.clone())
+            }
+        }
+    }
 }
 
 /// Medidas do furo como digitadas, com expressões.
@@ -190,20 +337,18 @@ pub(super) struct Draft {
     base: Option<BodyId>,
     tool_body: Option<BodyId>,
     /// Posição na lista atual de regiões do rascunho selecionado.
-    region: usize,
+    region: Option<usize>,
     kept_region: Option<RegionRef>,
     axis: RevolveAxis,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
     kept_axis: Option<([f64; 3], [f64; 3])>,
-    /// Índice de aresta/face no corpo base, quando o usuário escolhe uma nova seleção.
+    /// Índice de aresta/face no corpo base, para seleções sem nome estável.
     index: usize,
     kept_topology: Option<Kept>,
     /// Arestas/faces adicionais da mesma operação (arredondamento, chanfro, casca).
     extra_topology: Vec<Kept>,
-    /// O próximo clique na área 3D escolhe a aresta/face da operação.
-    selecting: bool,
-    /// O próximo clique acrescenta uma aresta/face em vez de substituir a principal.
-    appending: bool,
+    /// Campo de seleção que recebe os próximos cliques no modelo.
+    field: Option<Field>,
     /// Chanfro por distância e ângulo, com o ângulo em expressão.
     chamfer_angle: Option<String>,
     /// Casca com paredes para fora do sólido original.
@@ -213,48 +358,50 @@ pub(super) struct Draft {
     combine_target: Option<BodyId>,
     /// Face limite da extrusão (corpo e face), escolhida por clique.
     until: Option<(BodyId, FaceRef)>,
-    picking_until: bool,
-    from: String,
-    to: String,
+    extrude: ExtrudeDraft,
+    /// Medida principal das ferramentas de uma só dimensão (raio, distância, espessura).
+    size: String,
     angle: String,
     hole: HoleDraft,
     layout: LayoutDraft,
 }
 impl Draft {
-    fn new(tab: u64, part: PartId) -> Self {
+    fn new(tab: u64, part: PartId, tool: Tool) -> Self {
         Self {
             tab,
             part,
             output: None,
-            tool: Tool::Extrude,
+            tool,
             sketch: None,
             base: None,
             tool_body: None,
-            region: 0,
+            region: None,
             kept_region: None,
             axis: RevolveAxis::V,
             kept_axis: None,
             index: 0,
             kept_topology: None,
             extra_topology: Vec::new(),
-            selecting: false,
-            appending: false,
+            field: Some(tool.first_field()),
             chamfer_angle: None,
             outward: false,
             combine: 0,
             combine_target: None,
             until: None,
-            picking_until: false,
-            from: "0 mm".into(),
-            to: "10 mm".into(),
+            extrude: ExtrudeDraft::default(),
+            size: match tool {
+                Tool::Fillet | Tool::Chamfer => "2 mm".into(),
+                _ => "2 mm".into(),
+            },
             angle: "360 deg".into(),
             hole: HoleDraft::default(),
             layout: LayoutDraft::default(),
         }
     }
     pub fn edit(tab: u64, part: PartId, feature: Feature) -> Self {
-        let mut d = Self::new(tab, part);
+        let mut d = Self::new(tab, part, Tool::Extrude);
         d.output = Some(feature.output);
+        d.field = None;
         let nearest = |direction: [f64; 3], table: &[(&str, [f64; 3])]| {
             table
                 .iter()
@@ -272,8 +419,7 @@ impl Draft {
             } => {
                 d.sketch = Some(sketch);
                 d.kept_region = Some(region);
-                d.from = from;
-                d.to = to;
+                d.extrude = ExtrudeDraft::from_limits(from, to);
                 if let Some(combine) = combine {
                     d.combine = match combine.mode {
                         BooleanMode::Join => 1,
@@ -282,6 +428,7 @@ impl Draft {
                     };
                     d.combine_target = Some(combine.target);
                 }
+                d.extrude.to_face = until.is_some();
                 d.until = until.map(|limit| (limit.body, limit.face));
             }
             Operation::Revolve {
@@ -320,7 +467,7 @@ impl Draft {
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Edge(edge));
                 d.extra_topology = additional_edges.into_iter().map(Kept::Edge).collect();
-                d.to = radius;
+                d.size = radius;
             }
             Operation::Chamfer {
                 base,
@@ -333,7 +480,7 @@ impl Draft {
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Edge(edge));
                 d.extra_topology = additional_edges.into_iter().map(Kept::Edge).collect();
-                d.to = distance;
+                d.size = distance;
                 d.chamfer_angle = angle;
             }
             Operation::Shell {
@@ -347,7 +494,7 @@ impl Draft {
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Face(face));
                 d.extra_topology = additional_faces.into_iter().map(Kept::Face).collect();
-                d.to = thickness;
+                d.size = thickness;
                 d.outward = outward;
             }
             Operation::Hole {
@@ -452,12 +599,6 @@ impl Draft {
 }
 
 /// Descrição curta de uma referência para o usuário reconhecer o que está gravado.
-fn describe_region(region: &RegionRef) -> String {
-    match region {
-        RegionRef::Boundary(ids) => format!("{} ({} entidades)", text(T::KeptReference), ids.len()),
-        RegionRef::Index(i) => format!("{} (#{})", text(T::KeptReference), i + 1),
-    }
-}
 fn describe_topology(kept: &Kept) -> String {
     match kept {
         Kept::Edge(EdgeRef::Between([a, b])) => format!("{a} × {b}"),
@@ -465,6 +606,7 @@ fn describe_topology(kept: &Kept) -> String {
         Kept::Edge(EdgeRef::Index { index, .. }) | Kept::Face(FaceRef::Index { index, .. }) => {
             format!("#{index}")
         }
+        Kept::Body(id) => format!("#{}", id.0),
     }
 }
 
@@ -491,40 +633,99 @@ fn hole_points(sketch: &Sketch) -> Vec<u64> {
 }
 
 impl Draft {
-    /// Tipo de elemento que o próximo clique deve selecionar, se o diálogo estiver esperando.
+    /// Tipo de elemento que o próximo clique deve selecionar, se o painel estiver esperando.
     pub(super) fn awaiting(&self) -> Option<Awaiting> {
-        if self.picking_until && self.tool == Tool::Extrude {
-            return Some(Awaiting::Face);
+        match self.field? {
+            Field::Edges => Some(Awaiting::Edge),
+            Field::Faces | Field::UntilFace => Some(Awaiting::Face),
+            Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
+            Field::Profile => None,
         }
-        let waiting = self.selecting || self.appending;
-        match self.tool {
-            Tool::Fillet | Tool::Chamfer if waiting => Some(Awaiting::Edge),
-            Tool::Shell if waiting => Some(Awaiting::Face),
-            _ => None,
-        }
+    }
+    pub(super) fn field(&self) -> Option<Field> {
+        self.field
     }
     pub(super) fn part(&self) -> PartId {
         self.part
     }
-    /// Aplica uma seleção gráfica: o corpo clicado passa a ser a base da operação.
+    pub(super) fn tab(&self) -> u64 {
+        self.tab
+    }
+    /// Operação em edição, cujo histórico é recuado para as seleções.
+    pub(super) fn output(&self) -> Option<BodyId> {
+        self.output
+    }
+    pub(super) fn sketch(&self) -> Option<SketchId> {
+        self.sketch
+    }
+    /// Região do perfil escolhida por clique no rascunho.
+    pub(super) fn choose_region(&mut self, sketch: SketchId, boundary: Vec<u64>) {
+        self.sketch = Some(sketch);
+        self.kept_region = Some(RegionRef::Boundary(boundary));
+        self.region = None;
+        // Na revolução, o eixo gravado pertence ao rascunho anterior.
+        if self.tool == Tool::Revolve {
+            self.kept_axis = None;
+        }
+        self.field = None;
+    }
+    pub(super) fn region_boundary(&self) -> Option<&[u64]> {
+        match &self.kept_region {
+            Some(RegionRef::Boundary(ids)) => Some(ids),
+            _ => None,
+        }
+    }
+    /// Aplica uma seleção gráfica ao campo ativo. Arestas e faces alternam: clicar de novo
+    /// numa já escolhida a retira.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
-        if self.picking_until {
-            if let Kept::Face(face) = kept {
+        match (self.field, kept) {
+            (Some(Field::UntilFace), Kept::Face(face)) => {
                 self.until = Some((body, face));
+                self.field = None;
             }
-            self.picking_until = false;
-            return;
+            (Some(Field::Base), Kept::Body(id)) => {
+                if self.base != Some(id) {
+                    self.kept_topology = None;
+                    self.extra_topology.clear();
+                }
+                self.base = Some(id);
+                self.field = match self.tool {
+                    Tool::Join | Tool::Cut | Tool::Intersect if self.tool_body.is_none() => {
+                        Some(Field::ToolBody)
+                    }
+                    _ => None,
+                };
+            }
+            (Some(Field::ToolBody), Kept::Body(id)) => {
+                self.tool_body = Some(id);
+                self.field = None;
+            }
+            (Some(Field::Target), Kept::Body(id)) => {
+                self.combine_target = Some(id);
+                self.field = None;
+            }
+            (Some(Field::Edges | Field::Faces), kept @ (Kept::Edge(_) | Kept::Face(_))) => {
+                if self.base != Some(body) {
+                    // Outro corpo: as escolhas anteriores deixam de valer.
+                    self.base = Some(body);
+                    self.kept_topology = Some(kept);
+                    self.extra_topology.clear();
+                } else if self.kept_topology.as_ref() == Some(&kept) {
+                    self.kept_topology = if self.extra_topology.is_empty() {
+                        None
+                    } else {
+                        Some(self.extra_topology.remove(0))
+                    };
+                } else if let Some(i) = self.extra_topology.iter().position(|k| *k == kept) {
+                    self.extra_topology.remove(i);
+                } else if self.kept_topology.is_none() {
+                    self.kept_topology = Some(kept);
+                } else {
+                    self.extra_topology.push(kept);
+                }
+            }
+            _ => {}
         }
-        if self.appending && self.base == Some(body) {
-            self.extra_topology.push(kept);
-        } else {
-            // Outro corpo, ou seleção principal: as escolhas anteriores deixam de valer.
-            self.base = Some(body);
-            self.kept_topology = Some(kept);
-            self.extra_topology.clear();
-        }
-        self.selecting = false;
-        self.appending = false;
     }
     pub(super) fn describe(kept: &Kept) -> String {
         describe_topology(kept)
@@ -535,7 +736,7 @@ impl Draft {
             .iter()
             .filter_map(|k| match k {
                 Kept::Edge(edge) => Some(edge.clone()),
-                Kept::Face(_) => None,
+                _ => None,
             })
             .collect()
     }
@@ -580,12 +781,31 @@ impl Draft {
         )
     }
 
-    /// Monta a operação a partir do que está no diálogo.
-    fn operation(
-        &self,
-        part: &nator_document::Part,
-        regions: &Option<Result<Vec<profiles::Region>, String>>,
-    ) -> Operation {
+    /// Seleções obrigatórias ainda vazias impedem o OK.
+    fn complete(&self) -> bool {
+        match self.tool {
+            Tool::Extrude => {
+                self.sketch.is_some()
+                    && (self.kept_region.is_some() || self.region.is_some())
+                    && (!self.extrude.to_face || self.until.is_some())
+                    && (self.combine == 0 || self.combine_target.is_some())
+            }
+            Tool::Revolve => {
+                self.sketch.is_some() && (self.kept_region.is_some() || self.region.is_some())
+            }
+            Tool::Join | Tool::Cut | Tool::Intersect => {
+                self.base.is_some() && self.tool_body.is_some() && self.base != self.tool_body
+            }
+            Tool::Fillet | Tool::Chamfer | Tool::Shell => {
+                self.base.is_some() && self.kept_topology.is_some()
+            }
+            Tool::Hole => self.base.is_some() && self.sketch.is_some(),
+            _ => self.base.is_some(),
+        }
+    }
+
+    /// Monta a operação a partir do painel.
+    fn operation(&self, part: &nator_document::Part) -> Operation {
         let base = self.base.unwrap_or(BodyId(0));
         let sketch = self.sketch.unwrap_or(SketchId(0));
         let stamp = part
@@ -595,12 +815,14 @@ impl Draft {
             .and_then(|b| b.brep.as_ref())
             .map(|b| signature(b))
             .unwrap_or(0);
-        // Nova seleção: a posição atual vira identidade estável no comando.
-        let region = self.kept_region.clone().unwrap_or_else(|| match regions {
-            Some(Ok(list)) if self.region < list.len() => {
-                RegionRef::Boundary(list[self.region].boundary())
+        let record = part.sketches.iter().find(|s| s.id == sketch);
+        // Nova seleção pela lista: a posição atual vira identidade estável no comando.
+        let region = self.kept_region.clone().unwrap_or_else(|| {
+            let index = self.region.unwrap_or(0);
+            match record.map(|r| profiles::regions(&r.sketch)) {
+                Some(Ok(list)) if index < list.len() => RegionRef::Boundary(list[index].boundary()),
+                _ => RegionRef::Index(index),
             }
-            _ => RegionRef::Index(self.region),
         });
         let edge = match &self.kept_topology {
             Some(Kept::Edge(edge)) => edge.clone(),
@@ -616,29 +838,32 @@ impl Draft {
                 signature: stamp,
             },
         };
-        let record = part.sketches.iter().find(|s| s.id == sketch);
         match self.tool {
-            Tool::Extrude => Operation::Extrude {
-                sketch,
-                region,
-                from: self.from.clone(),
-                to: self.to.clone(),
-                combine: self
-                    .combine_target
-                    .filter(|_| self.combine > 0)
-                    .map(|target| Combine {
-                        target,
-                        mode: match self.combine {
-                            1 => BooleanMode::Join,
-                            2 => BooleanMode::Cut,
-                            _ => BooleanMode::Intersect,
-                        },
-                    }),
-                until: self
-                    .until
-                    .clone()
-                    .map(|(body, face)| UntilFace { body, face }),
-            },
+            Tool::Extrude => {
+                let (from, to) = self.extrude.limits();
+                Operation::Extrude {
+                    sketch,
+                    region,
+                    from,
+                    to,
+                    combine: self
+                        .combine_target
+                        .filter(|_| self.combine > 0)
+                        .map(|target| Combine {
+                            target,
+                            mode: match self.combine {
+                                1 => BooleanMode::Join,
+                                2 => BooleanMode::Cut,
+                                _ => BooleanMode::Intersect,
+                            },
+                        }),
+                    until: self
+                        .until
+                        .clone()
+                        .filter(|_| self.extrude.to_face)
+                        .map(|(body, face)| UntilFace { body, face }),
+                }
+            }
             Tool::Revolve => {
                 let plane = record.map(|r| r.sketch.plane).unwrap_or_default();
                 let (axis_origin, axis_direction) = self.kept_axis.unwrap_or(match self.axis {
@@ -669,26 +894,26 @@ impl Draft {
             Tool::Fillet => Operation::Fillet {
                 base,
                 edge,
-                radius: self.to.clone(),
+                radius: self.size.clone(),
                 additional_edges: self.extra_edges(),
             },
             Tool::Chamfer => Operation::Chamfer {
                 base,
                 edge,
-                distance: self.to.clone(),
+                distance: self.size.clone(),
                 angle: self.chamfer_angle.clone(),
                 additional_edges: self.extra_edges(),
             },
             Tool::Shell => Operation::Shell {
                 base,
                 face,
-                thickness: self.to.clone(),
+                thickness: self.size.clone(),
                 additional_faces: self
                     .extra_topology
                     .iter()
                     .filter_map(|k| match k {
                         Kept::Face(face) => Some(face.clone()),
-                        Kept::Edge(_) => None,
+                        _ => None,
                     })
                     .collect(),
                 outward: self.outward,
@@ -752,59 +977,110 @@ impl Draft {
             }
         }
     }
+
+    /// Comando que o OK aplicaria, também usado como chave da pré-visualização.
+    pub(super) fn preview_key(&self, part: &nator_document::Part) -> Command {
+        self.command(part)
+    }
+    /// Medida principal (distância da extrusão, raio, espessura), para capturas de ensaio.
+    pub(super) fn set_size_for_capture(&mut self, value: &str) {
+        self.size = value.into();
+        self.extrude.distance = value.into();
+    }
+    /// Comando que o OK aplicaria.
+    fn command(&self, part: &nator_document::Part) -> Command {
+        let operation = self.operation(part);
+        match self.output {
+            Some(output) => Command::EditFeature {
+                part: self.part,
+                output,
+                operation,
+            },
+            None => Command::AddFeature {
+                part: self.part,
+                name: text(match self.tool {
+                    Tool::Join => T::Join,
+                    Tool::Cut => T::Cut,
+                    Tool::Intersect => T::Intersect,
+                    Tool::LinearPattern => T::LinearPattern,
+                    tool => tool.label(),
+                })
+                .into(),
+                operation,
+            },
+        }
+    }
 }
 
-/// Lista de seleção de um eixo/plano principal.
-fn choose(
-    ui: &mut egui::Ui,
-    label: T,
-    value: &mut usize,
-    options: &[(&str, [f64; 3])],
-    salt: &str,
-) {
-    egui::ComboBox::new(salt, text(label))
-        .selected_text(options[*value].0)
-        .show_ui(ui, |ui| {
-            for (i, (name, _)) in options.iter().enumerate() {
-                ui.selectable_value(value, i, *name);
-            }
-        });
+/// Eixo ou plano principal escolhido por botões X/Y/Z ou XY/XZ/YZ.
+fn axis_choice(ui: &mut egui::Ui, value: &mut usize, options: &[(&str, [f64; 3])]) {
+    ui.spacing_mut().item_spacing.x = 2.;
+    for (i, (name, _)) in options.iter().enumerate() {
+        if ui.selectable_label(*value == i, *name).clicked() {
+            *value = i;
+        }
+    }
 }
 
-fn labeled_text(ui: &mut egui::Ui, label: T, value: &mut String) {
-    ui.horizontal(|ui| {
-        ui.label(text(label));
-        ui.text_edit_singleline(value);
-    });
+/// Nome de um corpo da peça, para os campos de seleção.
+fn body_name(part: &nator_document::Part, id: Option<BodyId>) -> Option<String> {
+    id.and_then(|id| part.bodies.iter().find(|b| b.id == id))
+        .map(|b| b.name.clone())
 }
 
 impl Editor {
     pub(super) fn open_feature_tool(&mut self, tool: Tool) {
-        self.open_features();
-        if let Some(draft) = &mut self.feature_edit {
-            draft.tool = tool;
+        let Some(part) = self.current().active_part else {
+            return;
+        };
+        let mut d = Draft::new(self.current().id, part, tool);
+        let definition = self.current().session.document().part(part);
+        // Rascunho em edição ou visível sugere o perfil; o clique continua escolhendo a região.
+        d.sketch = self
+            .current()
+            .sketch_edit
+            .as_ref()
+            .map(|w| w.id)
+            .or_else(|| {
+                definition.and_then(|p| {
+                    p.sketches
+                        .iter()
+                        .rev()
+                        .find(|s| s.visible)
+                        .or_else(|| p.sketches.last())
+                        .map(|s| s.id)
+                })
+            });
+        // A seleção explícita é a primeira sugestão de corpo. Caso contrário, o resultado
+        // visível da peça; a operação continua pendente de confirmação.
+        let suggestion = match self.current().selection {
+            Some(Selection::Body { part: owner, id }) if owner == part => Some(id),
+            _ => definition
+                .and_then(|p| {
+                    p.bodies
+                        .iter()
+                        .rev()
+                        .find(|b| b.visible && b.brep.is_some())
+                })
+                .map(|b| b.id),
+        };
+        match tool {
+            Tool::Extrude | Tool::Revolve => d.combine_target = suggestion,
+            Tool::Hole
+            | Tool::LinearPattern
+            | Tool::CircularPattern
+            | Tool::Mirror
+            | Tool::Split => {
+                d.base = suggestion;
+                d.field = suggestion.is_none().then_some(Field::Base);
+            }
+            _ => {}
         }
-    }
-    pub(super) fn open_features(&mut self) {
-        if let Some(part) = self.current().active_part {
-            let mut d = Draft::new(self.current().id, part);
-            let definition = self.current().session.document().part(part);
-            d.sketch = self
-                .current()
-                .sketch_edit
-                .as_ref()
-                .map(|w| w.id)
-                .or_else(|| definition.and_then(|p| p.sketches.first()).map(|s| s.id));
-            // A seleção explícita é a primeira sugestão. Caso contrário, oferecer o
-            // resultado visível da peça; a operação continua pendente de confirmação.
-            d.base = match self.current().selection {
-                Some(Selection::Body { part: owner, id }) if owner == part => Some(id),
-                _ => definition
-                    .and_then(|p| p.bodies.iter().find(|b| b.visible && b.brep.is_some()))
-                    .map(|b| b.id),
-            };
-            self.feature_edit = Some(d);
+        // Concluir o rascunho aberto mantém o perfil visível para a seleção.
+        if self.current().sketch_edit.is_some() {
+            self.finish_sketch();
         }
+        self.feature_edit = Some(d);
     }
     pub(super) fn feature_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.feature_edit.take() else {
@@ -819,321 +1095,280 @@ impl Editor {
         else {
             return;
         };
-        // Regiões atuais do rascunho escolhido; um perfil inválido mostra o diagnóstico.
         let record = d
             .sketch
             .and_then(|id| part.sketches.iter().find(|s| s.id == id));
         let regions = record
             .filter(|_| d.tool.uses_profile())
             .map(|s| profiles::regions(&s.sketch).map_err(|e| e.to_string()));
-        let mut open = true;
-        let mut command = None;
-        egui::Window::new(format!(
-            "{} · {}",
-            text(d.tool.label()),
-            text(T::SolidTools)
-        ))
-        .id(egui::Id::new("feature_editor"))
-        .default_width(340.)
-        .default_pos(egui::pos2(
-            (ctx.content_rect().right() - 650.).max(235.),
-            200.,
-        ))
-        .vscroll(true)
-        .max_height((ctx.content_rect().height() - 230.).max(250.))
-        .open(&mut open)
-        .show(ctx, |ui| {
-            if !nator_kernel::is_available() {
-                ui.colored_label(theme::WARNING, text(T::KernelUnavailable));
-            }
-            egui::ComboBox::from_label(text(T::Operation))
-                .selected_text(text(d.tool.label()))
-                .show_ui(ui, |ui| {
-                    for tool in TOOLS {
-                        ui.selectable_value(&mut d.tool, tool, text(tool.label()));
-                    }
-                });
-            if d.tool.uses_profile() || d.tool == Tool::Hole {
-                let previous = d.sketch;
-                egui::ComboBox::from_label(text(T::Profile))
-                    .selected_text(record.map(|s| s.sketch.name.as_str()).unwrap_or("—"))
-                    .show_ui(ui, |ui| {
-                        for s in &part.sketches {
-                            ui.selectable_value(&mut d.sketch, Some(s.id), &s.sketch.name);
-                        }
-                    });
-                if d.sketch != previous {
-                    d.kept_region = None;
-                    d.region = 0;
-                    d.hole.kept_points = None;
-                    d.kept_axis = None;
-                    d.axis = RevolveAxis::V;
+        let command = d.command(&part);
+        let complete = d.complete() && nator_kernel::is_available();
+        let footer_error;
+        let footer = if !complete {
+            Footer::None
+        } else {
+            match self.preview_status(&command) {
+                PreviewStatus::Waiting => Footer::Waiting,
+                PreviewStatus::Ready => Footer::Ready,
+                PreviewStatus::Failed(error) => {
+                    footer_error = error.to_string();
+                    Footer::Failed(&footer_error)
                 }
             }
-            if d.tool.uses_profile() {
-                region_controls(ui, &mut d, &regions);
-            }
-            match d.tool {
-                Tool::Extrude => extrude_controls(ui, &mut d, &part),
-                Tool::Revolve => {
-                    revolve_controls(ui, &mut d, record.map(|r| &r.sketch));
-                    labeled_text(ui, T::Angle, &mut d.angle);
-                }
-                _ => {}
-            }
-            if !d.tool.uses_profile() {
-                body_controls(ui, &mut d, &part);
-            }
-            if d.tool.uses_topology() {
-                if let Some(kept) = &d.kept_topology {
-                    ui.label(format!(
-                        "{}: {}",
-                        text(T::KeptReference),
-                        describe_topology(kept)
-                    ));
-                }
-                let mut remove = None;
-                for (i, kept) in d.extra_topology.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("+ {}", describe_topology(kept)));
-                        if ui.small_button("×").clicked() {
-                            remove = Some(i);
-                        }
-                    });
-                }
-                if let Some(i) = remove {
-                    d.extra_topology.remove(i);
-                }
-                if d.selecting || d.appending {
-                    ui.colored_label(theme::ACCENT, text(T::PickingTopology));
-                } else {
-                    ui.horizontal(|ui| {
-                        if ui.button(text(T::PickInViewport)).clicked() {
-                            d.selecting = true;
-                        }
-                        if d.kept_topology.is_some() && ui.button(text(T::PickAnother)).clicked() {
-                            d.appending = true;
-                        }
-                    });
-                }
-                if d.tool == Tool::Chamfer {
-                    let mut by_angle = d.chamfer_angle.is_some();
-                    if ui
-                        .checkbox(&mut by_angle, text(T::ChamferByAngle))
-                        .changed()
-                    {
-                        d.chamfer_angle = by_angle.then(|| "45 deg".into());
-                    }
-                    if let Some(angle) = &mut d.chamfer_angle {
-                        labeled_text(ui, T::Angle, angle);
-                    }
-                }
-                if d.tool == Tool::Shell {
-                    ui.checkbox(&mut d.outward, text(T::ShellOutward));
-                }
-                ui.label(text(T::TopologyIndex));
-                if ui
-                    .add(egui::DragValue::new(&mut d.index).range(0..=100000))
-                    .changed()
-                {
-                    d.kept_topology = None;
-                }
-                labeled_text(ui, T::EndLimit, &mut d.to);
-            }
-            match d.tool {
-                Tool::Hole => hole_controls(ui, &mut d, record.map(|r| &r.sketch)),
-                Tool::LinearPattern => {
-                    let l = &mut d.layout;
-                    choose(ui, T::PatternDirection, &mut l.axis, &AXES, "pattern_axis");
-                    ui.add(
-                        egui::DragValue::new(&mut l.count)
-                            .range(2..=1000)
-                            .prefix(format!("{} ", text(T::PatternCount))),
-                    );
-                    labeled_text(ui, T::PatternSpacing, &mut l.spacing);
-                    ui.checkbox(&mut l.second, text(T::SecondDirection));
-                    if l.second {
-                        choose(
-                            ui,
-                            T::PatternDirection,
-                            &mut l.second_axis,
-                            &AXES,
-                            "pattern_axis_2",
-                        );
-                        ui.add(
-                            egui::DragValue::new(&mut l.second_count)
-                                .range(1..=1000)
-                                .prefix(format!("{} ", text(T::PatternCount))),
-                        );
-                        labeled_text(ui, T::PatternSpacing, &mut l.second_spacing);
-                    }
-                }
-                Tool::CircularPattern => {
-                    let l = &mut d.layout;
-                    choose(ui, T::RevolveAxis, &mut l.axis, &AXES, "circular_axis");
-                    ui.horizontal(|ui| {
-                        ui.label(text(T::AxisOrigin));
-                        for v in &mut l.origin {
-                            ui.add(egui::DragValue::new(v).speed(0.5));
-                        }
-                    });
-                    ui.add(
-                        egui::DragValue::new(&mut l.count)
-                            .range(2..=1000)
-                            .prefix(format!("{} ", text(T::PatternCount))),
-                    );
-                    labeled_text(ui, T::TotalAngle, &mut l.angle);
-                }
-                Tool::Mirror | Tool::Split => {
-                    let l = &mut d.layout;
-                    choose(ui, T::PlaneChoice, &mut l.plane, &PLANES, "mirror_plane");
-                    ui.horizontal(|ui| {
-                        ui.label(text(T::PlaneOffset));
-                        ui.add(egui::DragValue::new(&mut l.offset).speed(0.5));
-                    });
-                    if d.tool == Tool::Mirror {
-                        ui.checkbox(&mut l.keep_original, text(T::KeepOriginal));
-                    } else {
-                        ui.checkbox(&mut l.flip, text(T::FlipSide));
-                    }
-                }
-                _ => {}
-            }
-            ui.add_enabled_ui(!self.busy() && nator_kernel::is_available(), |ui| {
-                if ui.button(text(T::Apply)).clicked() {
-                    let operation = d.operation(&part, &regions);
-                    command = Some(if let Some(output) = d.output {
-                        Command::EditFeature {
-                            part: d.part,
-                            output,
-                            operation,
-                        }
-                    } else {
-                        Command::AddFeature {
-                            part: d.part,
-                            name: text(d.tool.label()).into(),
-                            operation,
-                        }
-                    });
-                }
-                if let Some(output) = d.output
-                    && ui.button(text(T::RemoveFeature)).clicked()
-                {
-                    command = Some(Command::RemoveFeature {
-                        part: d.part,
-                        output,
-                    });
-                }
-            });
+        };
+        let title = text(match d.tool {
+            Tool::Join | Tool::Cut | Tool::Intersect => T::CombineTool,
+            tool => tool.label(),
         });
-        if let Some(command) = command {
-            self.prepare_command(ctx, d.tab, command);
+        let outcome = panel::show(
+            ctx,
+            panel::Header {
+                id: "feature",
+                icon: d.tool.icon(),
+                title,
+            },
+            self.canvas_rect,
+            footer,
+            complete && !self.busy(),
+            |ui| {
+                if !nator_kernel::is_available() {
+                    ui.colored_label(theme::WARNING, text(T::KernelUnavailable));
+                }
+                if self
+                    .pending_failure
+                    .as_ref()
+                    .is_some_and(|p| p.fixing && Some(p.failure.output) == d.output)
+                {
+                    ui.colored_label(theme::WARNING, text(T::FixingFailure));
+                }
+                match d.tool {
+                    Tool::Extrude => extrude_panel(ui, &mut d, &part, &regions),
+                    Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
+                    Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
+                    Tool::Fillet | Tool::Chamfer | Tool::Shell => topology_panel(ui, &mut d, &part),
+                    Tool::Hole => hole_panel(ui, &mut d, &part, record),
+                    Tool::LinearPattern | Tool::CircularPattern => pattern_panel(ui, &mut d, &part),
+                    Tool::Mirror | Tool::Split => plane_panel(ui, &mut d, &part),
+                }
+            },
+        );
+        let tab = d.tab;
+        if outcome.cancel {
+            self.close_feature_panel(&d);
+            return;
         }
-        if open {
-            self.feature_edit = Some(d);
+        if outcome.ok {
+            let command = match d.output {
+                Some(output) => self.with_pending_fix(tab, output, command),
+                None => command,
+            };
+            self.apply_previewed(ctx, tab, command);
+            self.close_feature_panel(&d);
+            return;
+        }
+        if complete {
+            // Ao editar, a prévia mostra o histórico até a operação, como no recuo da linha
+            // do tempo durante a edição.
+            let rollback = d.output.map(|output| (d.part, output));
+            self.preview_command(tab, Some(command), d.output, rollback);
+        } else {
+            self.preview_command(tab, None, None, None);
+        }
+        self.feature_edit = Some(d);
+    }
+
+    /// Fecha o painel; uma correção pendente volta a oferecer as opções de resolução.
+    fn close_feature_panel(&mut self, draft: &Draft) {
+        if let Some(pending) = self
+            .pending_failure
+            .as_mut()
+            .filter(|p| p.tab == draft.tab && Some(p.failure.output) == draft.output)
+        {
+            pending.fixing = false;
+        }
+    }
+
+    /// Publica a prévia já calculada para o comando, sem recalcular; uma falha atribuída a
+    /// uma operação abre a decisão do usuário; sem prévia válida, prepara normalmente.
+    pub(super) fn apply_previewed(&mut self, context: &egui::Context, tab: u64, command: Command) {
+        if let Some(prepared) = self.take_preview(tab, &command) {
+            self.commit_prepared(tab, prepared);
+        } else if let Some(error) = self
+            .preview_failure(&command)
+            .filter(|e| e.failure.is_some())
+        {
+            self.reject_command(tab, command, error);
+        } else {
+            self.prepare_command(context, tab, command);
         }
     }
 }
 
-fn region_controls(
+/// Perfil escolhido por clique, com alternativa pela lista de regiões.
+fn profile_rows(
     ui: &mut egui::Ui,
     d: &mut Draft,
+    part: &nator_document::Part,
     regions: &Option<Result<Vec<profiles::Region>, String>>,
 ) {
+    let chosen = usize::from(d.kept_region.is_some() || d.region.is_some());
+    let sketch_name = d
+        .sketch
+        .and_then(|id| part.sketches.iter().find(|s| s.id == id))
+        .map(|s| s.sketch.name.clone());
+    let selection = panel::selection(
+        ui,
+        text(T::ProfileField),
+        chosen,
+        sketch_name.as_deref(),
+        d.field == Some(Field::Profile),
+    );
+    if selection.activate {
+        d.field = Some(Field::Profile);
+    }
+    if selection.clear {
+        d.kept_region = None;
+        d.region = None;
+        d.field = Some(Field::Profile);
+    }
+    if d.field == Some(Field::Profile) {
+        ui.label(
+            egui::RichText::new(text(T::ProfileHint))
+                .small()
+                .color(theme::MUTED),
+        );
+    }
     match regions {
-        Some(Ok(list)) if !list.is_empty() => {
-            let label = |i: usize| {
-                let r = &list[i];
-                format!(
-                    "{} {} · {:.1} mm² · {} {}",
-                    text(T::Region),
-                    i + 1,
-                    r.area(),
-                    r.holes.len(),
-                    text(T::RegionHoles)
-                )
-            };
-            let selected = match &d.kept_region {
-                Some(kept) => describe_region(kept),
-                None => label(d.region.min(list.len() - 1)),
-            };
-            egui::ComboBox::from_label(text(T::Region))
-                .selected_text(selected)
-                .show_ui(ui, |ui| {
-                    for i in 0..list.len() {
-                        if ui
-                            .selectable_label(d.kept_region.is_none() && d.region == i, label(i))
-                            .clicked()
-                        {
-                            d.region = i;
-                            d.kept_region = None;
-                        }
-                    }
-                });
-        }
         Some(Err(message)) => {
             ui.colored_label(theme::WARNING, message);
         }
-        _ => {
+        Some(Ok(list)) if list.is_empty() => {
             ui.colored_label(theme::WARNING, text(T::NoRegions));
         }
+        _ => {}
     }
 }
 
-/// Limites e resultado da extrusão: distância ou face limite, novo corpo ou combinação.
-fn extrude_controls(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
-    labeled_text(ui, T::StartLimit, &mut d.from);
-    let mut until = d.until.is_some() || d.picking_until;
-    if ui.checkbox(&mut until, text(T::UntilFace)).changed() {
-        d.picking_until = until;
-        if !until {
-            d.until = None;
+fn extrude_panel(
+    ui: &mut egui::Ui,
+    d: &mut Draft,
+    part: &nator_document::Part,
+    regions: &Option<Result<Vec<profiles::Region>, String>>,
+) {
+    profile_rows(ui, d, part, regions);
+    let e = &mut d.extrude;
+    if let Some((from, to)) = &mut e.custom {
+        panel::row(ui, text(T::FromField), |ui| panel::expression(ui, from));
+        panel::row(ui, text(T::ToField), |ui| panel::expression(ui, to));
+        if ui.small_button(text(T::OneSide)).clicked() {
+            e.custom = None;
         }
-    }
-    match (&d.until, d.picking_until) {
-        (_, true) => {
-            ui.colored_label(theme::ACCENT, text(T::PickingTopology));
-        }
-        (Some((_, face)), false) => {
-            ui.horizontal(|ui| {
-                ui.label(describe_topology(&Kept::Face(face.clone())));
-                if ui.button(text(T::PickInViewport)).clicked() {
-                    d.picking_until = true;
-                }
-            });
-        }
-        (None, false) => labeled_text(ui, T::EndLimit, &mut d.to),
-    }
-    let results = [T::NewBody, T::Join, T::Cut, T::Intersect];
-    egui::ComboBox::from_label(text(T::ExtrudeResult))
-        .selected_text(text(results[d.combine]))
-        .show_ui(ui, |ui| {
-            for (i, label) in results.into_iter().enumerate() {
-                ui.selectable_value(&mut d.combine, i, text(label));
-            }
+    } else {
+        panel::row(ui, text(T::DirectionField), |ui| {
+            panel::choice(
+                ui,
+                &mut e.direction,
+                &[
+                    (Direction::OneSide, Icon::OneSide, T::OneSide),
+                    (Direction::TwoSides, Icon::TwoSides, T::TwoSides),
+                    (Direction::Symmetric, Icon::Symmetric, T::Symmetric),
+                ],
+            );
         });
-    if d.combine > 0 {
-        egui::ComboBox::from_label(text(T::SourceBody))
-            .selected_text(
-                d.combine_target
-                    .and_then(|id| part.bodies.iter().find(|b| b.id == id))
-                    .map(|b| b.name.as_str())
-                    .unwrap_or("—"),
-            )
-            .show_ui(ui, |ui| {
-                for b in part
-                    .bodies
-                    .iter()
-                    .filter(|b| b.brep.is_some() && Some(b.id) != d.output)
-                {
-                    ui.selectable_value(&mut d.combine_target, Some(b.id), &b.name);
+        panel::row(ui, text(T::ExtentField), |ui| {
+            panel::choice(
+                ui,
+                &mut e.to_face,
+                &[
+                    (false, Icon::Measure, T::ExtentDistance),
+                    (true, Icon::ToFace, T::ExtentToFace),
+                ],
+            );
+        });
+        if e.to_face {
+            let chosen = usize::from(d.until.is_some());
+            let description = d
+                .until
+                .as_ref()
+                .map(|(_, face)| describe_topology(&Kept::Face(face.clone())));
+            let s = panel::selection(
+                ui,
+                text(T::FacesField),
+                chosen,
+                description.as_deref(),
+                d.field == Some(Field::UntilFace),
+            );
+            if s.activate {
+                d.field = Some(Field::UntilFace);
+            }
+            if s.clear {
+                d.until = None;
+            }
+        } else {
+            let e = &mut d.extrude;
+            panel::row(ui, text(T::DistanceField), |ui| {
+                panel::expression(ui, &mut e.distance);
+                if icons::button(ui, Icon::Flip, text(T::FlipDirection), false, e.flip).clicked() {
+                    e.flip = !e.flip;
                 }
             });
+            if e.direction == Direction::TwoSides {
+                panel::row(ui, text(T::Distance2Field), |ui| {
+                    panel::expression(ui, &mut e.distance2)
+                });
+            }
+        }
+        let e = &mut d.extrude;
+        if e.direction == Direction::OneSide {
+            panel::row(ui, text(T::StartOffset), |ui| {
+                panel::expression(ui, &mut e.offset)
+            });
+        }
+    }
+    operation_rows(ui, d, part);
+}
+
+/// Resultado: novo corpo, união, corte ou interseção com um corpo alvo.
+fn operation_rows(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    panel::row(ui, text(T::OperationField), |ui| {
+        panel::choice(
+            ui,
+            &mut d.combine,
+            &[
+                (1, Icon::Join, T::Join),
+                (2, Icon::CutBody, T::Cut),
+                (3, Icon::IntersectBody, T::Intersect),
+                (0, Icon::NewBody, T::NewBody),
+            ],
+        );
+    });
+    if d.combine > 0 {
+        let name = body_name(part, d.combine_target);
+        let s = panel::selection(
+            ui,
+            text(T::TargetBody),
+            usize::from(d.combine_target.is_some()),
+            name.as_deref(),
+            d.field == Some(Field::Target),
+        );
+        if s.activate {
+            d.field = Some(Field::Target);
+        }
+        if s.clear {
+            d.combine_target = None;
+            d.field = Some(Field::Target);
+        }
     }
 }
 
-/// Eixo da revolução: eixos U/V do plano ou uma linha (de construção ou não) do rascunho.
-fn revolve_controls(ui: &mut egui::Ui, d: &mut Draft, sketch: Option<&Sketch>) {
+fn revolve_panel(
+    ui: &mut egui::Ui,
+    d: &mut Draft,
+    part: &nator_document::Part,
+    regions: &Option<Result<Vec<profiles::Region>, String>>,
+    record: Option<&nator_document::SketchRecord>,
+) {
+    profile_rows(ui, d, part, regions);
     let label = |axis: RevolveAxis| match axis {
         RevolveAxis::U => text(T::AxisU).to_owned(),
         RevolveAxis::V => text(T::AxisV).to_owned(),
@@ -1144,64 +1379,207 @@ fn revolve_controls(ui: &mut egui::Ui, d: &mut Draft, sketch: Option<&Sketch>) {
     } else {
         label(d.axis)
     };
-    let lines = sketch
+    let lines = record
         .map(|s| {
-            s.entities
+            s.sketch
+                .entities
                 .iter()
                 .filter(|e| matches!(e.curve, Curve::Line { .. }))
                 .map(|e| e.id)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    egui::ComboBox::from_label(text(T::RevolveAxis))
-        .selected_text(selected)
-        .show_ui(ui, |ui| {
-            for axis in [RevolveAxis::U, RevolveAxis::V]
-                .into_iter()
-                .chain(lines.into_iter().map(RevolveAxis::Line))
-            {
-                if ui
-                    .selectable_label(d.kept_axis.is_none() && d.axis == axis, label(axis))
-                    .clicked()
+    panel::row(ui, text(T::AxisField), |ui| {
+        egui::ComboBox::from_id_salt("revolve_axis")
+            .width(170.)
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                for axis in [RevolveAxis::U, RevolveAxis::V]
+                    .into_iter()
+                    .chain(lines.into_iter().map(RevolveAxis::Line))
                 {
-                    d.axis = axis;
-                    d.kept_axis = None;
+                    if ui
+                        .selectable_label(d.kept_axis.is_none() && d.axis == axis, label(axis))
+                        .clicked()
+                    {
+                        d.axis = axis;
+                        d.kept_axis = None;
+                    }
                 }
+            });
+    });
+    let mut full = d.angle.trim() == "360 deg";
+    panel::row(ui, text(T::Angle), |ui| {
+        ui.add_enabled_ui(!full, |ui| panel::expression(ui, &mut d.angle));
+        if ui.checkbox(&mut full, text(T::FullTurn)).changed() {
+            d.angle = if full { "360 deg" } else { "180 deg" }.into();
+        }
+    });
+    operation_rows(ui, d, part);
+}
+
+fn body_selection(
+    ui: &mut egui::Ui,
+    d: &mut Draft,
+    part: &nator_document::Part,
+    field: Field,
+    label: T,
+) {
+    let value = match field {
+        Field::ToolBody => d.tool_body,
+        _ => d.base,
+    };
+    let name = body_name(part, value);
+    let s = panel::selection(
+        ui,
+        text(label),
+        usize::from(value.is_some()),
+        name.as_deref(),
+        d.field == Some(field),
+    );
+    if s.activate {
+        d.field = Some(field);
+    }
+    if s.clear {
+        match field {
+            Field::ToolBody => d.tool_body = None,
+            _ => {
+                d.base = None;
+                d.kept_topology = None;
+                d.extra_topology.clear();
+            }
+        }
+        d.field = Some(field);
+    }
+}
+
+fn combine_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    body_selection(ui, d, part, Field::Base, T::TargetBody);
+    body_selection(ui, d, part, Field::ToolBody, T::ToolBodyField);
+    panel::row(ui, text(T::OperationField), |ui| {
+        panel::choice(
+            ui,
+            &mut d.tool,
+            &[
+                (Tool::Join, Icon::Join, T::Join),
+                (Tool::Cut, Icon::CutBody, T::Cut),
+                (Tool::Intersect, Icon::IntersectBody, T::Intersect),
+            ],
+        );
+    });
+}
+
+fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    let field = if d.tool == Tool::Shell {
+        Field::Faces
+    } else {
+        Field::Edges
+    };
+    let chosen = usize::from(d.kept_topology.is_some()) + d.extra_topology.len();
+    let description = d.kept_topology.as_ref().map(describe_topology);
+    let s = panel::selection(
+        ui,
+        text(if field == Field::Faces {
+            T::FacesField
+        } else {
+            T::EdgesField
+        }),
+        chosen,
+        description.as_deref(),
+        d.field == Some(field),
+    );
+    if s.activate {
+        d.field = Some(field);
+    }
+    if s.clear {
+        d.kept_topology = None;
+        d.extra_topology.clear();
+        d.field = Some(field);
+    }
+    if let Some(name) = body_name(part, d.base).filter(|_| chosen > 0) {
+        panel::row(ui, text(T::BodyField), |ui| {
+            ui.label(egui::RichText::new(name).color(theme::MUTED))
+        });
+    }
+    match d.tool {
+        Tool::Fillet => {
+            panel::row(ui, text(T::RadiusField), |ui| {
+                panel::expression(ui, &mut d.size)
+            });
+        }
+        Tool::Chamfer => {
+            let mut by_angle = d.chamfer_angle.is_some();
+            panel::row(ui, text(T::ChamferType), |ui| {
+                if panel::choice(
+                    ui,
+                    &mut by_angle,
+                    &[
+                        (false, Icon::Chamfer, T::EqualDistance),
+                        (true, Icon::Measure, T::DistanceAngle),
+                    ],
+                ) {
+                    d.chamfer_angle = by_angle.then(|| "45 deg".into());
+                }
+            });
+            panel::row(ui, text(T::DistanceField), |ui| {
+                panel::expression(ui, &mut d.size)
+            });
+            if let Some(angle) = &mut d.chamfer_angle {
+                panel::row(ui, text(T::Angle), |ui| panel::expression(ui, angle));
+            }
+        }
+        _ => {
+            panel::row(ui, text(T::ThicknessField), |ui| {
+                panel::expression(ui, &mut d.size)
+            });
+            panel::row(ui, text(T::DirectionField), |ui| {
+                panel::choice(
+                    ui,
+                    &mut d.outward,
+                    &[
+                        (false, Icon::Shell, T::InwardWalls),
+                        (true, Icon::Cube, T::OutwardWalls),
+                    ],
+                );
+            });
+        }
+    }
+    egui::CollapsingHeader::new(text(T::AdvancedGroup))
+        .id_salt("topology_advanced")
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text(T::TopologyIndex)).small());
+            if ui
+                .add(egui::DragValue::new(&mut d.index).range(0..=100000))
+                .changed()
+            {
+                d.kept_topology = None;
+                d.extra_topology.clear();
             }
         });
 }
 
-/// Corpo base (e corpo ferramenta nas booleanas), entre os sólidos da peça.
-fn body_controls(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
-    let two = matches!(d.tool, Tool::Join | Tool::Cut | Tool::Intersect);
-    let output = d.output;
-    for (label, slot) in [
-        (T::SourceBody, &mut d.base),
-        (T::ToolBody, &mut d.tool_body),
-    ]
-    .into_iter()
-    .take(if two { 2 } else { 1 })
-    {
-        egui::ComboBox::from_label(text(label))
-            .selected_text(
-                slot.and_then(|id| part.bodies.iter().find(|b| b.id == id))
-                    .map(|b| b.name.as_str())
-                    .unwrap_or("—"),
-            )
+fn hole_panel(
+    ui: &mut egui::Ui,
+    d: &mut Draft,
+    part: &nator_document::Part,
+    record: Option<&nator_document::SketchRecord>,
+) {
+    body_selection(ui, d, part, Field::Base, T::BodyField);
+    let points = record.map(|r| hole_points(&r.sketch)).unwrap_or_default();
+    panel::row(ui, text(T::Profile), |ui| {
+        let previous = d.sketch;
+        egui::ComboBox::from_id_salt("hole_sketch")
+            .width(170.)
+            .selected_text(record.map(|s| s.sketch.name.as_str()).unwrap_or("—"))
             .show_ui(ui, |ui| {
-                for b in part
-                    .bodies
-                    .iter()
-                    .filter(|b| b.brep.is_some() && Some(b.id) != output)
-                {
-                    ui.selectable_value(slot, Some(b.id), &b.name);
+                for s in &part.sketches {
+                    ui.selectable_value(&mut d.sketch, Some(s.id), &s.sketch.name);
                 }
             });
-    }
-}
-
-fn hole_controls(ui: &mut egui::Ui, d: &mut Draft, sketch: Option<&Sketch>) {
-    let points = sketch.map(hole_points).unwrap_or_default();
+        if d.sketch != previous {
+            d.hole.kept_points = None;
+        }
+    });
     match &d.hole.kept_points {
         Some(kept) => {
             ui.label(format!("{}: {}", text(T::KeptReference), kept.len()));
@@ -1214,36 +1592,160 @@ fn hole_controls(ui: &mut egui::Ui, d: &mut Draft, sketch: Option<&Sketch>) {
         }
     }
     let h = &mut d.hole;
-    labeled_text(ui, T::HoleDiameter, &mut h.diameter);
-    ui.checkbox(&mut h.through, text(T::Through));
-    if !h.through {
-        labeled_text(ui, T::HoleDepth, &mut h.depth);
-        ui.checkbox(&mut h.tip, text(T::DrillPoint));
-        if h.tip {
-            labeled_text(ui, T::Angle, &mut h.tip_angle);
+    panel::row(ui, text(T::HoleType), |ui| {
+        panel::choice(
+            ui,
+            &mut h.head,
+            &[
+                (0, Icon::Hole, T::HeadSimple),
+                (1, Icon::Shell, T::Counterbore),
+                (2, Icon::Chamfer, T::Countersink),
+            ],
+        );
+    });
+    panel::row(ui, text(T::HoleDiameter), |ui| {
+        panel::expression(ui, &mut h.diameter)
+    });
+    if h.head > 0 {
+        panel::row(ui, text(T::HeadDiameter), |ui| {
+            panel::expression(ui, &mut h.head_diameter)
+        });
+        if h.head == 1 {
+            panel::row(ui, text(T::HeadDepth), |ui| {
+                panel::expression(ui, &mut h.head_depth)
+            });
+        } else {
+            panel::row(ui, text(T::HeadAngle), |ui| {
+                panel::expression(ui, &mut h.head_angle)
+            });
         }
     }
-    let heads = [T::HeadSimple, T::Counterbore, T::Countersink];
-    egui::ComboBox::from_label(text(T::HoleHead))
-        .selected_text(text(heads[h.head]))
-        .show_ui(ui, |ui| {
-            for (i, head) in heads.into_iter().enumerate() {
-                ui.selectable_value(&mut h.head, i, text(head));
-            }
+    panel::row(ui, text(T::HoleExtent), |ui| {
+        panel::choice(
+            ui,
+            &mut h.through,
+            &[
+                (false, Icon::Measure, T::ExtentDistance),
+                (true, Icon::ToFace, T::Through),
+            ],
+        );
+    });
+    if !h.through {
+        panel::row(ui, text(T::HoleDepth), |ui| {
+            panel::expression(ui, &mut h.depth)
         });
-    if h.head > 0 {
-        labeled_text(ui, T::HeadDiameter, &mut h.head_diameter);
-        if h.head == 1 {
-            labeled_text(ui, T::HeadDepth, &mut h.head_depth);
-        } else {
-            labeled_text(ui, T::HeadAngle, &mut h.head_angle);
+        ui.checkbox(&mut h.tip, text(T::DrillPoint));
+        if h.tip {
+            panel::row(ui, text(T::Angle), |ui| {
+                panel::expression(ui, &mut h.tip_angle)
+            });
         }
     }
     ui.checkbox(&mut h.reverse, text(T::ReverseDirection));
     ui.checkbox(&mut h.thread, text(T::ThreadToggle));
     if h.thread {
-        labeled_text(ui, T::ThreadDesignation, &mut h.thread_designation);
-        labeled_text(ui, T::ThreadNominal, &mut h.thread_nominal);
-        labeled_text(ui, T::ThreadPitch, &mut h.thread_pitch);
+        panel::row(ui, text(T::ThreadDesignation), |ui| {
+            ui.text_edit_singleline(&mut h.thread_designation)
+        });
+        panel::row(ui, text(T::ThreadNominal), |ui| {
+            panel::expression(ui, &mut h.thread_nominal)
+        });
+        panel::row(ui, text(T::ThreadPitch), |ui| {
+            panel::expression(ui, &mut h.thread_pitch)
+        });
+    }
+}
+
+fn pattern_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    body_selection(ui, d, part, Field::Base, T::BodyField);
+    let circular = d.tool == Tool::CircularPattern;
+    let l = &mut d.layout;
+    panel::row(
+        ui,
+        text(if circular {
+            T::AxisField
+        } else {
+            T::DirectionField
+        }),
+        |ui| axis_choice(ui, &mut l.axis, &AXES),
+    );
+    panel::row(ui, text(T::CountField), |ui| {
+        ui.add(egui::DragValue::new(&mut l.count).range(2..=1000))
+    });
+    if circular {
+        panel::row(ui, text(T::OriginField), |ui| {
+            for v in &mut l.origin {
+                ui.add(egui::DragValue::new(v).speed(0.5).max_decimals(3));
+            }
+        });
+        panel::row(ui, text(T::TotalAngle), |ui| {
+            panel::expression(ui, &mut l.angle)
+        });
+    } else {
+        panel::row(ui, text(T::SpacingField), |ui| {
+            panel::expression(ui, &mut l.spacing)
+        });
+        ui.checkbox(&mut l.second, text(T::SecondDirection));
+        if l.second {
+            panel::row(ui, text(T::DirectionField), |ui| {
+                axis_choice(ui, &mut l.second_axis, &AXES)
+            });
+            panel::row(ui, text(T::CountField), |ui| {
+                ui.add(egui::DragValue::new(&mut l.second_count).range(1..=1000))
+            });
+            panel::row(ui, text(T::SpacingField), |ui| {
+                panel::expression(ui, &mut l.second_spacing)
+            });
+        }
+    }
+}
+
+fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    body_selection(ui, d, part, Field::Base, T::BodyField);
+    let mirror = d.tool == Tool::Mirror;
+    let l = &mut d.layout;
+    panel::row(ui, text(T::PlaneField), |ui| {
+        axis_choice(ui, &mut l.plane, &PLANES)
+    });
+    panel::row(ui, text(T::OffsetField), |ui| {
+        ui.add(
+            egui::DragValue::new(&mut l.offset)
+                .speed(0.5)
+                .suffix(" mm")
+                .max_decimals(4),
+        )
+    });
+    if mirror {
+        ui.checkbox(&mut l.keep_original, text(T::KeepOriginal));
+    } else {
+        ui.checkbox(&mut l.flip, text(T::FlipSide));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extrusion_limits_round_trip_through_the_panel_directions() {
+        for (from, to, direction) in [
+            ("0 mm", "espessura", Direction::OneSide),
+            ("0 mm", "-(espessura)", Direction::OneSide),
+            ("-(largura)", "largura", Direction::Symmetric),
+            ("-(5 mm)", "12 mm", Direction::TwoSides),
+            ("3 mm", "(3 mm) + (10 mm)", Direction::OneSide),
+        ] {
+            let draft = ExtrudeDraft::from_limits(from.into(), to.into());
+            assert!(draft.custom.is_none(), "{from} → {to}");
+            assert_eq!(draft.direction, direction);
+            assert_eq!(draft.limits(), (from.to_owned(), to.to_owned()));
+        }
+        // Limites fora dos padrões do painel são preservados como estão.
+        let custom = ExtrudeDraft::from_limits("2 mm".into(), "espessura".into());
+        assert_eq!(custom.limits(), ("2 mm".to_owned(), "espessura".to_owned()));
+        // Inverter troca o sentido sem perder a expressão digitada.
+        let mut flipped = ExtrudeDraft::from_limits("0 mm".into(), "espessura".into());
+        flipped.flip = true;
+        assert_eq!(flipped.limits().1, "-(espessura)");
     }
 }
