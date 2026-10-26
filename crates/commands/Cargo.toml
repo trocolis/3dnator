@@ -15,5 +15,9 @@ nator-document.workspace = true
 nator-geometry.workspace = true
 nator-sketch.workspace = true
 
+[dev-dependencies]
+nator-project-io.workspace = true
+tempfile = "3.27"
+
 [lints]
 workspace = true

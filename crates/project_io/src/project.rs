@@ -16,7 +16,9 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-pub const FORMAT_VERSION: u32 = 6;
+/// Versão 7: nomes estáveis de faces por corpo e referências de região/aresta/face por
+/// identidade de origem. Versões anteriores são migradas na leitura (`migrate_to_7`).
+pub const FORMAT_VERSION: u32 = 7;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -70,6 +72,9 @@ struct BodyRecord {
     mesh_path: String,
     #[serde(default)]
     brep_path: Option<String>,
+    /// Um nome por face do B-rep, na ordem topológica; vazio em corpos de malha.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    face_names: Vec<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -224,7 +229,11 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             header.format, header.schema_version
         )));
     }
-    let manifest: Manifest = serde_json::from_slice(&bytes).map_err(error)?;
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes).map_err(error)?;
+    if header.schema_version < 7 {
+        migrate_to_7(&mut value)?;
+    }
+    let manifest: Manifest = serde_json::from_value(value).map_err(error)?;
     let mut expected_names = HashSet::from(["manifest.json".to_owned()]);
     let mut parts = Vec::new();
     let mut total_triangles = 0_usize;
@@ -258,8 +267,12 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             } else {
                 None
             };
+            if !body.face_names.is_empty() && brep.is_none() {
+                return Err(ImportError("Nomes de faces sem B-rep no projeto.".into()));
+            }
             bodies.push(Body {
                 brep,
+                face_names: Arc::new(body.face_names),
                 id: BodyId(body.id),
                 name: body.name,
                 visible: body.visible,
@@ -333,6 +346,60 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
     Ok(document)
 }
 
+/// Migração 6 → 7 sobre o JSON do manifesto, antes da desserialização tipada.
+///
+/// Até a versão 6, extrusões/revoluções guardavam a região como posição na lista ordenada
+/// por área, e arredondamento/chanfro/casca guardavam índice + assinatura do B-rep em campos
+/// soltos. Essas referências são preservadas literalmente nas variantes `Index`, com o mesmo
+/// significado de antes; a próxima edição da operação as converte em referências estáveis.
+fn migrate_to_7(manifest: &mut serde_json::Value) -> Result<(), ImportError> {
+    use serde_json::{Value, json};
+    let invalid = || ImportError("Histórico de versão anterior com formato inesperado.".into());
+    let Some(parts) = manifest.get_mut("parts").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for part in parts {
+        let Some(features) = part.get_mut("features").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for feature in features {
+            let Some(operation) = feature.get_mut("operation").and_then(Value::as_object_mut)
+            else {
+                return Err(invalid());
+            };
+            for (kind, data) in operation.iter_mut() {
+                let data = data.as_object_mut().ok_or_else(invalid)?;
+                match kind.as_str() {
+                    "Extrude" | "Revolve" => {
+                        let index = data
+                            .get("region")
+                            .and_then(Value::as_u64)
+                            .ok_or_else(invalid)?;
+                        data.insert("region".into(), json!({ "Index": index }));
+                    }
+                    "Fillet" | "Chamfer" | "Shell" => {
+                        let field = if kind == "Shell" { "face" } else { "edge" };
+                        let index = data
+                            .get(field)
+                            .and_then(Value::as_u64)
+                            .ok_or_else(invalid)?;
+                        let signature = data
+                            .remove("signature")
+                            .and_then(|s| s.as_u64())
+                            .ok_or_else(invalid)?;
+                        data.insert(
+                            field.into(),
+                            json!({ "Index": { "index": index, "signature": signature } }),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn write_project(path: &Path, document: &Document) -> Result<(), ImportError> {
     write_archive(path, document, false)
 }
@@ -390,6 +457,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                         placement: b.placement.into(),
                         mesh_path: mesh_path(b.id.0),
                         brep_path: b.brep.as_ref().map(|_| format!("breps/{}.brep", b.id.0)),
+                        face_names: b.face_names.to_vec(),
                     })
                     .collect(),
             })
@@ -581,6 +649,77 @@ mod tests {
         let loaded = read_project(&old)?;
         assert_eq!(loaded.parts()[0].bodies.len(), 2);
         assert!(loaded.parts()[0].sketches.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn migrates_index_references_from_version_six() -> Result<(), Box<dyn Error>> {
+        use nator_document::features::{EdgeRef, FaceRef, Feature, Operation, RegionRef};
+        let mut manifest = serde_json::json!({"parts": [{"features": [
+            {"name": "Extrusão", "output": 5, "operation": {"Extrude":
+                {"sketch": 3, "region": 1, "from": "0 mm", "to": "10 mm"}}},
+            {"name": "Arredondamento", "output": 6, "operation": {"Fillet":
+                {"base": 5, "edge": 7, "signature": 42, "radius": "2 mm"}}},
+            {"name": "Casca", "output": 8, "operation": {"Shell":
+                {"base": 6, "face": 2, "signature": 9, "thickness": "1 mm"}}}
+        ]}]});
+        migrate_to_7(&mut manifest)?;
+        let features: Vec<Feature> =
+            serde_json::from_value(manifest["parts"][0]["features"].clone())?;
+        assert!(matches!(
+            &features[0].operation,
+            Operation::Extrude {
+                region: RegionRef::Index(1),
+                ..
+            }
+        ));
+        assert!(matches!(
+            &features[1].operation,
+            Operation::Fillet {
+                edge: EdgeRef::Index {
+                    index: 7,
+                    signature: 42
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &features[2].operation,
+            Operation::Shell {
+                face: FaceRef::Index {
+                    index: 2,
+                    signature: 9
+                },
+                ..
+            }
+        ));
+        // Um histórico corrompido não é migrado pela metade.
+        let mut broken = serde_json::json!({"parts": [{"features": [
+            {"name": "X", "output": 1, "operation": {"Fillet": {"base": 2, "edge": 3}}}
+        ]}]});
+        assert!(migrate_to_7(&mut broken).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn face_names_round_trip_with_the_brep() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("nomes.3dnator");
+        let mut doc = document()?;
+        let body = doc.parts()[0].bodies[0].id;
+        let names = vec!["b9:start".to_owned(), String::new(), "b9:e4".to_owned()];
+        {
+            let target = doc.body_mut(body)?;
+            target.brep = Some(Arc::new(b"conteudo-brep".to_vec()));
+            target.face_names = Arc::new(names.clone());
+        }
+        write_project(&path, &doc)?;
+        let loaded = read_project(&path)?;
+        let restored = loaded.body(body).ok_or("Corpo ausente")?;
+        assert_eq!(restored.face_names.as_slice(), names.as_slice());
+        // Nomes sem B-rep são rejeitados pela validação do documento.
+        doc.body_mut(body)?.brep = None;
+        assert!(write_project(&directory.path().join("invalido.3dnator"), &doc).is_err());
         Ok(())
     }
 

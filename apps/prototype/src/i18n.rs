@@ -29,10 +29,13 @@ pub enum Text {
     ToolBody,
     Profile,
     Region,
+    RegionHoles,
+    NoRegions,
     StartLimit,
     EndLimit,
     Angle,
     TopologyIndex,
+    KeptReference,
     KernelUnavailable,
     RemoveFeature,
     ModelFilter,
@@ -265,13 +268,16 @@ pub fn text(key: Text) -> &'static str {
         Text::SourceBody => "Corpo base",
         Text::ToolBody => "Corpo ferramenta",
         Text::Profile => "Rascunho de perfil",
-        Text::Region => "Região (0 = maior contorno externo)",
+        Text::Region => "Região",
+        Text::RegionHoles => "furos",
+        Text::NoRegions => "O rascunho não tem regiões fechadas utilizáveis.",
         Text::StartLimit => "Início da extrusão",
         Text::EndLimit => "Fim da extrusão / dimensão",
         Text::Angle => "Ângulo / dimensão",
         Text::TopologyIndex => {
-            "Índice de aresta/face (temporário; geometria protegida por assinatura)"
+            "Índice de aresta/face no corpo base; ao aplicar, vira referência pelas faces de origem"
         }
+        Text::KeptReference => "Referência atual (mantida enquanto o índice não for alterado)",
         Text::KernelUnavailable => {
             "SDK OCCT necessário: compile com a feature occt para construir sólidos."
         }

@@ -1,19 +1,31 @@
-# Formato de projeto — versão interna 1
+# Formato de projeto — versão interna 7
 
-Implementado no protótipo 0.2.0. A versão do pacote é independente da versão do aplicativo.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 7; a gravação sempre usa a versão atual.
 
-Um arquivo `.3dnator` é um ZIP com compressão Deflate e entradas declaradas:
+Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
 ```text
 manifest.json
 meshes/<body_id>.bin
+breps/<body_id>.brep      (somente corpos sólidos CAD)
 ```
 
-O manifesto registra `format = "3dnator"`, `schema_version = 1`, versão do aplicativo que gravou, UUID do documento, nome, contador de identificadores, definições de peças e suas instâncias. O campo opcional `recovery` distingue uma cópia automática de um projeto normal; quando ausente, vale `false`.
+## Manifesto
 
-Cada peça contém corpos. Cada corpo possui identificador, nome, visibilidade, transformação local e caminho de sua malha. Cada instância referencia uma definição de peça e guarda posição/orientação relativas à montagem. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
+O manifesto registra `format = "3dnator"`, `schema_version`, versão do aplicativo que gravou, UUID do documento, nome, contador de identificadores, peças, instâncias, grupos e folhas técnicas. O campo opcional `recovery` distingue uma cópia automática de um projeto normal; quando ausente, vale `false`.
+
+Cada peça contém:
+
+- corpos: identificador, nome, visibilidade, transformação local, caminho da malha, caminho opcional do B-rep e, desde a versão 7, `face_names`;
+- rascunhos: plano, pontos, entidades, restrições e expressões das cotas;
+- parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
+- histórico de operações (`features`), cada uma com nome, corpo resultante e operação.
+
+Cada instância referencia uma definição de peça, a peça pai opcional (subconjuntos) e guarda posição/orientação relativas ao pai. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
 
 Transformações usam deslocamentos em milímetros e rotações em radianos, aplicando X, depois Y, depois Z. A transformação do corpo é aplicada antes da transformação da instância. Movimentar a montagem não altera os vértices locais.
+
+## Malhas e B-rep
 
 Cada malha usa:
 
@@ -25,15 +37,46 @@ Cada malha usa:
 | Vértices | Três f64 little-endian por vértice |
 | Triângulos | Três índices u32 little-endian por triângulo |
 
-A precisão do projeto não é reduzida a f32, como ocorre na exportação STL binária. Malhas continuam sendo malhas; esse formato não reconstrói superfícies curvas exatas nem histórico CAD.
+A precisão do projeto não é reduzida a f32, como ocorre na exportação STL binária. A malha de um corpo sólido é a malha de exibição; a geometria precisa está no B-rep, gravado no formato texto do OCCT (`BRepTools::Write`, até 64 MiB por corpo).
+
+## Nomes de faces e referências estáveis (versão 7)
+
+`face_names` tem um nome por face do B-rep, na ordem topológica do núcleo (`TopExp::MapShapes`), que a serialização B-rep preserva. Os nomes descrevem a origem da face:
+
+| Origem | Nome |
+| --- | --- |
+| Lateral de extrusão/revolução | `b{corpo}:e{entidade do rascunho}` |
+| Tampas da extrusão/revolução | `b{corpo}:start`, `b{corpo}:end` |
+| Face nova de arredondamento/chanfro | `b{corpo}:round`, `b{corpo}:chamfer` |
+| Borda e face interna de casca | `b{corpo}:rim`, `{nome original}:inner` |
+| Face preservada ou recortada | nome da face de entrada |
+| Sólido STEP importado | `b{corpo}:f{índice}` |
+
+Nome vazio indica face sem origem conhecida, que não pode ser referenciada.
+
+As operações referenciam a geometria pela origem, não pela posição:
+
+- `RegionRef::Boundary(entidades)`: região de rascunho identificada pelas entidades do contorno externo;
+- `EdgeRef::Between([face, face])`: aresta entre duas faces nomeadas;
+- `FaceRef::Named(face)`: face nomeada.
+
+As variantes `Index` (`RegionRef::Index`, `EdgeRef::Index`, `FaceRef::Index`) guardam a referência posicional das versões anteriores. Elas mantêm o significado antigo: a região é a posição na lista ordenada por área, e a aresta/face só vale enquanto a assinatura do B-rep de entrada for idêntica. A próxima edição da operação as converte em referências estáveis quando as faces envolvidas têm nome.
+
+Quando a origem de uma referência desaparece ou fica ambígua, o recálculo falha com uma mensagem pedindo nova seleção. Nenhuma outra região, aresta ou face é escolhida no lugar.
+
+## Migrações
+
+- Versões 1 a 6: campos acrescentados ao longo dessas versões (rascunhos, parâmetros, histórico, B-rep, subconjuntos, grupos, folhas) são opcionais e assumem valores vazios quando ausentes.
+- 6 → 7 (`migrate_to_7`): antes da desserialização tipada, a região numérica de extrusões/revoluções vira `{"Index": n}`, e o par `edge`/`face` + `signature` de arredondamento, chanfro e casca vira `{"Index": {"index": n, "signature": s}}`. Um histórico com campos ausentes é rejeitado inteiro, sem migração parcial.
 
 ## Integridade e limites
 
 - Até 256 MiB de arquivo, 512 MiB descompactados e 8 MiB de manifesto.
 - Até dez mil elementos, dois milhões de triângulos e seis milhões de vértices, com limites também na cena resultante das instâncias visíveis.
-- Validação de números finitos, índices, triângulos, nomes, identificadores únicos e referências entre peças/instâncias.
-- Caminhos de malha são derivados dos identificadores. O leitor não extrai entradas para disco nem segue caminhos externos.
-- Versões futuras e campos desconhecidos são rejeitados para evitar descarte silencioso de dados. Ainda não há migração, pois esta é a primeira versão do formato.
+- Validação de números finitos, índices, triângulos, nomes, identificadores únicos e referências entre peças, instâncias, rascunhos e operações.
+- `face_names` só é aceito em corpos com B-rep; cada nome tem até 256 bytes e nenhum caractere NUL.
+- Caminhos de malha e B-rep são derivados dos identificadores. O leitor não extrai entradas para disco nem segue caminhos externos.
+- Versões futuras e campos desconhecidos são rejeitados para evitar descarte silencioso de dados.
 
 O salvamento cria um arquivo temporário no diretório de destino, conclui e sincroniza a gravação, reabre e valida o pacote e só então substitui o arquivo principal. Falhas anteriores à substituição preservam o arquivo anterior. Isso não constitui garantia contra toda falha de hardware ou sistema de arquivos.
 
@@ -49,4 +92,4 @@ A descoberta e a limpeza verificam o marcador `recovery = true` no manifesto. Ar
 
 ## Escopo ainda pendente
 
-Miniaturas, configurações persistentes de câmera, sólidos CAD, rascunhos, parâmetros, histórico paramétrico, grupos e subconjuntos ainda não fazem parte deste esquema. A sequência de desfazer/refazer é somente da sessão e começa vazia ao reabrir um projeto.
+Miniaturas e configurações persistentes de câmera ainda não fazem parte do esquema. A sequência de desfazer/refazer é somente da sessão e começa vazia ao reabrir um projeto.

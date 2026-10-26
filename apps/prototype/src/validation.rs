@@ -96,7 +96,7 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
         })?;
         measured(&mut steps, "fillet", || {
             let original = Solid::cuboid([0.; 3], [20., 30., 40.])?;
-            let mut body = original.fillet(0, 2.)?;
+            let mut body = original.fillet(0, 2., "b1")?;
             if body.volume()? >= original.volume()? {
                 return Err("O arredondamento não reduziu o volume do bloco.".into());
             }
@@ -108,7 +108,7 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
         })?;
         measured(&mut steps, "chamfer", || {
             let original = Solid::cuboid([0.; 3], [20., 30., 40.])?;
-            let mut body = original.chamfer(0, 2.)?;
+            let mut body = original.chamfer(0, 2., "b1")?;
             if body.volume()? >= original.volume()? {
                 return Err("O chanfro não reduziu o volume do bloco.".into());
             }
@@ -120,7 +120,7 @@ pub fn run(directory: &Path) -> Result<(), Box<dyn Error>> {
         })?;
         measured(&mut steps, "invalid_operation_preserves_source", || {
             let body = Solid::cuboid([0.; 3], [20., 30., 40.])?;
-            if body.fillet(usize::MAX, 2.).is_ok() {
+            if body.fillet(usize::MAX, 2., "b1").is_ok() {
                 return Err("Uma aresta inválida foi aceita.".into());
             }
             if Solid::cuboid([0.; 3], [-1., 1., 1.]).is_ok() {

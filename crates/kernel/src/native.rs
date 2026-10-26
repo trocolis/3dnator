@@ -1,8 +1,14 @@
 //! Único módulo Rust autorizado a chamar o ABI nativo.
 //! Cada sólido tem propriedade exclusiva e permanece na thread que o criou.
+//!
+//! Além do ponteiro nativo, `Solid` carrega os nomes estáveis de suas faces (ver
+//! `naming`). Toda operação produz os nomes do resultado a partir do histórico registrado
+//! pela ponte, de modo que referências do histórico paramétrico sobrevivam a mudanças de cota.
 
 use super::KernelError;
+use crate::naming::{self, Inheritance, Origin};
 use nator_geometry::{Mesh, Point3};
+use nator_sketch::{Sketch, profiles::Region};
 use std::{
     ffi::{CStr, CString, c_char, c_void},
     marker::PhantomData,
@@ -47,10 +53,21 @@ unsafe extern "C" {
     fn nator_tessellate(body: *mut c_void, linear: f64, angular: f64) -> bool;
     fn nator_mesh_size(body: *const c_void) -> usize;
     fn nator_mesh_copy(body: *const c_void, output: *mut f64, length: usize) -> bool;
+    fn nator_mesh_faces_copy(body: *const c_void, output: *mut i32, length: usize) -> bool;
+    fn nator_face_count(body: *const c_void) -> usize;
+    fn nator_edge_count(body: *const c_void) -> usize;
+    fn nator_edge_faces(body: *const c_void, output: *mut i32, length: usize) -> bool;
+    fn nator_origins_size(body: *const c_void) -> usize;
+    fn nator_origins_copy(body: *const c_void, output: *mut i32, length: usize) -> bool;
 }
+
+/// Limite defensivo de faces/arestas copiadas da ponte (um modelo de protótipo tem centenas).
+const MAX_TOPOLOGY: usize = 1_000_000;
 
 pub struct Solid {
     pointer: NonNull<c_void>,
+    /// Nome estável de cada face, na ordem de `TopExp::MapShapes`. Vazio = sem nome.
+    faces: Vec<String>,
     // Rc impede Send/Sync: objetos nativos não atravessam threads por acidente.
     _thread: PhantomData<Rc<()>>,
 }
@@ -89,6 +106,15 @@ fn path_string(path: &Path) -> Result<CString, KernelError> {
     CString::new(text).map_err(|_| KernelError("O caminho contém um caractere NUL.".into()))
 }
 
+fn owner_name(owner: &str) -> Result<(), KernelError> {
+    if owner.is_empty() || owner.contains(':') || owner.len() > 64 {
+        return Err(KernelError(
+            "Identificador de dono das faces inválido.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn version() -> String {
     // SAFETY: texto estático da versão do SDK vinculado.
     unsafe { CStr::from_ptr(nator_version()) }
@@ -96,15 +122,37 @@ pub fn version() -> String {
         .into_owned()
 }
 
+/// Perfil plano já convertido para a ponte, com a entidade de origem de cada segmento.
+struct Profile {
+    face: Solid,
+    entities: Vec<u64>,
+}
+
 impl Solid {
+    // ----- Construção a partir de dados persistidos ---------------------------------------
+
     /// Os dados B-rep imutáveis podem atravessar threads; objetos OCCT vivos não podem.
-    pub fn from_brep(bytes: &[u8]) -> Result<Self, KernelError> {
+    /// `names` deve ter um nome por face; sem nomes, as faces ficam não referenciáveis.
+    pub fn from_brep(bytes: &[u8], names: Option<&[String]>) -> Result<Self, KernelError> {
         if bytes.is_empty() || bytes.len() > 64 * 1024 * 1024 {
             return Err(KernelError("B-rep vazio ou excessivo.".into()));
         }
         // SAFETY: fatia vive durante a leitura síncrona; a ponte valida e copia o conteúdo.
-        Self::from_pointer(unsafe { nator_brep_read(bytes.as_ptr().cast(), bytes.len()) })
+        let mut solid =
+            Self::from_pointer(unsafe { nator_brep_read(bytes.as_ptr().cast(), bytes.len()) })?;
+        let count = solid.face_count()?;
+        solid.faces = match names {
+            Some(names) if names.len() == count => names.to_vec(),
+            Some(_) => {
+                return Err(KernelError(
+                    "Os nomes de faces não correspondem ao B-rep armazenado.".into(),
+                ));
+            }
+            None => vec![String::new(); count],
+        };
+        Ok(solid)
     }
+
     pub fn to_brep(&mut self) -> Result<Vec<u8>, KernelError> {
         // SAFETY: acesso exclusivo ao objeto vivo nesta thread.
         if !unsafe { nator_brep_prepare(self.pointer.as_ptr()) } {
@@ -122,15 +170,116 @@ impl Solid {
         }
         Ok(bytes)
     }
-    pub fn boolean(&self, other: &Self, mode: u32) -> Result<Self, KernelError> {
+
+    /// Dá nomes posicionais às faces de geometria que não será recalculada.
+    pub fn name_faces_by_index(&mut self, owner: &str) -> Result<(), KernelError> {
+        owner_name(owner)?;
+        self.faces = naming::indexed_names(owner, self.face_count()?);
+        Ok(())
+    }
+
+    // ----- Topologia e nomes --------------------------------------------------------------
+
+    pub fn face_names(&self) -> &[String] {
+        &self.faces
+    }
+
+    pub fn face_count(&self) -> Result<usize, KernelError> {
+        // SAFETY: objeto vivo nesta thread; a ponte apenas consulta a topologia.
+        let count = unsafe { nator_face_count(self.pointer.as_ptr()) };
+        if count > MAX_TOPOLOGY {
+            return Err(KernelError("Sólido com faces demais.".into()));
+        }
+        Ok(count)
+    }
+
+    /// Para cada aresta, as faces adjacentes (base 0; -1 quando ausente).
+    fn adjacency(&self) -> Result<Vec<[i32; 2]>, KernelError> {
+        // SAFETY: objeto vivo nesta thread; apenas consulta.
+        let count = unsafe { nator_edge_count(self.pointer.as_ptr()) };
+        if count > MAX_TOPOLOGY {
+            return Err(KernelError("Sólido com arestas demais.".into()));
+        }
+        let mut flat = vec![0_i32; count * 2];
+        // SAFETY: buffer exclusivo com o comprimento exato verificado pela ponte.
+        if !unsafe { nator_edge_faces(self.pointer.as_ptr(), flat.as_mut_ptr(), flat.len()) } {
+            return Err(last_error());
+        }
+        Ok(flat.as_chunks::<2>().0.to_vec())
+    }
+
+    /// Origens das faces registradas pela última operação da ponte.
+    fn origins(&self) -> Result<Vec<Origin>, KernelError> {
+        // SAFETY: objeto vivo nesta thread; apenas consulta.
+        let length = unsafe { nator_origins_size(self.pointer.as_ptr()) };
+        if !length.is_multiple_of(3) || length / 3 != self.face_count()? {
+            return Err(KernelError(
+                "Histórico de faces da operação ausente ou incoerente.".into(),
+            ));
+        }
+        let mut flat = vec![0_i32; length];
+        // SAFETY: buffer exclusivo com o comprimento informado pela própria ponte.
+        if !unsafe { nator_origins_copy(self.pointer.as_ptr(), flat.as_mut_ptr(), flat.len()) } {
+            return Err(last_error());
+        }
+        Ok(flat.as_chunks::<3>().0.to_vec())
+    }
+
+    /// Índice da única aresta entre duas faces nomeadas.
+    pub fn edge_between(&self, faces: &[String; 2]) -> Result<usize, KernelError> {
+        naming::edge_between(&self.faces, &self.adjacency()?, faces)
+    }
+
+    /// Nomes das faces adjacentes a uma aresta, para criar uma referência estável.
+    pub fn edge_face_names(&self, edge: usize) -> Result<[String; 2], KernelError> {
+        naming::edge_face_names(&self.faces, &self.adjacency()?, edge)
+    }
+
+    /// Índice da única face com o nome dado.
+    pub fn face_named(&self, face: &str) -> Result<usize, KernelError> {
+        naming::face_named(&self.faces, face)
+    }
+
+    /// Nome estável da face `index`, quando houver.
+    pub fn face_name(&self, index: usize) -> Result<&str, KernelError> {
+        self.faces
+            .get(index)
+            .filter(|n| !n.is_empty())
+            .map(String::as_str)
+            .ok_or_else(|| KernelError("A face não possui nome estável.".into()))
+    }
+
+    fn with_inherited(
+        mut self,
+        inputs: &[&[String]],
+        rule: &Inheritance<'_>,
+    ) -> Result<Self, KernelError> {
+        self.faces = naming::inherited_names(&self.origins()?, inputs, rule);
+        Ok(self)
+    }
+
+    // ----- Operações paramétricas ----------------------------------------------------------
+
+    pub fn boolean(&self, other: &Self, mode: u32, owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
         if mode > 2 {
             return Err(KernelError("Operação booleana inválida.".into()));
         }
         // SAFETY: ambos os sólidos estão vivos; a operação é não destrutiva.
         Self::from_pointer(unsafe {
             nator_boolean(self.pointer.as_ptr(), other.pointer.as_ptr(), mode as i32)
-        })
+        })?
+        .with_inherited(
+            &[&self.faces, &other.faces],
+            &Inheritance {
+                owner,
+                generated: "section",
+                modified_suffix: None,
+            },
+        )
     }
+
+    /// Transformação rígida; as faces mantêm seus nomes.
     pub fn transformed(&self, placement: nator_geometry::Placement) -> Result<Self, KernelError> {
         let origin = placement.apply([0.; 3]);
         let columns = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
@@ -143,44 +292,99 @@ impl Solid {
             }
         });
         // SAFETY: matriz rígida finita em buffer fixo durante a chamada.
-        Self::from_pointer(unsafe { nator_transform(self.pointer.as_ptr(), data.as_ptr()) })
+        let moved =
+            Self::from_pointer(unsafe { nator_transform(self.pointer.as_ptr(), data.as_ptr()) })?;
+        // A cópia transformada tem a mesma estrutura; o histórico confirma a correspondência.
+        moved.with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner: "transform",
+                generated: "transform",
+                modified_suffix: None,
+            },
+        )
     }
-    pub fn shell(&self, face: usize, thickness: f64) -> Result<Self, KernelError> {
+
+    /// Casca para dentro, removendo a face `face`.
+    pub fn shell(&self, face: usize, thickness: f64, owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
         positive(thickness, "Espessura")?;
         // SAFETY: ponte valida índice e constrói geometria nova.
-        Self::from_pointer(unsafe { nator_shell(self.pointer.as_ptr(), face, thickness) })
+        Self::from_pointer(unsafe { nator_shell(self.pointer.as_ptr(), face, thickness) })?
+            .with_inherited(
+                &[&self.faces],
+                &Inheritance {
+                    owner,
+                    generated: "rim",
+                    modified_suffix: Some("inner"),
+                },
+            )
     }
+
+    pub fn fillet(&self, edge: usize, radius: f64, owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        positive(radius, "Raio")?;
+        // SAFETY: o índice da aresta é validado na ponte; falhas são convertidas em erro.
+        Self::from_pointer(unsafe { nator_fillet(self.pointer.as_ptr(), edge, radius) })?
+            .with_inherited(
+                &[&self.faces],
+                &Inheritance {
+                    owner,
+                    generated: "round",
+                    modified_suffix: None,
+                },
+            )
+    }
+
+    pub fn chamfer(&self, edge: usize, distance: f64, owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        positive(distance, "Distância")?;
+        // SAFETY: mesmo contrato de fillet; não modifica o sólido original.
+        Self::from_pointer(unsafe { nator_chamfer(self.pointer.as_ptr(), edge, distance) })?
+            .with_inherited(
+                &[&self.faces],
+                &Inheritance {
+                    owner,
+                    generated: "chamfer",
+                    modified_suffix: None,
+                },
+            )
+    }
+
+    /// Extrusão de uma região entre `from` e `to` mm ao longo da normal do plano do rascunho.
     pub fn extrude(
-        sketch: &nator_sketch::Sketch,
-        region: usize,
+        sketch: &Sketch,
+        region: &Region,
         from: f64,
         to: f64,
+        owner: &str,
     ) -> Result<Self, KernelError> {
+        owner_name(owner)?;
         if !from.is_finite() || !to.is_finite() || (to - from).abs() < 1e-7 {
             return Err(KernelError("Limites de extrusão inválidos.".into()));
         }
-        let mut profile = Self::profile(sketch, region)?;
-        if from != 0. {
-            profile = profile.transformed(
-                nator_geometry::Placement::new(sketch.plane.normal().map(|v| v * from), [0.; 3])
-                    .map_err(|e| KernelError(e.to_string()))?,
-            )?;
-        }
+        // O perfil é construído diretamente no plano deslocado: transformar um perfil pronto
+        // copiaria suas arestas e perderia a correspondência segmento → entidade.
+        let profile = Self::profile(sketch, region, sketch.plane.normal().map(|v| v * from))?;
         let direction = sketch.plane.normal().map(|v| v * (to - from));
         // SAFETY: perfil vivo e vetor finito não nulo, sem retenção dos buffers.
-        let solid = Self::from_pointer(unsafe {
-            nator_extrude(profile.pointer.as_ptr(), direction.as_ptr())
+        let mut solid = Self::from_pointer(unsafe {
+            nator_extrude(profile.face.pointer.as_ptr(), direction.as_ptr())
         })?;
+        solid.faces = naming::sweep_names(owner, &solid.origins()?, &profile.entities);
         solid.volume()?;
         Ok(solid)
     }
+
     pub fn revolve(
-        sketch: &nator_sketch::Sketch,
-        region: usize,
+        sketch: &Sketch,
+        region: &Region,
         origin: Point3,
         direction: Point3,
         angle: f64,
+        owner: &str,
     ) -> Result<Self, KernelError> {
+        owner_name(owner)?;
         coordinates(origin)?;
         coordinates(direction)?;
         if nator_geometry::norm(direction) < 1e-9
@@ -190,86 +394,63 @@ impl Solid {
         {
             return Err(KernelError("Eixo ou ângulo de revolução inválido.".into()));
         }
-        let profile = Self::profile(sketch, region)?;
+        let profile = Self::profile(sketch, region, [0.; 3])?;
         // SAFETY: buffers de três coordenadas vivos e perfil válido durante a chamada.
-        let solid = Self::from_pointer(unsafe {
+        let mut solid = Self::from_pointer(unsafe {
             nator_revolve(
-                profile.pointer.as_ptr(),
+                profile.face.pointer.as_ptr(),
                 origin.as_ptr(),
                 direction.as_ptr(),
                 angle,
             )
         })?;
+        solid.faces = naming::sweep_names(owner, &solid.origins()?, &profile.entities);
         solid.volume()?;
         Ok(solid)
     }
-    fn profile(sketch: &nator_sketch::Sketch, region: usize) -> Result<Self, KernelError> {
-        use nator_sketch::profiles::{self, Segment};
-        let (mut wires, diagnostics) =
-            profiles::analyze(sketch).map_err(|e| KernelError(e.to_string()))?;
-        if !diagnostics.open_points.is_empty()
-            || !diagnostics.crossings.is_empty()
-            || !diagnostics.duplicate_entities.is_empty()
-        {
-            return Err(KernelError(
-                "Feche os contornos e remova cruzamentos/duplicações antes de criar o sólido."
-                    .into(),
-            ));
-        }
-        wires.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
-        let parents = wires
-            .iter()
-            .enumerate()
-            .map(|(i, w)| {
-                let first = w.sample(64).first().copied().unwrap_or([0.; 2]);
-                (0..i).rev().find(|p| wires[*p].contains(first))
-            })
-            .collect::<Vec<_>>();
-        let depth = |mut i: usize| {
-            let mut d = 0;
-            while let Some(p) = parents[i] {
-                d += 1;
-                i = p;
-            }
-            d
-        };
-        let outer = (0..wires.len())
-            .filter(|i| depth(*i) % 2 == 0)
-            .nth(region)
-            .ok_or_else(|| KernelError("Região do rascunho inexistente.".into()))?;
+
+    /// Converte uma região em face plana na ponte. `offset` desloca o plano em mm.
+    fn profile(sketch: &Sketch, region: &Region, offset: Point3) -> Result<Profile, KernelError> {
+        use nator_sketch::profiles::Segment;
+        let plane = sketch.plane;
+        let world = |p| nator_geometry::add(plane.world(p), offset);
         let mut records = Vec::new();
         let mut ends = Vec::new();
-        let plane = sketch.plane;
-        for i in
-            std::iter::once(outer).chain((0..wires.len()).filter(|i| parents[*i] == Some(outer)))
-        {
-            let reverse = (wires[i].area() > 0.) != (i == outer);
-            let segments = if reverse {
-                wires[i]
-                    .segments
-                    .iter()
-                    .rev()
-                    .map(Segment::reversed)
-                    .collect::<Vec<_>>()
-            } else {
-                wires[i].segments.clone()
-            };
-            for segment in segments {
+        let mut entities = Vec::new();
+        // O contorno externo segue o sentido anti-horário e os furos o horário, convenção
+        // que o OCCT usa para orientar a face.
+        let wires =
+            std::iter::once((&region.outer, true)).chain(region.holes.iter().map(|h| (h, false)));
+        for (wire, outer) in wires {
+            let reverse = (wire.area() > 0.) != outer;
+            let mut segments = wire
+                .segments
+                .iter()
+                .cloned()
+                .zip(wire.entities.iter().copied())
+                .collect::<Vec<_>>();
+            if reverse {
+                segments.reverse();
+                for (segment, _) in &mut segments {
+                    *segment = segment.reversed();
+                }
+            }
+            for (segment, entity) in segments {
                 let (kind, a, b, c, r) = match segment {
-                    Segment::Line { a, b } => (0., plane.world(a), plane.world(b), [0.; 3], 0.),
+                    Segment::Line { a, b } => (0., world(a), world(b), [0.; 3], 0.),
                     Segment::Arc { .. } => {
                         let points = segment.sample(4);
                         (
                             1.,
-                            plane.world(points[0]),
-                            plane.world(points[points.len() / 2]),
-                            plane.world(points[points.len() - 1]),
+                            world(points[0]),
+                            world(points[points.len() / 2]),
+                            world(points[points.len() - 1]),
                             0.,
                         )
                     }
                     Segment::Circle { center, radius } => (
                         2.,
-                        plane.world(center),
+                        world(center),
                         plane.normal().map(|v| if reverse { -v } else { v }),
                         plane.u,
                         radius,
@@ -280,12 +461,18 @@ impl Solid {
                 records.extend(b);
                 records.extend(c);
                 records.push(r);
+                entities.push(entity);
             }
             ends.push(records.len() / 11);
         }
-        let data = [plane.origin, plane.normal(), plane.u].concat();
+        let data = [
+            nator_geometry::add(plane.origin, offset),
+            plane.normal(),
+            plane.u,
+        ]
+        .concat();
         // SAFETY: registros fixos de 11 doubles e índices de término validados pela ponte.
-        Self::from_pointer(unsafe {
+        let face = Self::from_pointer(unsafe {
             nator_profile(
                 records.as_ptr(),
                 records.len() / 11,
@@ -293,14 +480,19 @@ impl Solid {
                 ends.len(),
                 data.as_ptr(),
             )
-        })
+        })?;
+        Ok(Profile { face, entities })
     }
+
     fn from_pointer(pointer: *mut c_void) -> Result<Self, KernelError> {
         Ok(Self {
             pointer: NonNull::new(pointer).ok_or_else(last_error)?,
+            faces: Vec::new(),
             _thread: PhantomData,
         })
     }
+
+    // ----- Primitivas e intercâmbio --------------------------------------------------------
 
     pub fn cuboid(origin: Point3, size: Point3) -> Result<Self, KernelError> {
         coordinates(origin)?;
@@ -308,9 +500,11 @@ impl Solid {
             positive(value, "Dimensão")?;
         }
         // SAFETY: argumentos finitos/positivos; a ponte entrega propriedade exclusiva ou null.
-        Self::from_pointer(unsafe {
+        let mut solid = Self::from_pointer(unsafe {
             nator_box(origin[0], origin[1], origin[2], size[0], size[1], size[2])
-        })
+        })?;
+        solid.name_faces_by_index("box")?;
+        Ok(solid)
     }
 
     pub fn cylinder(origin: Point3, radius: f64, height: f64) -> Result<Self, KernelError> {
@@ -318,26 +512,24 @@ impl Solid {
         positive(radius, "Raio")?;
         positive(height, "Altura")?;
         // SAFETY: mesmos limites de propriedade de cuboid, com eixo Z fixo neste protótipo.
-        Self::from_pointer(unsafe {
+        let mut solid = Self::from_pointer(unsafe {
             nator_cylinder(origin[0], origin[1], origin[2], radius, height)
-        })
+        })?;
+        solid.name_faces_by_index("cylinder")?;
+        Ok(solid)
     }
 
     pub fn cut(&self, tool: &Self) -> Result<Self, KernelError> {
         // SAFETY: ambos os ponteiros pertencem a sólidos vivos nesta thread. O resultado é novo.
-        Self::from_pointer(unsafe { nator_cut(self.pointer.as_ptr(), tool.pointer.as_ptr()) })
-    }
-
-    pub fn fillet(&self, edge: usize, radius: f64) -> Result<Self, KernelError> {
-        positive(radius, "Raio")?;
-        // SAFETY: o índice da aresta é validado na ponte; falhas são convertidas em erro.
-        Self::from_pointer(unsafe { nator_fillet(self.pointer.as_ptr(), edge, radius) })
-    }
-
-    pub fn chamfer(&self, edge: usize, distance: f64) -> Result<Self, KernelError> {
-        positive(distance, "Distância")?;
-        // SAFETY: mesmo contrato de fillet; não modifica o sólido original.
-        Self::from_pointer(unsafe { nator_chamfer(self.pointer.as_ptr(), edge, distance) })
+        Self::from_pointer(unsafe { nator_cut(self.pointer.as_ptr(), tool.pointer.as_ptr()) })?
+            .with_inherited(
+                &[&self.faces, &tool.faces],
+                &Inheritance {
+                    owner: "cut",
+                    generated: "section",
+                    modified_suffix: None,
+                },
+            )
     }
 
     pub fn volume(&self) -> Result<f64, KernelError> {
@@ -352,6 +544,7 @@ impl Solid {
         Ok(volume)
     }
 
+    /// Lê a geometria de um STEP. As faces ficam sem nome até `name_faces_by_index`.
     pub fn read_step(path: &Path) -> Result<Self, KernelError> {
         let metadata = std::fs::metadata(path)
             .map_err(|e| KernelError(format!("Não foi possível ler o STEP: {e}")))?;
@@ -362,7 +555,9 @@ impl Solid {
         }
         let path = path_string(path)?;
         // SAFETY: CString vive durante a chamada; o resultado possui propriedade exclusiva.
-        Self::from_pointer(unsafe { nator_read_step(path.as_ptr()) })
+        let mut solid = Self::from_pointer(unsafe { nator_read_step(path.as_ptr()) })?;
+        solid.faces = vec![String::new(); solid.face_count()?];
+        Ok(solid)
     }
 
     pub fn write_step(&self, path: &Path) -> Result<(), KernelError> {
@@ -376,6 +571,16 @@ impl Solid {
     }
 
     pub fn tessellate(&mut self, linear_mm: f64, angular_rad: f64) -> Result<Mesh, KernelError> {
+        Ok(self.tessellate_with_faces(linear_mm, angular_rad)?.0)
+    }
+
+    /// Malha de exibição e a face de origem de cada triângulo (índice base 0), usada para
+    /// destacar e selecionar faces e arestas na interface.
+    pub fn tessellate_with_faces(
+        &mut self,
+        linear_mm: f64,
+        angular_rad: f64,
+    ) -> Result<(Mesh, Vec<u32>), KernelError> {
         positive(linear_mm, "Tolerância linear")?;
         positive(angular_rad, "Tolerância angular")?;
         if angular_rad > std::f64::consts::PI {
@@ -405,6 +610,18 @@ impl Solid {
         } {
             return Err(last_error());
         }
+        let mut faces = vec![0_i32; length / 9];
+        // SAFETY: um índice de face por triângulo, comprimento validado pela ponte.
+        if !unsafe { nator_mesh_faces_copy(self.pointer.as_ptr(), faces.as_mut_ptr(), faces.len()) }
+        {
+            return Err(last_error());
+        }
+        let faces = faces
+            .into_iter()
+            .map(|f| {
+                u32::try_from(f).map_err(|_| KernelError("Face de triângulo inválida.".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let vertices = positions
             .as_chunks::<3>()
             .0
@@ -414,7 +631,8 @@ impl Solid {
         let triangles = (0..(length / 9) as u32)
             .map(|i| [i * 3, i * 3 + 1, i * 3 + 2])
             .collect();
-        Mesh::new(vertices, triangles).map_err(|e| KernelError(e.to_string()))
+        let mesh = Mesh::new(vertices, triangles).map_err(|e| KernelError(e.to_string()))?;
+        Ok((mesh, faces))
     }
 }
 

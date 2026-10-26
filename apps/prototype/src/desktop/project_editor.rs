@@ -646,6 +646,7 @@ impl Editor {
                         let mut solid =
                             nator_kernel::Solid::read_step(&path).map_err(|e| e.to_string())?;
                         let brep = Arc::new(solid.to_brep().map_err(|e| e.to_string())?);
+                        let faces = solid.face_count().map_err(|e| e.to_string())?;
                         let geometry = Arc::new(MeshAsset::new(
                             solid.tessellate(0.05, 0.25).map_err(|e| e.to_string())?,
                         ));
@@ -657,6 +658,7 @@ impl Editor {
                                 name,
                                 geometry,
                                 brep,
+                                faces,
                             },
                         )
                         .map_err(|e| e.to_string())?;
@@ -814,7 +816,8 @@ impl Editor {
                 #[cfg(feature = "occt")]
                 {
                     let bytes = brep.ok_or_else(|| text(T::MeshIsNotSolid).to_owned())?;
-                    let solid = nator_kernel::Solid::from_brep(&bytes)
+                    // A exportação não usa referências: os nomes das faces são dispensáveis.
+                    let solid = nator_kernel::Solid::from_brep(&bytes, None)
                         .and_then(|s| s.transformed(placement))
                         .map_err(|e| e.to_string())?;
                     // Gerar em temporário e publicar sem substituir um arquivo existente.

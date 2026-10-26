@@ -1296,7 +1296,9 @@ dependencies = [
  "nator-drawing",
  "nator-geometry",
  "nator-kernel",
+ "nator-project-io",
  "nator-sketch",
+ "tempfile",
 ]
 
 [[package]]

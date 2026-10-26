@@ -188,6 +188,9 @@ impl Topology {
     }
 }
 
+pub fn add(a: Point3, b: Point3) -> Point3 {
+    std::array::from_fn(|i| a[i] + b[i])
+}
 pub fn sub(a: Point3, b: Point3) -> Point3 {
     std::array::from_fn(|i| a[i] - b[i])
 }

@@ -141,6 +141,17 @@ impl Document {
             body.id = BodyId(self.allocate_id()?);
             body_map.insert(old, body.id);
         }
+        // Os nomes de faces levam o corpo dono; no clone, passam aos novos corpos.
+        for body in &mut part.bodies {
+            if !body.face_names.is_empty() {
+                body.face_names = Arc::new(
+                    body.face_names
+                        .iter()
+                        .map(|n| super::features::remap_face_name(n, &body_map))
+                        .collect(),
+                );
+            }
+        }
         for sketch in &mut part.sketches {
             let old = sketch.id;
             sketch.id = SketchId(self.allocate_id()?);

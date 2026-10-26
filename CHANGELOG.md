@@ -1,6 +1,30 @@
 # Histórico de mudanças
 
-## Não lançado — 0.2.0 em desenvolvimento
+## Não lançado — 0.3.0 em desenvolvimento
+
+### Modelagem e documento
+
+- Rascunhos 2D com linhas, retângulos, círculos e arcos, geometria de construção, cotas de referência, aparar, estender, offset, espelhamento e refinamento de cantos; solver com indicação de graus de liberdade, conflitos e redundâncias.
+- Parâmetros nomeados por peça com expressões e unidades, ligados às cotas dos rascunhos.
+- Histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca e transformação, construídos pelo OCCT fora da thread da interface.
+- Montagem com subpeças, clones independentes e grupos; folhas técnicas associadas com vistas, cotas, corte e exportação PNG/PDF.
+
+### Referências estáveis
+
+- Faces de sólidos recebem nomes pela origem (entidade do rascunho, tampa, arredondamento, face herdada), registrados pelo histórico do OCCT na ponte C++.
+- Regiões de extrusão/revolução são identificadas pelas entidades do contorno, e arestas/faces pelos nomes das faces. Mudar uma cota não troca mais a região usada nem quebra arredondamentos, chanfros e cascas posteriores; uma referência que deixa de existir gera erro pedindo nova seleção.
+- Clonar uma peça remapeia os donos dos nomes de faces para os novos corpos.
+- Formato `.3dnator` versão 7, com nomes de faces por corpo e migração explícita das referências por índice das versões anteriores.
+- Seleção de região no editor de operações por lista com área e furos, em vez de índice numérico.
+
+### Núcleo CAD
+
+- Corrigida a ordem dos componentes OCCT no CMake, que impedia a configuração com qualquer SDK 7.x.
+- Ponte compilada e validada com OCCT 7.9.3 no Linux: os nove passos de `--validate` e os testes de nomeação com o núcleo real foram aprovados.
+- Mensagens de estatística do OCCT não poluem mais o stdout dos relatórios JSON.
+- A tesselação informa a face de origem de cada triângulo, base para seleção gráfica de faces e arestas.
+
+## 0.2.0 — incremento anterior, sem tag
 
 - Documento com peças, múltiplos corpos de malha, instâncias e transformações locais separadas da montagem.
 - Comandos atômicos, desfazer/refazer por projeto e identificação de alterações desde o último salvamento; malhas compartilhadas entre snapshots.

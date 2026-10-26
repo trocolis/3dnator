@@ -18,6 +18,8 @@ pub enum Command {
         name: String,
         geometry: Arc<MeshAsset>,
         brep: Arc<Vec<u8>>,
+        /// Quantidade de faces do B-rep; recebem nomes posicionais com o dono do novo corpo.
+        faces: usize,
     },
     AddFeature {
         part: PartId,
@@ -158,9 +160,21 @@ impl Command {
                 name,
                 geometry,
                 brep,
+                faces,
             } => {
+                if faces == 0 || faces > nator_document::MAX_FACES_PER_BODY {
+                    return Err(DocumentError(
+                        "Quantidade de faces do sólido importado inválida.".into(),
+                    ));
+                }
                 let (part, body) = doc.add_mesh(destination, name, geometry)?;
-                doc.body_mut(body)?.brep = Some(brep);
+                let imported = doc.body_mut(body)?;
+                imported.brep = Some(brep);
+                // A geometria importada nunca é recalculada: nomes posicionais são estáveis.
+                imported.face_names = Arc::new(nator_kernel::indexed_face_names(
+                    &nator_document::features::body_owner(body),
+                    faces,
+                ));
                 return Ok(Effect::Imported { part, body });
             }
             Self::AddFeature {
@@ -168,9 +182,23 @@ impl Command {
                 name,
                 operation,
             } => {
-                let (geometry, brep) = features::construct(doc, part, &operation)?;
-                let (_, output) = doc.add_mesh(Some(part), name.clone(), geometry)?;
-                doc.body_mut(output)?.brep = Some(brep);
+                // O identificador vem antes da construção porque os nomes das faces levam
+                // o corpo dono; em caso de falha, a cópia candidata é descartada inteira.
+                let output = doc.allocate_body_id()?;
+                let operation = features::normalize(doc, part, operation)?;
+                let built = features::construct(doc, part, output, &operation)?;
+                doc.add_body(
+                    part,
+                    nator_document::Body {
+                        id: output,
+                        name: name.clone(),
+                        geometry: built.mesh,
+                        brep: Some(built.brep),
+                        face_names: built.faces,
+                        placement: Placement::default(),
+                        visible: true,
+                    },
+                )?;
                 for input in operation.inputs() {
                     doc.body_mut(input)?.visible = false;
                 }
@@ -188,6 +216,7 @@ impl Command {
                 output,
                 operation,
             } => {
+                let operation = features::normalize(doc, part, operation)?;
                 let feature = doc
                     .part_mut(part)?
                     .features

@@ -15,11 +15,19 @@ pub fn is_available() -> bool {
     cfg!(feature = "occt")
 }
 
+// A nomeação é Rust puro e testada sem o SDK; só o módulo nativo a usa em produção.
+#[cfg_attr(not(feature = "occt"), allow(dead_code))]
+mod naming;
 #[cfg(feature = "occt")]
 #[allow(unsafe_code)]
 mod native;
 #[cfg(feature = "occt")]
 pub use native::{Solid, version};
+
+/// Nomes posicionais (`{dono}:f{i}`) para sólidos importados, que nunca são recalculados.
+pub fn indexed_face_names(owner: &str, count: usize) -> Vec<String> {
+    naming::indexed_names(owner, count)
+}
 
 /// Não existe núcleo alternativo silencioso: sem SDK, a operação é indisponível.
 pub fn require_available() -> Result<(), KernelError> {

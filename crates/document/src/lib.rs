@@ -69,9 +69,15 @@ pub struct Body {
     pub name: String,
     pub geometry: Arc<MeshAsset>,
     pub brep: Option<Arc<Vec<u8>>>,
+    /// Nome estável de cada face do B-rep, na ordem topológica do núcleo. Vazio quando o
+    /// corpo é malha ou veio de um projeto sem nomes; um nome vazio marca face sem origem.
+    pub face_names: Arc<Vec<String>>,
     pub placement: Placement,
     pub visible: bool,
 }
+
+/// Limite de faces nomeadas por corpo, coerente com o limite de topologia do núcleo.
+pub const MAX_FACES_PER_BODY: usize = 1_000_000;
 #[derive(Debug, Clone)]
 pub struct Part {
     pub id: PartId,
@@ -352,16 +358,33 @@ impl Document {
                 id
             }
         };
-        let body = BodyId(self.allocate_id()?);
+        let body = self.allocate_body_id()?;
         self.part_mut(part)?.bodies.push(Body {
             id: body,
             name,
             geometry,
             brep: None,
+            face_names: Arc::default(),
             placement: Placement::default(),
             visible: true,
         });
         Ok((part, body))
+    }
+    /// Reserva o identificador do próximo corpo. Operações paramétricas precisam dele antes
+    /// de construir o sólido, porque os nomes das faces levam o dono (`b{id}`).
+    pub fn allocate_body_id(&mut self) -> Result<BodyId, DocumentError> {
+        Ok(BodyId(self.allocate_id()?))
+    }
+    /// Insere um corpo com identificador já reservado por `allocate_body_id`.
+    pub fn add_body(&mut self, part: PartId, body: Body) -> Result<(), DocumentError> {
+        validate_name(&body.name)?;
+        if body.id.0 == 0 || body.id.0 >= self.next_id || self.body(body.id).is_some() {
+            return Err(DocumentError(
+                "Identificador de corpo não reservado ou repetido.".into(),
+            ));
+        }
+        self.part_mut(part)?.bodies.push(body);
+        Ok(())
     }
     pub fn remove_body(&mut self, id: BodyId) -> Result<(), DocumentError> {
         let part = self
@@ -449,6 +472,18 @@ impl Document {
                     .is_some_and(|b| b.is_empty() || b.len() > 64 * 1024 * 1024)
                 {
                     return Err(DocumentError("B-rep vazio ou excessivo.".into()));
+                }
+                if !body.face_names.is_empty()
+                    && (body.brep.is_none()
+                        || body.face_names.len() > MAX_FACES_PER_BODY
+                        || body
+                            .face_names
+                            .iter()
+                            .any(|n| !n.is_empty() && features::validate_face_name(n).is_err()))
+                {
+                    return Err(DocumentError(
+                        "Nomes de faces inválidos ou sem B-rep correspondente.".into(),
+                    ));
                 }
                 validate_name(&body.name)?;
                 total_triangles = total_triangles
