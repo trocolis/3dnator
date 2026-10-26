@@ -20,6 +20,13 @@
 - Padrões linear e circular de entidades no rascunho, com direção dada por uma linha ou centro dado por um círculo ou arco.
 - Editor de operações reorganizado por ferramenta, com seções para cada operação.
 
+### Empacotamento e distribuição
+
+- Estratégia de pacotes portáteis autocontidos para Linux (x86_64) e Windows (x64) documentada em `docs/DISTRIBUTION.md`, permitindo executar a aplicação com o núcleo OCCT sem necessidade de instalação global de pacotes do sistema ou privilégios de administrador.
+- Script automatizado `scripts/package_linux.sh` que analisa dependências dinâmicas via `ldd`, reúne as bibliotecas compartilhadas do OCCT em `lib/`, gera launcher portátil com `LD_LIBRARY_PATH` e empacota arquivo `.tar.gz`.
+- Script PowerShell `scripts/package_windows.ps1` que reúne o executável e as DLLs do OCCT em pasta portátil e gera arquivo compactado `.zip`.
+- Inventário detalhado de dependências e avisos de licença em `THIRD_PARTY.md`, incluindo o aviso proeminente e texto integral da *Open CASCADE Technology Exception (version 1.0)* à GNU LGPL 2.1, assegurando conformidade de redistribuição de binários via vinculação dinâmica.
+
 ### Exportação para impressão 3D
 
 - Diálogo de exportação STL com escopo (corpo, corpos da peça, cada definição uma vez, montagem em um arquivo ou todas as ocorrências), qualidade rascunho/padrão/alta/personalizada e resumo com arquivos, triângulos, tamanho, dimensões e ocorrências antes de gravar.

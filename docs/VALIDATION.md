@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — empacotamento, distribuição e licenças (26/10/2026)
+
+- Estratégia de distribuição e empacotamento documentada em `docs/DISTRIBUTION.md`, estabelecendo a arquitetura de pacotes portáteis autocontidos e os scripts automatizados `scripts/package_linux.sh` e `scripts/package_windows.ps1`.
+- Ensaio de empacotamento no Linux: o script reuniu o executável ELF, resolveu automaticamente as dependências dinâmicas via `ldd` copiando 78 bibliotecas e symlinks do OCCT 7.9.3 para `lib/`, e gerou o launcher `3dnator` com `LD_LIBRARY_PATH` local.
+- Execução do pacote portátil em ambiente estritamente limpo (`env -i PATH=/usr/bin:/bin`): verificado que `./3dnator --version` identifica corretamente "3dnator 0.3.0 | OCCT: habilitado" e que o ensaio `--validate` completa com sucesso todos os passos de B-rep, corte, furo, arredondamento e intercâmbio STEP/STL, confirmando que a distribuição opera de forma independente e autocontida.
+- Inventário de licenças em `THIRD_PARTY.md` enriquecido com o aviso proeminente e texto integral da *Open CASCADE Technology Exception (version 1.0)* à GNU LGPL 2.1, instruções para obtenção de fontes e garantia de substituição de bibliotecas dinâmicas pelo usuário final.
+
 ## Continuação 0.3.0 — cortes precisos do B-rep (26/10/2026)
 
 83 testes sem OCCT e 113 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. Uma seção anular no núcleo preserva os dois contornos, a área esperada dentro da tolerância de amostragem e o volume do sólido original. Outra regressão impede que sobreposições de corpos distintos cancelem suas hachuras. Vistas e traços dos planos usam a interseção preparada uma única vez por corte; curvas de HLR e corte compartilham amostragem por intervalos C2 com desvio de 0,01 mm. O ensaio `--validate-step target/codex-validation/precise-sections-001` gerou PNG/PDF com cortes precisos A–A/B–B da montagem posicionada. A legenda identifica **HLR E CORTES DO B-REP**; contextos com malhas continuam aproximados. O formato de projeto permanece em 10.

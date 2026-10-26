@@ -49,7 +49,14 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - Sombras opcionais e desligadas por padrão, ativáveis nas opções de visualização da área 3D (`Sombras`).
 - Iluminação direcional com faces opostas sombreadas e luz suave de preenchimento, combinada com sombra de contato suave no plano de apoio da cena gerada com decaimento quadrático, sem alocação de mapas de sombra pesados e mantendo leveza para GPUs integradas.
 - 87 testes sem OCCT e 118 com OCCT aprovados; formatação e Clippy sem avisos. Ensaios `--render-preview` e `--render-perspective-preview` verificados pelo wgpu/Vulkan confirmando sombreamento e decaimento de brilho.
-- Próxima etapa: preparação de distribuição e empacotamento das bibliotecas nativas.
+
+### Empacotamento, distribuição e licenças
+
+- Arquitetura de empacotamento portátil documentada em `docs/DISTRIBUTION.md`, abordando resolução dinâmica de bibliotecas compartilhadas, compatibilidade entre distribuições Linux e runtime do Windows.
+- Scripts automatizados de empacotamento em `scripts/package_linux.sh` (com launcher portátil que resolve `LD_LIBRARY_PATH`, coleta recursiva de symlinks e geração de `.tar.gz`) e `scripts/package_windows.ps1` (com DLLs adjacentes e geração de `.zip`).
+- Teste real de empacotamento no Linux: pacote gerado e executado em ambiente limpo (`env -i`), confirmando o carregamento autônomo das 78 bibliotecas dinâmicas do OCCT e a execução de `--validate` com relatório aprovado.
+- Inventário de licenças em `THIRD_PARTY.md` expandido com o aviso proeminente e texto integral da *Open CASCADE Technology Exception (version 1.0)* à GNU LGPL 2.1, detalhamento da garantia de vinculação dinâmica para substituição pelo usuário final e catálogo de todas as crates diretas e transitivas.
+- Todas as 5 etapas do plano de implementação inicial e as frentes do roadmap foram concluídas no ambiente local, restando apenas verificações que requerem ambiente físico externo (Windows nativo e máquina de referência de 8 GB).
 
 ## Critério de trabalho
 
