@@ -4,9 +4,17 @@ Sequência aprovada de entregas. Este documento descreve trabalho planejado, nã
 
 ## Situação atual
 
-Incremento 0.2.0: documento com peças, múltiplos corpos de malha e instâncias, posicionamento numérico, comandos atômicos com desfazer/refazer, formato `.3dnator`, recuperação automática e interface em abas. A base de persistência da etapa 2 está implementada; rascunhos e operações paramétricas ainda não. A ponte OCCT permanece pendente de SDK e os workflows Windows ainda não foram executados. Consulte [docs/PROTOTYPE.md](docs/PROTOTYPE.md).
+Incremento 0.3.0, em 26/10/2026. As cinco etapas têm seus itens principais implementados e cobertos por testes e ensaios de linha de comando, com o núcleo OCCT 7.9.3 validado no Linux. O critério de entrega da etapa 2 é verificado por `--validate-part`. Detalhes em [docs/VALIDATION.md](docs/VALIDATION.md).
 
-Próximo incremento funcional: rascunhos 2D e suas cotas/restrições, preservando a separação entre documento, comandos, solução geométrica e interface. A validação nativa OCCT continua necessária antes de confirmar o fluxo de sólidos e STEP.
+Pendências conhecidas, por etapa:
+
+1. **Base técnica:** compilação, testes e validação OCCT no Windows e no Ubuntu (OCCT 7.6), já preparados na CI mas ainda não executados por falta de repositório remoto; medições na máquina de referência de 8 GB (as atuais foram feitas na GPU integrada de um notebook mais forte); interação real com teclado, mouse e diálogos, que os ensaios automáticos não cobrem.
+2. **Primeira peça:** importação STEP sem cores nem estrutura de montagem; extrusão até uma face e extrusão diretamente como união, corte ou interseção (hoje feitas com uma operação booleana seguinte).
+3. **Construção mecânica:** arredondamento e chanfro de várias arestas por operação, propagação por arestas tangentes e chanfro por distância/ângulo; casca com várias faces removidas e paredes para fora; hélice real de rosca (adiada por decisão de escopo).
+4. **Montagem:** espelhamento de peças que contêm subpeças; alinhamento contínuo por restrições não faz parte do escopo inicial.
+5. **Documentação técnica:** folhas derivadas da malha de exibição (remoção aproximada de linhas ocultas, sem HLR exato do B-rep); cotas apenas gerais e não reposicionáveis; uma vista em corte por folha.
+
+Interface: isolamento, transparência, bloqueio de seleção, esmaecimento das outras peças na construção, projeção em perspectiva e sombras ainda não foram implementados.
 
 ## 1. Base técnica
 
@@ -47,6 +55,6 @@ Próximo incremento funcional: rascunhos 2D e suas cotas/restrições, preservan
 
 ## Direção para o núcleo geométrico
 
-A aplicação permanece em Rust; dependências C/C++ são permitidas para o núcleo CAD. OCCT é o candidato prioritário para validação, com Truck como alternativa em Rust. Ainda não há núcleo integrado ou validado.
+A aplicação permanece em Rust; dependências C/C++ são permitidas para o núcleo CAD. OCCT foi integrado por uma ponte C++ própria e validado no Linux (OCCT 7.9.3): extrusão, revolução, booleanas, chanfro, arredondamento, casca, tesselação, ida e volta STEP/STL, gestão de erros e de propriedade de memória. Truck permanece como alternativa em Rust, sem avaliação.
 
-Antes de confirmar a integração, verificar extrusão/revolução, booleanas, chanfro/arredondamento, casca, tesselação, importação/exportação STEP com cores e montagem, gestão de erros e memória, compilação/distribuição e licença. Medir tempo e memória em casos representativos, sem presumir leveza pelo idioma de implementação.
+Antes de consolidar a dependência para distribuição, falta verificar no Windows, preservar cores e montagem na importação/exportação STEP, avaliar o empacotamento das bibliotecas compartilhadas e reunir os avisos de licença (LGPL 2.1 com exceção). Medir tempo e memória na máquina de referência, sem presumir leveza pelo idioma de implementação.

@@ -8,7 +8,7 @@ Validação em Linux x86_64 (Arch, Rust 1.99.1, GCC 16.2.1) com OCCT 7.9.3 extra
 | --- | --- |
 | Configuração CMake da ponte | Falhava em qualquer SDK 7.x pela ordem dos componentes; corrigida |
 | `cargo clippy --workspace --all-targets` com e sem `occt` | Aprovado, avisos negados |
-| Testes do workspace com `occt` | 57 aprovados, incluindo 5 de nomeação no núcleo e 4 de fluxo paramétrico nos comandos |
+| Testes do workspace com `occt` | 86 aprovados (67 sem `occt`): nomeação e operações mecânicas no núcleo; fluxo paramétrico, furos, padrões, espelhamento, divisão, montagem espelhada, medição exata e qualidade de exportação nos comandos |
 | `--validate` (primitivas, corte, furo, arredondamento, chanfro, erro preservando a origem, tesselação, STEP/STL) | 9 passos aprovados; 37 ms; pico RSS 46 MiB |
 | `--validate-project`, `--validate-sketch`, `--validate-editor` com o binário `occt` | Aprovados |
 | `--validate-part` (critério de entrega da etapa 2) | Aprovado: volume final 14.375,365 mm³ igual ao analítico; STEP reimportado com o mesmo volume e caixa 60 × 25 × 30 mm; STL fechado e orientado, 656 triângulos, desvio de volume de 0,001% |

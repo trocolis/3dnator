@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Contexto
 
-3dnator é um CAD paramétrico em Rust (licença MIT). O estado atual é um **protótipo 0.2.0** com documento, comandos, abas, recuperação e persistência `.3dnator` para corpos de malha. O editor paramétrico e os rascunhos ainda **não existem**. README.md e ROADMAP.md descrevem o escopo aprovado, não funcionalidades entregues; não presuma que algo descrito ali já está implementado.
+3dnator é um CAD paramétrico em Rust (licença MIT), no **protótipo 0.3.0**: rascunhos com restrições, histórico paramétrico sobre OCCT, montagem, folhas técnicas e exportação STL/STEP. As pendências conhecidas estão em `ROADMAP.md` (seção Situação atual); o restante do README descreve o escopo aprovado, não necessariamente entregue.
 
-As convenções obrigatórias (idioma, arquitetura, erros, versões, commits) estão em `AGENTS.md`; siga-as. Em resumo: identificadores em inglês, comentários e documentação em português, textos de interface em português via catálogo de tradução, CHANGELOG.md atualizado a cada mudança, nada de push sem autorização.
+As convenções obrigatórias (idioma, arquitetura, erros, versões, commits) estão em `AGENTS.md`; siga-as. Em resumo: identificadores em inglês, comentários e documentação em português, textos de interface em português via catálogo de tradução (`apps/prototype/src/i18n.rs`), CHANGELOG.md atualizado a cada mudança, commits descritivos em português, nada de push sem autorização.
+
+Uma sessão do Codex pode estar trabalhando neste mesmo diretório. Antes de editar, verifique `pgrep -a codex` (o processo `codex` da TUI, não só o daemon `app-server`) e arquivos alterados recentemente; antes de cada commit, confira o `git status`. O sandbox do Codex não grava em `.git`, então os commits ficam com quem tem acesso ao repositório.
 
 ## Comandos
 
@@ -18,86 +20,95 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 
 # Um crate ou um teste específico
-cargo test -p nator-geometry --locked
+cargo test -p nator-sketch --locked
 cargo test -p nator-project-io --locked rejects_truncation
 
-# Visualizador desktop (egui/eframe + wgpu)
-cargo run -p nator-prototype
+# Editor (egui/eframe + wgpu); sem `occt`, não constrói sólidos
+cargo run -p nator-prototype --features occt
 
-# CLI sem janela (sem a feature desktop)
-cargo run -p nator-prototype --no-default-features -- --export-reference reference.stl
-cargo run -p nator-prototype --no-default-features -- --inspect reference.stl
-cargo run -p nator-prototype -- --render-preview target/prototype/preview.png   # captura wgpu offscreen; destino deve ser novo
-
-# Núcleo CAD real (exige SDK OCCT 7.x + CMake instalados)
-cargo clippy -p nator-prototype --no-default-features --features occt --locked -- -D warnings
-cargo run -p nator-prototype --no-default-features --features occt -- --validate validation-output/run-001   # diretório deve ser novo
+# Ensaios sem janela (diretórios de saída devem ser novos)
+cargo run -p nator-prototype --no-default-features -- --validate-project target/check/project
+cargo run -p nator-prototype --no-default-features -- --validate-sketch target/check/sketch
+cargo run -p nator-prototype -- --validate-editor target/check/editor
+cargo run -p nator-prototype -- --render-project-preview PROJETO.3dnator target/check/editor.png
 ```
 
-Para OCCT, configure `OpenCASCADE_DIR` (pasta com `OpenCASCADEConfig.cmake`) ou `CMAKE_PREFIX_PATH`; as bibliotecas compartilhadas precisam estar no carregador (no Windows, DLLs no PATH). Receitas de instalação para Ubuntu e Windows/conda-forge estão em `docs/PROTOTYPE.md` e `.github/workflows/ci.yml`. No Linux, o build com janela precisa de `libxkbcommon-dev` e `libwayland-dev`.
+### Núcleo OCCT
+
+A feature `occt` compila `crates/kernel/native/bridge.cpp` via CMake e vincula o OCCT 7.x (alvo 7.6 a 7.9). Configure `OpenCASCADE_DIR` (pasta com `OpenCASCADEConfig.cmake`) ou `CMAKE_PREFIX_PATH`, e deixe as bibliotecas no carregador (`LD_LIBRARY_PATH`; no Windows, DLLs no PATH). Nesta máquina, sem sudo, o pacote oficial do Arch foi extraído em `target/claude-occt-sdk/root/usr`; use um diretório de build separado para não invalidar o cache dos builds sem OCCT:
+
+```sh
+SDK=$PWD/target/claude-occt-sdk/root/usr
+export OpenCASCADE_DIR=$SDK/lib/cmake/opencascade LD_LIBRARY_PATH=$SDK/lib CARGO_TARGET_DIR=$PWD/target/claude-occt
+cargo clippy --workspace --all-targets --features nator-prototype/occt --locked -- -D warnings
+cargo test --workspace --features nator-prototype/occt --locked      # inclui kernel/tests e commands/tests *_occt.rs
+cargo run -p nator-prototype --features occt -- --validate target/check/occt          # primitivas, STEP/STL
+cargo run -p nator-prototype --features occt -- --validate-part target/check/part     # critério da etapa 2
+cargo run --release -p nator-prototype --features occt -- --benchmark target/check/bench   # GPU integrada; NATOR_BENCH_GPU=high
+```
+
+`cargo clean` apaga o SDK extraído; baixe de novo do mirror em `/etc/pacman.d/mirrorlist` conferindo o SHA-256 com `/var/lib/pacman/sync/extra.db`.
 
 ## Lints do workspace
 
-Definidos em `Cargo.toml` e herdados por todos os crates (`[lints] workspace = true`):
+Definidos em `Cargo.toml` e herdados por todos os crates:
 
-- `unsafe_code = "deny"`: a única exceção é `crates/kernel/src/native.rs` (`#[allow(unsafe_code)]`). Todo bloco `unsafe` leva comentário `// SAFETY:`.
-- Clippy nega `unwrap_used`, `expect_used` e `panic`, inclusive em testes; os testes retornam `Result<(), Box<dyn Error>>` e usam `?`.
+- `unsafe_code = "deny"`: a única exceção é `crates/kernel/src/native.rs`. Todo bloco `unsafe` leva comentário `// SAFETY:`.
+- Clippy nega `unwrap_used`, `expect_used` e `panic`, inclusive em testes; os testes retornam `Result` e usam `?`.
+- Código só usado com `occt` precisa compilar sem avisos também sem a feature (veja o `cfg_attr(..., allow(dead_code))` em `kernel/src/lib.rs`).
 
 ## Arquitetura
 
-`ARCHITECTURE.md` define nove módulos planejados e seus limites de dependência. Hoje existem apenas:
+`ARCHITECTURE.md` define os módulos e limites de dependência. Crates atuais:
 
-| Crate | Papel atual |
+| Crate | Papel |
 | --- | --- |
-| `crates/geometry` (`nator-geometry`) | Tipos base sem dependências: `Point3 = [f64; 3]` em mm, `Mesh` validada, `Topology`, `reference_bracket()` |
-| `crates/kernel` (`nator-kernel`) | Fronteira do núcleo CAD; com a feature `occt`, expõe `Solid` sobre uma ponte C++ |
-| `crates/project_io` (`nator-project-io`) | STL e pacote `.3dnator` versão 1, com salvamento atômico e recuperação |
-| `crates/document` (`nator-document`) | Peças, corpos de malha, instâncias e transformações |
-| `crates/commands` (`nator-commands`) | Transações e desfazer/refazer, com snapshots que compartilham malhas |
-| `crates/renderer` (`nator-renderer`) | Câmera ortográfica e `Viewport` wgpu que renderiza para textura offscreen |
-| `apps/prototype` (`nator-prototype`) | Binário: CLI, visualizador eframe (`desktop.rs`), catálogo i18n, captura (`preview.rs`) e validação OCCT (`validation.rs`) |
+| `geometry` | `Point3` (mm), `Mesh` validada e fundida (`welded`), topologia e arestas vivas (`edge_analysis`), `Placement` (rotação X→Y→Z) |
+| `sketch` | Rascunhos, solver (graus de liberdade, conflito, redundância), ferramentas e regiões estáveis (`profiles::regions`/`find_region`) |
+| `kernel` | Fronteira do OCCT: `Solid`, nomes de faces (`naming.rs`), perfis de furo (`hole.rs`) |
+| `document` | Peças, corpos, instâncias, grupos, parâmetros com expressões, histórico (`features.rs`), seleção por clique (`selection.rs`) |
+| `commands` | Comandos atômicos e desfazer/refazer por snapshots; recálculo (`features.rs`); consultas `measure` e `export` |
+| `project_io` | STL e pacote `.3dnator` (versão 7, com migração), salvamento atômico e recuperação |
+| `renderer` | Câmera ortográfica e `Viewport` wgpu que renderiza para textura; triangulação e arestas vivas no shader |
+| `drawing` | Folhas técnicas a partir da malha: vistas, cotas, corte A–A hachurado, PNG/PDF |
+| `apps/prototype` | Binário: CLI de ensaios, editor eframe (`desktop/project_editor/*`), i18n, benchmark |
 
-Ainda não há crates `sketch`, `ui` e `app`; por enquanto a interface vive em `apps/prototype`. Ao criá-los, respeite a direção de dependências do ARCHITECTURE.md (`geometry` na base; `sketch`/`kernel` sem dependência de `document`/`commands`/`ui`/`app`; regras de negócio sem egui/eframe/wgpu).
+### Referências estáveis (não volte a usar índices)
 
-### Integração OCCT (pontos delicados)
+Regiões são identificadas pelas entidades do contorno; faces pelo nome de origem (`b{corpo}:e{entidade}`, `:start`, `:end`, `:round`, `:hole{i}:{papel}`, nomes herdados); arestas pelo par de faces adjacentes. A ponte C++ só informa a origem de cada face (trios tipo/entrada/índice); a nomeação fica em `kernel/src/naming.rs`. Seleções por índice (`RegionRef::Index`, `EdgeRef::Index`, `FaceRef::Index`) existem para projetos antigos e são convertidas em `commands::features::normalize`. Referência perdida ou ambígua deve falhar com erro explícito: nunca escolha outra geometria no lugar. O `MakeRevol` do OCCT 7.9 não informa faces planas em `Generated()`; a ponte as identifica geometricamente (`match_planar_revolution_faces`).
 
-- Camadas: `bridge.cpp` (único código que conhece tipos OCCT, ABI C `nator_*` com erro em `thread_local`) → `native.rs` (único módulo Rust com FFI) → `Solid` (API pública). Nenhum tipo OCCT ou ponteiro cru sai do crate `kernel`; erros nativos viram `KernelError`.
-- `build.rs` só faz algo com a feature `occt`: chama CMake em `native/`, compila a ponte estática e lê `nator-links.txt`, gerado pelo CMake, para vincular as bibliotecas OCCT. Compilação cruzada é rejeitada; para validar Windows, use um runner Windows.
-- `CMakeLists.txt` exige OCCT 7.x (alvo: 7.6 a 7.9) e lida com a reorganização dos toolkits STEP no 7.8 (`TKDESTEP` contra `TKSTEP*`).
-- `Solid` é `!Send`/`!Sync` de propósito (`PhantomData<Rc<()>>`): objetos nativos ficam na thread que os criou. Operações (`cut`, `fillet`, `chamfer`) devolvem um sólido novo e preservam o original.
-- Índices de aresta passados a `fillet`/`chamfer` são temporários e **não** servem como identificação persistente para o histórico paramétrico.
-- Sem a feature `occt`, operações CAD falham explicitamente via `nator_kernel::require_available()`. Não crie núcleo alternativo nem simule resultados.
+### Integração OCCT
 
-### Malha versus sólido
+- Camadas: `bridge.cpp` (único código com tipos OCCT; ABI C `nator_*`, exceções viram `false`/nullptr e `nator_last_error`) → `native.rs` (único módulo com FFI) → `Solid`. Nenhum tipo OCCT sai do crate `kernel`.
+- `Solid` é `!Send`/`!Sync` (`PhantomData<Rc<()>>`): objetos nativos ficam na thread que os criou. Para cruzar threads, use bytes B-rep + nomes de faces.
+- `build.rs` só age com `occt`; compilação cruzada é rejeitada. A ordem dos componentes no `find_package` importa (Visualization antes de ApplicationFramework).
+- O messenger padrão do OCCT é silenciado na ponte, porque o stdout da CLI carrega relatórios JSON.
+- Sem `occt`, operações CAD falham via `nator_kernel::require_available()`. Não crie núcleo alternativo nem simule resultados.
 
-`Mesh` é representação de apresentação/intercâmbio, nunca a geometria precisa. `Mesh::new` rejeita índices inválidos, coordenadas não finitas e triângulos degenerados; os campos são privados para manter essa invariante. `topology()` reconhece vértices por igualdade exata de bits, sem solda por tolerância, e só verifica arestas localmente (não detecta auto-interseções). Malhas STL abertas são aceitas como referência, sem reparo nem conversão para sólido.
+### Documento, comandos e recálculo
 
-### Interface e trabalho em segundo plano
+- Cada operação produz um corpo novo (`Feature.output`) e oculta as entradas. `Command::apply` roda numa cópia candidata do documento (`PreparedCommand`), em geral na thread de trabalho; uma falha descarta a cópia inteira.
+- Mudar parâmetro, rascunho ou posição de corpo recalcula todo o histórico da peça (`features::rebuild`).
+- O identificador do corpo de saída é reservado antes da construção (`allocate_body_id`), porque os nomes das faces levam o dono.
+- Malha é apresentação/intercâmbio, nunca a geometria precisa. A exportação STL de sólidos re-tessela o B-rep com a qualidade escolhida.
 
-- `desktop/project_editor.rs` coordena E/S e preparação de cena em thread de trabalho e recebe o resultado por `mpsc`; o redesenho é sob demanda, sem ciclo de animação contínuo. A preparação CPU dos buffers ocorre na thread de trabalho; o upload à GPU continua na thread da interface.
-- O renderer desenha em textura própria, registrada no egui como textura nativa; `--render-preview` usa o mesmo caminho sem abrir janela.
-- Textos de interface ficam em `apps/prototype/src/i18n.rs` (enum `Text` + `text()`); não escreva strings visíveis diretamente nos widgets.
+### Interface
 
-### Convenções de E/S observadas no código
+- `desktop/project_editor.rs` coordena trabalhos em segundo plano (`self.start(...)` → `Outcome`), com proteção contra resultados de outra aba ou revisão. Cálculos com o núcleo (recálculo, medição, exportação) não rodam na thread da interface.
+- O redesenho é sob demanda. A cena é uma malha única por revisão; o upload à GPU ocorre na interface.
+- Não escreva textos visíveis direto nos widgets: acrescente uma variante em `i18n::Text`.
+- Não há como testar a janela interativamente nesta sessão; use `--render-project-preview` e `--render-preview` (este confere também a triangulação) para capturas reais.
 
-- Exportações e diretórios de validação nunca sobrescrevem arquivos existentes; o destino deve ser novo.
-- Entradas importadas têm limites explícitos: STL até 128 MiB e 2 milhões de triângulos; STEP até 256 MiB. A escala do STL para mm é aplicada na leitura.
-- Unidades internas em milímetros e radianos (ex.: `tessellate(linear_mm, angular_rad)`).
+### Convenções de E/S
 
-## Formato de projeto e ensaios atuais
-
-O pacote ZIP `.3dnator` usa manifesto JSON e malhas binárias f64, conforme `docs/PROJECT_FORMAT.md`. Ainda não preserva sólidos CAD, rascunhos ou histórico paramétrico. Recuperação usa `NATOR_RECOVERY_DIR` quando definido; configure um diretório temporário nos testes que executam esse fluxo.
-
-```sh
-cargo run -p nator-prototype --no-default-features -- --validate-project target/project-check/run-001
-cargo run -p nator-prototype --no-default-features -- --inspect-project target/project-check/run-001/support.3dnator
-cargo run -p nator-prototype -- --render-project-preview target/project-check/run-001/support.3dnator target/project-check/editor.png
-```
+- Exportações e diretórios de ensaio nunca sobrescrevem arquivos: destinos novos, ou sufixos em `write_stl_files`.
+- Limites explícitos: STL até 128 MiB e 2 milhões de triângulos; STEP até 256 MiB; B-rep até 64 MiB por corpo.
+- Unidades internas em mm e radianos; expressões aceitam unidades (`"espessura + 1 mm"`, `"118 deg"`).
 
 ## CI
 
-`.github/workflows/ci.yml` roda fmt, clippy, testes e a CLI de STL em Ubuntu 24.04 e Windows 2025, além de jobs separados `occt-linux` (apt) e `occt-windows` (conda-forge), que publicam `validation-output/` como artefato. Mudanças em dependências nativas precisam funcionar nos dois sistemas.
+`.github/workflows/ci.yml` roda fmt, clippy, testes e ensaios de linha de comando em Ubuntu 24.04 e Windows 2025, e jobs `occt-linux` (apt, OCCT 7.6) e `occt-windows` (conda-forge) com testes `--features occt`, `--validate` e `--validate-part`. Ainda não foi executada: não há repositório remoto.
 
 ## Dependências
 
-Ao adicionar uma dependência direta, registre-a em `THIRD_PARTY.md`. O OCCT é externo (LGPL 2.1 com exceção) e não deve ser incorporado ao repositório. O `Cargo.lock` mantém `clipboard-win` 5.4.1 (yanked) por restrição de cache offline; ele precisa ser atualizado antes de distribuir para Windows.
+Ao adicionar uma dependência direta, registre-a em `THIRD_PARTY.md`. O OCCT é externo (LGPL 2.1 com exceção) e não deve ser incorporado ao repositório. O `Cargo.lock` mantém `clipboard-win` 5.4.1 (yanked) por restrição de cache offline; atualize antes de distribuir para Windows. Sem rede, use `cargo update --offline -p <crate>` para registrar mudanças de dependências internas.

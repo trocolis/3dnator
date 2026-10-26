@@ -1,28 +1,35 @@
 # 3dnator
 
-Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos. O protótipo 0.2.0 permite editar e salvar projetos com corpos de malha; rascunhos e operações paramétricas permanecem em desenvolvimento futuro.
+Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos. O protótipo 0.3.0 já percorre o fluxo da primeira peça utilizável: rascunho cotado por parâmetros, extrusão, furos, arredondamentos, alteração de cota com recálculo, salvamento, reabertura e exportação STEP/STL, com o núcleo OCCT validado no Linux.
 
-O projeto é de código aberto, sob a [licença MIT](LICENSE) para o código próprio. Dependências e recursos de terceiros mantêm suas respectivas licenças. Ainda não há repositório remoto publicado nesta sessão.
+O projeto é de código aberto, sob a [licença MIT](LICENSE) para o código próprio. Dependências e recursos de terceiros mantêm suas respectivas licenças. Ainda não há repositório remoto publicado.
 
 ## Executar o protótipo
 
 ```sh
-cargo run -p nator-prototype
+cargo run -p nator-prototype --features occt
 ```
 
-Abre projetos em abas. Importe um STL ou insira o suporte em L, selecione uma peça na árvore e use Construir nesta peça para adicionar outros corpos. Há renomeação, visibilidade, posicionamento numérico, desfazer/refazer, salvamento `.3dnator`, recuperação automática e exportação de um corpo em STL.
+Sem a feature `occt` (e o SDK OCCT 7.x instalado), o editor funciona com corpos de malha, mas não constrói sólidos. Consulte [docs/PROTOTYPE.md](docs/PROTOTYPE.md) para preparar o SDK, os comandos de linha e os ensaios, e [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) para o formato `.3dnator`.
 
-Consulte [docs/PROTOTYPE.md](docs/PROTOTYPE.md) para os comandos e [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) para o formato inicial. Os ensaios CAD/STEP continuam dependendo do SDK OCCT, ainda indisponível neste ambiente.
+O protótipo oferece, em resumo:
 
-As verificações locais e evidências estão em [docs/VALIDATION.md](docs/VALIDATION.md).
+- projetos em abas, desfazer/refazer, salvamento autocontido e recuperação automática;
+- rascunhos com restrições, cotas ligadas a parâmetros, aparar, estender, offset, espelhamento, padrões e refinamento de cantos;
+- histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca, furos (rebaixo, escareado, passantes, rosca registrada), padrões, espelhamento e divisão, com referências estáveis a regiões, faces e arestas;
+- seleção de arestas e faces na área 3D, medição exata no B-rep e montagem com subpeças, clones, grupos, padrões e espelhamento de instâncias;
+- folhas técnicas com vistas, cotas, corte A–A hachurado e exportação PNG/PDF;
+- exportação STL por corpo, por definição ou da montagem, com qualidade escolhida, e STEP de sólidos.
 
-As seções seguintes descrevem o escopo completo aprovado; apenas o subconjunto acima está implementado.
+O que ainda falta do escopo abaixo está registrado em [ROADMAP.md](ROADMAP.md), na seção Situação atual. Verificações locais e medições estão em [docs/VALIDATION.md](docs/VALIDATION.md).
+
+As seções seguintes descrevem o escopo completo aprovado.
 
 ## Tecnologia e arquitetura
 
 - Interface com egui, janela e eventos com eframe/winit e área gráfica com wgpu.
-- Núcleo geométrico ainda a selecionar; sua API será separada da interface.
-- Dependências C/C++ são permitidas para o núcleo geométrico, mantendo a aplicação em Rust. Open CASCADE (OCCT) é o candidato prioritário para validação; a escolha depende de testes de integração, operações e STEP, além de avaliação de distribuição e licença.
+- Núcleo geométrico Open CASCADE (OCCT) 7.x, usado por uma ponte C++ própria e uma API Rust separada da interface. Validado no Linux com OCCT 7.9.3; a validação no Windows e a avaliação de distribuição ainda estão pendentes.
+- Dependências C/C++ são permitidas para o núcleo geométrico, mantendo a aplicação em Rust. Faces dos sólidos recebem nomes pela origem, de modo que o histórico paramétrico referencia regiões, faces e arestas de forma estável.
 - Português como idioma padrão, com estrutura para traduções.
 - Linux e Windows são as plataformas iniciais; compilação, integração nativa e comportamento do editor devem ser validados em ambos. macOS não faz parte do escopo inicial.
 - Máquina de referência inicial: computador com 8 GB de RAM e GPU integrada. É uma meta de validação, não um requisito mínimo comprovado ou garantia de desempenho; modelos concretos de CPU/GPU ainda serão escolhidos.

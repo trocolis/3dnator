@@ -1,6 +1,6 @@
 # Arquitetura do aplicativo
 
-Estrutura aprovada para um workspace Rust. O incremento 0.2.0 implementa `geometry`, `document`, `commands`, persistência/intercâmbio em `project_io` e visualização em `renderer`, além da ponte opcional em `kernel`. A interface experimental permanece em `apps/prototype/src/desktop`, com composição visual em módulo próprio. Rascunhos, histórico paramétrico e a extração da interface para seu crate final ainda não foram implementados.
+Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geometry`, `sketch`, `kernel`, `document`, `commands`, `project_io`, `renderer` e `drawing` (folhas técnicas, derivado da geometria de apresentação). A interface ainda vive em `apps/prototype/src/desktop`, que reúne os papéis planejados de `ui` e `app`; a extração para crates próprios fica para quando a interface estabilizar.
 
 ## Módulos
 
@@ -10,9 +10,10 @@ Estrutura aprovada para um workspace Rust. O incremento 0.2.0 implementa `geomet
 | `sketch` | Entidades 2D, restrições, solução e identificação de regiões |
 | `kernel` | Integração com OCCT, sólidos, operações e tesselação, através de API própria |
 | `document` | Peças, corpos, instâncias, grupos, parâmetros e histórico paramétrico |
-| `commands` | Ações de edição, transações, desfazer/refazer e coordenação do recálculo |
+| `commands` | Ações de edição, transações, desfazer/refazer, coordenação do recálculo e consultas que usam o núcleo (medição, planejamento de exportação) |
 | `project_io` | Formato `.3dnator`, migrações, recuperação e importação/exportação |
 | `renderer` | Visualização em wgpu, seleção gráfica e destaques |
+| `drawing` | Folhas técnicas: vistas, cortes, cotas, notas e exportação PNG/PDF |
 | `ui` | Painéis, ferramentas interativas, atalhos e traduções |
 | `app` | Inicialização e integração com Linux e Windows |
 
@@ -24,15 +25,27 @@ Estrutura aprovada para um workspace Rust. O incremento 0.2.0 implementa `geomet
 - `document` usa os tipos e APIs próprios de geometria, rascunhos e núcleo; não recebe tipos públicos de OCCT.
 - `commands` coordena as alterações do documento e o recálculo. `project_io` usa o documento e as APIs internas para codificar, decodificar e converter dados, sem depender da interface.
 - `renderer` recebe dados de apresentação derivados do documento, sem se tornar a fonte da geometria precisa.
+- `drawing` recebe uma malha de apresentação e a especificação da folha; o documento só guarda a especificação e fornece notas derivadas do histórico.
 - `ui` apresenta o estado, conduz interações e solicita comandos e operações de arquivo; `app` conecta esses serviços ao ciclo de vida da aplicação.
 - A definição dos crates concretos e de seus contratos deve respeitar esses limites, sem dependências circulares.
+
+## Referências topológicas estáveis
+
+O histórico paramétrico nunca guarda posições em listas que mudam com as cotas:
+
+- Regiões de rascunho são identificadas pelas entidades do contorno externo (`RegionRef::Boundary`). Se o contorno for refinado, a região continua reconhecida enquanto metade das entidades originais existir e todas estiverem em um único contorno.
+- Cada face de um sólido recebe um nome pela origem, calculado a partir do histórico do OCCT (`Generated`/`Modified`) na ponte C++: entidade do rascunho que gerou a lateral, tampas, faces novas de arredondamento, chanfro, casca ou furo, e faces herdadas de booleanas, transformações e padrões. Os nomes têm a forma `b{corpo}:...` e são gravados com o B-rep.
+- Arestas são referenciadas pelo par de faces adjacentes (`EdgeRef::Between`) e faces pelo nome (`FaceRef::Named`). A interface pode selecionar por índice ou por clique; o comando converte a escolha em referência estável antes de gravá-la.
+- Uma referência cuja origem desapareceu, ou ficou ambígua, faz o recálculo falhar com mensagem pedindo nova seleção. Nenhuma outra geometria é escolhida no lugar.
+
+A lógica de nomes fica em `kernel/src/naming.rs` (Rust puro, testado sem o SDK); a ponte só informa a origem de cada face.
 
 ## Operações, prévias e erros
 
 - No incremento atual, o documento usa identificadores tipados e geometria de malha imutável compartilhada por Arc. Transformações de corpos são locais à peça; instâncias aplicam uma transformação adicional na montagem.
 - `Session` publica uma edição somente após validar sua cópia candidata; desfazer/refazer mantém até 100 snapshots leves. A revisão da sessão cresce também ao desfazer/refazer, enquanto o identificador do estado permite reconhecer o último salvamento.
 - Cenas e buffers CPU são preparados na thread de trabalho. O resultado de importação identifica a aba e a revisão originais, e uma cena antiga não substitui a revisão atual. A interface mantém apenas os buffers GPU da aba ativa.
-- O formato de projeto ainda não serializa sólidos CAD nem histórico paramétrico. O salvamento atual preserva peças, corpos de malha, referências de instâncias, nomes, visibilidade e transformações.
+- O formato de projeto (versão 7) serializa peças, corpos de malha e sólidos (B-rep, nomes de faces e face de origem de cada triângulo), rascunhos, parâmetros, histórico paramétrico, montagem, grupos e folhas. O recálculo de cada operação ocorre na preparação do comando, fora da thread da interface, sobre uma cópia candidata do documento.
 
 - Uma operação confirmada é atômica: sua conclusão atualiza o documento e adiciona uma ação à sequência de desfazer, ou a falha preserva o documento anterior.
 - Prévias e edições pendentes usam estado separado até a confirmação. Uma edição paramétrica com falha permanece pendente para correção, supressão da etapa afetada ou cancelamento, conforme as regras do editor.
@@ -42,4 +55,4 @@ Estrutura aprovada para um workspace Rust. O incremento 0.2.0 implementa `geomet
 
 ## Próxima validação
 
-OCCT é o candidato prioritário, ainda sem integração validada. A etapa de base deve verificar operações representativas, STEP, tesselação e distribuição em Linux e Windows antes de consolidar a dependência.
+OCCT está integrado e validado no Linux. Falta a mesma validação no Windows (job `occt-windows` da CI) e no Ubuntu com OCCT 7.6, além da avaliação de distribuição das bibliotecas compartilhadas.
