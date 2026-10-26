@@ -22,6 +22,10 @@
 
 ### Empacotamento e distribuição
 
+- Auditoria do plano com evidências por etapa e critérios de aceite ainda abertos; limites numéricos provisórios de desempenho registrados e benchmark release repetido, identificando corretamente o uso de llvmpipe.
+- Empacotadores passam a exigir destinos e arquivos comprimidos novos, preservando dados existentes. Linux rejeita bibliotecas ausentes, usa o diretório explícito do SDK na resolução e copia SONAMEs sem symlinks externos; Windows percorre imports transitivos com `dumpbin`, incluindo dependências além de `TK*.dll`.
+- Textos integrais LGPL 2.1/exceção OCCT incluídos em `licenses/` e nos pacotes, com instruções próprias de execução e manifesto de dependências do host. Documentação distingue pacote local verificado de compatibilidade entre sistemas e de revisão completa de licenças para publicação.
+- Regressões de preservação de arquivos e relocação do pacote Linux; regressões Windows e ensaios com o pacote movido e PATH limpo preparados na CI. A validação OCCT da CI passa a incluir o desktop e todos os testes do workspace.
 - Estratégia de pacotes portáteis autocontidos para Linux (x86_64) e Windows (x64) documentada em `docs/DISTRIBUTION.md`, permitindo executar a aplicação com o núcleo OCCT sem necessidade de instalação global de pacotes do sistema ou privilégios de administrador.
 - Script automatizado `scripts/package_linux.sh` que analisa dependências dinâmicas via `ldd`, reúne as bibliotecas compartilhadas do OCCT em `lib/`, gera launcher portátil com `LD_LIBRARY_PATH` e empacota arquivo `.tar.gz`.
 - Script PowerShell `scripts/package_windows.ps1` que reúne o executável e as DLLs do OCCT em pasta portátil e gera arquivo compactado `.zip`.

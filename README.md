@@ -18,17 +18,17 @@ O protótipo oferece, em resumo:
 - rascunhos com restrições, cotas ligadas a parâmetros, aparar, estender, offset, espelhamento, padrões e refinamento de cantos;
 - histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca, furos (rebaixo, escareado, passantes, rosca registrada), padrões, espelhamento e divisão, com referências estáveis a regiões, faces e arestas;
 - seleção de arestas e faces na área 3D, medição exata no B-rep e montagem com subpeças, clones, grupos, padrões e espelhamento de instâncias e conjuntos aninhados;
-- folhas técnicas com vistas, cotas, corte A–A hachurado e exportação PNG/PDF;
+- folhas técnicas com vistas HLR e cortes do B-rep, cotas associativas reposicionáveis, múltiplos cortes hachurados e exportação PNG/PDF;
 - exportação STL por corpo, por definição ou da montagem, com qualidade escolhida, e intercâmbio STEP de sólidos e montagens com cores e definições compartilhadas.
 
-O que ainda falta do escopo abaixo está registrado em [ROADMAP.md](ROADMAP.md), na seção Situação atual. Verificações locais e medições estão em [docs/VALIDATION.md](docs/VALIDATION.md).
+O que ainda falta do escopo abaixo está registrado em [ROADMAP.md](ROADMAP.md), na seção Situação atual. A [auditoria do plano](docs/PLAN_AUDIT.md) distingue implementação de aceite completo. Verificações locais e medições estão em [docs/VALIDATION.md](docs/VALIDATION.md).
 
 As seções seguintes descrevem o escopo completo aprovado.
 
 ## Tecnologia e arquitetura
 
 - Interface com egui, janela e eventos com eframe/winit e área gráfica com wgpu.
-- Núcleo geométrico Open CASCADE (OCCT) 7.x, usado por uma ponte C++ própria e uma API Rust separada da interface. Validado no Linux com OCCT 7.9.3; a validação no Windows e a avaliação de distribuição ainda estão pendentes.
+- Núcleo geométrico Open CASCADE (OCCT) 7.x, usado por uma ponte C++ própria e uma API Rust separada da interface. Validado no Linux com OCCT 7.9.3; pacotes locais verificados conforme [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). A validação no Windows e a compatibilidade entre distribuições Linux continuam pendentes.
 - Dependências C/C++ são permitidas para o núcleo geométrico, mantendo a aplicação em Rust. Faces dos sólidos recebem nomes pela origem, de modo que o histórico paramétrico referencia regiões, faces e arestas de forma estável.
 - Português como idioma padrão, com estrutura para traduções.
 - Linux e Windows são as plataformas iniciais; compilação, integração nativa e comportamento do editor devem ser validados em ambos. macOS não faz parte do escopo inicial.

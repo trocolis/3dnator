@@ -1,0 +1,2 @@
+# Preservar literalmente os textos upstream, inclusive espaços ao fim de linha.
+licenses/OCCT/*.txt whitespace=-blank-at-eol

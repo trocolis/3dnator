@@ -23,6 +23,13 @@ jobs:
       - name: Preparar bibliotecas de janela no Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
+      - name: Verificar preservação de arquivos e relocação do pacote
+        if: runner.os == 'Linux'
+        run: python3 scripts/test_package_linux.py
+      - name: Verificar preservação de arquivos no Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test_package_windows.ps1
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -47,18 +54,27 @@ jobs:
       - name: Preparar SDK OCCT
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-application-framework-dev
-      - run: cargo clippy -p nator-prototype --no-default-features --features occt --locked -- -D warnings
-      - run: cargo test -p nator-kernel -p nator-commands --features occt --locked
-      - run: cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/linux
-      - run: cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-part validation-output/linux-part
-      - run: cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-step validation-output/step
+          sudo apt-get install -y cmake libxkbcommon-dev libwayland-dev libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-application-framework-dev
+      - run: cargo clippy --workspace --all-targets --features occt --locked -- -D warnings
+      - run: cargo test --workspace --features occt --locked
+      - run: cargo build -p nator-prototype --features occt --locked
+      - name: Empacotar e validar fora dos caminhos do SDK
+        run: |
+          bash scripts/package_linux.sh --bin target/debug/nator-prototype --output 'dist/linux pacote' --archive
+          mv 'dist/linux pacote' 'dist/linux relocado'
+          env -i PATH=/usr/bin:/bin 'dist/linux relocado/3dnator' --validate validation-output/linux
+          env -i PATH=/usr/bin:/bin 'dist/linux relocado/3dnator' --validate-part validation-output/linux-part
+          env -i PATH=/usr/bin:/bin 'dist/linux relocado/3dnator' --validate-step validation-output/linux-step
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: occt-linux
           path: validation-output/
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacote-linux-validacao
+          path: dist/linux pacote.tar.gz
 
   occt-windows:
     runs-on: windows-2025
@@ -70,6 +86,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: ilammy/msvc-dev-cmd@v1
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
@@ -81,14 +98,31 @@ jobs:
         run: |
           export CMAKE_PREFIX_PATH="$CONDA_PREFIX/Library"
           export PATH="$CONDA_PREFIX/Library/bin:$PATH"
-          cargo clippy -p nator-prototype --no-default-features --features occt --locked -- -D warnings
-          cargo test -p nator-kernel -p nator-commands --features occt --locked
-          cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/windows
-          cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-part validation-output/windows-part
-          cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-step validation-output/windows-step
+          echo "NATOR_OCCT_BIN=$(cygpath -w "$CONDA_PREFIX/Library/bin")" >> "$GITHUB_ENV"
+          cargo clippy --workspace --all-targets --features occt --locked -- -D warnings
+          cargo test --workspace --features occt --locked
+          cargo build -p nator-prototype --features occt --locked
+      - name: Empacotar e validar sem o SDK no PATH
+        shell: pwsh
+        run: |
+          ./scripts/package_windows.ps1 -BinPath target/debug/nator-prototype.exe -OcctBinDir "$env:NATOR_OCCT_BIN" -OutputDir 'dist/windows pacote' -Archive
+          Move-Item -LiteralPath 'dist/windows pacote' -Destination 'dist/windows relocado'
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+          & './dist/windows relocado/3dnator.exe' --version
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao carregar o pacote.' }
+          & './dist/windows relocado/3dnator.exe' --validate validation-output/windows
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no ensaio OCCT.' }
+          & './dist/windows relocado/3dnator.exe' --validate-part validation-output/windows-part
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no ensaio da peça.' }
+          & './dist/windows relocado/3dnator.exe' --validate-step validation-output/windows-step
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no ensaio STEP.' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: occt-windows
           path: validation-output/
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacote-windows-validacao
+          path: dist/windows pacote.zip

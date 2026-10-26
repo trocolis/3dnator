@@ -1,5 +1,39 @@
 # Validação local do protótipo
 
+## Auditoria do plano — 26/10/2026
+
+Situação completa e critérios de aceite em [PLAN_AUDIT.md](PLAN_AUDIT.md). Repetidos `cargo fmt --all -- --check`, Clippy do workspace com todos os alvos e avisos negados, e testes com/sem `occt`: **87 sem OCCT e 119 com OCCT**, todos aprovados. Compilação desktop debug e release aprovada no Linux com OCCT 7.9.3. Não houve alteração de versão do aplicativo ou do formato de projeto.
+
+Cinco regressões de empacotamento Linux aprovadas: destino existente preservado, arquivo comprimido preservado, dependência ausente rejeitada antes da saída, erro compreensível para opção sem valor e execução após mover o pacote e tornar o SDK indisponível. O SDK mínimo do ensaio tem uma biblioteca OCCT com dependência TBB transitiva em caminho com espaços. As duas regressões PowerShell estão preparadas na CI, ainda sem execução local.
+
+O pacote real reuniu 26 bibliotecas OCCT pelo SONAME, sem symlinks, junto com os textos LGPL/exceção. Após movê-lo, os seis ensaios `--validate`, `--validate-project`, `--validate-sketch`, `--validate-editor`, `--validate-part` e `--validate-step` passaram em ambiente limpo. Capturas ortográfica, perspectiva e do editor passaram pelo wgpu/GL llvmpipe, sem erros de validação; o editor e a folha STEP foram inspecionados. Evidências em `target/codex-validation/audit-20261026/`.
+
+O `.tar.gz` release também foi extraído em outro diretório e passou nos ensaios OCCT, da primeira peça e de montagem STEP com ambiente limpo. A verificação de procedência confirmou que os dois textos de licença OCCT estão idênticos, byte a byte, aos arquivos do SDK local.
+
+### Limites numéricos provisórios para a máquina de referência
+
+Os limites abaixo são critérios de aceite inicial, estabelecidos após as medições existentes. Não constituem desempenho comprovado em 8 GB. Usar build release, OCCT, área 3D de 1280 × 800, cinco quadros de aquecimento e 120 de medição, tesselação do suporte com desvio linear de 0,05 mm e angular de 0,25 rad. Rodar três vezes em processos novos, com GPU integrada física e a máquina ociosa; comparar a mediana das três execuções. A abertura mede a leitura do projeto, separada da preparação e do upload gráfico.
+
+| Cenário | Abrir projeto | Quadro p95 | RSS em repouso / pico |
+| --- | --- | --- | --- |
+| Suporte simples (280 triângulos) | ≤ 250 ms | ≤ 16,7 ms | ≤ 256 / 384 MiB |
+| 400 instâncias (112 mil triângulos) | ≤ 500 ms | ≤ 16,7 ms | ≤ 384 / 512 MiB |
+| STL de 50 MB (1 milhão de triângulos) | ≤ 2.000 ms | ≤ 33,3 ms | ≤ 512 / 768 MiB |
+
+Importação do STL e análise de topologia: cada etapa ≤ 2.000 ms. Alteração de parâmetro do suporte: p95 ≤ 250 ms, pico RSS ≤ 128 MiB no processo de recálculo. Abertura da janela até o primeiro quadro utilizável: ≤ 5 s, medidos separadamente em três lançamentos com captura de tela/cronômetro. Confirmar que teclado, mouse e cancelamento respondem durante trabalho em segundo plano. No Windows, coletar memória também por ferramenta do sistema, pois o relatório atual só implementa RSS no Linux. Uma medição ausente não aprova o critério.
+
+### Repetição release nesta auditoria
+
+Intel Core i5-11400H, 16 GB, Linux Arch, OCCT 7.9.3; adaptador **llvmpipe/GL (CPU)**, não a Intel UHD. Medição única para diagnóstico, sem aprovar o aceite da GPU integrada. Relatório em `target/codex-validation/audit-20261026/benchmark/report.json`:
+
+| Cenário | Abrir projeto | Quadro médio / p95 | RSS repouso / pico |
+| --- | --- | --- | --- |
+| Suporte | 0,09 ms | 0,64 / 0,89 ms | 172 / 182 MiB |
+| 400 instâncias | 1,32 ms | 16,89 / 17,91 ms | 210 / 254 MiB |
+| STL de 1 milhão de triângulos | 364,51 ms | 86,88 / 94,40 ms | 431 / 522 MiB |
+
+Importação STL: 270,45 ms; topologia: 306,23 ms; recálculo p95: 21,08 ms; pico do processo de recálculo: 37,5 MiB. Os quadros de instâncias e da malha excedem o objetivo numérico sob renderização por software; isso fica registrado e não é convertido em uma alegação de aprovação no hardware de referência. O buffer gráfico atual usa 96 bytes por triângulo, incluindo a cor.
+
 ## Continuação 0.3.0 — empacotamento, distribuição e licenças (26/10/2026)
 
 - Estratégia de distribuição e empacotamento documentada em `docs/DISTRIBUTION.md`, estabelecendo a arquitetura de pacotes portáteis autocontidos e os scripts automatizados `scripts/package_linux.sh` e `scripts/package_windows.ps1`.
@@ -145,7 +179,7 @@ Captura real produzida em `target/prototype/preview-solid.png`; relatório em `t
 
 Esses valores não representam fluidez interativa nem validam a meta de computador com 8 GB/GPU integrada. O teste usou uma malha pequena, build de desenvolvimento e renderização por software. A validação completa depende de SDK OCCT, Windows e hardware de referência.
 
-## Pendências do ambiente
+## Pendências do ambiente no registro inicial (histórico)
 
 - Sem resolução DNS pelo terminal: não foi possível obter o SDK OCCT ou atualizar dependências fora do cache.
 - A pasta `.git` está protegida contra escrita e não contém um repositório inicializado. Não foi possível criar commits; nenhum remoto foi publicado.

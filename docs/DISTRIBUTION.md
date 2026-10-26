@@ -1,140 +1,56 @@
-# Estratégia de empacotamento e distribuição
+# Empacotamento para Linux e Windows
 
-Este documento descreve os critérios, a arquitetura e os procedimentos para distribuição do **3dnator** em Linux e Windows, com ênfase na integração das dependências nativas do OpenCASCADE Technology (OCCT) e na conformidade com suas licenças.
+Os scripts criam pacotes com o executável e as bibliotecas do OCCT. Ainda são pacotes de validação: a compatibilidade com Windows e Ubuntu precisa ser demonstrada nos runners correspondentes antes de uma distribuição pública. Executar em ambiente limpo no mesmo Linux não demonstra portabilidade entre distribuições.
 
----
+## Dependências e limites
 
-## 1. Princípios de distribuição
+A ponte C++ própria é estática; o OCCT permanece vinculado dinamicamente e pode ser substituído no pacote. Os scripts exigem um executável com OCCT, rejeitam bibliotecas não encontradas e gravam `NATIVE_DEPENDENCIES.txt`, distinguindo os arquivos incluídos dos requisitos fornecidos pelo sistema.
 
-O 3dnator prioriza a experiência do usuário final, oferecendo pacotes portáteis autocontidos que não exigem privilégios de administrador ou instalação global de pacotes complexos do sistema para serem executados:
+- Linux x86_64: inclui os SONAMEs OCCT efetivamente carregados e TBB quando o SDK o utiliza. Cada arquivo contém a biblioteca real, sem symlinks que apontem para a instalação de origem. O launcher resolve `lib/` relativamente à sua localização. glibc, runtime C++, bibliotecas de janela/fontes e drivers gráficos continuam sendo requisitos do host, conforme o manifesto. O pacote não é independente de todos os pacotes do sistema.
+- Windows x64: usa `dumpbin /dependents` recursivamente, copiando as DLLs OCCT e as dependências do SDK encontradas junto ao executável, no diretório OCCT ou no PATH. Contratos API-set e DLLs existentes no diretório de sistema permanecem requisitos do Windows. O Microsoft Visual C++ Redistributable compatível pode ser necessário no destino. Não se copiam DLLs do sistema.
 
-- **Autocontido e portátil:** O pacote inclui o binário da aplicação e as bibliotecas compartilhadas nativas necessárias para execução direta.
-- **Isolamento de dependências:** O executável não interfere nas versões de bibliotecas instaladas no sistema hospedeiro.
-- **Conformidade estrita de licenças:** A distribuição atende rigorosamente aos termos da licença LGPL 2.1 e da *Open CASCADE Technology Exception* (versão 1.0).
+Bibliotecas carregadas dinamicamente por plugins ou drivers não são descobertas por essa análise de imports. A janela e os diálogos precisam de ensaio na máquina de destino.
 
----
+Para alcançar uma base Linux mais antiga, compile o executável **e o SDK** nessa base. A CI usa Ubuntu 24.04 com o OCCT da distribuição; isso não comprova compatibilidade com Ubuntu 22.04 ou uma glibc anterior. O SDK 7.9.3 do Arch usado localmente não constitui base para prometer essa compatibilidade.
 
-## 2. Dependências nativas e resolução dinâmica
+## Criar um pacote Linux
 
-O núcleo CAD do 3dnator (`nator-kernel`) vincula-se à biblioteca C++ do OpenCASCADE (OCCT 7.x) através de uma ponte nativa estática (`nator_occt`), que por sua vez se vincula dinamicamente às bibliotecas compartilhadas oficiais do OCCT:
+Compile com o SDK configurado conforme [PROTOTYPE.md](PROTOTYPE.md):
 
-### Toolkits OCCT utilizados
+```sh
+cargo build -p nator-prototype --release --features occt --locked
+bash scripts/package_linux.sh --bin target/release/nator-prototype --archive
+```
 
-- **Fundação e Matemática:** `TKernel`, `TKMath`
-- **Geometria e Topologia:** `TKG2d`, `TKG3d`, `TKGeomBase`, `TKBRep`, `TKGeomAlgo`, `TKTopAlgo`
-- **Operações de Modelagem:** `TKPrim`, `TKBO`, `TKBool`, `TKFillet`, `TKOffset`, `TKMesh`
-- **Projeções e Desenho:** `TKHLR`
-- **Estrutura CAF/XCAF e STEP:** `TKXSBase`, `TKCDF`, `TKLCAF`, `TKCAF`, `TKVCAF`, `TKService`, `TKV3d`, `TKDE`, `TKXCAF`, `TKDESTEP` (ou `TKSTEP`, `TKSTEPBase`, `TKSTEPAttr`, `TKXDESTEP` em versões anteriores a 7.8).
+Se o SDK estiver fora dos caminhos do sistema, acrescente `--occt-lib-dir /caminho/para/sdk/lib`. Essa opção participa da resolução das dependências, em vez de apenas copiar arquivos depois da análise. `--output CAMINHO` escolhe outro destino.
 
----
+Os caminhos informados são relativos ao diretório de invocação. O destino e o arquivo comprimido precisam ser novos; o script não remove nem sobrescreve arquivos existentes. O padrão é `dist/3dnator-linux-x86_64`, acompanhado de `.tar.gz` quando solicitado.
 
-## 3. Estratégia por plataforma
+```sh
+mv dist/3dnator-linux-x86_64 dist/3dnator-relocado
+env -i PATH=/usr/bin:/bin ./dist/3dnator-relocado/3dnator --version
+env -i PATH=/usr/bin:/bin ./dist/3dnator-relocado/3dnator --validate target/pacote-occt-001
+env -i PATH=/usr/bin:/bin ./dist/3dnator-relocado/3dnator --validate-part target/pacote-peca-001
+env -i PATH=/usr/bin:/bin ./dist/3dnator-relocado/3dnator --validate-step target/pacote-step-001
+```
 
-### 3.1. Linux (x86_64)
+Cada ensaio também exige um diretório novo. As regressões dos scripts usam um SDK mínimo compilado em um caminho com espaços, com dependência transitiva TBB e symlinks; renomeiam o SDK antes de executar o pacote. Rode `python3 scripts/test_package_linux.py`.
 
-No Linux, a resolução de bibliotecas compartilhadas ELF respeita a seguinte hierarquia:
+## Criar um pacote Windows
 
-1. **Estrutura do pacote:**
-   ```text
-   3dnator-linux-x86_64/
-   ├── 3dnator             # Script inicializador executável
-   ├── bin/
-   │   └── 3dnator         # Binário compilado ELF
-   ├── lib/
-   │   ├── libTKernel.so.7.9
-   │   ├── libTKMath.so.7.9
-   │   └── ... (links e arquivos .so do OCCT)
-   ├── LICENSE
-   ├── THIRD_PARTY.md
-   └── README.md
-   ```
+Use PowerShell em um **Developer Command Prompt do Visual Studio**, para disponibilizar `dumpbin.exe`, e configure o SDK conforme [PROTOTYPE.md](PROTOTYPE.md):
 
-2. **Launcher portátil (`3dnator`):**
-   O script na raiz do pacote resolve seu próprio diretório de forma confiável e define a variável `LD_LIBRARY_PATH` apontando para o subdiretório `lib/` antes de invocar o binário real:
-   ```sh
-   #!/usr/bin/env sh
-   set -e
-   BUNDLE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-   export LD_LIBRARY_PATH="$BUNDLE_DIR/lib:$BUNDLE_DIR/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-   exec "$BUNDLE_DIR/bin/3dnator" "$@"
-   ```
+```powershell
+cargo build -p nator-prototype --release --features occt --locked
+.\scripts\package_windows.ps1 -BinPath target\release\nator-prototype.exe -OcctBinDir C:\sdk\bin -Archive
+```
 
-3. **Compatibilidade de glibc:**
-   Para ampla portabilidade entre distribuições Linux (Ubuntu, Debian, Fedora, Arch), o binário de release para distribuição deve ser compilado em uma imagem de sistema com versão razoavelmente antiga da glibc (por exemplo Ubuntu 22.04 LTS ou imagem manylinux/alma8 na esteira de CI), garantindo que funcione nas distribuições modernas sem incompatibilidade de símbolos da biblioteca C.
+O script também procura os layouts usuais de `OpenCASCADE_DIR`, conda e PATH. `-OutputDir` escolhe um destino novo. O padrão é `dist\3dnator-windows-x64`, acompanhado de `.zip` quando solicitado. Não há remoção ou sobrescrita de pacotes anteriores.
 
-### 3.2. Windows (x64)
+Teste o pacote após movê-lo, com PATH limitado a `%SystemRoot%\System32` e `%SystemRoot%`, executando `--version`, `--validate`, `--validate-part` e `--validate-step` e verificando cada código de saída. A CI prepara esses ensaios tanto no Windows quanto no Linux; os artefatos publicados pelo workflow são para validação, não releases deliberadas.
 
-No Windows, a política de busca de DLLs do sistema operacional prioriza automaticamente o diretório onde o executável está localizado:
+## Avisos e textos de licença
 
-1. **Estrutura do pacote:**
-   ```text
-   3dnator-windows-x64/
-   ├── 3dnator.exe         # Binário compilado da aplicação
-   ├── TKernel.dll
-   ├── TKMath.dll
-   ├── TKBRep.dll
-   ├── ... (demais DLLs do OCCT)
-   ├── LICENSE
-   ├── THIRD_PARTY.md
-   └── README.md
-   ```
+Os dois scripts incluem `LICENSE`, `THIRD_PARTY.md`, a documentação de uso do pacote e o diretório `licenses/`, com os textos integrais da LGPL 2.1 e da exceção OCCT obtidos do SDK 7.9.3. A procedência está em [licenses/README.md](../licenses/README.md).
 
-2. **Resolução de dependências:**
-   Ao colocar as DLLs do OCCT lado a lado com `3dnator.exe`, o carregador do Windows resolve todas as dependências nativas sem necessidade de manipulação de variáveis de ambiente do sistema (`PATH`).
-   
-3. **Runtime MSVC:**
-   O pacote requer o Microsoft Visual C++ Redistributable (arquivos `vcruntime140.dll` e `msvcp140.dll`), comumente já presentes em instalações modernas do Windows ou instaláveis através do redistribuível oficial da Microsoft.
-
----
-
-## 4. Conformidade com a LGPL 2.1 e Exceção OCCT
-
-O código próprio do 3dnator é licenciado sob os termos da licença **MIT**. A utilização do OpenCASCADE Technology respeita integralmente as seguintes exigências legais:
-
-1. **Vinculação dinâmica:**
-   O OCCT é consumido exclusivamente por meio de vinculação dinâmica (`.so` no Linux, `.dll` no Windows). Dessa forma, o usuário mantém a liberdade expressa na LGPL 2.1 de inspecionar, recompilar ou substituir qualquer biblioteca do OCCT por uma versão personalizada sem violar a licença do projeto ou exigir o fornecimento de código proprietário fechado.
-
-2. **Aviso proeminente de uso:**
-   Conforme estipulado pela *Open CASCADE Technology Exception (version 1.0)*, a documentação de apoio do projeto e os arquivos distribuídos (`THIRD_PARTY.md`, `README.md`) contêm aviso explícito e proeminente informando que o software utiliza e baseia-se em recursos fornecidos pelo Open CASCADE Technology.
-
-3. **Disponibilização de fontes e licenças:**
-   O texto integral da LGPL versão 2.1 e da exceção do OCCT acompanham a distribuição, acompanhados de indicações e links para os repositórios oficiais onde o código-fonte original do OpenCASCADE pode ser obtido.
-
----
-
-## 5. Procedimentos de geração de pacotes
-
-### 5.1. No Linux
-
-1. **Compilar o binário em modo release:**
-   ```sh
-   export OpenCASCADE_DIR=/caminho/para/o/sdk/opencascade
-   export LD_LIBRARY_PATH="$OpenCASCADE_DIR/lib:$LD_LIBRARY_PATH"
-   cargo build -p nator-prototype --release --features occt --locked
-   ```
-
-2. **Executar o script de empacotamento:**
-   ```sh
-   ./scripts/package_linux.sh --bin target/release/nator-prototype --archive
-   ```
-   O pacote portátil descompactado será criado em `dist/3dnator-linux-x86_64` e o arquivo comprimido em `dist/3dnator-linux-x86_64.tar.gz`.
-
-3. **Testar a execução do pacote distribuído:**
-   ```sh
-   ./dist/3dnator-linux-x86_64/3dnator --version
-   ./dist/3dnator-linux-x86_64/3dnator --help
-   ```
-
-### 5.2. No Windows (PowerShell)
-
-1. **Compilar o binário em modo release:**
-   ```powershell
-   $env:OpenCASCADE_DIR = "C:\caminho\para\opencascade"
-   cargo build -p nator-prototype --release --features occt --locked
-   ```
-
-2. **Executar o script de empacotamento:**
-   ```powershell
-   .\scripts\package_windows.ps1 -BinPath "target\release\nator-prototype.exe" -Archive
-   ```
-   O diretório portátil será gerado em `dist\3dnator-windows-x64` e o arquivo compactado em `dist\3dnator-windows-x64.zip`.
+[THIRD_PARTY.md](../THIRD_PARTY.md) identifica dependências e fontes originais. Esse resumo não é um inventário por versão de todas as crates nem de todas as variantes de SDK. Antes de uma release pública, revisar também avisos e textos das crates/fontes incorporadas e das dependências nativas efetivamente incluídas (por exemplo TBB, FreeType e zlib), conforme o manifesto do pacote. A inclusão dos textos OCCT não substitui essa revisão.

@@ -2,6 +2,15 @@
 
 Autorização do usuário: continuar todas as etapas sem solicitar acompanhamento.
 
+## Auditoria e correções — 26/10/2026
+
+- Conferido o plano contra código, testes, ensaios e critérios de aceite. As funcionalidades principais estão implementadas; o plano **não tem aceite completo** por falta de execução Windows/Ubuntu, interação real e medições no hardware físico de 8 GB. Detalhes em [PLAN_AUDIT.md](PLAN_AUDIT.md).
+- Corrigidos empacotadores para preservar destinos/arquivos existentes, rejeitar dependências ausentes e resolver os imports transitivos do SDK no Windows; Linux resolve o diretório explícito antes de `ldd`, inclui TBB quando necessário e evita symlinks externos. Textos integrais LGPL/exceção OCCT agora versionados e incluídos, com README próprio do pacote e manifesto de dependências.
+- Cinco regressões Linux aprovadas. Duas regressões Windows e os ensaios de pacote movido com PATH limpo preparados na CI, que passou a compilar/testar também o desktop com OCCT. Nenhum resultado Windows/Ubuntu foi declarado sem execução.
+- Repetidos formatação, Clippy e testes: 87 aprovados sem OCCT e 119 com OCCT 7.9.3. Compilação desktop debug/release aprovada. Pacote real com 26 bibliotecas pelo SONAME passou nos seis ensaios CLI após relocação, com ambiente limpo; capturas do renderizador e do editor aprovadas, editor/folha inspecionados.
+- Definidos limites numéricos provisórios para o aceite de desempenho. Benchmark release repetido com llvmpipe; não substitui medição em GPU integrada física. Documentação corrigida para não prometer independência de bibliotecas do host nem inventário completo de licenças que não foi produzido.
+- Sem release, tag ou publicação remota. As pendências de aceite continuam abertas, com procedimento concreto de verificação.
+
 ## Continuação autônoma — cores e intercâmbio (26/10/2026)
 
 - Reafirmada a autorização de seguir todas as etapas sem monitoramento, preservando os limites de publicação e as validações externas ao ambiente.
@@ -56,7 +65,7 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - Scripts automatizados de empacotamento em `scripts/package_linux.sh` (com launcher portátil que resolve `LD_LIBRARY_PATH`, coleta recursiva de symlinks e geração de `.tar.gz`) e `scripts/package_windows.ps1` (com DLLs adjacentes e geração de `.zip`).
 - Teste real de empacotamento no Linux: pacote gerado e executado em ambiente limpo (`env -i`), confirmando o carregamento autônomo das 78 bibliotecas dinâmicas do OCCT e a execução de `--validate` com relatório aprovado.
 - Inventário de licenças em `THIRD_PARTY.md` expandido com o aviso proeminente e texto integral da *Open CASCADE Technology Exception (version 1.0)* à GNU LGPL 2.1, detalhamento da garantia de vinculação dinâmica para substituição pelo usuário final e catálogo de todas as crates diretas e transitivas.
-- Todas as 5 etapas do plano de implementação inicial e as frentes do roadmap foram concluídas no ambiente local, restando apenas verificações que requerem ambiente físico externo (Windows nativo e máquina de referência de 8 GB).
+- Registro original declarava concluídas as cinco etapas no ambiente local. A auditoria posterior, acima, corrigiu falhas nos pacotes e distinguiu implementação local de aceite completo, incluindo Ubuntu, interação em janela e requisitos do host.
 
 ## Critério de trabalho
 
@@ -91,7 +100,7 @@ Ao fim: 90 testes aprovados com OCCT e 68 sem, clippy sem avisos nas duas config
 
 ## Pendências
 
-Ver a seção Situação atual de [ROADMAP.md](../ROADMAP.md): Windows e Ubuntu (CI não executada), máquina de referência, interação real com a janela, sombras, importação STEP com cores e montagem e folhas com HLR exato.
+Ver [PLAN_AUDIT.md](PLAN_AUDIT.md) e a seção Situação atual de [ROADMAP.md](../ROADMAP.md): Windows e Ubuntu (CI não executada), máquina física de referência e interação real com a janela. Sombras, STEP com cores/montagem e folhas HLR estão implementados e verificados localmente; não são mais pendências funcionais.
 
 ## Continuação Codex (26/10/2026)
 

@@ -15,7 +15,7 @@ As bibliotecas e recursos de terceiros incorporados ou vinculados mantêm suas l
 
 O Open CASCADE Technology (OCCT) é distribuído sob a **GNU Lesser General Public License (LGPL) versão 2.1**, acompanhada da **Open CASCADE Technology Exception (versão 1.0)**.
 
-A ponte própria de integração do 3dnator (`nator_occt`) consome o OCCT exclusivamente através de **vinculação dinâmica** (`.so` em sistemas Linux e `.dll` em sistemas Windows). O código do Open CASCADE não é incorporado estaticamente ao executável da aplicação, assegurando aos usuários a liberdade de inspecionar, modificar ou substituir as bibliotecas dinâmicas do OCCT por suas próprias versões, em plena conformidade com a seção 6 da LGPL 2.1.
+A ponte própria de integração do 3dnator (`nator_occt`) consome o OCCT através de **vinculação dinâmica** (`.so` em sistemas Linux e `.dll` em sistemas Windows). As bibliotecas permanecem separadas e substituíveis por versões compatíveis. Os textos integrais distribuídos pelo SDK estão em [licenses/OCCT/LICENSE_LGPL_21.txt](licenses/OCCT/LICENSE_LGPL_21.txt) e [licenses/OCCT/OCCT_LGPL_EXCEPTION.txt](licenses/OCCT/OCCT_LGPL_EXCEPTION.txt), incluídos pelos scripts de empacotamento.
 
 O código-fonte original e completo do Open CASCADE Technology pode ser obtido gratuitamente em seu portal oficial:
 - Portal oficial: <https://dev.opencascade.org/>
@@ -65,7 +65,7 @@ A biblioteca gráfica `eframe`/`epaint` embute cópias de fontes tipográficas p
 
 ## 4. Dependências transitivas do ecossistema Rust
 
-Todas as dependências transitivas compiladas no binário utilizam licenças de código aberto amplamente permissivas e compatíveis com a licença MIT do projeto:
+Esta lista resume famílias de licenças das dependências Rust; não é um inventário completo por pacote e versão. Antes de uma release pública, conferir os avisos e textos das crates e fontes incorporadas, além das dependências nativas efetivamente incluídas conforme `NATIVE_DEPENDENCIES.txt`:
 
 - **Licenças permissivas padrão (MIT / Apache-2.0):** Utilizadas pela grande maioria das crates auxiliares do ecossistema Rust (estruturas de dados, gerenciamento assíncrono, vinculações de janelas `winit`, geração de shaders `naga`, abstrações Vulkan `ash`, etc.).
 - **Zlib / libpng:** Utilizadas pelas rotinas de compressão e manipulação gráfica (`miniz_oxide`, `crc32fast`).
