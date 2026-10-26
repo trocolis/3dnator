@@ -399,3 +399,46 @@ fn exact_measurements_on_solids() -> Result<()> {
     assert!((measure::body_distance(doc, &at(0), &at(1))? - 40.).abs() < 1e-9);
     Ok(())
 }
+
+/// A malha de exportação de um sólido vem do B-rep com a qualidade escolhida.
+#[test]
+fn stl_export_quality_comes_from_the_precise_geometry() -> Result<()> {
+    use nator_commands::export::{self, Quality, Scope};
+    let mut session = Session::new(Document::new("Exportação")?)?;
+    let (part, body) = plate(&mut session)?;
+    let mut positions = Sketch::new("Furo", Plane::xy());
+    let circle = positions.add_circle([30., 20.], 5., false)?;
+    let center = match positions.entity(circle)?.curve {
+        Curve::Circle { center, .. } => center,
+        _ => return Err("Centro ausente".into()),
+    };
+    let (_, holes) = sketch(&mut session, Some(part), positions)?;
+    let drilled = feature(
+        &mut session,
+        part,
+        "Furo",
+        Operation::Hole {
+            base: body,
+            sketch: holes,
+            points: vec![center],
+            spec: HoleSpec {
+                diameter: "10 mm".into(),
+                depth: None,
+                head: HoleHeadSpec::Simple,
+                tip_angle: None,
+                reverse: true,
+                thread: None,
+            },
+        },
+    )?;
+    let exact = 60. * 40. * 8. - PI * 25. * 8.;
+    let draft = export::plan(session.document(), Scope::Body(drilled), Quality::Draft)?;
+    let high = export::plan(session.document(), Scope::Body(drilled), Quality::High)?;
+    let (coarse, fine) = (&draft[0].mesh, &high[0].mesh);
+    assert!(fine.triangles().len() > coarse.triangles().len());
+    assert!(fine.topology().has_closed_oriented_edges());
+    // A malha poligonal do furo remove menos material que o cilindro exato.
+    assert!((fine.signed_volume() - exact).abs() < (coarse.signed_volume() - exact).abs());
+    assert!((fine.signed_volume() - exact).abs() / exact < 1e-4);
+    Ok(())
+}

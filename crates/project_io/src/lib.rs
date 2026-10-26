@@ -217,6 +217,37 @@ pub fn write_stl(path: &Path, mesh: &Mesh) -> Result<(), ImportError> {
     result
 }
 
+/// Grava vários STL em uma pasta. Um nome já ocupado recebe sufixo (`_2`, `_3`...): arquivos
+/// existentes nunca são sobrescritos. Devolve os caminhos efetivamente gravados.
+pub fn write_stl_files(
+    directory: &Path,
+    files: &[(String, &Mesh)],
+) -> Result<Vec<std::path::PathBuf>, ImportError> {
+    if !directory.is_dir() {
+        return Err(ImportError("A pasta de destino não existe.".into()));
+    }
+    let mut written = Vec::new();
+    for (name, mesh) in files {
+        let mut counter = 1;
+        loop {
+            let candidate = if counter == 1 {
+                directory.join(format!("{name}.stl"))
+            } else {
+                directory.join(format!("{name}_{counter}.stl"))
+            };
+            match write_stl(&candidate, mesh) {
+                Ok(()) => {
+                    written.push(candidate);
+                    break;
+                }
+                Err(_) if candidate.exists() && counter < 1000 => counter += 1,
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(written)
+}
+
 /// Exportação nativa publicada somente após sucesso e sem sobrescrever destinos.
 pub fn export_step(
     path: &std::path::Path,
@@ -299,6 +330,28 @@ mod tests {
         assert!(decode_stl(&bytes, 1.).is_err());
         assert!(decode_stl(b"", f64::INFINITY).is_err());
         assert!(decode_stl(b"solid x\nendsolid x", 1.).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn multiple_files_get_suffixes_instead_of_overwriting() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let mesh = nator_geometry::reference_bracket()?;
+        let existing = directory.path().join("Suporte.stl");
+        std::fs::write(&existing, b"original")?;
+        let written = write_stl_files(
+            directory.path(),
+            &[("Suporte".into(), &mesh), ("Suporte".into(), &mesh)],
+        )?;
+        assert_eq!(
+            written,
+            vec![
+                directory.path().join("Suporte_2.stl"),
+                directory.path().join("Suporte_3.stl")
+            ]
+        );
+        assert_eq!(std::fs::read(&existing)?, b"original");
+        assert!(write_stl_files(&directory.path().join("ausente"), &[]).is_err());
         Ok(())
     }
 

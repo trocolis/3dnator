@@ -1,6 +1,7 @@
 mod assembly_editor;
 pub(crate) mod capture;
 mod drawing_editor;
+mod export_editor;
 mod feature_editor;
 mod navigation;
 mod parameter_editor;
@@ -218,6 +219,11 @@ enum Outcome {
         revision: u64,
         lines: Vec<String>,
     },
+    ExportSummary {
+        tab: u64,
+        revision: u64,
+        text: String,
+    },
     Cancelled,
 }
 struct Worker {
@@ -247,6 +253,7 @@ pub struct Editor {
     assembly_edit: Option<assembly_editor::Draft>,
     feature_edit: Option<feature_editor::Draft>,
     drawing_edit: Option<drawing_editor::Draft>,
+    export_edit: Option<export_editor::Draft>,
     pick_mode: navigation::PickMode,
     alignment: Option<(u64, u64, nator_document::assembly::Pick)>,
     move_freely: bool,
@@ -303,6 +310,7 @@ impl Editor {
             assembly_edit: None,
             feature_edit: None,
             drawing_edit: None,
+            export_edit: None,
             pick_mode: navigation::PickMode::Face,
             alignment: None,
             move_freely: false,
@@ -625,6 +633,15 @@ impl Editor {
                 self.status = text(T::RecoverySaved).into();
             }
             Ok(Outcome::Exported) => self.status = text(T::Exported).into(),
+            Ok(Outcome::ExportSummary {
+                tab,
+                revision,
+                text,
+            }) => {
+                if let Some(draft) = self.export_edit.as_mut() {
+                    draft.set_summary(tab, revision, text);
+                }
+            }
             Ok(Outcome::Measured {
                 tab,
                 revision,
@@ -822,14 +839,14 @@ impl Editor {
             })
         });
     }
-    fn export(&mut self, context: &egui::Context) {
+    /// Exporta o corpo sólido selecionado como STEP, em coordenadas da peça.
+    fn export_step(&mut self, context: &egui::Context) {
         let Some(Selection::Body { id, part }) = self.current().selection else {
             return;
         };
         let Some(body) = self.current().session.document().body(id) else {
             return;
         };
-        let geometry = Arc::clone(&body.geometry);
         let brep = body.brep.clone();
         let part_name = self
             .current()
@@ -850,60 +867,42 @@ impl Editor {
             .collect::<String>();
         let placement = body.placement;
         self.start(context, None, move || {
-            let dialog = rfd::FileDialog::new().add_filter(text(T::StlFilter), &["stl"]);
-            let dialog = if brep.is_some() {
-                dialog.add_filter(text(T::StepFilter), &["step", "stp"])
-            } else {
-                dialog
-            };
-            let Some(mut path) = dialog.set_file_name(format!("{name}.stl")).save_file() else {
+            let Some(mut path) = rfd::FileDialog::new()
+                .add_filter(text(T::StepFilter), &["step", "stp"])
+                .set_file_name(format!("{name}.step"))
+                .save_file()
+            else {
                 return Ok(Outcome::Cancelled);
             };
-            if path
+            if !path
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
             {
-                if path.exists() {
-                    return Err(text(T::OutputExists).into());
-                }
-                #[cfg(feature = "occt")]
-                {
-                    let bytes = brep.ok_or_else(|| text(T::MeshIsNotSolid).to_owned())?;
-                    // A exportação não usa referências: os nomes das faces são dispensáveis.
-                    let solid = nator_kernel::Solid::from_brep(&bytes, None)
-                        .and_then(|s| s.transformed(placement))
-                        .map_err(|e| e.to_string())?;
-                    // Gerar em temporário e publicar sem substituir um arquivo existente.
-                    nator_project_io::export_step(&path, |temp| {
-                        solid.write_step(temp).map_err(|e| e.to_string())
-                    })
-                    .map_err(|e| e.to_string())?;
-                    return Ok(Outcome::Exported);
-                }
-                #[cfg(not(feature = "occt"))]
-                {
-                    nator_kernel::require_available().map_err(|e| e.to_string())?;
-                    return Err(text(T::KernelUnavailable).into());
-                }
+                path.set_extension("step");
             }
-            if !path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("stl"))
+            if path.exists() {
+                return Err(text(T::OutputExists).into());
+            }
+            #[cfg(feature = "occt")]
             {
-                path.set_extension("stl");
+                let bytes = brep.ok_or_else(|| text(T::MeshIsNotSolid).to_owned())?;
+                // A exportação não usa referências: os nomes das faces são dispensáveis.
+                let solid = nator_kernel::Solid::from_brep(&bytes, None)
+                    .and_then(|s| s.transformed(placement))
+                    .map_err(|e| e.to_string())?;
+                // Gerar em temporário e publicar sem substituir um arquivo existente.
+                nator_project_io::export_step(&path, |temp| {
+                    solid.write_step(temp).map_err(|e| e.to_string())
+                })
+                .map_err(|e| e.to_string())?;
+                Ok(Outcome::Exported)
             }
-            // Exportar um corpo usa seu posicionamento dentro da peça, sem a transformação da montagem.
-            let mesh = geometry.mesh();
-            let transformed = Mesh::new(
-                mesh.vertices()
-                    .iter()
-                    .map(|p| placement.apply(*p))
-                    .collect(),
-                mesh.triangles().to_vec(),
-            )
-            .map_err(|e| e.to_string())?;
-            nator_project_io::write_stl(&path, &transformed).map_err(|e| e.to_string())?;
-            Ok(Outcome::Exported)
+            #[cfg(not(feature = "occt"))]
+            {
+                let _ = (brep, placement);
+                nator_kernel::require_available().map_err(|e| e.to_string())?;
+                Err(text(T::KernelUnavailable).into())
+            }
         });
     }
     fn maybe_recover(&mut self, context: &egui::Context) {
@@ -1005,6 +1004,7 @@ impl Editor {
         self.assembly_dialog(ui.ctx());
         self.feature_dialog(ui.ctx());
         self.drawing_dialog(ui.ctx());
+        self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
         self.maybe_recover(ui.ctx());
     }

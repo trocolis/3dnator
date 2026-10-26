@@ -521,7 +521,7 @@ impl Editor {
             self.execute(command);
         }
         if export {
-            self.export(ui.ctx());
+            self.open_export();
         }
     }
     pub(super) fn canvas(&mut self, ui: &mut egui::Ui) {

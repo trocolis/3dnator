@@ -18,6 +18,12 @@
 - Padrões linear e circular de entidades no rascunho, com direção dada por uma linha ou centro dado por um círculo ou arco.
 - Editor de operações reorganizado por ferramenta, com seções para cada operação.
 
+### Exportação para impressão 3D
+
+- Diálogo de exportação STL com escopo (corpo, corpos da peça, cada definição uma vez, montagem em um arquivo ou todas as ocorrências), qualidade rascunho/padrão/alta/personalizada e resumo com arquivos, triângulos, tamanho, dimensões e ocorrências antes de gravar.
+- A malha exportada de sólidos vem do B-rep com a tolerância escolhida, não da malha de exibição.
+- Nomes por peça e corpo sem colisões; arquivos existentes recebem sufixo em vez de serem sobrescritos.
+
 ### Montagem
 
 - Padrão linear ou circular de instâncias, que compartilham a definição e ficam reunidas em um grupo; desagrupar libera cada posição.

@@ -1,4 +1,5 @@
 //! Transações de documento, separadas do futuro histórico de operações paramétricas.
+pub mod export;
 mod features;
 pub mod measure;
 use nator_document::{
