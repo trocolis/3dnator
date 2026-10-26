@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 project(nator_occt LANGUAGES CXX)
 
 # A ponte usa a API OCCT 7.x. A migração para 8.x precisa de validação própria.
-find_package(OpenCASCADE REQUIRED COMPONENTS FoundationClasses ModelingData ModelingAlgorithms ApplicationFramework Visualization DataExchange)
+# O OpenCASCADEConfig.cmake inclui os alvos na ordem pedida e verifica dependências a cada
+# inclusão: Visualization precisa vir antes de ApplicationFramework e DataExchange.
+find_package(OpenCASCADE REQUIRED COMPONENTS FoundationClasses ModelingData ModelingAlgorithms Visualization ApplicationFramework DataExchange)
 if(DEFINED OpenCASCADE_MAJOR_VERSION AND NOT OpenCASCADE_MAJOR_VERSION EQUAL 7)
   message(FATAL_ERROR "Este protótipo requer OCCT 7.x (alvo: 7.6 a 7.9).")
 endif()
