@@ -423,6 +423,7 @@ pub enum Text {
     CreateCopy,
     ResetTransform,
     MoveHint,
+    InvalidTransformNumber,
     AlignType,
     AlignFrom,
     AlignTo,
@@ -956,6 +957,9 @@ pub fn text(key: Text) -> &'static str {
         Text::PivotOrigin => "Origem do primeiro elemento",
         Text::CreateCopy => "Criar cópia (nova instância ou corpo)",
         Text::ResetTransform => "Zerar",
+        Text::InvalidTransformNumber => {
+            "Corrija os campos destacados. Use números ou expressões entre −10.000.000 e 10.000.000 na unidade indicada; Esc restaura o último valor válido."
+        }
         Text::MoveHint => {
             "Arraste as setas para transladar, os anéis para girar e o centro para mover livremente."
         }

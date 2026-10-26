@@ -50,8 +50,25 @@ pub(super) fn show(
     ok_enabled: bool,
     body: impl FnOnce(&mut egui::Ui),
 ) -> Outcome {
+    show_validated(context, header, canvas, footer, ok_enabled, |ui| {
+        body(ui);
+        true
+    })
+}
+
+/// A validade é colhida depois de desenhar os campos, antes do rodapé: digitar um texto
+/// inválido e clicar em OK no mesmo quadro nunca publica o último valor válido.
+pub(super) fn show_validated(
+    context: &egui::Context,
+    header: Header<'_>,
+    canvas: egui::Rect,
+    footer: Footer<'_>,
+    ok_enabled: bool,
+    body: impl FnOnce(&mut egui::Ui) -> bool,
+) -> Outcome {
     let Header { id, icon, title } = header;
     let mut outcome = Outcome::default();
+    let mut fields_valid = true;
     // Campo em edição no início do quadro: Enter só conclui o valor digitado; o próximo
     // Enter, fora do campo, confirma o painel.
     let typing = context.egui_wants_keyboard_input();
@@ -115,7 +132,7 @@ pub(super) fn show(
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.y = 6.;
-                            body(ui);
+                            fields_valid = body(ui);
                         });
                 });
             ui.add(egui::Separator::default().spacing(0.));
@@ -169,7 +186,7 @@ pub(super) fn show(
                             )
                             .fill(theme::ACCENT)
                             .min_size(egui::vec2(64., 26.));
-                            if ui.add_enabled(ok_enabled, ok).clicked() {
+                            if ui.add_enabled(ok_enabled && fields_valid, ok).clicked() {
                                 outcome.ok = true;
                             }
                         });
@@ -184,7 +201,7 @@ pub(super) fn show(
     if !typing && context.input(|i| i.key_pressed(egui::Key::Escape)) {
         outcome.cancel = true;
     }
-    if ok_enabled && !typing && context.input(|i| i.key_pressed(egui::Key::Enter)) {
+    if ok_enabled && fields_valid && !typing && context.input(|i| i.key_pressed(egui::Key::Enter)) {
         outcome.ok = true;
     }
     outcome
@@ -341,12 +358,7 @@ impl Quantity {
 /// Lê o texto de um campo numérico: vírgula ou ponto decimal, unidades e contas, sem
 /// parâmetros ("12,5", "1 in", "90 + 45"). Ângulos sem unidade são graus.
 pub(super) fn parse_number(input: &str, quantity: Quantity) -> Option<f64> {
-    // Vírgula decimal, exceto dentro de funções, onde separa argumentos.
-    let input = if input.contains('(') {
-        input.to_owned()
-    } else {
-        input.replace(',', ".")
-    };
+    // O avaliador já aceita vírgula decimal; argumentos de funções usam ponto e vírgula.
     let parameters = nator_document::parameters::Parameters::default();
     let value = match quantity {
         Quantity::Length => parameters
@@ -360,49 +372,82 @@ pub(super) fn parse_number(input: &str, quantity: Quantity) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-/// Campo numérico digitável, como nos CADs: mostra o valor na unidade da grandeza; ao
-/// receber o foco, seleciona o texto para ser substituído. Cada texto válido atualiza o valor; um
-/// texto inválido fica destacado e não altera o campo.
-pub(super) fn number(
-    ui: &mut egui::Ui,
-    id_salt: impl std::hash::Hash + std::fmt::Debug,
-    value: &mut f64,
-    quantity: Quantity,
-    decimals: usize,
-    width: f32,
-) -> egui::Response {
-    let id = ui.make_persistent_id(id_salt);
-    let shown = || nator_drawing::format_fixed(*value, decimals);
-    let mut buffer = if ui.memory(|m| m.has_focus(id)) {
-        ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(shown)
-    } else {
-        shown()
-    };
-    let response = ui.add(
-        egui::TextEdit::singleline(&mut buffer)
-            .id(id)
-            .desired_width(width)
-            .horizontal_align(egui::Align::RIGHT),
-    );
-    if response.changed()
-        && let Some(parsed) = parse_number(&buffer, quantity)
-    {
-        *value = parsed;
+/// Limite simétrico dos deslocamentos (mm) e rotações (graus) do painel Mover.
+/// Valores fora da faixa são recusados, sem truncamento silencioso.
+const NUMBER_LIMIT: f64 = 1e7;
+
+/// Texto transitório pertencente ao painel, preservado inclusive fora do foco. Fechar o
+/// painel descarta esse estado; uma nova abertura nunca herda erros da anterior.
+#[derive(Default)]
+pub(super) struct NumberInput {
+    buffer: Option<String>,
+    last_value: Option<f64>,
+}
+
+impl NumberInput {
+    pub fn is_valid(&self, quantity: Quantity) -> bool {
+        self.buffer
+            .as_ref()
+            .is_none_or(|s| Self::parse(s, quantity).is_some())
     }
-    if response.gained_focus()
-        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
-    {
-        let end = egui::text::CCursor::new(buffer.chars().count());
-        state
-            .cursor
-            .set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(0),
-                end,
-            )));
-        state.store(ui.ctx(), id);
+
+    fn parse(buffer: &str, quantity: Quantity) -> Option<f64> {
+        parse_number(buffer, quantity).filter(|v| v.abs() <= NUMBER_LIMIT)
     }
-    if response.has_focus() {
-        if parse_number(&buffer, quantity).is_none() {
+
+    /// Campo digitável: cada expressão válida atualiza a prévia. Texto inválido continua
+    /// visível ao perder foco; Esc volta ao último valor válido. Arrastar o manipulador
+    /// sincroniza o campo com o novo valor sem reutilizar a expressão anterior.
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        id_salt: impl std::hash::Hash + std::fmt::Debug,
+        value: &mut f64,
+        quantity: Quantity,
+        decimals: usize,
+        width: f32,
+    ) -> egui::Response {
+        if self.last_value != Some(*value) {
+            self.buffer = None;
+        }
+        let id = ui.make_persistent_id(id_salt);
+        let mut buffer = self
+            .buffer
+            .take()
+            .unwrap_or_else(|| nator_drawing::format_fixed(*value, decimals));
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut buffer)
+                .id(id)
+                .desired_width(width)
+                .horizontal_align(egui::Align::RIGHT),
+        );
+        let parsed = Self::parse(&buffer, quantity);
+        if response.changed()
+            && let Some(parsed) = parsed
+        {
+            *value = parsed;
+        }
+        if response.gained_focus()
+            && !response.changed()
+            && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
+        {
+            let end = egui::text::CCursor::new(buffer.chars().count());
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    end,
+                )));
+            state.store(ui.ctx(), id);
+        }
+        let cancel = (response.has_focus() || response.lost_focus())
+            && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if cancel {
+            // O egui pode retirar o foco já no início do quadro de Esc. Consumir o
+            // evento impede que o rodapé também o interprete como cancelar o painel.
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        }
+        if !cancel && parsed.is_none() {
             ui.painter().rect_stroke(
                 response.rect.expand(1.),
                 3,
@@ -410,16 +455,228 @@ pub(super) fn number(
                 egui::StrokeKind::Outside,
             );
         }
-        ui.data_mut(|d| d.insert_temp(id, buffer));
-    } else {
-        ui.data_mut(|d| d.remove::<String>(id));
+        if !cancel && (response.has_focus() || parsed.is_none()) {
+            self.buffer = Some(buffer);
+        }
+        self.last_value = Some(*value);
+        response
     }
-    response
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+    /// Eventos reais do egui exercitam foco, edição e confirmação, sem adaptador gráfico.
+    fn number_frame(
+        context: &egui::Context,
+        input: &mut NumberInput,
+        value: &mut f64,
+        events: Vec<egui::Event>,
+        focus: bool,
+    ) -> TestResult<(egui::Response, Outcome)> {
+        let mut response = None;
+        let mut outcome = Outcome::default();
+        let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.));
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(canvas),
+                events,
+                ..Default::default()
+            },
+            |_| {
+                outcome = show_validated(
+                    context,
+                    Header {
+                        id: "number_test",
+                        icon: Icon::Move,
+                        title: "Mover",
+                    },
+                    canvas,
+                    Footer::None,
+                    true,
+                    |ui| {
+                        let field = input.show(ui, "number", value, Quantity::Length, 2, 100.);
+                        if focus {
+                            field.request_focus();
+                        }
+                        response = Some(field);
+                        input.is_valid(Quantity::Length)
+                    },
+                );
+            },
+        );
+        output.textures_delta.clear();
+        Ok((response.ok_or("Campo não composto")?, outcome))
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn replace(text: &str) -> Vec<egui::Event> {
+        vec![
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                },
+            },
+            egui::Event::Text(text.into()),
+        ]
+    }
+
+    #[test]
+    fn invalid_numbers_survive_blur_and_block_panel_confirmation() -> TestResult<()> {
+        let context = egui::Context::default();
+        let mut input = NumberInput::default();
+        let mut value = 5.;
+        number_frame(&context, &mut input, &mut value, vec![], true)?;
+        let (field, _) = number_frame(&context, &mut input, &mut value, vec![], false)?;
+        number_frame(&context, &mut input, &mut value, replace("12 +"), false)?;
+        assert_eq!(value, 5.);
+        context.memory_mut(|m| m.surrender_focus(field.id));
+        let (_, outcome) = number_frame(
+            &context,
+            &mut input,
+            &mut value,
+            vec![key(egui::Key::Enter)],
+            false,
+        )?;
+        assert_eq!(input.buffer.as_deref(), Some("12 +"));
+        assert!(!input.is_valid(Quantity::Length));
+        assert!(!outcome.ok);
+        // Uma mudança externa (por exemplo, arrastar o manipulador) substitui o texto.
+        value = 30.;
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        assert!(input.is_valid(Quantity::Length));
+        assert!(input.buffer.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn enter_finishes_typing_before_confirming_and_escape_restores_invalid_input() -> TestResult<()>
+    {
+        let context = egui::Context::default();
+        let mut input = NumberInput::default();
+        let mut value = 5.;
+        number_frame(&context, &mut input, &mut value, vec![], true)?;
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        let (_, outcome) = number_frame(
+            &context,
+            &mut input,
+            &mut value,
+            {
+                let mut events = replace("1 in");
+                events.push(key(egui::Key::Enter));
+                events
+            },
+            false,
+        )?;
+        assert_eq!(value, 25.4);
+        assert!(!outcome.ok);
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        let (_, outcome) = number_frame(
+            &context,
+            &mut input,
+            &mut value,
+            vec![key(egui::Key::Enter)],
+            false,
+        )?;
+        assert!(outcome.ok);
+
+        number_frame(&context, &mut input, &mut value, vec![], true)?;
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        number_frame(&context, &mut input, &mut value, replace("1 / 0"), false)?;
+        assert!(!input.is_valid(Quantity::Length));
+        let (_, outcome) = number_frame(
+            &context,
+            &mut input,
+            &mut value,
+            vec![key(egui::Key::Escape)],
+            false,
+        )?;
+        assert!(!outcome.cancel);
+        assert!(input.is_valid(Quantity::Length));
+        assert_eq!(value, 25.4);
+        Ok(())
+    }
+
+    #[test]
+    fn out_of_range_numbers_are_rejected_without_clamping() -> TestResult<()> {
+        let context = egui::Context::default();
+        let mut input = NumberInput::default();
+        let mut value = 5.;
+        number_frame(&context, &mut input, &mut value, vec![], true)?;
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        number_frame(&context, &mut input, &mut value, replace("10000001"), false)?;
+        assert_eq!(value, 5.);
+        assert!(!input.is_valid(Quantity::Length));
+        assert_eq!(NumberInput::parse("-10000001", Quantity::Length), None);
+        assert_eq!(NumberInput::parse("10000000", Quantity::Length), Some(1e7));
+        Ok(())
+    }
+
+    #[test]
+    fn clicking_a_number_selects_its_text_and_allows_correcting_an_error() -> TestResult<()> {
+        let context = egui::Context::default();
+        let mut input = NumberInput::default();
+        let mut value = 5.;
+        // Dois quadros estabilizam a posição inicial da janela do egui.
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        let (field, _) = number_frame(&context, &mut input, &mut value, vec![], false)?;
+        let position = field.rect.center();
+        for pressed in [true, false] {
+            number_frame(
+                &context,
+                &mut input,
+                &mut value,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                false,
+            )?;
+        }
+        number_frame(
+            &context,
+            &mut input,
+            &mut value,
+            vec![egui::Event::Text("12 +".into())],
+            false,
+        )?;
+        assert_eq!(input.buffer.as_deref(), Some("12 +"));
+        assert_eq!(value, 5.);
+        // Completar a conta recupera a validade sem restaurar ou redigitar o prefixo.
+        number_frame(
+            &context,
+            &mut input,
+            &mut value,
+            vec![egui::Event::Text("3".into())],
+            false,
+        )?;
+        assert!(input.is_valid(Quantity::Length));
+        assert_eq!(value, 15.);
+        Ok(())
+    }
 
     #[test]
     fn typed_numbers_accept_decimal_comma_units_and_arithmetic() {
@@ -427,6 +684,14 @@ mod tests {
         assert_eq!(parse_number("12,50 mm", Quantity::Length), Some(12.5));
         assert_eq!(parse_number("1 in", Quantity::Length), Some(25.4));
         assert_eq!(parse_number("-2 cm", Quantity::Length), Some(-20.));
+        assert_eq!(
+            parse_number("max(12,5 mm; 2 mm)", Quantity::Length),
+            Some(12.5)
+        );
+        assert_eq!(
+            parse_number("(12,5 + 2,5) * 2", Quantity::Length),
+            Some(30.)
+        );
         assert_eq!(parse_number("90 + 45", Quantity::Angle), Some(135.));
         assert!(parse_number("45°", Quantity::Angle).is_some_and(|v| (v - 45.).abs() < 1e-9));
         assert!(

@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Validação dos campos de montagem
+
+- Mover e origem do padrão circular preservam expressões inválidas ao perder foco, destacam os campos e bloqueiam OK/Enter até a correção. Valores fora da faixa de ±10.000.000 mm/graus são recusados sem truncamento silencioso.
+- Enter conclui a digitação antes de confirmar; Esc no campo restaura o último valor válido sem fechar o painel. Zerar limpa também os textos pendentes; o manipulador sincroniza os campos com seus novos valores.
+- Estado de digitação pertence à abertura do painel, evitando reaproveitar textos de uma operação anterior.
+
 ### Árvore do projeto
 
 - Raiz **Projeto** com **Peças**, **Rascunhos** (de referência) e **Origem**; cada peça com **Corpos**, **Sub-peças**, **Rascunhos** e **Origem**, recursivamente. Pastas vazias dentro das peças não aparecem.

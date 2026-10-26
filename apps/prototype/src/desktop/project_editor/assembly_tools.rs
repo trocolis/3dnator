@@ -28,11 +28,25 @@ const ARROW: f32 = 82.;
 
 /// Painel de montagem aberto.
 pub(super) enum Panel {
-    Move(MoveDraft),
+    /// Texto dos seis campos e estado do manipulador ficam em caixa para manter o enum leve.
+    Move(Box<MoveDraft>),
     /// Guarda duas seleções completas; em caixa, para não inflar as demais variantes.
     Align(Box<AlignDraft>),
     Pattern(PatternDraft),
     Mirror(MirrorDraft),
+}
+
+impl Panel {
+    fn numbers_valid(&self) -> bool {
+        match self {
+            Self::Move(d) => d.numbers_valid(),
+            Self::Pattern(d) if d.circular => d
+                .origin_inputs
+                .iter()
+                .all(|i| i.is_valid(panel::Quantity::Length)),
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -69,6 +83,9 @@ pub(super) struct MoveDraft {
     translation: Point3,
     /// Graus em torno dos eixos do mundo, aplicados em X, Y e Z, pelo pivô.
     rotation: Point3,
+    /// Texto em edição separado dos valores usados na prévia, inclusive fora do foco.
+    translation_inputs: [panel::NumberInput; 3],
+    rotation_inputs: [panel::NumberInput; 3],
     pivot: Pivot,
     copy: bool,
     drag: Option<GizmoDrag>,
@@ -235,6 +252,7 @@ pub(super) struct PatternDraft {
     spacing: String,
     angle: String,
     origin: Point3,
+    origin_inputs: [panel::NumberInput; 3],
 }
 
 pub(super) struct MirrorDraft {
@@ -449,10 +467,22 @@ impl MoveDraft {
             targets,
             translation: [0.; 3],
             rotation: [0.; 3],
+            translation_inputs: Default::default(),
+            rotation_inputs: Default::default(),
             pivot: Pivot::Center,
             copy: false,
             drag: None,
         }
+    }
+
+    fn numbers_valid(&self) -> bool {
+        self.translation_inputs
+            .iter()
+            .all(|i| i.is_valid(panel::Quantity::Length))
+            && self
+                .rotation_inputs
+                .iter()
+                .all(|i| i.is_valid(panel::Quantity::Angle))
     }
 }
 
@@ -480,7 +510,10 @@ impl Editor {
     pub(super) fn open_move(&mut self) {
         let targets = self.movable_selection();
         self.feature_edit = None;
-        self.assembly_panel = Some(Panel::Move(MoveDraft::new(self.current().id, targets)));
+        self.assembly_panel = Some(Panel::Move(Box::new(MoveDraft::new(
+            self.current().id,
+            targets,
+        ))));
     }
     /// Translação e rotação do Mover/Copiar aberto, para capturas de ensaio.
     pub(super) fn set_move_for_capture(&mut self, translation: Point3, rotation: Point3) {
@@ -530,6 +563,7 @@ impl Editor {
             spacing: "100 mm".into(),
             angle: "360 deg".into(),
             origin: [0.; 3],
+            origin_inputs: Default::default(),
         }));
     }
     pub(super) fn open_instance_mirror(&mut self) {
@@ -791,7 +825,7 @@ impl Editor {
         };
         let document = self.current().session.document().clone();
         let picked = self.current().picked.as_ref().map(|p| p.point);
-        let outcome = panel::show(
+        let outcome = panel::show_validated(
             context,
             panel::Header {
                 id: "assembly",
@@ -801,11 +835,14 @@ impl Editor {
             self.canvas_rect,
             footer,
             command.is_some() && !self.busy(),
-            |ui| match &mut panel {
-                Panel::Move(d) => move_panel(ui, d, &document, picked),
-                Panel::Align(d) => align_panel(ui, d, &document),
-                Panel::Pattern(d) => pattern_panel(ui, d, &document),
-                Panel::Mirror(d) => mirror_panel(ui, d, &document),
+            |ui| {
+                match &mut panel {
+                    Panel::Move(d) => move_panel(ui, d, &document, picked),
+                    Panel::Align(d) => align_panel(ui, d, &document),
+                    Panel::Pattern(d) => pattern_panel(ui, d, &document),
+                    Panel::Mirror(d) => mirror_panel(ui, d, &document),
+                }
+                panel.numbers_valid()
             },
         );
         if outcome.cancel {
@@ -832,6 +869,9 @@ impl Editor {
     }
 
     fn panel_command(&self, panel: &Panel) -> Option<Command> {
+        if !panel.numbers_valid() {
+            return None;
+        }
         let tab = self.current();
         match panel {
             Panel::Move(d) => {
@@ -1246,6 +1286,7 @@ fn number_row(
     ui: &mut egui::Ui,
     label: &str,
     values: &mut Point3,
+    inputs: &mut [panel::NumberInput; 3],
     quantity: panel::Quantity,
     document: &Document,
 ) {
@@ -1253,10 +1294,10 @@ fn number_row(
     panel::row(ui, &format!("{label} ({})", quantity.unit()), |ui| {
         ui.spacing_mut().item_spacing.x = 3.;
         let width = ((ui.available_width() - 6.) / 3. - 8.).clamp(44., 90.);
-        for (axis, value) in values.iter_mut().enumerate() {
-            panel::number(ui, (label, axis), value, quantity, decimals, width)
+        for (axis, (value, input)) in values.iter_mut().zip(inputs).enumerate() {
+            input
+                .show(ui, (label, axis), value, quantity, decimals, width)
                 .on_hover_text(AXIS_NAMES[axis]);
-            *value = value.clamp(-1e7, 1e7);
         }
     });
 }
@@ -1281,6 +1322,7 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         ui,
         text(T::TranslationField),
         &mut d.translation,
+        &mut d.translation_inputs,
         panel::Quantity::Length,
         document,
     );
@@ -1288,6 +1330,7 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         ui,
         text(T::RotationField),
         &mut d.rotation,
+        &mut d.rotation_inputs,
         panel::Quantity::Angle,
         document,
     );
@@ -1325,8 +1368,17 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         if ui.small_button(text(T::ResetTransform)).clicked() {
             d.translation = [0.; 3];
             d.rotation = [0.; 3];
+            d.translation_inputs = Default::default();
+            d.rotation_inputs = Default::default();
         }
     });
+    if !d.numbers_valid() {
+        ui.label(
+            egui::RichText::new(text(T::InvalidTransformNumber))
+                .small()
+                .color(theme::DANGER),
+        );
+    }
     ui.label(
         egui::RichText::new(text(T::MoveHint))
             .small()
@@ -1473,9 +1525,21 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
             ui,
             text(T::OriginField),
             &mut d.origin,
+            &mut d.origin_inputs,
             panel::Quantity::Length,
             document,
         );
+        if !d
+            .origin_inputs
+            .iter()
+            .all(|i| i.is_valid(panel::Quantity::Length))
+        {
+            ui.label(
+                egui::RichText::new(text(T::InvalidTransformNumber))
+                    .small()
+                    .color(theme::DANGER),
+            );
+        }
         panel::row(ui, text(T::TotalAngle), |ui| {
             panel::expression(ui, &mut d.angle)
         });

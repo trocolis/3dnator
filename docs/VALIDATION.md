@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Revisão da montagem e validação de campos — 26/10/2026
+
+- Revisados os três incrementos recentes de montagem e árvore (`3fcaa1c`, `5dda7d0`, `b221ac6`): referências fora das peças, posicionamento ao lado e visibilidade hierárquica. O conjunto existente passou antes das alterações. A revisão identificou que o campo numérico descartava texto inválido ao perder foco e permitia confirmar o último valor válido; valores acima da faixa também eram truncados silenciosamente.
+- Corrigida a edição transitória dos campos de Mover e da origem do padrão circular, com validade colhida antes do rodapé e novamente antes de preparar o comando. Quatro regressões novas de eventos egui cobrem perda de foco com texto inválido, bloqueio da confirmação, limites sem truncamento, sincronização externa, clique com seleção do texto, correção incremental e a separação entre Enter/Esc do campo e do painel. Ampliada a verificação de expressões com parênteses, funções e vírgula decimal.
+- **137 testes sem OCCT e 178 com OCCT 7.9.3 aprovados**; os dois ensaios optativos de interação gráfica continuam ignorados nesta execução. `cargo fmt`, Clippy do workspace com todos os alvos e avisos negados, nas duas configurações, e compilação desktop com OCCT aprovados.
+- Capturas da árvore e do painel Mover em 1440 × 900 inspecionadas, pelo egui/wgpu/GL llvmpipe, sem erros de validação. Imagens e logs em `target/codex-validation/refinement-20261026/`. Não houve execução Windows nem interação com janela nativa. Versão de desenvolvimento 0.3.0 e formato de projeto 15 preservados.
+
 ## Rascunhos no mesmo viewport CAD — 26/10/2026
 
 - Removido o canvas 2D separado. A edição, os sólidos, a origem e o cubo compartilham a câmera e o viewport. Regressões verificam ida/volta cursor–plano em XY/XZ/YZ e plano oblíquo, peças rotacionadas, ambas as projeções, recusa de plano de perfil e interpolação rígida incluindo meia-volta. Projetos apenas com rascunhos incluem círculos e pontos isolados no enquadramento.

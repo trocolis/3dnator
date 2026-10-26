@@ -1,5 +1,12 @@
 # Execução autônoma
 
+## Revisão dos incrementos do Claude e campos de montagem — 26/10/2026
+
+- Revisados os três commits recentes de fluxo de montagem, posicionamento automático e árvore com pastas. Mantidas as decisões de interface e a separação entre documento, comandos e apresentação; executado o conjunto de testes antes de refinar os campos numéricos.
+- Corrigidos descarte de texto inválido ao perder foco, confirmação com último valor válido e truncamento silencioso fora da faixa. O estado transitório agora pertence ao painel; Mover e origem do padrão circular bloqueiam comandos enquanto houver erro. Esc restaura o campo sem fechar o painel; Enter só confirma depois de concluir a digitação.
+- Quatro regressões novas de interação egui, além da ampliação do teste de expressões. Aprovados 137 testes sem OCCT, 178 com OCCT, formatação, Clippy nas duas configurações e compilação desktop com OCCT. Capturas reais de árvore e Mover inspecionadas em `target/codex-validation/refinement-20261026/`.
+- Como próxima frente de revisão da árvore, conferir o vínculo entre a ocorrência escolhida e a edição de definições compartilhadas: o lápis recebe a definição da peça e a resolução do referencial ainda consulta seleção/último clique. Este incremento não altera essa escolha. Windows e interação nativa continuam pendentes; sem release ou publicação remota.
+
 ## Rascunhos integrados à área de edição — 26/10/2026
 
 - Atendida a solicitação de manter o modelo na mesma tela ao criar/editar rascunhos. A câmera alinha suavemente ao suporte; projeção, cursor e desenho respeitam o plano da peça e a posição na montagem. A última cena válida é mantida enquanto a revisão seguinte é preparada.
