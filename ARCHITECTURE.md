@@ -63,3 +63,7 @@ OCCT está integrado e validado no Linux. Falta a mesma validação no Windows (
 ## Intercâmbio STEP
 
 A ponte XCAF isola documentos, definições e ocorrências do OCCT atrás de `StepAssembly`. A camada de comandos converte a importação em definições independentes, com B-reps, malhas e nomes posicionais de faces; a aplicação publica o comando preparado apenas na revisão capturada. Corpos e ocorrências guardam cores sRGB, com a ocorrência mais específica sobrepondo a aparência da definição. Matrizes de intercâmbio passam por validação de ortonormalidade e determinante antes de se tornarem `Placement`. Leitores e escritores STEP compartilham uma exclusão mútua porque o intercâmbio OCCT usa configurações globais; a espera fica na thread de trabalho.
+
+## Interface e apresentação
+
+O shell desktop mantém tema, ícones vetoriais e organização de ferramentas em módulos próprios de `apps/prototype/src/desktop/project_editor/` (`theme`, `icons` e `shell`). Menu, faixa e busca encaminham as mesmas ações aos editores e comandos existentes; o estado dos painéis pertence à interface. Nenhuma regra geométrica depende desses módulos. A cor de fundo é configurável no renderizador e participa do esmaecimento visual das referências, sem modificar a geometria ou a cor dos corpos no documento. Uso e responsabilidades em [docs/INTERFACE.md](docs/INTERFACE.md).

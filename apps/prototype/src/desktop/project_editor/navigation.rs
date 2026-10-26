@@ -318,6 +318,29 @@ impl Editor {
             }
         }
     }
+    pub(super) fn measure_current_selection(&mut self, context: &egui::Context) {
+        if self.busy() {
+            return;
+        }
+        let Some(pick) = self.current().picked.clone() else {
+            return;
+        };
+        let document = self.current().session.document().clone();
+        let tab = self.current().id;
+        let revision = self.current().session.revision();
+        let mode = self.pick_mode;
+        let assembly = self.current().active_part.is_none();
+        let reference = self.current().reference.clone();
+        // As medidas do B-rep continuam sendo calculadas fora da interface.
+        self.start(context, None, move || {
+            let lines = measure_lines(&document, &pick, mode, assembly, reference.as_ref());
+            Ok(Outcome::Measured {
+                tab,
+                revision,
+                lines,
+            })
+        });
+    }
     pub(super) fn measure_controls(&mut self, ui: &mut egui::Ui) {
         egui::ComboBox::from_id_salt("pick_mode")
             .selected_text(text(match self.pick_mode {
@@ -353,23 +376,7 @@ impl Editor {
                     .add_enabled(!self.busy(), egui::Button::new(text(T::MeasureSelection)))
                     .clicked()
                 {
-                    let document = self.current().session.document().clone();
-                    let tab = self.current().id;
-                    let revision = self.current().session.revision();
-                    let mode = self.pick_mode;
-                    let assembly = self.current().active_part.is_none();
-                    let reference = self.current().reference.clone();
-                    let pick = pick.clone();
-                    // Medidas exatas consultam o núcleo: ficam fora da thread da interface.
-                    self.start(ui.ctx(), None, move || {
-                        let lines =
-                            measure_lines(&document, &pick, mode, assembly, reference.as_ref());
-                        Ok(Outcome::Measured {
-                            tab,
-                            revision,
-                            lines,
-                        })
-                    });
+                    self.measure_current_selection(ui.ctx());
                 }
                 if ui.button(text(T::SetReference)).clicked() {
                     self.current_mut().reference = Some(pick.clone());
@@ -538,21 +545,24 @@ impl Editor {
         if let Some(p) = &self.current().picked
             && let Some(position) = screen(p.point)
         {
-            ui.painter()
-                .circle_stroke(position, 6., egui::Stroke::new(2., egui::Color32::YELLOW));
+            ui.painter().circle_stroke(
+                position,
+                6.,
+                egui::Stroke::new(2., egui::Color32::from_rgb(190, 113, 21)),
+            );
         }
         if let [a, b] = self.current().measurements.as_slice()
             && let (Some(start), Some(end)) = (screen(*a), screen(*b))
         {
             let p = [start, end];
             ui.painter()
-                .line_segment(p, egui::Stroke::new(1.5, egui::Color32::LIGHT_GREEN));
+                .line_segment(p, egui::Stroke::new(1.5, theme::GREEN));
             ui.painter().text(
                 p[0].lerp(p[1], 0.5),
                 egui::Align2::CENTER_BOTTOM,
                 format!("{:.3} mm", norm(sub(*b, *a))),
                 egui::FontId::proportional(14.),
-                egui::Color32::WHITE,
+                theme::INK,
             );
         }
     }
@@ -640,18 +650,38 @@ impl Editor {
             let hover = ui
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|p| inside_polygon(p, &polygon));
-            let _response =
+            let response =
                 ui.interact(bounds, egui::Id::new(("cube", index)), egui::Sense::click());
             ui.painter().add(egui::Shape::convex_polygon(
-                polygon,
+                polygon.clone(),
                 if hover {
-                    egui::Color32::from_rgb(85, 128, 165)
+                    theme::BLUE_FILL
                 } else {
-                    egui::Color32::from_gray(75)
+                    egui::Color32::from_rgb(218, 228, 239)
                 },
-                egui::Stroke::new(1., egui::Color32::from_gray(150)),
+                egui::Stroke::new(1., theme::MUTED),
             ));
-            if hover && ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)) {
+            if normal.iter().filter(|v| v.abs() > 0.5).count() == 1 {
+                let label = if normal[0] != 0. {
+                    "X"
+                } else if normal[1] != 0. {
+                    "Y"
+                } else {
+                    "Z"
+                };
+                let sum = polygon
+                    .iter()
+                    .fold(egui::Vec2::ZERO, |sum, p| sum + p.to_vec2());
+                let center = (sum / polygon.len() as f32).to_pos2();
+                ui.painter().text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::FontId::proportional(10.),
+                    theme::INK,
+                );
+            }
+            if hover && response.clicked() {
                 chosen = Some(normal);
             }
         }
@@ -660,9 +690,9 @@ impl Editor {
         }
         let axis_origin = center + egui::vec2(0., 48.);
         for (axis, label, color) in [
-            ([1., 0., 0.], "X", egui::Color32::LIGHT_RED),
-            ([0., 1., 0.], "Y", egui::Color32::LIGHT_GREEN),
-            ([0., 0., 1.], "Z", egui::Color32::LIGHT_BLUE),
+            ([1., 0., 0.], "X", theme::DANGER),
+            ([0., 1., 0.], "Y", theme::GREEN),
+            ([0., 0., 1.], "Z", theme::ACCENT),
         ] {
             let v = self.viewport.camera.axis_projection(axis);
             let end = axis_origin + egui::vec2(v[0] as f32, v[1] as f32) * 19.;

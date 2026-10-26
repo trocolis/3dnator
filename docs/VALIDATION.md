@@ -1,5 +1,14 @@
 # Validação local do protótipo
 
+## Refinamento da interface — 26/10/2026
+
+- Referência visual: organização compacta do SolidCraft consultada no projeto local. Ícones vetoriais e implementação produzidos no 3dnator. Estrutura e uso em [INTERFACE.md](INTERFACE.md).
+- `cargo fmt --all -- --check` e Clippy com todos os alvos e avisos negados aprovados, com e sem OCCT. **91 testes sem OCCT e 123 com OCCT 7.9.3** aprovados. Os testes novos verificam clique, bloqueio de botões desabilitados, rótulo acessível, ativação por teclado, busca portuguesa sem acentos e enquadramento de perfis deslocados/círculos em canvases pequenos.
+- Compilação desktop aprovada no Linux. Os seis ensaios de núcleo, projeto, rascunho, montagem/folhas, primeira peça e intercâmbio STEP passaram novamente; relatórios em `target/codex-validation/interface-20261026/validate*/report.json`.
+- Capturas reais do editor e rascunho em 1280 × 820 e 900 × 600, pelo egui/wgpu/GL llvmpipe, sem erros de validação. Imagens inspecionadas; a revisão no tamanho mínimo revelou e permitiu corrigir o corte do rascunho por falta de enquadramento. Evidências: `model-final.png`, `compact-final.png`, `sketch-final.png` e `sketch-fitted.png` no diretório do ensaio. Capturas são evidências locais ignoradas pelo Git.
+- Prévias ortográfica e em perspectiva do renderizador também passaram, preservando cores, triangulação e transparência (razão de brilho de aproximadamente 0,698). O fundo configurável do editor não alterou o padrão usado pelos ensaios do renderizador.
+- Windows foi adiado por orientação do usuário e não foi testado. O workflow mantém a validação nativa como opção manual `validate_windows`; a rotina atual prioriza Linux. Os testes de eventos egui não equivalem a um ensaio de teclado/mouse e diálogos em uma janela nativa.
+
 ## Auditoria do plano — 26/10/2026
 
 Situação completa e critérios de aceite em [PLAN_AUDIT.md](PLAN_AUDIT.md). Repetidos `cargo fmt --all -- --check`, Clippy do workspace com todos os alvos e avisos negados, e testes com/sem `occt`: **87 sem OCCT e 119 com OCCT**, todos aprovados. Compilação desktop debug e release aprovada no Linux com OCCT 7.9.3. Não houve alteração de versão do aplicativo ou do formato de projeto.

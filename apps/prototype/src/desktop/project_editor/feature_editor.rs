@@ -13,7 +13,7 @@ use nator_sketch::{Curve, Sketch, profiles};
 
 /// Ferramentas do diálogo, na ordem exibida.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Tool {
+pub(super) enum Tool {
     Extrude,
     Revolve,
     Join,
@@ -44,7 +44,7 @@ const TOOLS: [Tool; 13] = [
     Tool::Split,
 ];
 impl Tool {
-    fn label(self) -> T {
+    pub(super) fn label(self) -> T {
         match self {
             Self::Extrude => T::Extrude,
             Self::Revolve => T::Revolve,
@@ -779,10 +779,30 @@ fn labeled_text(ui: &mut egui::Ui, label: T, value: &mut String) {
 }
 
 impl Editor {
+    pub(super) fn open_feature_tool(&mut self, tool: Tool) {
+        self.open_features();
+        if let Some(draft) = &mut self.feature_edit {
+            draft.tool = tool;
+        }
+    }
     pub(super) fn open_features(&mut self) {
         if let Some(part) = self.current().active_part {
             let mut d = Draft::new(self.current().id, part);
-            d.sketch = self.current().sketch_edit.as_ref().map(|w| w.id);
+            let definition = self.current().session.document().part(part);
+            d.sketch = self
+                .current()
+                .sketch_edit
+                .as_ref()
+                .map(|w| w.id)
+                .or_else(|| definition.and_then(|p| p.sketches.first()).map(|s| s.id));
+            // A seleção explícita é a primeira sugestão. Caso contrário, oferecer o
+            // resultado visível da peça; a operação continua pendente de confirmação.
+            d.base = match self.current().selection {
+                Some(Selection::Body { part: owner, id }) if owner == part => Some(id),
+                _ => definition
+                    .and_then(|p| p.bodies.iter().find(|b| b.visible && b.brep.is_some()))
+                    .map(|b| b.id),
+            };
             self.feature_edit = Some(d);
         }
     }
@@ -808,194 +828,204 @@ impl Editor {
             .map(|s| profiles::regions(&s.sketch).map_err(|e| e.to_string()));
         let mut open = true;
         let mut command = None;
-        egui::Window::new(text(T::SolidTools))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                if !nator_kernel::is_available() {
-                    ui.colored_label(egui::Color32::YELLOW, text(T::KernelUnavailable));
-                }
-                egui::ComboBox::from_label(text(T::Operation))
-                    .selected_text(text(d.tool.label()))
-                    .show_ui(ui, |ui| {
-                        for tool in TOOLS {
-                            ui.selectable_value(&mut d.tool, tool, text(tool.label()));
-                        }
-                    });
-                if d.tool.uses_profile() || d.tool == Tool::Hole {
-                    let previous = d.sketch;
-                    egui::ComboBox::from_label(text(T::Profile))
-                        .selected_text(record.map(|s| s.sketch.name.as_str()).unwrap_or("—"))
-                        .show_ui(ui, |ui| {
-                            for s in &part.sketches {
-                                ui.selectable_value(&mut d.sketch, Some(s.id), &s.sketch.name);
-                            }
-                        });
-                    if d.sketch != previous {
-                        d.kept_region = None;
-                        d.region = 0;
-                        d.hole.kept_points = None;
-                        d.kept_axis = None;
-                        d.axis = RevolveAxis::V;
-                    }
-                }
-                if d.tool.uses_profile() {
-                    region_controls(ui, &mut d, &regions);
-                }
-                match d.tool {
-                    Tool::Extrude => extrude_controls(ui, &mut d, &part),
-                    Tool::Revolve => {
-                        revolve_controls(ui, &mut d, record.map(|r| &r.sketch));
-                        labeled_text(ui, T::Angle, &mut d.angle);
-                    }
-                    _ => {}
-                }
-                if !d.tool.uses_profile() {
-                    body_controls(ui, &mut d, &part);
-                }
-                if d.tool.uses_topology() {
-                    if let Some(kept) = &d.kept_topology {
-                        ui.label(format!(
-                            "{}: {}",
-                            text(T::KeptReference),
-                            describe_topology(kept)
-                        ));
-                    }
-                    let mut remove = None;
-                    for (i, kept) in d.extra_topology.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("+ {}", describe_topology(kept)));
-                            if ui.small_button("×").clicked() {
-                                remove = Some(i);
-                            }
-                        });
-                    }
-                    if let Some(i) = remove {
-                        d.extra_topology.remove(i);
-                    }
-                    if d.selecting || d.appending {
-                        ui.colored_label(egui::Color32::LIGHT_BLUE, text(T::PickingTopology));
-                    } else {
-                        ui.horizontal(|ui| {
-                            if ui.button(text(T::PickInViewport)).clicked() {
-                                d.selecting = true;
-                            }
-                            if d.kept_topology.is_some()
-                                && ui.button(text(T::PickAnother)).clicked()
-                            {
-                                d.appending = true;
-                            }
-                        });
-                    }
-                    if d.tool == Tool::Chamfer {
-                        let mut by_angle = d.chamfer_angle.is_some();
-                        if ui
-                            .checkbox(&mut by_angle, text(T::ChamferByAngle))
-                            .changed()
-                        {
-                            d.chamfer_angle = by_angle.then(|| "45 deg".into());
-                        }
-                        if let Some(angle) = &mut d.chamfer_angle {
-                            labeled_text(ui, T::Angle, angle);
-                        }
-                    }
-                    if d.tool == Tool::Shell {
-                        ui.checkbox(&mut d.outward, text(T::ShellOutward));
-                    }
-                    ui.label(text(T::TopologyIndex));
-                    if ui
-                        .add(egui::DragValue::new(&mut d.index).range(0..=100000))
-                        .changed()
-                    {
-                        d.kept_topology = None;
-                    }
-                    labeled_text(ui, T::EndLimit, &mut d.to);
-                }
-                match d.tool {
-                    Tool::Hole => hole_controls(ui, &mut d, record.map(|r| &r.sketch)),
-                    Tool::LinearPattern => {
-                        let l = &mut d.layout;
-                        choose(ui, T::PatternDirection, &mut l.axis, &AXES, "pattern_axis");
-                        ui.add(
-                            egui::DragValue::new(&mut l.count)
-                                .range(2..=1000)
-                                .prefix(format!("{} ", text(T::PatternCount))),
-                        );
-                        labeled_text(ui, T::PatternSpacing, &mut l.spacing);
-                        ui.checkbox(&mut l.second, text(T::SecondDirection));
-                        if l.second {
-                            choose(
-                                ui,
-                                T::PatternDirection,
-                                &mut l.second_axis,
-                                &AXES,
-                                "pattern_axis_2",
-                            );
-                            ui.add(
-                                egui::DragValue::new(&mut l.second_count)
-                                    .range(1..=1000)
-                                    .prefix(format!("{} ", text(T::PatternCount))),
-                            );
-                            labeled_text(ui, T::PatternSpacing, &mut l.second_spacing);
-                        }
-                    }
-                    Tool::CircularPattern => {
-                        let l = &mut d.layout;
-                        choose(ui, T::RevolveAxis, &mut l.axis, &AXES, "circular_axis");
-                        ui.horizontal(|ui| {
-                            ui.label(text(T::AxisOrigin));
-                            for v in &mut l.origin {
-                                ui.add(egui::DragValue::new(v).speed(0.5));
-                            }
-                        });
-                        ui.add(
-                            egui::DragValue::new(&mut l.count)
-                                .range(2..=1000)
-                                .prefix(format!("{} ", text(T::PatternCount))),
-                        );
-                        labeled_text(ui, T::TotalAngle, &mut l.angle);
-                    }
-                    Tool::Mirror | Tool::Split => {
-                        let l = &mut d.layout;
-                        choose(ui, T::PlaneChoice, &mut l.plane, &PLANES, "mirror_plane");
-                        ui.horizontal(|ui| {
-                            ui.label(text(T::PlaneOffset));
-                            ui.add(egui::DragValue::new(&mut l.offset).speed(0.5));
-                        });
-                        if d.tool == Tool::Mirror {
-                            ui.checkbox(&mut l.keep_original, text(T::KeepOriginal));
-                        } else {
-                            ui.checkbox(&mut l.flip, text(T::FlipSide));
-                        }
-                    }
-                    _ => {}
-                }
-                ui.add_enabled_ui(!self.busy() && nator_kernel::is_available(), |ui| {
-                    if ui.button(text(T::Apply)).clicked() {
-                        let operation = d.operation(&part, &regions);
-                        command = Some(if let Some(output) = d.output {
-                            Command::EditFeature {
-                                part: d.part,
-                                output,
-                                operation,
-                            }
-                        } else {
-                            Command::AddFeature {
-                                part: d.part,
-                                name: text(d.tool.label()).into(),
-                                operation,
-                            }
-                        });
-                    }
-                    if let Some(output) = d.output
-                        && ui.button(text(T::RemoveFeature)).clicked()
-                    {
-                        command = Some(Command::RemoveFeature {
-                            part: d.part,
-                            output,
-                        });
+        egui::Window::new(format!(
+            "{} · {}",
+            text(d.tool.label()),
+            text(T::SolidTools)
+        ))
+        .id(egui::Id::new("feature_editor"))
+        .default_width(340.)
+        .default_pos(egui::pos2(
+            (ctx.content_rect().right() - 650.).max(235.),
+            200.,
+        ))
+        .vscroll(true)
+        .max_height((ctx.content_rect().height() - 230.).max(250.))
+        .open(&mut open)
+        .show(ctx, |ui| {
+            if !nator_kernel::is_available() {
+                ui.colored_label(theme::WARNING, text(T::KernelUnavailable));
+            }
+            egui::ComboBox::from_label(text(T::Operation))
+                .selected_text(text(d.tool.label()))
+                .show_ui(ui, |ui| {
+                    for tool in TOOLS {
+                        ui.selectable_value(&mut d.tool, tool, text(tool.label()));
                     }
                 });
+            if d.tool.uses_profile() || d.tool == Tool::Hole {
+                let previous = d.sketch;
+                egui::ComboBox::from_label(text(T::Profile))
+                    .selected_text(record.map(|s| s.sketch.name.as_str()).unwrap_or("—"))
+                    .show_ui(ui, |ui| {
+                        for s in &part.sketches {
+                            ui.selectable_value(&mut d.sketch, Some(s.id), &s.sketch.name);
+                        }
+                    });
+                if d.sketch != previous {
+                    d.kept_region = None;
+                    d.region = 0;
+                    d.hole.kept_points = None;
+                    d.kept_axis = None;
+                    d.axis = RevolveAxis::V;
+                }
+            }
+            if d.tool.uses_profile() {
+                region_controls(ui, &mut d, &regions);
+            }
+            match d.tool {
+                Tool::Extrude => extrude_controls(ui, &mut d, &part),
+                Tool::Revolve => {
+                    revolve_controls(ui, &mut d, record.map(|r| &r.sketch));
+                    labeled_text(ui, T::Angle, &mut d.angle);
+                }
+                _ => {}
+            }
+            if !d.tool.uses_profile() {
+                body_controls(ui, &mut d, &part);
+            }
+            if d.tool.uses_topology() {
+                if let Some(kept) = &d.kept_topology {
+                    ui.label(format!(
+                        "{}: {}",
+                        text(T::KeptReference),
+                        describe_topology(kept)
+                    ));
+                }
+                let mut remove = None;
+                for (i, kept) in d.extra_topology.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("+ {}", describe_topology(kept)));
+                        if ui.small_button("×").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                }
+                if let Some(i) = remove {
+                    d.extra_topology.remove(i);
+                }
+                if d.selecting || d.appending {
+                    ui.colored_label(theme::ACCENT, text(T::PickingTopology));
+                } else {
+                    ui.horizontal(|ui| {
+                        if ui.button(text(T::PickInViewport)).clicked() {
+                            d.selecting = true;
+                        }
+                        if d.kept_topology.is_some() && ui.button(text(T::PickAnother)).clicked() {
+                            d.appending = true;
+                        }
+                    });
+                }
+                if d.tool == Tool::Chamfer {
+                    let mut by_angle = d.chamfer_angle.is_some();
+                    if ui
+                        .checkbox(&mut by_angle, text(T::ChamferByAngle))
+                        .changed()
+                    {
+                        d.chamfer_angle = by_angle.then(|| "45 deg".into());
+                    }
+                    if let Some(angle) = &mut d.chamfer_angle {
+                        labeled_text(ui, T::Angle, angle);
+                    }
+                }
+                if d.tool == Tool::Shell {
+                    ui.checkbox(&mut d.outward, text(T::ShellOutward));
+                }
+                ui.label(text(T::TopologyIndex));
+                if ui
+                    .add(egui::DragValue::new(&mut d.index).range(0..=100000))
+                    .changed()
+                {
+                    d.kept_topology = None;
+                }
+                labeled_text(ui, T::EndLimit, &mut d.to);
+            }
+            match d.tool {
+                Tool::Hole => hole_controls(ui, &mut d, record.map(|r| &r.sketch)),
+                Tool::LinearPattern => {
+                    let l = &mut d.layout;
+                    choose(ui, T::PatternDirection, &mut l.axis, &AXES, "pattern_axis");
+                    ui.add(
+                        egui::DragValue::new(&mut l.count)
+                            .range(2..=1000)
+                            .prefix(format!("{} ", text(T::PatternCount))),
+                    );
+                    labeled_text(ui, T::PatternSpacing, &mut l.spacing);
+                    ui.checkbox(&mut l.second, text(T::SecondDirection));
+                    if l.second {
+                        choose(
+                            ui,
+                            T::PatternDirection,
+                            &mut l.second_axis,
+                            &AXES,
+                            "pattern_axis_2",
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut l.second_count)
+                                .range(1..=1000)
+                                .prefix(format!("{} ", text(T::PatternCount))),
+                        );
+                        labeled_text(ui, T::PatternSpacing, &mut l.second_spacing);
+                    }
+                }
+                Tool::CircularPattern => {
+                    let l = &mut d.layout;
+                    choose(ui, T::RevolveAxis, &mut l.axis, &AXES, "circular_axis");
+                    ui.horizontal(|ui| {
+                        ui.label(text(T::AxisOrigin));
+                        for v in &mut l.origin {
+                            ui.add(egui::DragValue::new(v).speed(0.5));
+                        }
+                    });
+                    ui.add(
+                        egui::DragValue::new(&mut l.count)
+                            .range(2..=1000)
+                            .prefix(format!("{} ", text(T::PatternCount))),
+                    );
+                    labeled_text(ui, T::TotalAngle, &mut l.angle);
+                }
+                Tool::Mirror | Tool::Split => {
+                    let l = &mut d.layout;
+                    choose(ui, T::PlaneChoice, &mut l.plane, &PLANES, "mirror_plane");
+                    ui.horizontal(|ui| {
+                        ui.label(text(T::PlaneOffset));
+                        ui.add(egui::DragValue::new(&mut l.offset).speed(0.5));
+                    });
+                    if d.tool == Tool::Mirror {
+                        ui.checkbox(&mut l.keep_original, text(T::KeepOriginal));
+                    } else {
+                        ui.checkbox(&mut l.flip, text(T::FlipSide));
+                    }
+                }
+                _ => {}
+            }
+            ui.add_enabled_ui(!self.busy() && nator_kernel::is_available(), |ui| {
+                if ui.button(text(T::Apply)).clicked() {
+                    let operation = d.operation(&part, &regions);
+                    command = Some(if let Some(output) = d.output {
+                        Command::EditFeature {
+                            part: d.part,
+                            output,
+                            operation,
+                        }
+                    } else {
+                        Command::AddFeature {
+                            part: d.part,
+                            name: text(d.tool.label()).into(),
+                            operation,
+                        }
+                    });
+                }
+                if let Some(output) = d.output
+                    && ui.button(text(T::RemoveFeature)).clicked()
+                {
+                    command = Some(Command::RemoveFeature {
+                        part: d.part,
+                        output,
+                    });
+                }
             });
+        });
         if let Some(command) = command {
             self.prepare_command(ctx, d.tab, command);
         }
@@ -1042,10 +1072,10 @@ fn region_controls(
                 });
         }
         Some(Err(message)) => {
-            ui.colored_label(egui::Color32::YELLOW, message);
+            ui.colored_label(theme::WARNING, message);
         }
         _ => {
-            ui.colored_label(egui::Color32::YELLOW, text(T::NoRegions));
+            ui.colored_label(theme::WARNING, text(T::NoRegions));
         }
     }
 }
@@ -1062,7 +1092,7 @@ fn extrude_controls(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Par
     }
     match (&d.until, d.picking_until) {
         (_, true) => {
-            ui.colored_label(egui::Color32::LIGHT_BLUE, text(T::PickingTopology));
+            ui.colored_label(theme::ACCENT, text(T::PickingTopology));
         }
         (Some((_, face)), false) => {
             ui.horizontal(|ui| {
@@ -1177,7 +1207,7 @@ fn hole_controls(ui: &mut egui::Ui, d: &mut Draft, sketch: Option<&Sketch>) {
             ui.label(format!("{}: {}", text(T::KeptReference), kept.len()));
         }
         None if points.is_empty() => {
-            ui.colored_label(egui::Color32::YELLOW, text(T::NoHolePoints));
+            ui.colored_label(theme::WARNING, text(T::NoHolePoints));
         }
         None => {
             ui.label(format!("{}: {}", text(T::HolePoints), points.len()));

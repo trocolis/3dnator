@@ -2,6 +2,8 @@
 
 O plano inicial tem suas funcionalidades principais implementadas e verificadas localmente. **O aceite completo continua aberto**: Windows nativo, Ubuntu com OCCT 7.6, hardware físico de 8 GB e interação real ainda não foram validados. A afirmação anterior de conclusão de todas as frentes não demonstrava esses critérios.
 
+**Repriorização posterior do usuário:** a validação Windows está adiada enquanto refinamos funcionalidades e interface no Linux. A CI Windows passa a ser opcional, acionada manualmente com `validate_windows`; sua ausência não bloqueia os incrementos atuais. Os critérios acima são mantidos para retomada futura, sem declarar testes não executados.
+
 ## Evidências por etapa
 
 | Etapa | Evidência executada nesta auditoria | Aceite restante |

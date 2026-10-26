@@ -2,6 +2,16 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Interface desktop
+
+- Nova composição inspirada na organização visual do SolidCraft: barra escura de documentos, faixa clara por tarefa, árvore com grupos e controles de visibilidade, painéis recolhíveis e histórico paramétrico com ícones.
+- Ícones vetoriais originais para ações de arquivo, modelagem, rascunho, montagem, câmera e navegação, com tooltips, nomes acessíveis e ativação por teclado.
+- Acesso direto às operações com a ferramenta já selecionada; sugestões iniciais de perfil e corpo preservam a confirmação da operação. Busca de ferramentas pela tecla S, tolerante a acentos, e aba contextual de rascunho.
+- Tema claro compartilhado com o canvas, cores legíveis de restrições/avisos/medições, cubo de orientação identificado por eixos, painéis roláveis e ajuste de largura para janelas menores.
+- Rascunhos são enquadrados ao abrir e podem ser reenquadrados pela barra do canvas, incluindo extensões de círculos/arcos. Cotas usam vírgula decimal e omitem zeros desnecessários.
+- Capturas separadas de modelo e rascunho, com dimensões opcionais para revisão do layout em 900 × 600 e 1280 × 820. A captura do modelo deixa de abrir um rascunho automaticamente.
+- Validação Windows adiada por orientação do usuário e mantida como opção manual na CI; o desenvolvimento atual prioriza Linux e refinamento funcional.
+
 ### Modelagem e documento
 
 - Rascunhos 2D com linhas, retângulos, círculos e arcos, geometria de construção, cotas de referência, aparar, estender, offset, espelhamento e refinamento de cantos; solver com indicação de graus de liberdade, conflitos e redundâncias.

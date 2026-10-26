@@ -100,7 +100,7 @@ impl Editor {
                                     });
                                 }
                                 Err(error) => {
-                                    ui.colored_label(egui::Color32::LIGHT_RED, error.to_string());
+                                    ui.colored_label(theme::DANGER, error.to_string());
                                 }
                             }
                             ui.end_row();

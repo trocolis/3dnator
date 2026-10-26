@@ -241,7 +241,7 @@ impl Draft {
                 ui.painter().rect_stroke(
                     bounds,
                     0.,
-                    egui::Stroke::new(1., egui::Color32::LIGHT_BLUE),
+                    egui::Stroke::new(1., theme::ACCENT),
                     egui::StrokeKind::Inside,
                 );
             }

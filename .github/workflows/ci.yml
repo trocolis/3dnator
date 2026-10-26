@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      validate_windows:
+        description: Executar validação Windows (adiada durante o refinamento da interface)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +31,6 @@ jobs:
       - name: Verificar preservação de arquivos e relocação do pacote
         if: runner.os == 'Linux'
         run: python3 scripts/test_package_linux.py
-      - name: Verificar preservação de arquivos no Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/test_package_windows.ps1
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -77,6 +78,8 @@ jobs:
           path: dist/linux pacote.tar.gz
 
   occt-windows:
+    # O suporte é preservado; a execução volta a ser solicitada explicitamente.
+    if: github.event_name == 'workflow_dispatch' && inputs.validate_windows
     runs-on: windows-2025
     defaults:
       run:
@@ -87,6 +90,9 @@ jobs:
         with:
           components: clippy
       - uses: ilammy/msvc-dev-cmd@v1
+      - name: Verificar preservação de arquivos no Windows
+        shell: pwsh
+        run: ./scripts/test_package_windows.ps1
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest

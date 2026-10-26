@@ -2,6 +2,14 @@
 
 Autorização do usuário: continuar todas as etapas sem solicitar acompanhamento.
 
+## Refinamento da interface e prioridades — 26/10/2026
+
+- Usuário adiou a prioridade de testes Windows e solicitou polimento da interface com referência no projeto local SolidCraft. O suporte Windows permanece preparado, com CI nativa opcional por `workflow_dispatch`/`validate_windows`.
+- Implementados tema claro com barra escura, ícones vetoriais originais, faixa de tarefas (Modelo/Montagem/Inserir/Inspecionar/Vista e Rascunho contextual), busca por S, painéis recolhíveis/roláveis, árvore agrupada com visibilidade e histórico por ícones. Operações acessadas diretamente mantêm publicação por comandos e confirmação nos editores.
+- Ajustados contraste de erros/restrições/medições, fundo do renderizador e esmaecimento conforme o tema. A revisão de 900 × 600 identificou rascunhos cortados; implementados enquadramento inicial e botão Enquadrar no modo 2D, considerando os limites radiais.
+- 91 testes sem OCCT e 123 com OCCT 7.9.3 aprovados; formatação e Clippy aprovados nas duas configurações. Ensaios CLI de núcleo, projeto, rascunho, editor, primeira peça e STEP aprovados. Capturas reais em dois tamanhos e nas duas projeções inspecionadas, sem erros wgpu, em `target/codex-validation/interface-20261026/`.
+- Guia em [INTERFACE.md](INTERFACE.md). Nenhuma release ou publicação remota; Windows e interação com diálogos nativos não foram declarados aprovados.
+
 ## Auditoria e correções — 26/10/2026
 
 - Conferido o plano contra código, testes, ensaios e critérios de aceite. As funcionalidades principais estão implementadas; o plano **não tem aceite completo** por falta de execução Windows/Ubuntu, interação real e medições no hardware físico de 8 GB. Detalhes em [PLAN_AUDIT.md](PLAN_AUDIT.md).

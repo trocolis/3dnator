@@ -4,6 +4,7 @@
 struct View {
     transform: mat4x4<f32>,
     options: vec4<f32>,
+    background: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> view: View;
 
@@ -79,7 +80,7 @@ struct VertexOutput {
     let style = (input.edges >> 8u) & 255u;
     if (style == 1u) {
         // Esmaecido: cor próxima do fundo, para destacar a peça em construção.
-        return vec4<f32>(mix(color, vec3<f32>(0.075, 0.09, 0.11), 0.55), 0.35);
+        return vec4<f32>(mix(color, view.background.rgb, 0.55), 0.35);
     }
     if (style == 2u) {
         return vec4<f32>(color, 0.4);

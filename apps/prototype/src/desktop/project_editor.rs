@@ -3,9 +3,12 @@ pub(crate) mod capture;
 mod drawing_editor;
 mod export_editor;
 mod feature_editor;
+mod icons;
 mod navigation;
 mod parameter_editor;
+mod shell;
 mod sketch_editor;
+mod theme;
 mod views;
 use crate::i18n::{Text as T, text};
 use eframe::{egui, egui_wgpu};
@@ -330,6 +333,8 @@ pub struct Editor {
     rotate_angle: f64,
     /// Linhas do último relatório de medição, já formatadas para exibição.
     measure_report: Vec<String>,
+    /// Disposição da interface; não modifica o documento nem o histórico.
+    shell: shell::ShellState,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -388,7 +393,8 @@ impl Editor {
             wgpu::FilterMode::Linear,
         );
         let tab = Tab::new(1, document, None, None)?;
-        context.set_visuals(egui::Visuals::dark());
+        theme::apply(context);
+        viewport.set_background(nator_geometry::RgbColor::new([233, 238, 245]));
         let recoveries = recovery_files(&recovery_directory()).unwrap_or_default();
         Ok(Self {
             gpu,
@@ -418,6 +424,7 @@ impl Editor {
             move_freely: false,
             rotate_angle: 15.,
             measure_report: Vec::new(),
+            shell: shell::ShellState::new(),
         })
     }
     fn busy(&self) -> bool {
@@ -1108,8 +1115,12 @@ impl Editor {
         self.ensure_scene(ui.ctx());
         self.shortcuts(ui.ctx());
         self.toolbar(ui);
-        self.tree(ui);
-        self.properties(ui);
+        if self.shell.browser_visible {
+            self.tree(ui);
+        }
+        if self.shell.properties_visible {
+            self.properties(ui);
+        }
         self.canvas(ui);
         self.dialogs(ui.ctx());
         self.assembly_dialog(ui.ctx());
@@ -1117,6 +1128,7 @@ impl Editor {
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
+        self.command_palette(ui.ctx());
         self.maybe_recover(ui.ctx());
     }
 }

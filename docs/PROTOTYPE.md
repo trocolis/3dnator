@@ -1,5 +1,7 @@
 # Protótipo 0.3.0 — CAD paramétrico
 
+O refinamento atual organiza a interface por tarefas, com ícones vetoriais, busca por S e painéis recolhíveis. Veja [INTERFACE.md](INTERFACE.md) para navegar na nova disposição e gerar capturas de modelo/rascunho.
+
 Este incremento oferece rascunhos com restrições e parâmetros, histórico paramétrico, montagem, folhas técnicas e exportação STEP/STL. Operações de sólidos exigem a feature `occt` e o SDK externo. O histórico paramétrico é salvo no projeto; desfazer/refazer registra as edições da sessão. Pendências conhecidas estão em [ROADMAP.md](../ROADMAP.md).
 
 ## Abrir a aplicação

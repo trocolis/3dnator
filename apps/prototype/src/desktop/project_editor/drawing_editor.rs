@@ -192,7 +192,7 @@ impl Editor {
                     draft.preview_revision = None;
                 }
                 if draft.preview.is_some() && draft.preview_revision != Some(revision) {
-                    ui.colored_label(egui::Color32::YELLOW, text(T::StaleDrawingPreview));
+                    ui.colored_label(theme::WARNING, text(T::StaleDrawingPreview));
                 }
                 if let Some(sheet) = &draft.preview {
                     let width = ui.available_width().min(800.);
@@ -242,7 +242,7 @@ impl Editor {
                         }
                     }
                     if !sheet.annotation_warnings.is_empty() {
-                        ui.colored_label(egui::Color32::LIGHT_RED, text(T::DimensionReview));
+                        ui.colored_label(theme::DANGER, text(T::DimensionReview));
                         for (id, message) in &sheet.annotation_warnings {
                             ui.small(format!("#{}: {message}", id.0));
                         }

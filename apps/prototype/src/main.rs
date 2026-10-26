@@ -49,7 +49,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         [command] if command == "--help" || command == "-h" => {
             println!(
-                "3dnator — protótipo {}\n\nSem argumentos: abrir editor de projetos.\n--inspect ARQUIVO.stl: inspecionar malha (coordenadas assumidas em mm).\n--export-reference ARQUIVO.stl: exportar suporte em L de referência.\n--validate DIRETORIO_NOVO: validar OCCT e gerar relatório e arquivos.\n--validate-step DIRETORIO_NOVO: validar cores e montagem STEP com OCCT.\n--validate-project DIRETORIO_NOVO: validar salvamento, recuperação e comandos.\n--validate-sketch DIRETORIO_NOVO: validar restrições, expressões e recálculo.\n--validate-part DIRETORIO_NOVO: validar a peça de referência com OCCT (cotas, recálculo, STEP/STL).\n--validate-editor DIRETORIO_NOVO: validar montagem e folhas PNG/PDF.\n--render-project-preview PROJETO IMAGEM.png: capturar o editor real.\n--inspect-project ARQUIVO.3dnator: inspecionar projeto.\n--render-preview ARQUIVO.png: capturar renderizador ortográfico (requer desktop).\n--render-perspective-preview ARQUIVO.png: capturar renderizador em perspectiva (requer desktop).\n--benchmark DIRETORIO_NOVO: medir abertura, memória, navegação e recálculo (use --release).\n--version: informar versão e disponibilidade do núcleo.\n\nSTL aceita ASCII ou binário. STEP e operações CAD exigem --features occt.\nRascunhos, parâmetros, montagem e folhas disponíveis no protótipo.",
+                "3dnator — protótipo {}\n\nSem argumentos: abrir editor de projetos.\n--inspect ARQUIVO.stl: inspecionar malha (coordenadas assumidas em mm).\n--export-reference ARQUIVO.stl: exportar suporte em L de referência.\n--validate DIRETORIO_NOVO: validar OCCT e gerar relatório e arquivos.\n--validate-step DIRETORIO_NOVO: validar cores e montagem STEP com OCCT.\n--validate-project DIRETORIO_NOVO: validar salvamento, recuperação e comandos.\n--validate-sketch DIRETORIO_NOVO: validar restrições, expressões e recálculo.\n--validate-part DIRETORIO_NOVO: validar a peça de referência com OCCT (cotas, recálculo, STEP/STL).\n--validate-editor DIRETORIO_NOVO: validar montagem e folhas PNG/PDF.\n--render-project-preview PROJETO IMAGEM.png [LARGURA ALTURA]: capturar o editor 3D.\n--render-sketch-preview PROJETO IMAGEM.png [LARGURA ALTURA]: capturar o rascunho aberto.\n--inspect-project ARQUIVO.3dnator: inspecionar projeto.\n--render-preview ARQUIVO.png: capturar renderizador ortográfico (requer desktop).\n--render-perspective-preview ARQUIVO.png: capturar renderizador em perspectiva (requer desktop).\n--benchmark DIRETORIO_NOVO: medir abertura, memória, navegação e recálculo (use --release).\n--version: informar versão e disponibilidade do núcleo.\n\nSTL aceita ASCII ou binário. STEP e operações CAD exigem --features occt.\nRascunhos, parâmetros, montagem e folhas disponíveis no protótipo.",
                 env!("CARGO_PKG_VERSION")
             );
             Ok(())
@@ -122,6 +122,28 @@ fn run() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "desktop")]
         [command, project, output] if command == "--render-project-preview" => {
             desktop::render_project(Path::new(project), Path::new(output))
+        }
+        #[cfg(feature = "desktop")]
+        [command, project, output, width, height]
+            if command == "--render-project-preview" || command == "--render-sketch-preview" =>
+        {
+            let width = width.to_str().ok_or("Largura inválida.")?.parse::<u32>()?;
+            let height = height.to_str().ok_or("Altura inválida.")?.parse::<u32>()?;
+            desktop::render_project_at_size(
+                Path::new(project),
+                Path::new(output),
+                [width, height],
+                command == "--render-sketch-preview",
+            )
+        }
+        #[cfg(feature = "desktop")]
+        [command, project, output] if command == "--render-sketch-preview" => {
+            desktop::render_project_at_size(
+                Path::new(project),
+                Path::new(output),
+                [1280, 820],
+                true,
+            )
         }
         _ => Err("Argumentos inválidos. Use --help.".into()),
     }

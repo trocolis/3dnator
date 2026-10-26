@@ -3,9 +3,19 @@ use super::*;
 use std::{error::Error, path::Path};
 
 pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
+    render_project_at_size(project, output, [1280, 820], false)
+}
+
+pub(crate) fn render_project_at_size(
+    project: &Path,
+    output: &Path,
+    size: [u32; 2],
+    sketch_mode: bool,
+) -> Result<(), Box<dyn Error>> {
+    if !(900..=3840).contains(&size[0]) || !(600..=2160).contains(&size[1]) {
+        return Err("A captura aceita largura de 900 a 3840 e altura de 600 a 2160 pixels.".into());
+    }
     let document = read_project(project)?;
-    // Mesma preparação estilizada da janela, com o estado visual inicial da aba.
-    let scene = prepare_scene(&document, &ViewState::default(), None)?;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
@@ -29,22 +39,16 @@ pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dy
     let mut editor =
         Editor::from_gpu(state.clone(), &context, document).map_err(|e| e.to_string())?;
     // Mostrar duas abas exercita a disposição real, sem alterar o arquivo de origem.
-    editor.add_tab(Document::new("Projeto auxiliar")?, None, None)?;
+    editor.add_tab(Document::new(text(T::AuxiliaryProject))?, None, None)?;
     editor.switch(0);
     editor.recoveries.clear();
     editor.show_recovery = false;
-    let mesh = match scene {
-        Some((mesh, prepared)) => {
-            editor.viewport.set_prepared_mesh(&device, &prepared)?;
-            editor.current_mut().scene_bounds = Some(mesh.bounds());
-            Some(mesh)
-        }
-        None => None,
-    };
-    editor.scene = mesh;
-    editor.rendered = Some(editor.scene_key());
     if let Some(part) = editor.current().session.document().parts().first()
-        && let Some(body) = part.bodies.first()
+        && let Some(body) = part
+            .bodies
+            .iter()
+            .find(|b| b.visible)
+            .or_else(|| part.bodies.first())
     {
         let selection = Selection::Body {
             part: part.id,
@@ -54,26 +58,44 @@ pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dy
         editor.current_mut().select(Some(selection));
         editor.current_mut().active_part = Some(part);
     }
-    let sketch = editor
-        .current()
-        .session
-        .document()
-        .parts()
-        .iter()
-        .find_map(|p| p.sketches.first().map(|s| (p.id, s.id, s.sketch.clone())));
-    if let Some((part, id, sketch)) = sketch {
-        let report = nator_sketch::solver::solve(&sketch)?;
-        editor.begin_sketch(part, id);
-        if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
-            work.status = report.status;
-            work.redundant = report.redundant;
+    if sketch_mode {
+        let sketch = editor
+            .current()
+            .session
+            .document()
+            .parts()
+            .iter()
+            .find_map(|p| p.sketches.first().map(|s| (p.id, s.id, s.sketch.clone())));
+        if let Some((part, id, sketch)) = sketch {
+            let report = nator_sketch::solver::solve(&sketch)?;
+            editor.begin_sketch(part, id);
+            if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
+                work.status = report.status;
+                work.redundant = report.redundant;
+            }
         }
     }
+    // Preparar a cena após escolher o contexto mantém o esmaecimento e a revisão
+    // iguais aos da janela, sem iniciar uma reconstrução assíncrona durante a captura.
+    let scene = prepare_scene(
+        editor.current().session.document(),
+        &editor.current().view,
+        editor.current().active_part,
+    )?;
+    editor.scene = match scene {
+        Some((mesh, prepared)) => {
+            editor.viewport.set_prepared_mesh(&device, &prepared)?;
+            editor.current_mut().scene_bounds = Some(mesh.bounds());
+            Some(mesh)
+        }
+        None => None,
+    };
+    editor.rendered = Some(editor.scene_key());
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Tela do projeto"),
         size: wgpu::Extent3d {
-            width: 1280,
-            height: 820,
+            width: size[0],
+            height: size[1],
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -84,7 +106,8 @@ pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dy
         view_formats: &[],
     });
     for frame in 0..3 {
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.));
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
         let input = egui::RawInput {
             screen_rect: Some(rect),
             time: Some(f64::from(frame) / 60.),
@@ -93,7 +116,7 @@ pub(crate) fn render_project(project: &Path, output: &Path) -> Result<(), Box<dy
         let mut output = context.run_ui(input, |ui| editor.draw(ui));
         let shapes = context.tessellate(output.shapes, output.pixels_per_point);
         let descriptor = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [1280, 820],
+            size_in_pixels: size,
             pixels_per_point: output.pixels_per_point,
         };
         let mut renderer = state.renderer.write();

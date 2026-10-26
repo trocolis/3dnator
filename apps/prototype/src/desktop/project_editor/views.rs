@@ -3,6 +3,12 @@ use super::*;
 
 impl Editor {
     pub(super) fn shortcuts(&mut self, context: &egui::Context) {
+        if self.shell.search_open {
+            if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.shell.search_open = false;
+            }
+            return;
+        }
         if self.busy() || self.pending_close.is_some() {
             return;
         }
@@ -16,6 +22,11 @@ impl Editor {
             return;
         }
         if context.egui_wants_keyboard_input() {
+            return;
+        }
+        if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+            self.shell.search_open = true;
+            self.shell.search_focus = true;
             return;
         }
         let redo = context.input_mut(|i| {
@@ -45,320 +56,205 @@ impl Editor {
             self.invalidate_scene();
         }
     }
-    pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::top("tools").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong("3dnator");
-                ui.add_enabled_ui(!self.busy(), |ui| {
-                    if ui.button(text(T::NewProject)).clicked() {
-                        let result = Document::new(text(T::Untitled))
-                            .map_err(|e| e.to_string())
-                            .and_then(|d| self.add_tab(d, None, None));
-                        if let Err(error) = result {
-                            self.status = error;
-                        }
-                    }
-                    if ui.button(text(T::OpenProject)).clicked() {
-                        self.open(ui.ctx(), None);
-                    }
-                    if ui.button(text(T::Save)).clicked() {
-                        self.save(ui.ctx(), self.current().id, false, false);
-                    }
-                    if ui.button(text(T::SaveAs)).clicked() {
-                        self.save(ui.ctx(), self.current().id, true, false);
-                    }
-                    ui.separator();
-                    if ui
-                        .add_enabled(
-                            self.current().session.undo_label().is_some(),
-                            egui::Button::new(text(T::Undo)),
-                        )
-                        .clicked()
-                    {
-                        self.current_mut().session.undo();
-                        self.current_mut().changed();
-                        self.invalidate_scene();
-                    }
-                    if ui
-                        .add_enabled(
-                            self.current().session.redo_label().is_some(),
-                            egui::Button::new(text(T::Redo)),
-                        )
-                        .clicked()
-                    {
-                        self.current_mut().session.redo();
-                        self.current_mut().changed();
-                        self.invalidate_scene();
-                    }
-                    ui.separator();
-                    if ui.button(text(T::Import)).clicked() {
-                        self.import(ui.ctx(), false);
-                    }
-                    if ui.button(text(T::Reference)).clicked() {
-                        self.import(ui.ctx(), true);
-                    }
-                    if ui.button(text(T::Drawing)).clicked() {
-                        self.open_drawing(None);
-                    }
-                    if ui.button(text(T::AssemblyTools)).clicked() {
-                        self.assembly_edit = Some(assembly_editor::Draft::new(self.current().id));
-                    }
-                    if ui
-                        .add_enabled(
-                            self.current().active_part.is_some(),
-                            egui::Button::new(text(T::SolidTools)),
-                        )
-                        .clicked()
-                    {
-                        self.open_features();
-                    }
-                    ui.menu_button(text(T::NewSketch), |ui| {
-                        for (label, plane) in [
-                            ("XY", nator_sketch::Plane::xy()),
-                            ("XZ", nator_sketch::Plane::xz()),
-                            ("YZ", nator_sketch::Plane::yz()),
-                        ] {
-                            if ui.button(label).clicked() {
-                                let destination = self.current().active_part;
-                                self.execute(Command::AddSketch {
-                                    destination,
-                                    sketch: nator_sketch::Sketch::new(text(T::Sketch), plane),
-                                });
-                                ui.close();
-                            }
-                        }
-                        // Face clicada (de qualquer peça visível): o plano é capturado em
-                        // coordenadas da peça de destino, sem vínculo com a face de origem.
-                        let picked = self.current().picked.clone();
-                        if ui
-                            .add_enabled(picked.is_some(), egui::Button::new(text(T::SketchOnFace)))
-                            .clicked()
-                            && let Some(pick) = picked
-                        {
-                            let document = self.current().session.document();
-                            let destination = self.current().active_part.unwrap_or(pick.part);
-                            let target = document
-                                .instances()
-                                .iter()
-                                .find(|i| i.part == destination)
-                                .map(|i| i.placement)
-                                .unwrap_or_default();
-                            let origin = target.inverse_apply(pick.point);
-                            let normal = nator_geometry::sub(
-                                target.inverse_apply(pick.normal),
-                                target.inverse_apply([0.; 3]),
-                            );
-                            match nator_sketch::Plane::from_normal(origin, normal) {
-                                Ok(plane) => self.execute(Command::AddSketch {
-                                    destination: Some(destination),
-                                    sketch: nator_sketch::Sketch::new(text(T::Sketch), plane),
-                                }),
-                                Err(error) => self.status = error.to_string(),
-                            }
-                            ui.close();
-                        }
-                    });
-                    if ui
-                        .add_enabled(
-                            self.current().active_part.is_some(),
-                            egui::Button::new(text(T::Parameters)),
-                        )
-                        .clicked()
-                    {
-                        self.open_parameters();
-                    }
-                });
-            });
-            let mut switch = None;
-            let mut close = None;
-            egui::ScrollArea::horizontal()
-                .id_salt("tabs_scroll")
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for (index, tab) in self.tabs.iter().enumerate() {
-                            let name = tab
-                                .path
-                                .as_ref()
-                                .and_then(|p| p.file_name())
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| tab.session.document().name().into());
-                            let label =
-                                format!("{}{}", name, if tab.modified() { " *" } else { "" });
-                            if ui.selectable_label(index == self.active, label).clicked() {
-                                switch = Some(index);
-                            }
-                            if ui
-                                .add_enabled(!self.busy(), egui::Button::new("×").small())
-                                .on_hover_text(text(T::Close))
-                                .clicked()
-                            {
-                                close = Some(tab.id);
-                            }
-                        }
-                    });
-                });
-            if let Some(index) = switch {
-                self.switch(index);
-            }
-            if let Some(id) = close {
-                self.request_close(id);
-            }
-        });
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if self.busy() {
-                    ui.spinner();
-                }
-                ui.label(&self.status);
-                if !self.recoveries.is_empty()
-                    && ui
-                        .button(format!("{} ({})", text(T::Recovery), self.recoveries.len()))
-                        .clicked()
-                {
-                    self.show_recovery = true;
-                }
-            });
-            if let Some(part) = self
-                .current()
-                .active_part
-                .and_then(|id| self.current().session.document().part(id))
-                .cloned()
-            {
-                let mut edit = None;
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(text(T::ParametricHistory));
-                    for f in &part.features {
-                        if ui.button(&f.name).clicked() {
-                            edit = Some(f.clone());
-                        }
-                    }
-                });
-                if let Some(f) = edit {
-                    self.feature_edit =
-                        Some(feature_editor::Draft::edit(self.current().id, part.id, f));
-                }
-            }
-            ui.small(text(T::Navigation));
-        });
-    }
     pub(super) fn tree(&mut self, ui: &mut egui::Ui) {
         let document = self.current().session.document().clone();
         let selected = self.current().selection;
         let mut selection = None;
         let mut command = None;
+        let mut activate = None;
         let busy = self.busy();
-        egui::Panel::left("tree").default_size(230.).show(ui, |ui| {
-            ui.heading(text(T::Project));
-            let active = self.current().active_part.and_then(|p| document.part(p));
-            if let Some(part) = active {
-                ui.label(format!("{}: {}", text(T::Construction), part.name));
-                if ui.button(text(T::LeavePart)).clicked() {
-                    self.current_mut().active_part = None;
-                    self.current_mut().sketch_edit = None;
-                }
-            } else {
-                ui.label(text(T::Assembly));
-            }
-            ui.separator();
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for instance in document.instances().iter().filter(|i| i.parent.is_none()) {
-                    let Some(part) = document.part(instance.part) else {
-                        continue;
-                    };
-                    ui.horizontal(|ui| {
-                        let mut visible = instance.visible;
-                        if ui
-                            .add_enabled(!busy, egui::Checkbox::without_text(&mut visible))
-                            .changed()
-                        {
-                            command = Some(Command::SetInstanceVisibility {
-                                id: instance.id,
-                                visible,
-                            });
-                        }
-                        if ui
-                            .selectable_label(
-                                selected == Some(Selection::Instance(instance.id)),
-                                &part.name,
-                            )
-                            .clicked()
-                        {
-                            selection = Some(Selection::Instance(instance.id));
-                        }
+        egui::Panel::left("tree")
+            .default_size(235.)
+            .min_size(190.)
+            .max_size(390.)
+            .frame(theme::panel_frame())
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(text(T::Project)).strong().size(14.))
+                        .on_hover_text(text(T::PrototypeNotice));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(document.parts().len().to_string())
+                                .small()
+                                .color(theme::MUTED),
+                        );
                     });
-                    ui.indent(instance.id.0, |ui| {
-                        self.child_tree(ui, &document, part.id, 0, &mut selection);
-                        for sketch in &part.sketches {
-                            let selected = self
-                                .current()
-                                .sketch_edit
-                                .as_ref()
-                                .is_some_and(|w| w.id == sketch.id);
-                            if ui
-                                .selectable_label(
-                                    selected,
-                                    format!("{} · {}", sketch.sketch.name, text(T::Sketch)),
-                                )
-                                .clicked()
-                            {
-                                self.begin_sketch(part.id, sketch.id);
-                            }
-                        }
-                        for body in &part.bodies {
-                            ui.horizontal(|ui| {
-                                let mut visible = body.visible;
+                });
+                ui.separator();
+                let active = self.current().active_part.and_then(|p| document.part(p));
+                if let Some(part) = active {
+                    ui.label(
+                        egui::RichText::new(&part.name)
+                            .strong()
+                            .color(theme::ACCENT),
+                    );
+                    if ui.button(text(T::LeavePart)).clicked() {
+                        self.current_mut().active_part = None;
+                        self.current_mut().sketch_edit = None;
+                    }
+                } else {
+                    theme::section(ui, text(T::Assembly));
+                }
+                if document.instances().is_empty() {
+                    ui.add_space(16.);
+                    ui.label(egui::RichText::new(text(T::BrowserEmpty)).strong());
+                    ui.label(egui::RichText::new(text(T::StartSketch)).color(theme::MUTED));
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("project_browser")
+                    .show(ui, |ui| {
+                        for instance in document.instances().iter().filter(|i| i.parent.is_none()) {
+                            let Some(part) = document.part(instance.part) else {
+                                continue;
+                            };
+                            egui::collapsing_header::CollapsingState::load_with_default_open(
+                                ui.ctx(),
+                                egui::Id::new(("part_node", self.current().id, instance.id.0)),
+                                true,
+                            )
+                            .show_header(ui, |ui| {
                                 if ui
-                                    .add_enabled(!busy, egui::Checkbox::without_text(&mut visible))
-                                    .changed()
-                                {
-                                    command = Some(Command::SetBodyVisibility {
-                                        id: body.id,
-                                        visible,
-                                    });
-                                }
-                                let target = Selection::Body {
-                                    part: part.id,
-                                    id: body.id,
-                                };
-                                if ui
-                                    .selectable_label(
-                                        selected == Some(target),
-                                        format!(
-                                            "{} · {}",
-                                            body.name,
-                                            text(if body.brep.is_some() {
-                                                T::SolidBody
+                                    .add_enabled_ui(!busy, |ui| {
+                                        icons::button(
+                                            ui,
+                                            if instance.visible {
+                                                icons::Icon::Eye
                                             } else {
-                                                T::MeshBody
-                                            })
-                                        ),
-                                    )
+                                                icons::Icon::EyeOff
+                                            },
+                                            text(T::Visibility),
+                                            false,
+                                            false,
+                                        )
+                                    })
+                                    .inner
                                     .clicked()
                                 {
-                                    selection = Some(target);
+                                    command = Some(Command::SetInstanceVisibility {
+                                        id: instance.id,
+                                        visible: !instance.visible,
+                                    });
+                                }
+                                let response = icons::entry(
+                                    ui,
+                                    icons::Icon::Cube,
+                                    &part.name,
+                                    selected == Some(Selection::Instance(instance.id)),
+                                );
+                                if response.clicked() {
+                                    selection = Some(Selection::Instance(instance.id));
+                                }
+                                if response.double_clicked() && !busy {
+                                    activate = Some(part.id);
+                                }
+                            })
+                            .body(|ui| {
+                                self.child_tree(ui, &document, part.id, 0, &mut selection);
+                                if !part.sketches.is_empty() {
+                                    theme::section(
+                                        ui,
+                                        &format!(
+                                            "{} ({})",
+                                            text(T::SketchesGroup),
+                                            part.sketches.len()
+                                        ),
+                                    );
+                                }
+                                for sketch in &part.sketches {
+                                    let selected = self
+                                        .current()
+                                        .sketch_edit
+                                        .as_ref()
+                                        .is_some_and(|w| w.id == sketch.id);
+                                    if icons::entry(
+                                        ui,
+                                        icons::Icon::Sketch,
+                                        &sketch.sketch.name,
+                                        selected,
+                                    )
+                                    .clicked()
+                                    {
+                                        self.begin_sketch(part.id, sketch.id);
+                                    }
+                                }
+                                if !part.bodies.is_empty() {
+                                    theme::section(
+                                        ui,
+                                        &format!(
+                                            "{} ({})",
+                                            text(T::SolidBodies),
+                                            part.bodies.len()
+                                        ),
+                                    );
+                                }
+                                for body in &part.bodies {
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .add_enabled_ui(!busy, |ui| {
+                                                icons::button(
+                                                    ui,
+                                                    if body.visible {
+                                                        icons::Icon::Eye
+                                                    } else {
+                                                        icons::Icon::EyeOff
+                                                    },
+                                                    text(T::Visibility),
+                                                    false,
+                                                    false,
+                                                )
+                                            })
+                                            .inner
+                                            .clicked()
+                                        {
+                                            command = Some(Command::SetBodyVisibility {
+                                                id: body.id,
+                                                visible: !body.visible,
+                                            });
+                                        }
+                                        let target = Selection::Body {
+                                            part: part.id,
+                                            id: body.id,
+                                        };
+                                        let response = icons::entry(
+                                            ui,
+                                            icons::Icon::Cube,
+                                            &body.name,
+                                            selected == Some(target),
+                                        );
+                                        if response.clicked() {
+                                            selection = Some(target);
+                                        }
+                                        if response.double_clicked() && !busy {
+                                            activate = Some(part.id);
+                                        }
+                                    });
                                 }
                             });
                         }
+                        if !document.sheets().is_empty() {
+                            ui.separator();
+                            theme::section(ui, text(T::DocumentGroup));
+                        }
+                        for sheet in document.sheets() {
+                            if icons::entry(
+                                ui,
+                                icons::Icon::Drawing,
+                                &sheet.specification.title,
+                                false,
+                            )
+                            .clicked()
+                            {
+                                self.open_drawing(Some(sheet.clone()));
+                            }
+                        }
                     });
-                }
             });
-            ui.separator();
-            for sheet in document.sheets() {
-                if ui
-                    .button(format!(
-                        "{} · {}",
-                        text(T::Drawing),
-                        sheet.specification.title
-                    ))
-                    .clicked()
-                {
-                    self.open_drawing(Some(sheet.clone()));
-                }
-            }
-            ui.small(text(T::PrototypeNotice));
-        });
         if let Some(selection) = selection {
             self.current_mut().select(Some(selection));
+        }
+        if let Some(part) = activate {
+            self.current_mut().active_part = Some(part);
+            self.current_mut().sketch_edit = None;
         }
         if let Some(command) = command {
             self.execute(command);
@@ -383,159 +279,193 @@ impl Editor {
         let mut command = None;
         let mut export = false;
         egui::Panel::right("properties")
-            .default_size(255.)
+            .default_size(285.)
+            .min_size(250.)
+            .max_size(420.)
+            .frame(theme::panel_frame())
             .show(ui, |ui| {
-                ui.heading(text(T::Properties));
-                self.measure_controls(ui);
+                ui.label(egui::RichText::new(text(T::Properties)).strong().size(14.));
                 ui.separator();
-                if let Some(part) = part {
-                    if ui
-                        .add_enabled(!busy, egui::Button::new(text(T::EditPart)))
-                        .clicked()
-                    {
-                        self.current_mut().active_part = Some(part);
-                    }
-                    ui.text_edit_singleline(&mut self.current_mut().name_input);
-                    if ui
-                        .add_enabled(
-                            !busy
-                                && (editable_body
-                                    || matches!(selection, Some(Selection::Instance(_)))),
-                            egui::Button::new(text(T::Rename)),
-                        )
-                        .clicked()
-                    {
-                        let name = self.current().name_input.clone();
-                        command = match selection {
-                            Some(Selection::Body { id, .. }) => {
-                                Some(Command::RenameBody { id, name })
-                            }
-                            Some(Selection::Instance(_)) => {
-                                Some(Command::RenamePart { id: part, name })
-                            }
-                            None => None,
-                        };
-                    }
-                } else {
-                    ui.label(text(T::SelectElement));
-                }
-                self.visual_controls(ui, selection);
-                if let Some(Selection::Body { id, .. }) = selection {
-                    if let Some(body) = document.body(id) {
-                        ui.add_enabled_ui(!busy && editable_body, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(text(T::BodyColor));
-                                let mut channels = body
-                                    .color
-                                    .unwrap_or(nator_geometry::RgbColor::NEUTRAL)
-                                    .channels();
-                                if ui.color_edit_button_srgb(&mut channels).changed() {
-                                    command = Some(Command::SetBodyColor {
-                                        id,
-                                        color: Some(nator_geometry::RgbColor::new(channels)),
-                                    });
-                                }
-                            });
-                            if body.color.is_some() && ui.button(text(T::NeutralColor)).clicked() {
-                                command = Some(Command::SetBodyColor { id, color: None });
-                            }
-                        });
+                egui::ScrollArea::vertical()
+                    .id_salt("property_scroll")
+                    .show(ui, |ui| {
+                        egui::CollapsingHeader::new(text(T::MeasureSelection))
+                            .open(self.shell.measure_requested.then_some(true))
+                            .default_open(self.current().picked.is_some())
+                            .show(ui, |ui| self.measure_controls(ui));
+                        self.shell.measure_requested = false;
                         ui.separator();
-                        ui.label(text(T::Dimensions));
-                        for (axis, value) in ["X", "Y", "Z"]
-                            .into_iter()
-                            .zip(body.geometry.mesh().bounds().size())
-                        {
-                            ui.monospace(format!("{axis}  {value:.3}"));
+                        if let Some(part) = part {
+                            if ui
+                                .add_enabled(!busy, egui::Button::new(text(T::EditPart)))
+                                .clicked()
+                            {
+                                self.current_mut().active_part = Some(part);
+                            }
+                            ui.text_edit_singleline(&mut self.current_mut().name_input);
+                            if ui
+                                .add_enabled(
+                                    !busy
+                                        && (editable_body
+                                            || matches!(selection, Some(Selection::Instance(_)))),
+                                    egui::Button::new(text(T::Rename)),
+                                )
+                                .clicked()
+                            {
+                                let name = self.current().name_input.clone();
+                                command = match selection {
+                                    Some(Selection::Body { id, .. }) => {
+                                        Some(Command::RenameBody { id, name })
+                                    }
+                                    Some(Selection::Instance(_)) => {
+                                        Some(Command::RenamePart { id: part, name })
+                                    }
+                                    None => None,
+                                };
+                            }
+                        } else {
+                            ui.add_space(8.);
+                            ui.label(
+                                egui::RichText::new(text(T::SelectionHint)).color(theme::MUTED),
+                            );
+                            ui.add_space(8.);
                         }
-                        ui.label(format!(
-                            "{}: {}",
-                            text(T::Triangles),
-                            body.geometry.mesh().triangles().len()
-                        ));
-                        ui.label(format!(
-                            "{}: {}",
-                            text(T::BoundaryEdges),
-                            body.geometry.topology().boundary_edges
-                        ));
-                        ui.small(text(T::VolumeNotice));
-                    }
-                    if ui
-                        .add_enabled(!busy, egui::Button::new(text(T::Export)))
-                        .clicked()
-                    {
-                        export = true;
-                    }
-                    if ui
-                        .add_enabled(
-                            !busy && editable_body,
-                            egui::Button::new(text(T::DeleteBody)),
-                        )
-                        .clicked()
-                    {
-                        command = Some(Command::RemoveBody { id });
-                    }
-                }
-                if selection.is_some() {
-                    ui.separator();
-                    ui.label(text(T::Position));
-                    ui.add_enabled_ui(!busy && editable_position, |ui| {
-                        ui.horizontal(|ui| {
-                            for value in &mut self.current_mut().position_input {
-                                ui.add(egui::DragValue::new(value).speed(0.1).range(-1e9..=1e9));
-                            }
-                        });
-                        ui.label(text(T::Rotation));
-                        ui.horizontal(|ui| {
-                            for value in &mut self.current_mut().rotation_input {
-                                ui.add(
-                                    egui::DragValue::new(value)
-                                        .speed(1.)
-                                        .range(-3600.0..=3600.0),
+                        egui::CollapsingHeader::new(text(T::VisualControls))
+                            .show(ui, |ui| self.visual_controls(ui, selection));
+                        if let Some(Selection::Body { id, .. }) = selection {
+                            if let Some(body) = document.body(id) {
+                                ui.label(
+                                    egui::RichText::new(text(if body.brep.is_some() {
+                                        T::SolidBody
+                                    } else {
+                                        T::MeshBody
+                                    }))
+                                    .small()
+                                    .color(theme::MUTED),
                                 );
+                                ui.add_enabled_ui(!busy && editable_body, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(text(T::BodyColor));
+                                        let mut channels = body
+                                            .color
+                                            .unwrap_or(nator_geometry::RgbColor::NEUTRAL)
+                                            .channels();
+                                        if ui.color_edit_button_srgb(&mut channels).changed() {
+                                            command = Some(Command::SetBodyColor {
+                                                id,
+                                                color: Some(nator_geometry::RgbColor::new(
+                                                    channels,
+                                                )),
+                                            });
+                                        }
+                                    });
+                                    if body.color.is_some()
+                                        && ui.button(text(T::NeutralColor)).clicked()
+                                    {
+                                        command = Some(Command::SetBodyColor { id, color: None });
+                                    }
+                                });
+                                ui.separator();
+                                ui.label(text(T::Dimensions));
+                                for (axis, value) in ["X", "Y", "Z"]
+                                    .into_iter()
+                                    .zip(body.geometry.mesh().bounds().size())
+                                {
+                                    ui.monospace(format!("{axis}  {value:.3}"));
+                                }
+                                ui.label(format!(
+                                    "{}: {}",
+                                    text(T::Triangles),
+                                    body.geometry.mesh().triangles().len()
+                                ));
+                                ui.label(format!(
+                                    "{}: {}",
+                                    text(T::BoundaryEdges),
+                                    body.geometry.topology().boundary_edges
+                                ));
+                                ui.small(text(T::VolumeNotice));
                             }
-                        });
-                        if ui.button(text(T::Apply)).clicked() {
-                            match Placement::new(
-                                self.current().position_input,
-                                self.current().rotation_input.map(f64::to_radians),
-                            ) {
-                                Ok(placement) => {
-                                    command = match selection {
-                                        Some(Selection::Body { id, .. }) => {
-                                            Some(Command::MoveBody { id, placement })
+                            if ui
+                                .add_enabled(!busy, egui::Button::new(text(T::Export)))
+                                .clicked()
+                            {
+                                export = true;
+                            }
+                            if ui
+                                .add_enabled(
+                                    !busy && editable_body,
+                                    egui::Button::new(text(T::DeleteBody)),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::RemoveBody { id });
+                            }
+                        }
+                        if selection.is_some() {
+                            ui.separator();
+                            ui.label(text(T::Position));
+                            ui.add_enabled_ui(!busy && editable_position, |ui| {
+                                ui.horizontal(|ui| {
+                                    for value in &mut self.current_mut().position_input {
+                                        ui.add(
+                                            egui::DragValue::new(value)
+                                                .speed(0.1)
+                                                .range(-1e9..=1e9),
+                                        );
+                                    }
+                                });
+                                ui.label(text(T::Rotation));
+                                ui.horizontal(|ui| {
+                                    for value in &mut self.current_mut().rotation_input {
+                                        ui.add(
+                                            egui::DragValue::new(value)
+                                                .speed(1.)
+                                                .range(-3600.0..=3600.0),
+                                        );
+                                    }
+                                });
+                                if ui.button(text(T::Apply)).clicked() {
+                                    match Placement::new(
+                                        self.current().position_input,
+                                        self.current().rotation_input.map(f64::to_radians),
+                                    ) {
+                                        Ok(placement) => {
+                                            command = match selection {
+                                                Some(Selection::Body { id, .. }) => {
+                                                    Some(Command::MoveBody { id, placement })
+                                                }
+                                                Some(Selection::Instance(id)) => {
+                                                    Some(Command::MoveInstance { id, placement })
+                                                }
+                                                None => None,
+                                            }
                                         }
-                                        Some(Selection::Instance(id)) => {
-                                            Some(Command::MoveInstance { id, placement })
-                                        }
-                                        None => None,
+                                        Err(error) => self.status = error.to_string(),
                                     }
                                 }
-                                Err(error) => self.status = error.to_string(),
+                            });
+                            if editable_body {
+                                ui.small(text(T::BodyPosition));
                             }
                         }
+                        ui.separator();
+                        ui.checkbox(&mut self.viewport.show_triangles, text(T::Triangulation));
+                        ui.checkbox(&mut self.viewport.show_shadows, text(T::Shadows));
+                        ui.label(text(T::Scale));
+                        ui.add(
+                            egui::DragValue::new(&mut self.import_scale)
+                                .range(0.000_001..=1_000_000.)
+                                .speed(0.01),
+                        );
+                        ui.separator();
+                        ui.label(text(T::History));
+                        ui.small(
+                            self.current()
+                                .session
+                                .undo_label()
+                                .unwrap_or(text(T::NoHistory)),
+                        );
                     });
-                    if editable_body {
-                        ui.small(text(T::BodyPosition));
-                    }
-                }
-                ui.separator();
-                ui.checkbox(&mut self.viewport.show_triangles, text(T::Triangulation));
-                ui.checkbox(&mut self.viewport.show_shadows, text(T::Shadows));
-                ui.label(text(T::Scale));
-                ui.add(
-                    egui::DragValue::new(&mut self.import_scale)
-                        .range(0.000_001..=1_000_000.)
-                        .speed(0.01),
-                );
-                ui.separator();
-                ui.label(text(T::History));
-                ui.small(
-                    self.current()
-                        .session
-                        .undo_label()
-                        .unwrap_or(text(T::NoHistory)),
-                );
             });
         if let Some(command) = command {
             self.execute(command);
@@ -549,109 +479,71 @@ impl Editor {
             self.sketch_canvas(ui);
             return;
         }
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button(text(T::Fit)).clicked() {
-                    let [w, h] = self.viewport.size();
-                    self.viewport.camera.fit(f64::from(w) / f64::from(h));
-                }
-                if ui.button(text(T::Iso)).clicked() {
-                    self.viewport
-                        .camera
-                        .set_direction(Camera::default().direction());
-                }
-                if ui.button(text(T::Front)).clicked() {
-                    self.viewport.camera.yaw = -std::f64::consts::FRAC_PI_2;
-                    self.viewport.camera.pitch = 0.;
-                }
-                if ui.button(text(T::Top)).clicked() {
-                    self.viewport.camera.yaw = -std::f64::consts::FRAC_PI_2;
-                    self.viewport.camera.pitch = std::f64::consts::FRAC_PI_2;
-                }
-                if ui.button(text(T::Side)).clicked() {
-                    self.viewport.camera.yaw = 0.;
-                    self.viewport.camera.pitch = 0.;
-                }
-                egui::ComboBox::from_id_salt("camera_projection")
-                    .selected_text(text(match self.viewport.camera.projection {
-                        nator_renderer::Projection::Orthographic => T::Orthographic,
-                        nator_renderer::Projection::Perspective => T::Perspective,
-                    }))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.viewport.camera.projection,
-                            nator_renderer::Projection::Orthographic,
-                            text(T::Orthographic),
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(theme::CANVAS).inner_margin(8))
+            .show(ui, |ui| {
+                self.camera_bar(ui);
+                let size = ui.available_size().max(egui::vec2(1., 1.));
+                let pixels = ui.ctx().pixels_per_point();
+                if self.viewport.resize(
+                    &self.gpu.device,
+                    [(size.x * pixels) as u32, (size.y * pixels) as u32],
+                ) {
+                    self.gpu
+                        .renderer
+                        .write()
+                        .update_egui_texture_from_wgpu_texture(
+                            &self.gpu.device,
+                            self.viewport.view(),
+                            wgpu::FilterMode::Linear,
+                            self.texture,
                         );
-                        ui.selectable_value(
-                            &mut self.viewport.camera.projection,
-                            nator_renderer::Projection::Perspective,
-                            text(T::Perspective),
-                        );
-                    })
-                    .response
-                    .on_hover_text(text(T::Projection));
-            });
-            let size = ui.available_size().max(egui::vec2(1., 1.));
-            let pixels = ui.ctx().pixels_per_point();
-            if self.viewport.resize(
-                &self.gpu.device,
-                [(size.x * pixels) as u32, (size.y * pixels) as u32],
-            ) {
-                self.gpu
-                    .renderer
-                    .write()
-                    .update_egui_texture_from_wgpu_texture(
-                        &self.gpu.device,
-                        self.viewport.view(),
-                        wgpu::FilterMode::Linear,
-                        self.texture,
-                    );
-            }
-            let response = ui.add(
-                egui::Image::from_texture((self.texture, size))
-                    .sense(egui::Sense::click_and_drag()),
-            );
-            self.viewport_actions(ui, &response);
-            if response.dragged_by(egui::PointerButton::Middle) {
-                let (delta, shift) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
-                if shift {
-                    self.viewport
-                        .camera
-                        .orbit([f64::from(delta.x), f64::from(delta.y)]);
-                } else {
-                    self.viewport
-                        .camera
-                        .pan([f64::from(delta.x), f64::from(delta.y)], f64::from(size.y));
                 }
-            }
-            if response.hovered() {
-                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-                if let Some(position) = response.hover_pos().filter(|_| scroll != 0.) {
-                    self.viewport.camera.zoom_at(
-                        f64::from(scroll),
-                        [
-                            f64::from((position.x - response.rect.center().x) / size.x * 2.),
-                            f64::from((response.rect.center().y - position.y) / size.y * 2.),
-                        ],
-                        f64::from(size.x / size.y),
-                    );
-                }
-            }
-            self.viewport.render(&self.gpu.device, &self.gpu.queue);
-            if self.scene.is_none() && !self.busy() {
-                ui.painter().text(
-                    response.rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    text(T::EmptyScene),
-                    egui::FontId::proportional(14.),
-                    egui::Color32::LIGHT_GRAY,
+                let response = ui.add(
+                    egui::Image::from_texture((self.texture, size))
+                        .sense(egui::Sense::click_and_drag()),
                 );
-            }
-            self.navigation_cube(ui, response.rect);
-            self.measure_overlay(ui, response.rect);
-            self.current_mut().camera = self.viewport.camera.clone();
-        });
+                response.clone().on_hover_text(text(T::Navigation));
+                self.viewport_actions(ui, &response);
+                if response.dragged_by(egui::PointerButton::Middle) {
+                    let (delta, shift) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
+                    if shift {
+                        self.viewport
+                            .camera
+                            .orbit([f64::from(delta.x), f64::from(delta.y)]);
+                    } else {
+                        self.viewport
+                            .camera
+                            .pan([f64::from(delta.x), f64::from(delta.y)], f64::from(size.y));
+                    }
+                }
+                if response.hovered() {
+                    let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                    if let Some(position) = response.hover_pos().filter(|_| scroll != 0.) {
+                        self.viewport.camera.zoom_at(
+                            f64::from(scroll),
+                            [
+                                f64::from((position.x - response.rect.center().x) / size.x * 2.),
+                                f64::from((response.rect.center().y - position.y) / size.y * 2.),
+                            ],
+                            f64::from(size.x / size.y),
+                        );
+                    }
+                }
+                self.viewport.render(&self.gpu.device, &self.gpu.queue);
+                if self.scene.is_none() && !self.busy() {
+                    ui.painter().text(
+                        response.rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        text(T::EmptyScene),
+                        egui::FontId::proportional(14.),
+                        theme::MUTED,
+                    );
+                }
+                self.navigation_cube(ui, response.rect);
+                self.measure_overlay(ui, response.rect);
+                self.current_mut().camera = self.viewport.camera.clone();
+            });
     }
     pub(super) fn dialogs(&mut self, context: &egui::Context) {
         if let Some(id) = self.pending_close {

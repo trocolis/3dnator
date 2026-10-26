@@ -388,6 +388,8 @@ pub struct Viewport {
     pub show_edges: bool,
     /// Sombras opcionais (iluminação direcional com faces opostas sombreadas e sombra de apoio); desligadas por padrão.
     pub show_shadows: bool,
+    /// Fundo de apresentação; não participa da cena nem da geometria.
+    background: [f32; 4],
     color: wgpu::Texture,
     view: wgpu::TextureView,
     depth: wgpu::TextureView,
@@ -406,8 +408,8 @@ pub struct Viewport {
     shadow_pipeline: wgpu::RenderPipeline,
 }
 
-/// Uniforme do shader: matriz 4×4 da câmera seguida de quatro opções de exibição.
-const UNIFORM_BYTES: u64 = 80;
+/// Uniforme do shader: matriz 4×4, quatro opções e cor do fundo (alinhamento de 16 bytes).
+const UNIFORM_BYTES: u64 = 96;
 
 fn float_bytes(values: impl IntoIterator<Item = f32>) -> Vec<u8> {
     values.into_iter().flat_map(f32::to_le_bytes).collect()
@@ -580,6 +582,7 @@ impl Viewport {
             show_triangles: false,
             show_edges: true,
             show_shadows: false,
+            background: [0.075, 0.09, 0.11, 1.],
             color,
             view,
             depth,
@@ -597,6 +600,12 @@ impl Viewport {
         };
         viewport.set_mesh(device, mesh)?;
         Ok(viewport)
+    }
+
+    /// Cor sRGB do fundo; a interface pode escolher seu tema sem alterar os corpos.
+    pub fn set_background(&mut self, color: RgbColor) {
+        let [r, g, b] = color.channels().map(|v| f32::from(v) / 255.);
+        self.background = [r, g, b, 1.];
     }
 
     pub fn set_mesh(&mut self, device: &wgpu::Device, mesh: &Mesh) -> Result<(), String> {
@@ -689,7 +698,7 @@ impl Viewport {
         queue.write_buffer(
             &self.uniform,
             0,
-            &float_bytes(matrix.into_iter().chain(options)),
+            &float_bytes(matrix.into_iter().chain(options).chain(self.background)),
         );
         let mut encoder = device.create_command_encoder(&Default::default());
         {
@@ -701,10 +710,10 @@ impl Viewport {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.075,
-                            g: 0.09,
-                            b: 0.11,
-                            a: 1.,
+                            r: f64::from(self.background[0]),
+                            g: f64::from(self.background[1]),
+                            b: f64::from(self.background[2]),
+                            a: f64::from(self.background[3]),
                         }),
                         store: wgpu::StoreOp::Store,
                     },

@@ -91,12 +91,13 @@ impl Editor {
             .iter()
             .filter(|i| i.parent == Some(parent))
         {
-            if ui
-                .selectable_label(
-                    self.current().selection == Some(Selection::Instance(child.id)),
-                    format!("{} · {}", child.name, text(T::Assembly)),
-                )
-                .clicked()
+            if icons::entry(
+                ui,
+                icons::Icon::Cube,
+                &child.name,
+                self.current().selection == Some(Selection::Instance(child.id)),
+            )
+            .clicked()
             {
                 *selection = Some(Selection::Instance(child.id));
             }
@@ -107,15 +108,19 @@ impl Editor {
                             part: part.id,
                             id: b.id,
                         };
-                        if ui
-                            .selectable_label(self.current().selection == Some(target), &b.name)
-                            .clicked()
+                        if icons::entry(
+                            ui,
+                            icons::Icon::Cube,
+                            &b.name,
+                            self.current().selection == Some(target),
+                        )
+                        .clicked()
                         {
                             *selection = Some(target);
                         }
                     }
                     for s in &part.sketches {
-                        if ui.button(&s.sketch.name).clicked() {
+                        if icons::entry(ui, icons::Icon::Sketch, &s.sketch.name, false).clicked() {
                             self.begin_sketch(part.id, s.id);
                         }
                     }

@@ -4,6 +4,8 @@ Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para
 
 O projeto é de código aberto, sob a [licença MIT](LICENSE) para o código próprio. Dependências e recursos de terceiros mantêm suas respectivas licenças. Ainda não há repositório remoto publicado.
 
+A interface organiza ferramentas por tarefa, com ícones vetoriais, busca pela tecla **S**, aba contextual de rascunho e painéis recolhíveis. Guia de uso e organização visual em [docs/INTERFACE.md](docs/INTERFACE.md). O refinamento no Linux é a prioridade atual; testes Windows estão adiados e disponíveis por execução manual da CI.
+
 ## Executar o protótipo
 
 ```sh

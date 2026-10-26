@@ -4,6 +4,8 @@ Sequência aprovada de entregas. Este documento descreve trabalho planejado, nã
 
 ## Situação atual
 
+**Prioridade atual (26/10/2026):** refinar as funcionalidades e a interface no Linux. A validação Windows foi adiada por orientação do usuário; permanece disponível por execução manual da CI com `validate_windows`, sem bloquear os incrementos de interface. O suporte multiplataforma continua sendo uma meta do projeto.
+
 Incremento 0.3.0, em 26/10/2026. As cinco etapas têm seus itens principais implementados e cobertos por testes e ensaios de linha de comando, com o núcleo OCCT 7.9.3 validado no Linux. **O plano ainda não tem aceite completo**, pois a base técnica exige validações em outras plataformas, no hardware de referência e com interação real. O critério de entrega da etapa 2 é verificado por `--validate-part`. A [auditoria do plano](docs/PLAN_AUDIT.md) registra evidências e critérios restantes; detalhes em [docs/VALIDATION.md](docs/VALIDATION.md).
 
 Pendências conhecidas, por etapa:
