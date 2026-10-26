@@ -6,8 +6,8 @@
 //! existente, a referência gravada é mantida enquanto o usuário não escolher outra.
 use super::*;
 use nator_document::features::{
-    BooleanMode, EdgeRef, FaceRef, Feature, HoleHeadSpec, HoleSpec, LinearAxis, Operation,
-    PatternLayout, RegionRef, ThreadSpec, signature,
+    BooleanMode, Combine, EdgeRef, FaceRef, Feature, HoleHeadSpec, HoleSpec, LinearAxis, Operation,
+    PatternLayout, RegionRef, ThreadSpec, UntilFace, signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
 
@@ -208,6 +208,12 @@ pub(super) struct Draft {
     chamfer_angle: Option<String>,
     /// Casca com paredes para fora do sólido original.
     outward: bool,
+    /// Resultado da extrusão: 0 novo corpo, 1 união, 2 corte, 3 interseção com `combine_target`.
+    combine: usize,
+    combine_target: Option<BodyId>,
+    /// Face limite da extrusão (corpo e face), escolhida por clique.
+    until: Option<(BodyId, FaceRef)>,
+    picking_until: bool,
     from: String,
     to: String,
     angle: String,
@@ -235,6 +241,10 @@ impl Draft {
             appending: false,
             chamfer_angle: None,
             outward: false,
+            combine: 0,
+            combine_target: None,
+            until: None,
+            picking_until: false,
             from: "0 mm".into(),
             to: "10 mm".into(),
             angle: "360 deg".into(),
@@ -257,11 +267,22 @@ impl Draft {
                 region,
                 from,
                 to,
+                combine,
+                until,
             } => {
                 d.sketch = Some(sketch);
                 d.kept_region = Some(region);
                 d.from = from;
                 d.to = to;
+                if let Some(combine) = combine {
+                    d.combine = match combine.mode {
+                        BooleanMode::Join => 1,
+                        BooleanMode::Cut => 2,
+                        BooleanMode::Intersect => 3,
+                    };
+                    d.combine_target = Some(combine.target);
+                }
+                d.until = until.map(|limit| (limit.body, limit.face));
             }
             Operation::Revolve {
                 sketch,
@@ -472,6 +493,9 @@ fn hole_points(sketch: &Sketch) -> Vec<u64> {
 impl Draft {
     /// Tipo de elemento que o próximo clique deve selecionar, se o diálogo estiver esperando.
     pub(super) fn awaiting(&self) -> Option<Awaiting> {
+        if self.picking_until && self.tool == Tool::Extrude {
+            return Some(Awaiting::Face);
+        }
         let waiting = self.selecting || self.appending;
         match self.tool {
             Tool::Fillet | Tool::Chamfer if waiting => Some(Awaiting::Edge),
@@ -484,6 +508,13 @@ impl Draft {
     }
     /// Aplica uma seleção gráfica: o corpo clicado passa a ser a base da operação.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
+        if self.picking_until {
+            if let Kept::Face(face) = kept {
+                self.until = Some((body, face));
+            }
+            self.picking_until = false;
+            return;
+        }
         if self.appending && self.base == Some(body) {
             self.extra_topology.push(kept);
         } else {
@@ -592,6 +623,21 @@ impl Draft {
                 region,
                 from: self.from.clone(),
                 to: self.to.clone(),
+                combine: self
+                    .combine_target
+                    .filter(|_| self.combine > 0)
+                    .map(|target| Combine {
+                        target,
+                        mode: match self.combine {
+                            1 => BooleanMode::Join,
+                            2 => BooleanMode::Cut,
+                            _ => BooleanMode::Intersect,
+                        },
+                    }),
+                until: self
+                    .until
+                    .clone()
+                    .map(|(body, face)| UntilFace { body, face }),
             },
             Tool::Revolve => {
                 let plane = record.map(|r| r.sketch.plane).unwrap_or_default();
@@ -796,10 +842,7 @@ impl Editor {
                     region_controls(ui, &mut d, &regions);
                 }
                 match d.tool {
-                    Tool::Extrude => {
-                        labeled_text(ui, T::StartLimit, &mut d.from);
-                        labeled_text(ui, T::EndLimit, &mut d.to);
-                    }
+                    Tool::Extrude => extrude_controls(ui, &mut d, &part),
                     Tool::Revolve => {
                         revolve_controls(ui, &mut d, record.map(|r| &r.sketch));
                         labeled_text(ui, T::Angle, &mut d.angle);
@@ -1004,6 +1047,58 @@ fn region_controls(
         _ => {
             ui.colored_label(egui::Color32::YELLOW, text(T::NoRegions));
         }
+    }
+}
+
+/// Limites e resultado da extrusão: distância ou face limite, novo corpo ou combinação.
+fn extrude_controls(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    labeled_text(ui, T::StartLimit, &mut d.from);
+    let mut until = d.until.is_some() || d.picking_until;
+    if ui.checkbox(&mut until, text(T::UntilFace)).changed() {
+        d.picking_until = until;
+        if !until {
+            d.until = None;
+        }
+    }
+    match (&d.until, d.picking_until) {
+        (_, true) => {
+            ui.colored_label(egui::Color32::LIGHT_BLUE, text(T::PickingTopology));
+        }
+        (Some((_, face)), false) => {
+            ui.horizontal(|ui| {
+                ui.label(describe_topology(&Kept::Face(face.clone())));
+                if ui.button(text(T::PickInViewport)).clicked() {
+                    d.picking_until = true;
+                }
+            });
+        }
+        (None, false) => labeled_text(ui, T::EndLimit, &mut d.to),
+    }
+    let results = [T::NewBody, T::Join, T::Cut, T::Intersect];
+    egui::ComboBox::from_label(text(T::ExtrudeResult))
+        .selected_text(text(results[d.combine]))
+        .show_ui(ui, |ui| {
+            for (i, label) in results.into_iter().enumerate() {
+                ui.selectable_value(&mut d.combine, i, text(label));
+            }
+        });
+    if d.combine > 0 {
+        egui::ComboBox::from_label(text(T::SourceBody))
+            .selected_text(
+                d.combine_target
+                    .and_then(|id| part.bodies.iter().find(|b| b.id == id))
+                    .map(|b| b.name.as_str())
+                    .unwrap_or("—"),
+            )
+            .show_ui(ui, |ui| {
+                for b in part
+                    .bodies
+                    .iter()
+                    .filter(|b| b.brep.is_some() && Some(b.id) != d.output)
+                {
+                    ui.selectable_value(&mut d.combine_target, Some(b.id), &b.name);
+                }
+            });
     }
 }
 

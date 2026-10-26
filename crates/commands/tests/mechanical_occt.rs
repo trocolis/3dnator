@@ -73,6 +73,8 @@ fn plate(session: &mut Session) -> Result<(PartId, BodyId)> {
             region: RegionRef::Index(0),
             from: "0 mm".into(),
             to: "espessura".into(),
+            combine: None,
+            until: None,
         },
     )?;
     Ok((part, body))
@@ -440,5 +442,113 @@ fn stl_export_quality_comes_from_the_precise_geometry() -> Result<()> {
     // A malha poligonal do furo remove menos material que o cilindro exato.
     assert!((fine.signed_volume() - exact).abs() < (coarse.signed_volume() - exact).abs());
     assert!((fine.signed_volume() - exact).abs() / exact < 1e-4);
+    Ok(())
+}
+
+/// Extrusão até uma face de outro corpo da peça, unida à placa, e rebaixo por corte direto.
+/// A extrusão acompanha a face limite quando a cota dela muda.
+#[test]
+fn extrusion_until_a_face_and_direct_combination() -> Result<()> {
+    use nator_document::features::{BooleanMode, Combine, FaceRef, UntilFace, body_owner};
+    let mut session = Session::new(Document::new("Ressalto")?)?;
+    let (part, plate_body) = plate(&mut session)?;
+    session.execute(Command::SetParameter {
+        part,
+        name: "altura".into(),
+        expression: Some("20 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    let mut tower = Sketch::new("Torre", Plane::xy());
+    tower.add_rectangle([100., 0.], [120., 20.], false)?;
+    let (_, tower_sketch) = sketch(&mut session, Some(part), tower)?;
+    let block = feature(
+        &mut session,
+        part,
+        "Torre",
+        Operation::Extrude {
+            sketch: tower_sketch,
+            region: RegionRef::Index(0),
+            from: "0 mm".into(),
+            to: "altura".into(),
+            combine: None,
+            until: None,
+        },
+    )?;
+    let mut boss = Sketch::new("Ressalto", Plane::xy());
+    boss.add_circle([30., 20.], 5., false)?;
+    let (_, boss_sketch) = sketch(&mut session, Some(part), boss)?;
+    let joined = feature(
+        &mut session,
+        part,
+        "Ressalto",
+        Operation::Extrude {
+            sketch: boss_sketch,
+            region: RegionRef::Index(0),
+            from: "espessura".into(),
+            to: "1 mm".into(),
+            combine: Some(Combine {
+                target: plate_body,
+                mode: BooleanMode::Join,
+            }),
+            until: Some(UntilFace {
+                body: block,
+                face: FaceRef::Named(format!("{}:end", body_owner(block))),
+            }),
+        },
+    )?;
+    let expected = |t: f64, h: f64| 60. * 40. * t + PI * 25. * (h - t);
+    assert!((volume(&session, joined)? - expected(8., 20.)).abs() < 1e-3);
+    // A placa foi consumida pela união; a torre só foi consultada e continua visível.
+    let doc = session.document();
+    assert!(!doc.body(plate_body).ok_or("Placa ausente")?.visible);
+    assert!(doc.body(block).ok_or("Torre ausente")?.visible);
+    for (name, value) in [("altura", "30 mm"), ("espessura", "10 mm")] {
+        session.execute(Command::SetParameter {
+            part,
+            name: name.into(),
+            expression: Some(value.into()),
+            dimension: Dimension::Length,
+        })?;
+    }
+    assert!((volume(&session, joined)? - expected(10., 30.)).abs() < 1e-3);
+    // A torre é referência do ressalto: removê-la é recusado.
+    let tower_feature = session
+        .document()
+        .part(part)
+        .ok_or("Peça ausente")?
+        .features
+        .iter()
+        .find(|f| f.output == block)
+        .map(|f| f.output)
+        .ok_or("Operação da torre ausente")?;
+    assert!(
+        session
+            .execute(Command::RemoveFeature {
+                part,
+                output: tower_feature
+            })
+            .is_err()
+    );
+    // Rebaixo de 3 mm cortado diretamente do resultado.
+    let mut pocket = Sketch::new("Rebaixo", Plane::xy());
+    pocket.add_rectangle([5., 5.], [15., 15.], false)?;
+    let (_, pocket_sketch) = sketch(&mut session, Some(part), pocket)?;
+    let cut = feature(
+        &mut session,
+        part,
+        "Rebaixo",
+        Operation::Extrude {
+            sketch: pocket_sketch,
+            region: RegionRef::Index(0),
+            from: "espessura - 3 mm".into(),
+            to: "espessura".into(),
+            combine: Some(Combine {
+                target: joined,
+                mode: BooleanMode::Cut,
+            }),
+            until: None,
+        },
+    )?;
+    assert!((volume(&session, cut)? - (expected(10., 30.) - 300.)).abs() < 1e-3);
     Ok(())
 }

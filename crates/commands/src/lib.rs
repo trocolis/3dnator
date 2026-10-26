@@ -373,7 +373,7 @@ impl Command {
                 if part
                     .features
                     .iter()
-                    .any(|f| f.output == id || f.operation.inputs().contains(&id))
+                    .any(|f| f.output == id || f.operation.references().contains(&id))
                 {
                     return Err(DocumentError(
                         "O corpo participa do histórico; remova a operação correspondente.".into(),

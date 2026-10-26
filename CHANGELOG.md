@@ -7,6 +7,7 @@
 - Rascunhos 2D com linhas, retângulos, círculos e arcos, geometria de construção, cotas de referência, aparar, estender, offset, espelhamento e refinamento de cantos; solver com indicação de graus de liberdade, conflitos e redundâncias.
 - Parâmetros nomeados por peça com expressões e unidades, ligados às cotas dos rascunhos.
 - Histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca e transformação, construídos pelo OCCT fora da thread da interface.
+- Extrusão com resultado direto (novo corpo, união, corte ou interseção com um corpo da peça) e limite até uma face plana de outro corpo da mesma peça, que acompanha as cotas dessa face.
 - Montagem com subpeças, clones independentes e grupos; folhas técnicas associadas com vistas, cotas, corte e exportação PNG/PDF.
 
 ### Construção mecânica

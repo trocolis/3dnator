@@ -145,6 +145,8 @@ pub fn build() -> Result<ReferencePart> {
             region: RegionRef::Index(0),
             from: "0 mm".into(),
             to: "largura".into(),
+            combine: None,
+            until: None,
         },
     })?)?;
     let mut hole = Sketch::new("Furo", Plane::xy());
@@ -166,6 +168,8 @@ pub fn build() -> Result<ReferencePart> {
             region: RegionRef::Index(0),
             from: "-1 mm".into(),
             to: "espessura + 1 mm".into(),
+            combine: None,
+            until: None,
         },
     })?)?;
     let drilled = created(session.execute(Command::AddFeature {

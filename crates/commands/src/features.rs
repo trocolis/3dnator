@@ -1,7 +1,9 @@
 //! Construção ocorre no worker. Somente bytes B-rep, nomes de faces e malhas chegam ao
 //! documento; objetos nativos do núcleo nunca saem da thread que os criou.
 #[cfg(feature = "occt")]
-use nator_document::features::{BooleanMode, EdgeRef, FaceRef, RegionRef, body_owner, signature};
+use nator_document::features::{
+    BooleanMode, EdgeRef, FaceRef, RegionRef, UntilFace, body_owner, signature,
+};
 #[cfg(feature = "occt")]
 use nator_document::parameters::Dimension;
 use nator_document::{BodyId, Document, DocumentError, MeshAsset, PartId, features::Operation};
@@ -88,6 +90,43 @@ fn region(
         return Err(DocumentError("Região do rascunho inexistente.".into()));
     }
     Ok(regions.swap_remove(index))
+}
+
+#[cfg(feature = "occt")]
+fn boolean_mode(mode: BooleanMode) -> u32 {
+    match mode {
+        BooleanMode::Join => 0,
+        BooleanMode::Cut => 1,
+        BooleanMode::Intersect => 2,
+    }
+}
+
+/// Distância ao longo da normal do rascunho, a partir do plano do rascunho, até o plano da
+/// face limite. Só faces planas e não paralelas à direção da extrusão servem de limite.
+#[cfg(feature = "occt")]
+fn until_distance(
+    doc: &Document,
+    part: PartId,
+    sketch: &nator_sketch::Sketch,
+    limit: &UntilFace,
+) -> Result<f64, DocumentError> {
+    let (solid, bytes) = source(doc, part, limit.body)?;
+    let index = face_index(&solid, &bytes, &limit.face)?;
+    let nator_kernel::FaceKind::Plane { normal, offset } =
+        solid.face_measure(index).map_err(error)?.kind
+    else {
+        return Err(DocumentError(
+            "A face limite da extrusão deve ser plana.".into(),
+        ));
+    };
+    let direction = sketch.plane.normal();
+    let denominator = nator_geometry::dot(normal, direction);
+    if denominator.abs() < 1e-9 {
+        return Err(DocumentError(
+            "A face limite é paralela à direção da extrusão.".into(),
+        ));
+    }
+    Ok((offset - nator_geometry::dot(normal, sketch.plane.origin)) / denominator)
 }
 
 /// Eixo de revolução a partir de uma linha do rascunho, em coordenadas da peça.
@@ -203,11 +242,22 @@ pub(super) fn normalize(
             region,
             from,
             to,
+            combine,
+            until,
         } => Operation::Extrude {
             region: stable_region(sketch, region)?,
+            until: until
+                .map(|limit| {
+                    Ok::<_, DocumentError>(UntilFace {
+                        face: stable_face(doc, part, limit.body, limit.face)?,
+                        body: limit.body,
+                    })
+                })
+                .transpose()?,
             sketch,
             from,
             to,
+            combine,
         },
         Operation::Revolve {
             sketch,
@@ -338,16 +388,25 @@ pub(super) fn construct(
             region: reference,
             from,
             to,
+            combine,
+            until,
         } => {
             let sketch = sketch_of(doc, part, *sketch)?;
-            Solid::extrude(
-                sketch,
-                &region(sketch, reference)?,
-                value(from)?,
-                value(to)?,
-                &owner,
-            )
-            .map_err(error)?
+            let start = value(from)?;
+            let end = match until {
+                Some(limit) => until_distance(doc, part, sketch, limit)?,
+                None => value(to)?,
+            };
+            let extrusion = Solid::extrude(sketch, &region(sketch, reference)?, start, end, &owner)
+                .map_err(error)?;
+            match combine {
+                // O corpo existente é a base: o corte remove a extrusão dele.
+                Some(combine) => source(doc, part, combine.target)?
+                    .0
+                    .boolean(&extrusion, boolean_mode(combine.mode), &owner)
+                    .map_err(error)?,
+                None => extrusion,
+            }
         }
         Operation::Revolve {
             sketch,
@@ -374,15 +433,7 @@ pub(super) fn construct(
         }
         Operation::Boolean { base, tool, mode } => source(doc, part, *base)?
             .0
-            .boolean(
-                &source(doc, part, *tool)?.0,
-                match mode {
-                    BooleanMode::Join => 0,
-                    BooleanMode::Cut => 1,
-                    BooleanMode::Intersect => 2,
-                },
-                &owner,
-            )
+            .boolean(&source(doc, part, *tool)?.0, boolean_mode(*mode), &owner)
             .map_err(error)?,
         Operation::Fillet {
             base,
@@ -537,7 +588,7 @@ pub(super) fn remove(doc: &mut Document, part: PartId, body: BodyId) -> Result<(
     if piece
         .features
         .iter()
-        .any(|f| f.operation.inputs().contains(&body))
+        .any(|f| f.operation.references().contains(&body))
     {
         return Err(DocumentError(
             "Remova primeiro as operações que dependem deste resultado.".into(),

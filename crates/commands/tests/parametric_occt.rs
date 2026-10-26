@@ -140,6 +140,8 @@ fn build() -> Result<(Session, PartId, SketchId, BodyId, BodyId, [u64; 2])> {
             region: RegionRef::Index(0),
             from: "0 mm".into(),
             to: "20 mm".into(),
+            combine: None,
+            until: None,
         },
     })?)?;
     let owner = body_owner(extrusion);

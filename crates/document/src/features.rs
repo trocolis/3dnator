@@ -48,7 +48,14 @@ pub enum Operation {
         sketch: SketchId,
         region: RegionRef,
         from: String,
+        /// Fim da extrusão; ignorado quando `until` define uma face limite.
         to: String,
+        /// Une, corta ou intersecta o resultado com um corpo existente, que é consumido.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        combine: Option<Combine>,
+        /// Termina no plano de uma face plana de outro corpo da mesma peça.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<UntilFace>,
     },
     Revolve {
         sketch: SketchId,
@@ -185,15 +192,36 @@ pub enum PatternLayout {
 
 /// Limite de ocorrências por padrão e de furos por operação neste protótipo.
 pub const MAX_OCCURRENCES: usize = 1000;
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// Combinação do resultado de uma extrusão com um corpo existente da peça.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Combine {
+    pub target: BodyId,
+    pub mode: BooleanMode,
+}
+
+/// Limite de extrusão por uma face plana de um corpo da mesma peça. A distância é recalculada
+/// a cada recálculo, então a extrusão acompanha a face; faces de outras peças não são aceitas,
+/// para manter as peças independentes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UntilFace {
+    pub body: BodyId,
+    pub face: FaceRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BooleanMode {
     Join,
     Cut,
     Intersect,
 }
 impl Operation {
+    /// Corpos consumidos pela operação: ficam ocultos enquanto ela existir.
     pub fn inputs(&self) -> Vec<BodyId> {
         match self {
+            Self::Extrude {
+                combine: Some(combine),
+                ..
+            } => vec![combine.target],
             Self::Boolean { base, tool, .. } => vec![*base, *tool],
             Self::Fillet { base, .. }
             | Self::Chamfer { base, .. }
@@ -205,6 +233,18 @@ impl Operation {
             | Self::Split { base, .. } => vec![*base],
             _ => Vec::new(),
         }
+    }
+    /// Todos os corpos de que a operação depende (consumidos ou apenas consultados), para a
+    /// ordem do histórico e para impedir a exclusão de um corpo ainda referenciado.
+    pub fn references(&self) -> Vec<BodyId> {
+        let mut bodies = self.inputs();
+        if let Self::Extrude {
+            until: Some(limit), ..
+        } = self
+        {
+            bodies.push(limit.body);
+        }
+        bodies
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
@@ -258,7 +298,24 @@ impl Feature {
             Ok(())
         };
         match &mut self.operation {
-            Operation::Extrude { sketch: id, .. } | Operation::Revolve { sketch: id, .. } => {
+            Operation::Extrude {
+                sketch: id,
+                combine,
+                until,
+                ..
+            } => {
+                sketch(id)?;
+                if let Some(combine) = combine {
+                    body(&mut combine.target)?;
+                }
+                if let Some(limit) = until {
+                    body(&mut limit.body)?;
+                    if let FaceRef::Named(name) = &mut limit.face {
+                        *name = remap_face_name(name, bodies);
+                    }
+                }
+            }
+            Operation::Revolve { sketch: id, .. } => {
                 sketch(id)?;
             }
             Operation::Hole {
@@ -344,7 +401,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
             .iter()
             .any(|b| b.id == f.output && b.brep.is_some())
             || ready.contains(&f.output)
-            || f.operation.inputs().iter().any(|b| !ready.contains(b))
+            || f.operation.references().iter().any(|b| !ready.contains(b))
             || f.operation
                 .sketch()
                 .is_some_and(|id| !part.sketches.iter().any(|s| s.id == id))
@@ -356,15 +413,29 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
         use parameters::Dimension::{Angle, Length};
         match &f.operation {
             Operation::Extrude {
-                from, to, region, ..
+                from,
+                to,
+                region,
+                until,
+                ..
             } => {
                 validate_region(region)?;
                 let a = part.parameters.evaluate(from, Length)?;
-                let b = part.parameters.evaluate(to, Length)?;
-                if (a - b).abs() < 1e-7 {
-                    return Err(DocumentError(
-                        "Extrusão deve ter comprimento não nulo.".into(),
-                    ));
+                match until {
+                    // Com face limite, o comprimento só é conhecido no recálculo.
+                    Some(limit) => {
+                        if let FaceRef::Named(name) = &limit.face {
+                            validate_face_name(name)?;
+                        }
+                    }
+                    None => {
+                        let b = part.parameters.evaluate(to, Length)?;
+                        if (a - b).abs() < 1e-7 {
+                            return Err(DocumentError(
+                                "Extrusão deve ter comprimento não nulo.".into(),
+                            ));
+                        }
+                    }
                 }
             }
             Operation::Revolve {
