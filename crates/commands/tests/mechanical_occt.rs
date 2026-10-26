@@ -118,6 +118,13 @@ fn counterbored_holes_follow_sketch_points_and_parameters() -> Result<()> {
             },
         },
     )?;
+    assert!(
+        !session
+            .document()
+            .sketch(holes_sketch)
+            .ok_or("Rascunho ausente")?
+            .visible
+    );
     let removed = |t: f64| 2. * (PI * 5.5 * 5.5 * 4. + PI * 3.3 * 3.3 * (t - 4.));
     assert!((volume(&session, drilled)? - (60. * 40. * 8. - removed(8.))).abs() < 1e-3);
     // Engrossar a placa recalcula os furos passantes pela nova espessura.
@@ -213,6 +220,13 @@ fn pattern_mirror_split_and_revolve_about_a_sketch_line() -> Result<()> {
             axis_line: Some(axis),
         },
     )?;
+    assert!(
+        !session
+            .document()
+            .sketch(ring_sketch)
+            .ok_or("Rascunho ausente")?
+            .visible
+    );
     let expected = PI * (15. * 15. - 10. * 10.) * 4.;
     assert!((volume(&session, ring)? - expected).abs() < 1e-3);
     // Deslocar a linha do eixo 5 mm para a esquerda aumenta os raios do anel.

@@ -342,6 +342,14 @@ impl Document {
             .flat_map(|p| &p.sketches)
             .find(|s| s.id == id)
     }
+    /// Visibilidade do rascunho é estado do documento, persistido e reversível.
+    pub fn sketch_mut(&mut self, id: SketchId) -> Result<&mut SketchRecord, DocumentError> {
+        self.parts
+            .iter_mut()
+            .flat_map(|p| &mut p.sketches)
+            .find(|s| s.id == id)
+            .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))
+    }
     pub fn create_part(&mut self, name: String) -> Result<PartId, DocumentError> {
         validate_name(&name)?;
         let id = PartId(self.allocate_id()?);

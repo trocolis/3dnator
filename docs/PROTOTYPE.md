@@ -1,6 +1,6 @@
 # Protótipo 0.3.0 — CAD paramétrico
 
-O refinamento atual organiza a interface por tarefas, com ícones vetoriais, busca por S e painéis recolhíveis. Veja [INTERFACE.md](INTERFACE.md) para navegar na nova disposição e gerar capturas de modelo/rascunho.
+Rascunhos agora são editados sobre o próprio modelo no viewport CAD, com alinhamento da câmera ao plano, seleção de origem/face e visibilidade na árvore. O refinamento atual organiza a interface por tarefas, com ícones vetoriais, busca por S e painéis recolhíveis. Veja [INTERFACE.md](INTERFACE.md) para navegar na nova disposição e gerar capturas de modelo/rascunho.
 
 Este incremento oferece rascunhos com restrições e parâmetros, histórico paramétrico, montagem, folhas técnicas e exportação STEP/STL. Operações de sólidos exigem a feature `occt` e o SDK externo. O histórico paramétrico é salvo no projeto; desfazer/refazer registra as edições da sessão. Pendências conhecidas estão em [ROADMAP.md](../ROADMAP.md).
 
@@ -80,7 +80,7 @@ cargo run -p nator-prototype --locked -- --render-perspective-preview target/pro
 cargo run -p nator-prototype --locked -- --render-project-preview target/project-check/run-001/support.3dnator target/project-check/editor.png
 ```
 
-Os PNGs devem ter destinos novos. As capturas do renderizador verificam superfície, triangulação e transparência na projeção escolhida. A captura da interface carrega o projeto, seleciona seu primeiro corpo e acrescenta uma aba auxiliar vazia apenas para a visualização; se houver rascunho, abre seu editor. Não modifica o projeto de origem nem grava recuperação. Essas capturas não substituem o teste interativo de teclado, mouse ou diálogos do sistema.
+Os PNGs devem ter destinos novos. As capturas do renderizador verificam superfície, triangulação e transparência na projeção escolhida. A captura da interface carrega o projeto, seleciona seu primeiro corpo e acrescenta uma aba auxiliar vazia apenas para a visualização; a captura de modelo preserva os rascunhos visíveis sem abrir a edição. `--render-sketch-preview` abre o primeiro rascunho sobre o modelo no mesmo viewport, alinhando a câmera ao plano. Não modifica o projeto de origem nem grava recuperação. Essas capturas não substituem o teste interativo de teclado, mouse ou diálogos do sistema.
 
 ## Medições de leveza
 

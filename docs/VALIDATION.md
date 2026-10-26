@@ -1,5 +1,14 @@
 # Validação local do protótipo
 
+## Rascunhos no mesmo viewport CAD — 26/10/2026
+
+- Removido o canvas 2D separado. A edição, os sólidos, a origem e o cubo compartilham a câmera e o viewport. Regressões verificam ida/volta cursor–plano em XY/XZ/YZ e plano oblíquo, peças rotacionadas, ambas as projeções, recusa de plano de perfil e interpolação rígida incluindo meia-volta. Projetos apenas com rascunhos incluem círculos e pontos isolados no enquadramento.
+- Seleção exata de plano pelo B-rep testada com posições distintas de corpo e ocorrência; faces curvas são rejeitadas. A origem/eixos locais de uma face não dependem do ponto clicado nem da orientação da ocorrência.
+- **111 testes sem OCCT e 146 com OCCT 7.9.3 aprovados**; formatação e Clippy do workspace com todos os alvos e avisos negados aprovados nas duas configurações. Os testes cobrem ocultação de perfis por extrusão/revolução/furo, falha atômica, reexibição manual, recálculo, desfazer/refazer e salvamento/reabertura, sem alteração do formato 11.
+- **Ensaio adicional egui/wgpu aprovado**, optativo por depender de adaptador: cancela a escolha por Esc sem alterar o documento, seleciona XY por clique, desenha retângulo, conclui, extruda, mostra o perfil e escolhe uma face do sólido por clique. Em todos os quadros há exatamente uma imagem CAD com o mesmo identificador de textura; o modelo permanece carregado durante a edição.
+- Capturas reais em 1280 × 820 e 900 × 600 inspecionadas, sem erros de validação wgpu/GL llvmpipe: `edit.png`, `edit-compact.png`, `model.png` e `finished-sketch.png` em `target/codex-validation/sketch-viewport-20261026/`. Ensaios CLI `--validate-part` e `--validate-sketch` aprovados nesse diretório. Logs de formatação/compilação/Clippy/testes ficam junto das imagens. Não houve execução Windows nem teste em janela nativa; o suporte de face é um plano fixo, sem associação paramétrica posterior.
+
+
 ## Cubo de orientação e giros da vista — 26/10/2026
 
 - Reconstruído o cubo como poliedro fechado: 26 regiões, 48 arestas compartilhadas exatamente por duas faces e sem invasão dos semiespaços vizinhos. Os cliques escolhem polígonos visíveis, incluindo arestas/cantos, em vez de retângulos sobrepostos. Removido o indicador separado de linhas XYZ.

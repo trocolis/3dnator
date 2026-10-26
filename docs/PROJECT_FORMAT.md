@@ -19,7 +19,7 @@ Cada peça contém:
 
 - corpos: identificador, nome, visibilidade, transformação local, caminho da malha, caminho opcional do B-rep e, desde a versão 7, `face_names`;
 - desde a versão 8, `color_srgb` opcional por corpo, com três canais inteiros de 0 a 255; ausência usa a aparência neutra;
-- rascunhos: plano, pontos, entidades, restrições e expressões das cotas;
+- rascunhos: plano fixo, pontos, entidades, restrições, expressões das cotas e visibilidade (usada pelo viewport e pelo olho da árvore);
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
 - histórico de operações (`features`), cada uma com nome, corpo resultante e operação.
 

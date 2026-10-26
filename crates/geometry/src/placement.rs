@@ -162,6 +162,18 @@ impl Placement {
     pub fn apply(self, point: Point3) -> Point3 {
         std::array::from_fn(|i| self.translation[i] + crate::dot(self.matrix[i], point))
     }
+    /// Direções e normais usam somente a rotação; subtrair dois pontos já
+    /// transladados perde precisão quando a montagem está longe da origem.
+    pub fn apply_vector(self, vector: Point3) -> Point3 {
+        std::array::from_fn(|i| crate::dot(self.matrix[i], vector))
+    }
+    pub fn inverse_vector(self, vector: Point3) -> Point3 {
+        std::array::from_fn(|i| {
+            self.matrix[0][i] * vector[0]
+                + self.matrix[1][i] * vector[1]
+                + self.matrix[2][i] * vector[2]
+        })
+    }
     pub fn inverse_apply(self, point: Point3) -> Point3 {
         let p = crate::sub(point, self.translation);
         std::array::from_fn(|i| {

@@ -1,5 +1,14 @@
 # Execução autônoma
 
+## Rascunhos integrados à área de edição — 26/10/2026
+
+- Atendida a solicitação de manter o modelo na mesma tela ao criar/editar rascunhos. A câmera alinha suavemente ao suporte; projeção, cursor e desenho respeitam o plano da peça e a posição na montagem. A última cena válida é mantida enquanto a revisão seguinte é preparada.
+- Novo rascunho agora solicita XY/XZ/YZ na origem ou face plana do sólido, com cancelamento sem alteração do documento. Seleção de face exata em segundo plano; origem local consistente entre cliques/ocorrências. O plano da face é capturado, sem vínculo paramétrico posterior.
+- Origem visível com olho na árvore; rascunhos desenhados também fora da edição. Extrusão/revolução/furo ocultam o perfil na transação bem-sucedida; olhos na árvore reexibem os perfis sem abrir a edição. Recálculo preserva a escolha, que participa de desfazer/refazer e persistência.
+- 111 testes sem OCCT e 146 com OCCT aprovados, além de um ensaio de interação egui/wgpu que acompanha seleção, desenho, conclusão, extrusão, reexibição e face mantendo o mesmo viewport e o modelo. Formatação/Clippy/compilação aprovados; capturas em dois tamanhos e ensaios CLI de peça/rascunho registrados em `target/codex-validation/sketch-viewport-20261026/`.
+- Uso documentado em [INTERFACE.md](INTERFACE.md). Windows continua adiado, sem publicação remota ou release; versão de desenvolvimento 0.3.0 e formato 11 preservados.
+
+
 Autorização do usuário: continuar todas as etapas sem solicitar acompanhamento.
 
 ## Navegador de orientação e giro da tela — 26/10/2026

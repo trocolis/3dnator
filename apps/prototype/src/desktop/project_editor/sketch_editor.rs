@@ -47,8 +47,8 @@ pub(super) struct Workspace {
     anchor_kinds: Vec<Option<Kind>>,
     selected: Vec<u64>,
     constraint: Option<u64>,
-    pan: egui::Vec2,
-    zoom: f32,
+    pub(super) placement: Placement,
+    pub(super) previous_camera: Camera,
     pub(super) fit_requested: bool,
     tracker: Tracker,
     projected: Vec<Point2>,
@@ -80,8 +80,8 @@ impl Workspace {
             anchor_kinds: Vec::new(),
             selected: Vec::new(),
             constraint: None,
-            pan: egui::Vec2::ZERO,
-            zoom: 5.,
+            placement: Placement::default(),
+            previous_camera: Camera::default(),
             fit_requested: true,
             tracker: Tracker::default(),
             projected: vec![[0., 0.]],
@@ -141,34 +141,69 @@ impl Editor {
         if self.busy() {
             return;
         }
-        let Some(record) = self.current().session.document().sketch(id) else {
+        if self
+            .current()
+            .sketch_edit
+            .as_ref()
+            .is_some_and(|w| w.pending.is_some())
+        {
+            self.status = text(T::PendingEdit).into();
+            return;
+        }
+        let Some(record) = self.current().session.document().sketch(id).cloned() else {
             return;
         };
+        let target = match self
+            .current()
+            .plane_pick
+            .as_ref()
+            .filter(|p| p.destination == Some(part))
+            .map(|p| Ok(p.placement))
+            .unwrap_or_else(|| sketch_scene::part_placement(self.current(), part))
+        {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = e;
+                return;
+            }
+        };
+        if !record.visible {
+            self.execute(Command::SetSketchVisibility { id, visible: true });
+        }
+        let previous = self
+            .current()
+            .sketch_edit
+            .as_ref()
+            .map(|w| w.previous_camera.clone())
+            .unwrap_or_else(|| self.viewport.camera.clone());
         let plane = record.sketch.plane;
         let mut work = Workspace::new(id);
+        work.placement = target;
+        work.previous_camera = previous;
+        work.fit_requested = false;
         let document = self.current().session.document();
-        let target = document
-            .instances()
-            .iter()
-            .find(|i| i.part == part)
-            .map(|i| i.placement)
-            .unwrap_or_default();
-        // Referências são coordenadas capturadas, sem dependência da peça de origem.
-        for instance in document.instances().iter().filter(|i| i.visible).take(8) {
-            if let Some(piece) = document.part(instance.part) {
-                for body in &piece.bodies {
-                    let vertices = body.geometry.mesh().vertices();
-                    let stride = (vertices.len() / 64).max(1);
-                    for p in vertices.iter().step_by(stride).take(64) {
-                        let world = instance.placement.apply(body.placement.apply(*p));
-                        work.projected
-                            .push(plane.project(target.inverse_apply(world)));
+        if let Ok(occurrences) = document.occurrences() {
+            for occurrence in occurrences.iter().take(8) {
+                if let Some(piece) = document
+                    .instance(occurrence.instance)
+                    .and_then(|i| document.part(i.part))
+                {
+                    for body in piece.bodies.iter().filter(|b| b.visible) {
+                        let vertices = body.geometry.mesh().vertices();
+                        let stride = (vertices.len() / 64).max(1);
+                        for p in vertices.iter().step_by(stride).take(64) {
+                            let world = occurrence.placement.apply(body.placement.apply(*p));
+                            work.projected
+                                .push(plane.project(target.inverse_apply(world)));
+                        }
                     }
                 }
             }
         }
         self.current_mut().active_part = Some(part);
+        self.current_mut().plane_pick = None;
         self.current_mut().sketch_edit = Some(work);
+        self.align_sketch_camera(!record.sketch.points.is_empty(), true);
     }
     pub(super) fn solve_sketch(&mut self, context: &egui::Context, sketch: Sketch) {
         if self.busy() {
@@ -217,7 +252,7 @@ impl Editor {
             })
         });
     }
-    fn working_sketch(&self) -> Option<Sketch> {
+    pub(super) fn working_sketch(&self) -> Option<Sketch> {
         let work = self.current().sketch_edit.as_ref()?;
         work.pending.clone().or_else(|| {
             self.current()
@@ -606,7 +641,7 @@ impl Editor {
                             )
                             .clicked()
                         {
-                            self.current_mut().sketch_edit = None;
+                            self.finish_sketch();
                         }
                     });
             });
@@ -616,305 +651,275 @@ impl Editor {
             self.solve_sketch(ui.ctx(), sketch);
         }
     }
-    pub(super) fn sketch_canvas(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn sketch_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) {
         let Some(mut sketch) = self.working_sketch() else {
             return;
         };
+        let Some(work) = self.current().sketch_edit.as_ref() else {
+            return;
+        };
+        let placement = work.placement;
+        let frame = sketch_scene::Frame {
+            camera: self.viewport.camera.clone(),
+            bounds: self.display_bounds(),
+            rect: response.rect,
+            placement,
+            plane: sketch.plane,
+        };
+        let painter = ui
+            .painter()
+            .with_clip_rect(response.rect.intersect(ui.clip_rect()));
+        let animating = self.current().camera_transition.is_some();
+        let hover = if animating {
+            None
+        } else {
+            response
+                .hover_pos()
+                .filter(|p| !view_cube::rect(response.rect).contains(*p))
+                .and_then(|p| frame.cursor(p))
+        };
+        let pixels_per_mm = frame.pixels_per_mm(hover.unwrap_or([0., 0.]));
         let busy = self.busy();
         let mut submit = false;
-        egui::CentralPanel::default().show(ui, |ui| {
-            self.sketch_camera_bar(ui);
-            let (response, painter) =
-                ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-            painter.rect_filled(response.rect, 0., theme::CANVAS);
-            let Some(work) = self.current_mut().sketch_edit.as_mut() else {
-                return;
-            };
-            if work.fit_requested {
-                if let Some((zoom, pan)) = fitted_sketch_view(&sketch, response.rect.size()) {
-                    work.zoom = zoom;
-                    work.pan = pan;
-                }
-                work.fit_requested = false;
-            }
-            if response.dragged_by(egui::PointerButton::Middle) {
-                work.pan += ui.input(|i| i.pointer.delta());
-            }
-            let origin = response.rect.center() + work.pan;
-            if response.hovered() {
-                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-                if scroll != 0. {
-                    let previous = work.zoom;
-                    work.zoom = (work.zoom * (scroll * 0.002).exp()).clamp(1e-9, 500.);
-                    if let Some(pointer) = response.hover_pos() {
-                        work.pan += (pointer - origin) * (1. - work.zoom / previous);
-                    }
-                }
-            }
-            let origin = response.rect.center() + work.pan;
-            let screen =
-                |p: Point2| origin + egui::vec2(p[0] as f32 * work.zoom, -p[1] as f32 * work.zoom);
-            let world = |p: egui::Pos2| {
-                [
-                    f64::from((p.x - origin.x) / work.zoom),
-                    f64::from((origin.y - p.y) / work.zoom),
-                ]
-            };
-            let grid_mm = 10_f32.powf((50. / work.zoom).log10().round());
-            let step = grid_mm * work.zoom;
-            if step > 8. {
-                for i in -100..=100 {
-                    let x = origin.x + i as f32 * step;
-                    if response.rect.x_range().contains(x) {
-                        painter.line_segment(
-                            [
-                                egui::pos2(x, response.rect.top()),
-                                egui::pos2(x, response.rect.bottom()),
-                            ],
-                            egui::Stroke::new(0.5, egui::Color32::from_rgb(207, 217, 230)),
-                        );
-                    }
-                    let y = origin.y + i as f32 * step;
-                    if response.rect.y_range().contains(y) {
-                        painter.line_segment(
-                            [
-                                egui::pos2(response.rect.left(), y),
-                                egui::pos2(response.rect.right(), y),
-                            ],
-                            egui::Stroke::new(0.5, egui::Color32::from_rgb(207, 217, 230)),
-                        );
-                    }
-                }
-            }
-            painter.line_segment(
-                [
-                    egui::pos2(response.rect.left(), origin.y),
-                    egui::pos2(response.rect.right(), origin.y),
-                ],
-                egui::Stroke::new(1., egui::Color32::from_rgb(130, 60, 60)),
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(origin.x, response.rect.top()),
-                    egui::pos2(origin.x, response.rect.bottom()),
-                ],
-                egui::Stroke::new(1., egui::Color32::from_rgb(60, 120, 70)),
-            );
-            let base = match work.status {
-                Status::FullyConstrained => theme::GREEN,
-                Status::Conflict => theme::DANGER,
-                _ => theme::ACCENT,
-            };
-            for entity in &sketch.entities {
-                if let Ok(segment) = profiles::segment(&sketch, entity) {
-                    let points = segment
-                        .sample(128)
-                        .into_iter()
-                        .map(screen)
-                        .collect::<Vec<_>>();
-                    let color = if work.selected.contains(&entity.id) {
-                        egui::Color32::from_rgb(183, 106, 17)
-                    } else {
-                        base
-                    };
-                    if entity.construction {
-                        for shape in
-                            egui::Shape::dashed_line(&points, egui::Stroke::new(1., color), 6., 4.)
-                        {
-                            painter.add(shape);
-                        }
-                    } else {
-                        painter.add(egui::Shape::line(points, egui::Stroke::new(1.5, color)));
-                    }
-                    for id in entity.point_ids() {
-                        if let Ok(p) = sketch.point(id) {
-                            painter.circle_filled(screen(p), 2.5, color);
-                        }
-                    }
-                }
-            }
-            for constraint in &sketch.constraints {
-                let annotation = match constraint.kind {
-                    ConstraintKind::Distance { a, b, value }
-                    | ConstraintKind::DeltaX { a, b, value }
-                    | ConstraintKind::DeltaY { a, b, value } => sketch
-                        .point(a)
-                        .ok()
-                        .zip(sketch.point(b).ok())
-                        .map(|(a, b)| {
-                            (
-                                nator_sketch::scale(nator_sketch::add(a, b), 0.5),
-                                nator_drawing::format_mm(value),
-                            )
-                        }),
-                    ConstraintKind::Radius { circle, value } => {
-                        sketch.radial(circle).ok().map(|(center, _)| {
-                            (center, format!("R {}", nator_drawing::format_mm(value)))
-                        })
-                    }
-                    _ => None,
-                };
-                if let Some((point, label)) = annotation {
-                    painter.text(
-                        screen(point) + egui::vec2(0., -12.),
-                        egui::Align2::CENTER_BOTTOM,
-                        label,
-                        egui::FontId::proportional(13.),
-                        theme::INK,
-                    );
-                }
-            }
-            let hover = response.hover_pos().map(world);
-            let suspended = ui.input(|i| i.modifiers.alt);
-            let snap = hover.and_then(|point| {
-                if suspended {
-                    None
-                } else {
-                    snapping::find(
-                        &sketch,
-                        point,
-                        8. / f64::from(work.zoom),
-                        &work.tracker,
-                        &work.projected,
+        let Some(work) = self.current_mut().sketch_edit.as_mut() else {
+            return;
+        };
+        // Grade no próprio plano: o mesmo conjunto de linhas acompanha a câmera,
+        // em vez de substituir a área CAD por uma superfície plana independente.
+        let center = frame.cursor(response.rect.center()).unwrap_or([0., 0.]);
+        let step = 10_f64.powf((60. / pixels_per_mm).log10().round());
+        let radius = f64::from(response.rect.width().max(response.rect.height())) / pixels_per_mm;
+        for axis in 0..2 {
+            for i in -15..=15 {
+                let coordinate = (center[axis] / step).round() * step + f64::from(i) * step;
+                let (a, b) = if axis == 0 {
+                    (
+                        [coordinate, center[1] - radius],
+                        [coordinate, center[1] + radius],
                     )
-                    .ok()
-                    .flatten()
-                }
-            });
-            if let Some(snap) = &snap {
-                if matches!(
-                    snap.kind,
-                    Kind::Endpoint(_) | Kind::Center(_) | Kind::Midpoint(_) | Kind::Projected
-                ) {
-                    work.tracker.capture(snap.point);
-                }
-                painter.circle_stroke(
-                    screen(snap.point),
-                    5.,
-                    egui::Stroke::new(1.5, egui::Color32::from_rgb(183, 106, 17)),
-                );
-                for (a, b) in &snap.guides {
-                    for shape in egui::Shape::dashed_line(
-                        &[screen(*a), screen(*b)],
-                        egui::Stroke::new(1., theme::GREEN),
-                        4.,
-                        4.,
-                    ) {
-                        painter.add(shape);
-                    }
-                }
-            }
-            let cursor = snap.as_ref().map(|s| s.point).or(hover);
-            if let Some(first) = work.anchors.first().copied()
-                && let Some(cursor) = cursor
-            {
-                let points = match work.tool {
-                    Tool::Rectangle => vec![
-                        first,
-                        [cursor[0], first[1]],
-                        cursor,
-                        [first[0], cursor[1]],
-                        first,
-                    ],
-                    Tool::Circle => profiles::Segment::Circle {
-                        center: first,
-                        radius: nator_sketch::distance(first, cursor),
-                    }
-                    .sample(64),
-                    _ => vec![first, cursor],
-                };
-                painter.add(egui::Shape::line(
-                    points.into_iter().map(screen).collect(),
-                    egui::Stroke::new(1., theme::INK),
-                ));
-            }
-            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-            if escape {
-                work.anchors.clear();
-                work.anchor_kinds.clear();
-                work.pending = None;
-                work.tracker.clear();
-            }
-            if !busy
-                && response.clicked_by(egui::PointerButton::Primary)
-                && let Some(cursor) = cursor
-            {
-                if matches!(work.tool, Tool::Select | Tool::Trim) {
-                    let entity = sketch
-                        .entities
-                        .iter()
-                        .filter_map(|e| {
-                            profiles::segment(&sketch, e).ok().map(|curve| {
-                                (
-                                    e.id,
-                                    curve
-                                        .sample(128)
-                                        .windows(2)
-                                        .map(|p| point_segment_distance(cursor, p[0], p[1]))
-                                        .fold(f64::INFINITY, f64::min),
-                                )
-                            })
-                        })
-                        .filter(|(_, d)| *d < 8. / f64::from(work.zoom))
-                        .min_by(|a, b| a.1.total_cmp(&b.1))
-                        .map(|v| v.0);
-                    if let Some(id) = entity {
-                        if work.tool == Tool::Trim {
-                            match nator_sketch::tools::trim_line(&mut sketch, id, cursor) {
-                                Ok(()) => submit = true,
-                                Err(error) => {
-                                    painter.text(
-                                        response.rect.left_top(),
-                                        egui::Align2::LEFT_TOP,
-                                        error.to_string(),
-                                        egui::FontId::proportional(13.),
-                                        theme::DANGER,
-                                    );
-                                }
-                            }
-                        } else {
-                            if !ui.input(|i| i.modifiers.ctrl) {
-                                work.selected.clear();
-                            }
-                            if !work.selected.contains(&id) {
-                                work.selected.push(id);
-                            }
-                            work.constraint = None;
-                            work.dimension = sketch
-                                .line(id)
-                                .map(|(a, b)| nator_sketch::distance(a, b))
-                                .or_else(|_| sketch.radial(id).map(|(_, r)| r))
-                                .unwrap_or(10.);
-                            work.dimension_expression = format!("{} mm", work.dimension);
-                        }
-                    } else {
-                        work.selected.clear();
-                    }
                 } else {
-                    work.anchors.push(cursor);
-                    work.anchor_kinds.push(snap.as_ref().map(|s| s.kind));
-                    work.tracker.capture(cursor);
-                    let needed = if work.tool == Tool::Arc { 3 } else { 2 };
-                    if work.anchors.len() == needed {
-                        let result = draw_entity(&mut sketch, work);
-                        match result {
+                    (
+                        [center[0] - radius, coordinate],
+                        [center[0] + radius, coordinate],
+                    )
+                };
+                frame.path(
+                    &painter,
+                    [a, b],
+                    egui::Stroke::new(
+                        0.5,
+                        egui::Color32::from_rgba_unmultiplied(130, 150, 175, 70),
+                    ),
+                    false,
+                );
+            }
+        }
+        let base = match work.status {
+            Status::FullyConstrained => theme::GREEN,
+            Status::Conflict => theme::DANGER,
+            _ => theme::ACCENT,
+        };
+        for point in &sketch.points {
+            if let Some(p) = frame.screen(point.position) {
+                painter.circle_filled(p, 2.5, base);
+            }
+        }
+        for entity in &sketch.entities {
+            if let Ok(segment) = profiles::segment(&sketch, entity) {
+                let color = if work.selected.contains(&entity.id) {
+                    egui::Color32::from_rgb(183, 106, 17)
+                } else {
+                    base
+                };
+                frame.path(
+                    &painter,
+                    segment.sample(128),
+                    egui::Stroke::new(1.5, color),
+                    entity.construction,
+                );
+                for id in entity.point_ids() {
+                    if let Some(p) = sketch.point(id).ok().and_then(|p| frame.screen(p)) {
+                        painter.circle_filled(p, 2.5, color);
+                    }
+                }
+            }
+        }
+        for constraint in &sketch.constraints {
+            let annotation = match constraint.kind {
+                ConstraintKind::Distance { a, b, value }
+                | ConstraintKind::DeltaX { a, b, value }
+                | ConstraintKind::DeltaY { a, b, value } => sketch
+                    .point(a)
+                    .ok()
+                    .zip(sketch.point(b).ok())
+                    .map(|(a, b)| {
+                        (
+                            nator_sketch::scale(nator_sketch::add(a, b), 0.5),
+                            nator_drawing::format_mm(value),
+                        )
+                    }),
+                ConstraintKind::Radius { circle, value } => sketch
+                    .radial(circle)
+                    .ok()
+                    .map(|(center, _)| (center, format!("R {}", nator_drawing::format_mm(value)))),
+                _ => None,
+            };
+            if let Some((point, label)) = annotation
+                && let Some(position) = frame.screen(point)
+            {
+                painter.text(
+                    position + egui::vec2(0., -12.),
+                    egui::Align2::CENTER_BOTTOM,
+                    label,
+                    egui::FontId::proportional(13.),
+                    theme::INK,
+                );
+            }
+        }
+
+        let suspended = ui.input(|i| i.modifiers.alt);
+        let snap = hover.and_then(|point| {
+            if suspended {
+                None
+            } else {
+                snapping::find(
+                    &sketch,
+                    point,
+                    8. / pixels_per_mm,
+                    &work.tracker,
+                    &work.projected,
+                )
+                .ok()
+                .flatten()
+            }
+        });
+        if let Some(snap) = &snap {
+            if matches!(
+                snap.kind,
+                Kind::Endpoint(_) | Kind::Center(_) | Kind::Midpoint(_) | Kind::Projected
+            ) {
+                work.tracker.capture(snap.point);
+            }
+            if let Some(position) = frame.screen(snap.point) {
+                painter.circle_stroke(position, 5., egui::Stroke::new(1.5, theme::WARNING));
+            }
+            for (a, b) in &snap.guides {
+                frame.path(
+                    &painter,
+                    [*a, *b],
+                    egui::Stroke::new(1., theme::GREEN),
+                    true,
+                );
+            }
+        }
+        let cursor = snap.as_ref().map(|s| s.point).or(hover);
+        if let Some(first) = work.anchors.first().copied()
+            && let Some(cursor) = cursor
+        {
+            let points = match work.tool {
+                Tool::Rectangle => vec![
+                    first,
+                    [cursor[0], first[1]],
+                    cursor,
+                    [first[0], cursor[1]],
+                    first,
+                ],
+                Tool::Circle => profiles::Segment::Circle {
+                    center: first,
+                    radius: nator_sketch::distance(first, cursor),
+                }
+                .sample(64),
+                _ => vec![first, cursor],
+            };
+            frame.path(&painter, points, egui::Stroke::new(1., theme::INK), false);
+        }
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if escape {
+            work.anchors.clear();
+            work.anchor_kinds.clear();
+            work.pending = None;
+            work.tracker.clear();
+        }
+        if !busy
+            && !animating
+            && response.clicked_by(egui::PointerButton::Primary)
+            && let Some(cursor) = cursor
+        {
+            if matches!(work.tool, Tool::Select | Tool::Trim) {
+                let entity = sketch
+                    .entities
+                    .iter()
+                    .filter_map(|e| {
+                        profiles::segment(&sketch, e).ok().map(|curve| {
+                            (
+                                e.id,
+                                curve
+                                    .sample(128)
+                                    .windows(2)
+                                    .map(|p| point_segment_distance(cursor, p[0], p[1]))
+                                    .fold(f64::INFINITY, f64::min),
+                            )
+                        })
+                    })
+                    .filter(|(_, d)| *d < 8. / pixels_per_mm)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|v| v.0);
+                if let Some(id) = entity {
+                    if work.tool == Tool::Trim {
+                        match nator_sketch::tools::trim_line(&mut sketch, id, cursor) {
                             Ok(()) => submit = true,
                             Err(error) => {
                                 painter.text(
                                     response.rect.left_top(),
                                     egui::Align2::LEFT_TOP,
-                                    error,
+                                    error.to_string(),
                                     egui::FontId::proportional(13.),
                                     theme::DANGER,
                                 );
                             }
                         }
-                        work.anchors.clear();
-                        work.anchor_kinds.clear();
+                    } else {
+                        if !ui.input(|i| i.modifiers.ctrl) {
+                            work.selected.clear();
+                        }
+                        if !work.selected.contains(&id) {
+                            work.selected.push(id);
+                        }
+                        work.constraint = None;
+                        work.dimension = sketch
+                            .line(id)
+                            .map(|(a, b)| nator_sketch::distance(a, b))
+                            .or_else(|_| sketch.radial(id).map(|(_, r)| r))
+                            .unwrap_or(10.);
+                        work.dimension_expression = format!("{} mm", work.dimension);
                     }
+                } else {
+                    work.selected.clear();
+                }
+            } else {
+                work.anchors.push(cursor);
+                work.anchor_kinds.push(snap.as_ref().map(|s| s.kind));
+                work.tracker.capture(cursor);
+                let needed = if work.tool == Tool::Arc { 3 } else { 2 };
+                if work.anchors.len() == needed {
+                    let result = draw_entity(&mut sketch, work);
+                    match result {
+                        Ok(()) => submit = true,
+                        Err(error) => {
+                            painter.text(
+                                response.rect.left_top(),
+                                egui::Align2::LEFT_TOP,
+                                error,
+                                egui::FontId::proportional(13.),
+                                theme::DANGER,
+                            );
+                        }
+                    }
+                    work.anchors.clear();
+                    work.anchor_kinds.clear();
                 }
             }
-        });
+        }
         if submit {
             self.solve_sketch(ui.ctx(), sketch);
         }
@@ -1042,78 +1047,5 @@ fn bind_dimension(sketch: &mut Sketch, id: u64, work: &Workspace) {
         sketch
             .dimension_expressions
             .insert(id, work.dimension_expression.clone());
-    }
-}
-
-/// Enquadrar considera também os extremos radiais: apenas os centros dos círculos
-/// não representam o espaço ocupado. Para arcos, o círculo inteiro é um limite
-/// conservador simples. A geometria é apenas projetada; nenhum ponto é alterado.
-fn fitted_sketch_view(sketch: &Sketch, size: egui::Vec2) -> Option<(f32, egui::Vec2)> {
-    let points: std::collections::HashMap<_, _> =
-        sketch.points.iter().map(|p| (p.id, p.position)).collect();
-    let first = sketch.points.first()?.position;
-    let mut min = first;
-    let mut max = first;
-    let mut include = |p: Point2| {
-        for axis in 0..2 {
-            min[axis] = min[axis].min(p[axis]);
-            max[axis] = max[axis].max(p[axis]);
-        }
-    };
-    for point in &sketch.points {
-        include(point.position);
-    }
-    for entity in &sketch.entities {
-        let radial = match entity.curve {
-            Curve::Circle { center, radius } => points.get(&center).map(|p| (*p, radius)),
-            Curve::Arc { center, start, .. } => points
-                .get(&center)
-                .zip(points.get(&start))
-                .map(|(a, b)| (*a, nator_sketch::distance(*a, *b))),
-            Curve::Line { .. } => None,
-        };
-        if let Some((center, radius)) = radial {
-            include([center[0] - radius, center[1] - radius]);
-            include([center[0] + radius, center[1] + radius]);
-        }
-    }
-    let extent = [(max[0] - min[0]).max(1.), (max[1] - min[1]).max(1.)];
-    let zoom = ((f64::from((size.x - 64.).max(1.)) / extent[0])
-        .min(f64::from((size.y - 64.).max(1.)) / extent[1])
-        * 0.85) as f32;
-    let zoom = zoom.clamp(1e-9, 500.);
-    let center = [min[0] * 0.5 + max[0] * 0.5, min[1] * 0.5 + max[1] * 0.5];
-    let pan = egui::vec2(
-        -(center[0] * f64::from(zoom)) as f32,
-        (center[1] * f64::from(zoom)) as f32,
-    );
-    (zoom.is_finite() && pan.is_finite()).then_some((zoom, pan))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn fitting_keeps_offset_profiles_and_circle_extents_inside_small_canvases()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let mut sketch = Sketch::new("Perfil deslocado", nator_sketch::Plane::xy());
-        sketch.add_rectangle([900., -400.], [960., -370.], false)?;
-        sketch.add_circle([970., -365.], 20., false)?;
-        for size in [egui::vec2(365., 270.), egui::vec2(748., 480.)] {
-            let (zoom, pan) = fitted_sketch_view(&sketch, size).ok_or("Enquadramento ausente.")?;
-            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-            for entity in &sketch.entities {
-                for point in profiles::segment(&sketch, entity)?.sample(64) {
-                    let position = rect.center()
-                        + pan
-                        + egui::vec2(point[0] as f32 * zoom, -point[1] as f32 * zoom);
-                    assert!(
-                        rect.shrink(24.).contains(position),
-                        "Geometria cortada: {position:?}"
-                    );
-                }
-            }
-        }
-        Ok(())
     }
 }

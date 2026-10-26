@@ -120,9 +120,7 @@ impl Editor {
                         }
                     }
                     for s in &part.sketches {
-                        if icons::entry(ui, icons::Icon::Sketch, &s.sketch.name, false).clicked() {
-                            self.begin_sketch(part.id, s.id);
-                        }
+                        self.sketch_tree_entry(ui, part.id, s);
                     }
                     self.child_tree(ui, document, part.id, depth + 1, selection);
                 }

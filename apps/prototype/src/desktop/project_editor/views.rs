@@ -21,6 +21,12 @@ impl Editor {
             self.save(context, self.current().id, false, false);
             return;
         }
+        if self.current().plane_pick.is_some()
+            && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.current_mut().plane_pick = None;
+            return;
+        }
         if context.egui_wants_keyboard_input() {
             return;
         }
@@ -90,11 +96,29 @@ impl Editor {
                     );
                     if ui.button(text(T::LeavePart)).clicked() {
                         self.current_mut().active_part = None;
-                        self.current_mut().sketch_edit = None;
+                        self.finish_sketch();
                     }
                 } else {
                     theme::section(ui, text(T::Assembly));
                 }
+                ui.horizontal(|ui| {
+                    if icons::button(
+                        ui,
+                        if self.current().origin_visible {
+                            icons::Icon::Eye
+                        } else {
+                            icons::Icon::EyeOff
+                        },
+                        text(T::Visibility),
+                        false,
+                        false,
+                    )
+                    .clicked()
+                    {
+                        self.current_mut().origin_visible = !self.current().origin_visible;
+                    }
+                    ui.label(text(T::Origin));
+                });
                 if document.instances().is_empty() {
                     ui.add_space(16.);
                     ui.label(egui::RichText::new(text(T::BrowserEmpty)).strong());
@@ -161,21 +185,7 @@ impl Editor {
                                     );
                                 }
                                 for sketch in &part.sketches {
-                                    let selected = self
-                                        .current()
-                                        .sketch_edit
-                                        .as_ref()
-                                        .is_some_and(|w| w.id == sketch.id);
-                                    if icons::entry(
-                                        ui,
-                                        icons::Icon::Sketch,
-                                        &sketch.sketch.name,
-                                        selected,
-                                    )
-                                    .clicked()
-                                    {
-                                        self.begin_sketch(part.id, sketch.id);
-                                    }
+                                    self.sketch_tree_entry(ui, part.id, sketch);
                                 }
                                 if !part.bodies.is_empty() {
                                     theme::section(
@@ -475,14 +485,34 @@ impl Editor {
         }
     }
     pub(super) fn canvas(&mut self, ui: &mut egui::Ui) {
-        if self.current().sketch_edit.is_some() {
-            self.sketch_canvas(ui);
-            return;
-        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(theme::CANVAS).inner_margin(8))
             .show(ui, |ui| {
+                self.animate_camera(ui.ctx());
                 self.camera_bar(ui);
+                if self.current().plane_pick.is_some() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(text(T::ChooseSketchPlane));
+                        for (label, plane) in [
+                            ("XY", nator_sketch::Plane::xy()),
+                            ("XZ", nator_sketch::Plane::xz()),
+                            ("YZ", nator_sketch::Plane::yz()),
+                        ] {
+                            if ui
+                                .add_enabled(!self.busy(), egui::Button::new(label))
+                                .clicked()
+                            {
+                                self.choose_origin_plane(plane);
+                            }
+                        }
+                        if ui
+                            .add_enabled(!self.busy(), egui::Button::new(text(T::Cancel)))
+                            .clicked()
+                        {
+                            self.current_mut().plane_pick = None;
+                        }
+                    });
+                }
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let pixels = ui.ctx().pixels_per_point();
                 if self.viewport.resize(
@@ -499,17 +529,31 @@ impl Editor {
                             self.texture,
                         );
                 }
+                if self
+                    .current()
+                    .sketch_edit
+                    .as_ref()
+                    .is_some_and(|w| w.fit_requested)
+                {
+                    self.align_sketch_camera(true, false);
+                    if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                        work.fit_requested = false;
+                    }
+                }
                 let response = ui.add(
                     egui::Image::from_texture((self.texture, size))
                         .sense(egui::Sense::click_and_drag()),
                 );
                 response.clone().on_hover_text(text(T::Navigation));
-                self.viewport_actions(ui, &response);
+                if self.current().sketch_edit.is_none() && self.current().plane_pick.is_none() {
+                    self.viewport_actions(ui, &response);
+                }
                 let cube_rect = view_cube::rect(response.rect);
                 let starts_on_cube = ui
                     .input(|i| i.pointer.press_origin())
                     .is_some_and(|p| cube_rect.contains(p));
                 if response.dragged_by(egui::PointerButton::Middle) && !starts_on_cube {
+                    self.current_mut().camera_transition = None;
                     let (delta, shift) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
                     if shift {
                         self.viewport
@@ -526,6 +570,7 @@ impl Editor {
                 {
                     let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                     if let Some(position) = response.hover_pos().filter(|_| scroll != 0.) {
+                        self.current_mut().camera_transition = None;
                         self.viewport.camera.zoom_at(
                             f64::from(scroll),
                             [
@@ -536,12 +581,39 @@ impl Editor {
                         );
                     }
                 }
+                if ui.input(|i| i.pointer.any_down()) && starts_on_cube {
+                    self.current_mut().camera_transition = None;
+                }
                 view_cube::show(ui, &mut self.viewport.camera, response.rect);
                 self.viewport.render(&self.gpu.device, &self.gpu.queue);
-                if self.scene.is_none() && !self.busy() {
+                let origin_chosen = self.origin_overlay(ui, &response);
+                if !origin_chosen
+                    && self.current().plane_pick.is_some()
+                    && response.clicked()
+                    && !response.hover_pos().is_some_and(|p| cube_rect.contains(p))
+                    && let Some(position) = response.hover_pos()
+                {
+                    let ray = self.viewport.camera.world_ray(
+                        [
+                            f64::from((position.x - response.rect.center().x) / size.x * 2.),
+                            f64::from((response.rect.center().y - position.y) / size.y * 2.),
+                        ],
+                        self.display_bounds(),
+                        f64::from(size.x / size.y),
+                    );
+                    self.choose_face_plane(ui.ctx(), ray);
+                }
+                let visible_sketches = self.visible_sketches(ui, response.rect);
+                self.sketch_overlay(ui, &response);
+                if self.scene.is_none()
+                    && !visible_sketches
+                    && !self.busy()
+                    && self.current().sketch_edit.is_none()
+                    && self.current().plane_pick.is_none()
+                {
                     ui.painter().text(
-                        response.rect.center(),
-                        egui::Align2::CENTER_CENTER,
+                        response.rect.center_bottom() - egui::vec2(0., 24.),
+                        egui::Align2::CENTER_BOTTOM,
                         text(T::EmptyScene),
                         egui::FontId::proportional(14.),
                         theme::MUTED,

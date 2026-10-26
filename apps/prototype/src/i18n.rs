@@ -1,6 +1,10 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    ChooseSketchPlane,
+    SketchHiddenPart,
+    Origin,
+    SketchXY,
     ViewRight,
     ViewLeft,
     ViewBack,
@@ -363,6 +367,10 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::ChooseSketchPlane => "Selecione um plano da origem ou uma face plana do modelo",
+        Text::SketchHiddenPart => "Mostre uma ocorrência da peça para editar seu rascunho.",
+        Text::Origin => "Origem",
+        Text::SketchXY => "Rascunho XY",
         Text::ViewRight => "Direita",
         Text::ViewLeft => "Esquerda",
         Text::ViewBack => "Traseira",

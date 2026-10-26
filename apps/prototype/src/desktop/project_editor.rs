@@ -8,6 +8,7 @@ mod navigation;
 mod parameter_editor;
 mod shell;
 mod sketch_editor;
+mod sketch_scene;
 mod theme;
 mod view_cube;
 mod views;
@@ -121,6 +122,9 @@ struct Tab {
     selection: Option<Selection>,
     active_part: Option<PartId>,
     sketch_edit: Option<sketch_editor::Workspace>,
+    plane_pick: Option<sketch_scene::PlanePicker>,
+    origin_visible: bool,
+    camera_transition: Option<sketch_scene::CameraTransition>,
     name_input: String,
     position_input: Point3,
     rotation_input: Point3,
@@ -169,6 +173,9 @@ impl Tab {
             selection: None,
             active_part: None,
             sketch_edit: None,
+            plane_pick: None,
+            origin_visible: true,
+            camera_transition: None,
             name_input: String::new(),
             position_input: [0.; 3],
             rotation_input: [0.; 3],
@@ -282,6 +289,7 @@ enum Outcome {
     },
     Scene {
         key: SceneKey,
+        bounds: nator_geometry::Bounds,
         mesh: Option<Mesh>,
         prepared: Option<PreparedMesh>,
     },
@@ -443,8 +451,8 @@ impl Editor {
         self.tabs.iter_mut().find(|t| t.id == id)
     }
     fn invalidate_scene(&mut self) {
-        self.viewport.clear(&self.gpu.device);
-        self.scene = None;
+        // Manter a última cena válida enquanto a revisão nova é preparada evita
+        // apagar o modelo a cada segmento editado no rascunho.
         self.rendered = None;
         self.requested = None;
     }
@@ -454,6 +462,8 @@ impl Editor {
         }
         self.current_mut().camera = self.viewport.camera.clone();
         self.active = index;
+        self.viewport.clear(&self.gpu.device);
+        self.scene = None;
         self.viewport.camera = self.current().camera.clone();
         self.invalidate_scene();
     }
@@ -487,12 +497,21 @@ impl Editor {
                 if let Effect::Imported { part, body } = effect {
                     tab.selection = Some(Selection::Body { part, id: body });
                 }
-                if let Effect::SketchCreated { part, sketch } = effect {
+                if let Effect::SketchCreated { part, .. } = effect {
                     tab.active_part = Some(part);
-                    tab.sketch_edit = Some(sketch_editor::Workspace::new(sketch));
                 }
+                let consumed = matches!(effect, Effect::Imported { .. })
+                    && tab.sketch_edit.as_ref().is_some_and(|w| {
+                        tab.session
+                            .document()
+                            .sketch(w.id)
+                            .is_some_and(|s| !s.visible)
+                    });
                 tab.changed();
                 self.invalidate_scene();
+                if consumed {
+                    self.finish_sketch();
+                }
                 if let Effect::SketchCreated { part, sketch } = effect {
                     self.begin_sketch(part, sketch);
                 }
@@ -588,9 +607,44 @@ impl Editor {
             }
             Ok(Outcome::Prepared { tab, command }) => {
                 let mut saved = None;
+                let mut created = None;
+                let mut consumed = false;
+                let active_tab = self.current().id;
                 if let Some(target) = self.find_tab(tab) {
                     match target.session.commit(command) {
                         Ok(effect) => {
+                            if let Effect::SketchCreated { part, sketch } = effect {
+                                target.active_part = Some(part);
+                                let mut work = sketch_editor::Workspace::new(sketch);
+                                work.previous_camera = target.camera.clone();
+                                work.placement = target
+                                    .plane_pick
+                                    .as_ref()
+                                    .map(|p| p.placement)
+                                    .unwrap_or_default();
+                                if active_tab != tab {
+                                    target.sketch_edit = Some(work);
+                                    target.plane_pick = None;
+                                }
+                                created = Some((part, sketch));
+                            }
+                            if let Effect::Imported { part, body } = effect {
+                                target.select(Some(Selection::Body { part, id: body }));
+                                consumed = target.sketch_edit.as_ref().is_some_and(|w| {
+                                    target
+                                        .session
+                                        .document()
+                                        .sketch(w.id)
+                                        .is_some_and(|s| !s.visible)
+                                });
+                                if consumed
+                                    && active_tab != tab
+                                    && let Some(work) = target.sketch_edit.take()
+                                {
+                                    target.camera.copy_orientation(&work.previous_camera);
+                                    target.camera_transition = None;
+                                }
+                            }
                             if let Effect::SheetSaved { id } = effect {
                                 saved = Some(id);
                             }
@@ -598,6 +652,14 @@ impl Editor {
                             self.requested = None;
                         }
                         Err(error) => self.status = error.to_string(),
+                    }
+                }
+                if tab == active_tab {
+                    if let Some((part, sketch)) = created {
+                        self.begin_sketch(part, sketch);
+                    }
+                    if consumed {
+                        self.finish_sketch();
                     }
                 }
                 if let Some(id) = saved
@@ -729,19 +791,27 @@ impl Editor {
             }
             Ok(Outcome::Scene {
                 key,
+                bounds,
                 mesh,
                 prepared,
             }) => {
                 if self.scene_key() == key {
                     let mut camera = self.current().camera.clone();
-                    let new_bounds = mesh.as_ref().map(Mesh::bounds);
-                    if let Some(bounds) = new_bounds {
-                        if let Some(previous) = self.current().scene_bounds {
-                            camera.reframe(previous, bounds);
-                        } else {
-                            let [w, h] = self.viewport.size();
-                            camera.fit(f64::from(w) / f64::from(h));
+                    let previous = self.current().scene_bounds.or_else(|| {
+                        self.current()
+                            .sketch_edit
+                            .as_ref()
+                            .map(|_| sketch_scene::EMPTY_BOUNDS)
+                    });
+                    if let Some(previous) = previous {
+                        camera.reframe(previous, bounds);
+                        if let Some(transition) = &mut self.current_mut().camera_transition {
+                            transition.from.reframe(previous, bounds);
+                            transition.to.reframe(previous, bounds);
                         }
+                    } else {
+                        let [w, h] = self.viewport.size();
+                        camera.fit(f64::from(w) / f64::from(h));
                     }
                     let result = if let Some(prepared) = prepared {
                         self.viewport.set_prepared_mesh(&self.gpu.device, &prepared)
@@ -751,9 +821,7 @@ impl Editor {
                     };
                     match result {
                         Ok(()) => {
-                            if let Some(bounds) = new_bounds {
-                                self.current_mut().scene_bounds = Some(bounds);
-                            }
+                            self.current_mut().scene_bounds = Some(bounds);
                             self.scene = mesh;
                             self.rendered = Some(key);
                             self.viewport.camera = camera;
@@ -805,8 +873,6 @@ impl Editor {
         if self.rendered == Some(key) || self.requested == Some(key) || self.busy() {
             return;
         }
-        self.viewport.clear(&self.gpu.device);
-        self.scene = None;
         self.requested = Some(key);
         let document = self.current().session.document().clone();
         let view = self.current().view.clone();
@@ -816,8 +882,13 @@ impl Editor {
                 Some((mesh, prepared)) => (Some(mesh), Some(prepared)),
                 None => (None, None),
             };
+            let bounds = mesh
+                .as_ref()
+                .map(Mesh::bounds)
+                .unwrap_or_else(|| sketch_scene::document_bounds(&document, &view));
             Ok(Outcome::Scene {
                 key,
+                bounds,
                 mesh,
                 prepared,
             })
@@ -1075,6 +1146,8 @@ impl Editor {
             .iter()
             .position(|t| t.id == previous_active)
             .unwrap_or_else(|| index.min(self.tabs.len() - 1));
+        self.viewport.clear(&self.gpu.device);
+        self.scene = None;
         self.viewport.camera = self.current().camera.clone();
         self.invalidate_scene();
         self.pending_close = None;

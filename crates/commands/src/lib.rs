@@ -118,6 +118,10 @@ pub enum Command {
         id: BodyId,
         color: Option<nator_geometry::RgbColor>,
     },
+    SetSketchVisibility {
+        id: SketchId,
+        visible: bool,
+    },
     SetBodyVisibility {
         id: BodyId,
         visible: bool,
@@ -168,6 +172,7 @@ impl Command {
             Self::SetParameter { .. } => "Alterar parâmetro da peça",
             Self::AddSketch { .. } => "Criar rascunho",
             Self::UpdateSketch { .. } => "Editar rascunho",
+            Self::SetSketchVisibility { .. } => "Alterar visibilidade do rascunho",
             Self::ImportMesh { .. } => "Importar corpo de malha",
             Self::RenamePart { .. } => "Renomear peça",
             Self::RenameBody { .. } => "Renomear corpo",
@@ -378,6 +383,7 @@ impl Command {
                 doc.body_mut(id)?.name = name;
             }
             Self::SetBodyColor { id, color } => doc.body_mut(id)?.color = color,
+            Self::SetSketchVisibility { id, visible } => doc.sketch_mut(id)?.visible = visible,
             Self::SetBodyVisibility { id, visible } => doc.body_mut(id)?.visible = visible,
             Self::SetInstanceVisibility { id, visible } => doc.instance_mut(id)?.visible = visible,
             Self::MoveBody { id, placement } => {
@@ -447,6 +453,11 @@ fn add_feature(
     )?;
     for input in operation.inputs() {
         doc.body_mut(input)?.visible = false;
+    }
+    // Ocultar apenas na criação bem-sucedida da operação. Recalcular não deve
+    // apagar a escolha posterior do usuário de mostrar o perfil novamente.
+    if let Some(sketch) = operation.sketch() {
+        doc.sketch_mut(sketch)?.visible = false;
     }
     doc.part_mut(part)?
         .features
@@ -615,6 +626,54 @@ impl Session {
 mod tests {
     use super::*;
     use std::error::Error;
+
+    #[test]
+    fn sketch_visibility_is_an_independent_undoable_edit() -> Result<(), Box<dyn Error>> {
+        let mut session = Session::new(Document::new("Visibilidade")?)?;
+        let Effect::SketchCreated { sketch: id, .. } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: nator_sketch::Sketch::new("Perfil", nator_sketch::Plane::xy()),
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        session.mark_saved(session.state());
+        session.execute(Command::SetSketchVisibility { id, visible: false })?;
+        assert!(session.is_dirty());
+        assert!(
+            !session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .visible
+        );
+        assert!(session.undo());
+        assert!(!session.is_dirty());
+        assert!(
+            session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .visible
+        );
+        assert!(session.redo());
+        assert!(
+            !session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .visible
+        );
+        assert!(
+            session
+                .execute(Command::SetSketchVisibility {
+                    id: SketchId(u64::MAX),
+                    visible: true
+                })
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn unresolved_sketch_edits_do_not_change_the_document() -> Result<(), Box<dyn Error>> {

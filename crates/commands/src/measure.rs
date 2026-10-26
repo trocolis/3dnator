@@ -34,6 +34,49 @@ pub enum Topology {
     },
 }
 
+/// Plano exato da face clicada, em coordenadas de montagem. A captura é
+/// independente do corpo de origem: alterações futuras não criam vínculo externo.
+#[cfg(feature = "occt")]
+pub fn sketch_plane(doc: &Document, pick: &Pick) -> Result<nator_sketch::Plane, DocumentError> {
+    use nator_document::features::FaceRef;
+    let body = doc
+        .body(pick.body)
+        .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+    let bytes = body.brep.as_ref().ok_or_else(|| {
+        DocumentError(
+            "Selecione uma face plana de um sólido CAD; malhas não definem planos exatos.".into(),
+        )
+    })?;
+    let solid = nator_kernel::Solid::from_brep(bytes, Some(&body.face_names))
+        .and_then(|s| s.transformed(body.placement))
+        .map_err(error)?;
+    let FaceRef::Named(name) = doc.face_at(pick)? else {
+        return Err(DocumentError("Face sem referência estável.".into()));
+    };
+    let measured = solid
+        .face_measure(solid.face_named(&name).map_err(error)?)
+        .map_err(error)?;
+    let nator_kernel::FaceKind::Plane { normal, offset } = measured.kind else {
+        return Err(DocumentError(
+            "A face escolhida é curva. Selecione uma face plana ou um plano da origem.".into(),
+        ));
+    };
+    let local = pick.placement.inverse_apply(pick.point);
+    let distance = dot(normal, local) - offset;
+    let origin = std::array::from_fn(|i| local[i] - normal[i] * distance);
+    let mut world_normal = pick.placement.apply_vector(normal);
+    if dot(world_normal, pick.normal) < 0. {
+        world_normal = world_normal.map(|v| -v);
+    }
+    nator_sketch::Plane::from_normal(pick.placement.apply(origin), world_normal).map_err(error)
+}
+#[cfg(not(feature = "occt"))]
+pub fn sketch_plane(_doc: &Document, _pick: &Pick) -> Result<nator_sketch::Plane, DocumentError> {
+    Err(DocumentError(
+        "Seleção de face plana requer o núcleo OCCT.".into(),
+    ))
+}
+
 /// Ângulo entre duas faces clicadas e, se forem paralelas, a distância entre elas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FacePair {

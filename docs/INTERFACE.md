@@ -5,14 +5,22 @@ A organização visual usa como referência o shell compacto do SolidCraft e seu
 ## Organização e uso
 
 - **Barra superior:** menu Arquivo, salvar, desfazer/refazer, projetos em abas, novo projeto e busca. À direita ficam minimizar, maximizar/restaurar e fechar o aplicativo, substituindo a barra de título nativa. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar.
-- **Modelo:** novo rascunho XY, extrusão, revolução, furo, arredondamento, chanfro, casca, espelhamento, padrão linear e parâmetros. As operações abrem seu editor com a ferramenta já escolhida; perfil e corpo são sugeridos pelo contexto e continuam sujeitos à confirmação.
+- **Modelo:** novo rascunho com seleção de plano, extrusão, revolução, furo, arredondamento, chanfro, casca, espelhamento, padrão linear e parâmetros. As operações abrem seu editor com a ferramenta já escolhida; perfil e corpo são sugeridos pelo contexto e continuam sujeitos à confirmação.
 - **Montagem:** organização de instâncias, ferramentas de repetição e acesso à documentação/exportação. Os controles completos de clones, grupos e padrões permanecem no diálogo de montagem.
 - **Inserir:** importação STL/STEP, suporte de referência, rascunhos XY/XZ/YZ ou na face selecionada e exportação. O arquivo próprio continua sendo o meio de preservar o histórico.
 - **Inspecionar:** medição da seleção, folha técnica, parâmetros e exportação. Medir exige um elemento capturado na área 3D; os resultados exatos continuam sendo preparados em segundo plano.
 - **Vista:** enquadramento, orientações, projeção, sombras, triangulação e visibilidade dos painéis. A pequena faixa sobre a área 3D mantém os atalhos de câmera fora da região de seleção.
 - **Rascunho:** aba contextual selecionada ao entrar em edição, com selecionar, linha, retângulo, círculo, arco, aparar e concluir. As cotas, restrições e ferramentas de refinamento permanecem no inspetor rolável. Uma edição pendente precisa ser resolvida ou cancelada antes de concluir.
 
-O rascunho é enquadrado ao abrir, considerando centros e extensões de círculos/arcos. O botão **Enquadrar** da faixa sobre o canvas restaura essa vista após zoom, deslocamento ou redimensionamento da janela. As cotas usam a formatação em português, sem zeros decimais desnecessários.
+**Novo rascunho** entra na seleção de suporte sem modificar o documento. Clique num plano colorido da origem (XY/XZ/YZ), num dos atalhos da faixa sobre a área 3D ou numa face plana do sólido. Cancelar/Esc sai da seleção. Faces curvas e malhas não definem planos de rascunho; a seleção de faces exige OCCT. Os atalhos explícitos de XY/XZ/YZ em Inserir continuam disponíveis.
+
+A edição acontece no mesmo viewport do modelo. A câmera se desloca e alinha ao plano, conservando a projeção; os sólidos continuam desenhados. Grade, entidades, cotas, encaixes e cursor usam o plano local da peça e sua posição na montagem. O cubo, pan, zoom e órbita continuam disponíveis durante a edição. Ao concluir, a câmera retorna à orientação anterior, mantendo o alvo e a escala de trabalho.
+
+A origem da peça aparece na área 3D; em contexto de montagem, aparece a origem global. O olho de **Origem** na árvore controla sua apresentação. Os planos coloridos só aparecem durante a seleção de suporte. Em uma face, a origem do rascunho é a projeção da origem da peça no plano, com eixos definidos pela normal local; clicar em outro ponto da mesma face não desloca essa referência. O suporte é capturado como plano fixo: ainda não há vínculo paramétrico com alterações posteriores da face.
+
+O rascunho permanece visível ao concluir. Criar uma extrusão, revolução ou furo oculta o rascunho usado, apenas depois de uma operação bem-sucedida. Cada rascunho tem um olho na árvore, inclusive em subpeças, para mostrar/ocultar sem abrir a edição. Clicar no nome abre a edição e mostra o perfil. A visibilidade é salva e participa de desfazer/refazer; recálculos não anulam uma reexibição manual. Projetos anteriores preservam a visibilidade já armazenada.
+
+O rascunho existente é enquadrado ao abrir, considerando centros e extensões de círculos/arcos. O botão **Enquadrar** da faixa sobre o canvas restaura essa vista após zoom, deslocamento ou redimensionamento da janela. As cotas usam a formatação em português, sem zeros decimais desnecessários.
 
 A árvore usa ícones, controles de visibilidade, nomes abreviados por elipse e grupos por tipo. Duplo clique em peça/corpo entra na construção da peça. Os ícones de pasta e painel no canto da faixa recolhem/restauram árvore e propriedades. Os painéis têm largura ajustável e rolagem; a faixa de ferramentas também rola horizontalmente em janelas menores.
 
@@ -45,10 +53,12 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 - `shell.rs`: barra superior, faixa por tarefa, busca e histórico visual.
 - `window_frame.rs`: controles da janela, arraste e redimensionamento sem decoração nativa.
 - `view_cube.rs`: geometria de apresentação, seleção e interação do navegador de orientação, com pintura recortada.
-- `views.rs`, `sketch_editor.rs` e `navigation.rs`: painéis, canvas e integração com o editor existente.
+- `views.rs` e `navigation.rs`: painéis e navegação do viewport CAD único.
+- `sketch_editor.rs`: ferramentas, restrições e publicação das edições do rascunho.
+- `sketch_scene.rs`: origem, seleção de plano, alinhamento da câmera e projeção dos rascunhos no viewport.
 - `crates/renderer/src/lib.rs` e `view.wgsl`: cor de apresentação do fundo, incluindo o esmaecimento.
 
-A captura do projeto mostra a modelagem 3D. Para revisar a edição 2D, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
+A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-project-preview projeto.3dnator modelo.png
@@ -59,3 +69,9 @@ cargo run -p nator-prototype --features occt -- --render-project-preview projeto
 As capturas usam a mesma composição egui/wgpu da janela. Elas verificam layout e renderização; não substituem a interação com diálogos nativos. Testes de eventos verificam clique, bloqueio de botões desabilitados, nome acessível e ativação por teclado, além da busca em português sem acento.
 
 A validação Windows está adiada por orientação do usuário. O workflow a mantém disponível por acionamento manual com `validate_windows`, enquanto o trabalho atual prioriza Linux e refinamento funcional.
+
+O ensaio de interação do rascunho usa eventos egui e um adaptador wgpu (físico ou software), sem janela nativa. Ele é optativo no conjunto de testes:
+
+```sh
+cargo test -p nator-prototype --features occt sketch_workflow_keeps -- --ignored
+```

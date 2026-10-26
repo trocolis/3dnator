@@ -63,6 +63,7 @@ enum Action {
     Redo,
     Import,
     Reference,
+    NewSketch,
     SketchXY,
     SketchXZ,
     SketchYZ,
@@ -98,7 +99,8 @@ impl Action {
             Self::Redo => T::Redo,
             Self::Import => T::Import,
             Self::Reference => T::Reference,
-            Self::SketchXY => T::NewSketch,
+            Self::NewSketch => T::NewSketch,
+            Self::SketchXY => T::SketchXY,
             Self::SketchXZ => T::SketchXZ,
             Self::SketchYZ => T::SketchYZ,
             Self::SketchFace => T::SketchOnFace,
@@ -141,7 +143,11 @@ impl Action {
             Self::Redo => Icon::Redo,
             Self::Import => Icon::Import,
             Self::Reference => Icon::Cube,
-            Self::SketchXY | Self::SketchXZ | Self::SketchYZ | Self::SketchFace => Icon::Sketch,
+            Self::NewSketch
+            | Self::SketchXY
+            | Self::SketchXZ
+            | Self::SketchYZ
+            | Self::SketchFace => Icon::Sketch,
             Self::Solid(tool) => match tool {
                 SolidTool::Extrude => Icon::Extrude,
                 SolidTool::Revolve => Icon::Revolve,
@@ -193,6 +199,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Redo,
     Action::Import,
     Action::Reference,
+    Action::NewSketch,
     Action::SketchXY,
     Action::SketchXZ,
     Action::SketchYZ,
@@ -246,15 +253,28 @@ impl Editor {
             | Action::Side
             | Action::Perspective
             | Action::Shadows
-            | Action::Triangles => self.current().sketch_edit.is_none(),
+            | Action::Triangles => true,
             Action::Browser | Action::Properties => true,
             Action::Undo => editable && self.current().session.undo_label().is_some(),
             Action::Redo => editable && self.current().session.redo_label().is_some(),
             Action::Solid(_) => {
-                editable && self.current().active_part.is_some() && nator_kernel::is_available()
+                editable
+                    && self.current().active_part.is_some()
+                    && nator_kernel::is_available()
+                    && !self
+                        .current()
+                        .sketch_edit
+                        .as_ref()
+                        .is_some_and(|w| w.pending.is_some())
             }
             Action::Parameters => editable && self.current().active_part.is_some(),
-            Action::SketchFace | Action::Measure => editable && self.current().picked.is_some(),
+            Action::NewSketch | Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
+                editable && self.current().sketch_edit.is_none()
+            }
+            Action::SketchFace => {
+                editable && self.current().picked.is_some() && self.current().sketch_edit.is_none()
+            }
+            Action::Measure => editable && self.current().picked.is_some(),
             Action::SketchTool(_) => editable && self.current().sketch_edit.is_some(),
             Action::FinishSketch => {
                 editable
@@ -326,6 +346,17 @@ impl Editor {
         if !self.action_enabled(action) {
             return;
         }
+        if matches!(
+            action,
+            Action::Fit
+                | Action::Iso
+                | Action::Front
+                | Action::Top
+                | Action::Side
+                | Action::Perspective
+        ) {
+            self.current_mut().camera_transition = None;
+        }
         match action {
             Action::New => {
                 if let Err(error) = Document::new(text(T::Untitled))
@@ -351,6 +382,7 @@ impl Editor {
                 }
             }
             Action::Import | Action::Reference => self.import(context, action == Action::Reference),
+            Action::NewSketch => self.start_sketch_plane(),
             Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 let plane = match action {
                     Action::SketchXZ => nator_sketch::Plane::xz(),
@@ -362,7 +394,7 @@ impl Editor {
                     sketch: nator_sketch::Sketch::new(text(T::Sketch), plane),
                 });
             }
-            Action::SketchFace => self.sketch_on_selected_face(),
+            Action::SketchFace => self.sketch_on_selected_face(context),
             Action::Solid(tool) => self.open_feature_tool(tool),
             Action::Assembly => {
                 self.assembly_edit = Some(assembly_editor::Draft::new(self.current().id))
@@ -420,33 +452,18 @@ impl Editor {
                     work.select_tool(tool);
                 }
             }
-            Action::FinishSketch => self.current_mut().sketch_edit = None,
+            Action::FinishSketch => self.finish_sketch(),
         }
     }
-    fn sketch_on_selected_face(&mut self) {
+    fn sketch_on_selected_face(&mut self, context: &egui::Context) {
         let Some(pick) = self.current().picked.clone() else {
             return;
         };
-        let destination = self.current().active_part.unwrap_or(pick.part);
-        let document = self.current().session.document();
-        let target = document
-            .instances()
-            .iter()
-            .find(|i| i.part == destination)
-            .map(|i| i.placement)
-            .unwrap_or_default();
-        let origin = target.inverse_apply(pick.point);
-        let normal = nator_geometry::sub(
-            target.inverse_apply(pick.normal),
-            target.inverse_apply([0.; 3]),
-        );
-        match nator_sketch::Plane::from_normal(origin, normal) {
-            Ok(plane) => self.execute(Command::AddSketch {
-                destination: Some(destination),
-                sketch: nator_sketch::Sketch::new(text(T::Sketch), plane),
-            }),
-            Err(error) => self.status = error.to_string(),
+        if self.current().active_part.is_none() {
+            self.current_mut().active_part = Some(pick.part);
         }
+        self.start_sketch_plane();
+        self.choose_picked_plane(context, pick);
     }
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
         let sketch = self
@@ -717,7 +734,7 @@ impl Editor {
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
         match self.shell.tab {
             RibbonTab::Model => {
-                self.ribbon_group(ui, T::Sketch, &[Action::SketchXY]);
+                self.ribbon_group(ui, T::Sketch, &[Action::NewSketch]);
                 self.ribbon_group(
                     ui,
                     T::CreateGroupLabel,
@@ -917,17 +934,6 @@ impl Editor {
                     });
                 });
             });
-    }
-    /// Atalhos de câmera em uma faixa própria: não sobrepõem a área de seleção 3D.
-    pub(super) fn sketch_camera_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            self.action_button(ui, Action::Fit, false);
-            ui.label(
-                egui::RichText::new(text(T::Sketch))
-                    .small()
-                    .color(theme::MUTED),
-            );
-        });
     }
     pub(super) fn camera_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {

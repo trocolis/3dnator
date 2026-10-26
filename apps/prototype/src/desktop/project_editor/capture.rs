@@ -16,25 +16,11 @@ pub(crate) fn render_project_at_size(
         return Err("A captura aceita largura de 900 a 3840 e altura de 600 a 2160 pixels.".into());
     }
     let document = read_project(project)?;
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
-    let info = adapter.get_info();
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+    let state = gpu_state()?;
+    let device = state.device.clone();
+    let queue = state.queue.clone();
+    let info = state.adapter.get_info();
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let renderer =
-        egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
-    let state = egui_wgpu::RenderState {
-        adapter,
-        available_adapters: Vec::new(),
-        instance,
-        device: device.clone(),
-        queue: queue.clone(),
-        target_format: wgpu::TextureFormat::Rgba8Unorm,
-        renderer: Arc::new(egui::epaint::mutex::RwLock::new(renderer)),
-        surface_config: egui_wgpu::SurfaceConfig::LOW_LATENCY,
-    };
     let context = egui::Context::default();
     let mut editor =
         Editor::from_gpu(state.clone(), &context, document).map_err(|e| e.to_string())?;
@@ -90,6 +76,16 @@ pub(crate) fn render_project_at_size(
         }
         None => None,
     };
+    if editor.current().scene_bounds.is_none() {
+        editor.current_mut().scene_bounds = Some(sketch_scene::document_bounds(
+            editor.current().session.document(),
+            &editor.current().view,
+        ));
+    }
+    editor.current_mut().camera_transition = None;
+    if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
+        work.fit_requested = true;
+    }
     editor.rendered = Some(editor.scene_key());
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Tela do projeto"),
@@ -162,4 +158,317 @@ pub(crate) fn render_project_at_size(
         )?
     );
     Ok(())
+}
+
+fn gpu_state() -> Result<egui_wgpu::RenderState, Box<dyn Error>> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+    let renderer =
+        egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
+    let state = egui_wgpu::RenderState {
+        adapter,
+        available_adapters: Vec::new(),
+        instance,
+        device: device.clone(),
+        queue: queue.clone(),
+        target_format: wgpu::TextureFormat::Rgba8Unorm,
+        renderer: Arc::new(egui::epaint::mutex::RwLock::new(renderer)),
+        surface_config: egui_wgpu::SurfaceConfig::LOW_LATENCY,
+    };
+    Ok(state)
+}
+
+#[cfg(all(test, feature = "occt"))]
+mod tests {
+    use super::*;
+    use nator_document::features::{Operation, RegionRef};
+    use nator_sketch::{Plane, Sketch};
+
+    /// Ensaio optativo porque precisa de adaptador wgpu. Usa eventos reais egui
+    /// sobre o canvas completo; não exige compositor nem janela nativa.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_workflow_keeps_the_model_and_the_same_viewport() -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut base = Sketch::new("Base", Plane::xy());
+        base.add_rectangle([0., 0.], [20., 15.], false)?;
+        let mut session = Session::new(Document::new("Fluxo do viewport")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: base,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        session.execute(Command::AddFeature {
+            part,
+            name: "Base".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "8 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?;
+        let mut editor = Editor::from_gpu(state, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        let (mesh, prepared) = prepare_scene(
+            editor.current().session.document(),
+            &editor.current().view,
+            Some(part),
+        )?
+        .ok_or("Malha ausente")?;
+        editor
+            .viewport
+            .set_prepared_mesh(&editor.gpu.device, &prepared)?;
+        editor.current_mut().scene_bounds = Some(mesh.bounds());
+        editor.scene = Some(mesh);
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        editor.rendered = Some(editor.scene_key());
+        let texture = editor.texture;
+        frame(&mut editor, &context, Vec::new())?;
+        let revision = editor.current().session.revision();
+        editor.start_sketch_plane();
+        assert_eq!(revision, editor.current().session.revision());
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        assert!(editor.current().plane_pick.is_none());
+        assert_eq!(revision, editor.current().session.revision());
+        editor.start_sketch_plane();
+        let rect = frame(&mut editor, &context, Vec::new())?;
+        let point = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            rect,
+            [5., 5., 0.],
+        )
+        .ok_or("Plano sem projeção")?;
+        click(&mut editor, &context, point)?;
+        settle(&mut editor, &context)?;
+        let work = editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .ok_or("Clique não abriu a edição")?;
+        let id = work.id;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .plane,
+            Plane::xy()
+        );
+        editor.align_sketch_camera(false, false);
+        let rect = frame(&mut editor, &context, Vec::new())?;
+        let work = editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .ok_or("Edição ausente")?;
+        let projection = sketch_scene::Frame {
+            camera: editor.viewport.camera.clone(),
+            bounds: editor.display_bounds(),
+            rect,
+            placement: work.placement,
+            plane: Plane::xy(),
+        };
+        editor
+            .current_mut()
+            .sketch_edit
+            .as_mut()
+            .ok_or("Edição ausente")?
+            .select_tool(sketch_editor::Tool::Rectangle);
+        for point in [[2., 2.], [12., 10.]] {
+            click(
+                &mut editor,
+                &context,
+                projection.screen(point).ok_or("Ponto sem projeção")?,
+            )?;
+        }
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            4
+        );
+        assert_eq!(editor.texture, texture);
+        assert!(editor.scene.is_some());
+        editor.finish_sketch();
+        assert!(editor.current().sketch_edit.is_none());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .visible
+        );
+        frame(&mut editor, &context, Vec::new())?;
+        editor.execute(Command::AddFeature {
+            part,
+            name: "Perfil consumido".into(),
+            operation: Operation::Extrude {
+                sketch: id,
+                region: RegionRef::Index(0),
+                from: "8 mm".into(),
+                to: "12 mm".into(),
+                combine: None,
+                until: None,
+            },
+        });
+        assert!(
+            !editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .visible,
+            "{}",
+            editor.status
+        );
+        editor.execute(Command::SetSketchVisibility { id, visible: true });
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .visible
+        );
+        assert_eq!(editor.texture, texture);
+        settle(&mut editor, &context)?;
+        // Um clique fora dos planos da origem escolhe a face do sólido, sem
+        // aproximá-la pela normal de um triângulo e sem trocar de canvas.
+        editor.start_sketch_plane();
+        let rect = frame(&mut editor, &context, Vec::new())?;
+        let point = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            rect,
+            [16., 12., 8.],
+        )
+        .ok_or("Face sem projeção")?;
+        click(&mut editor, &context, point)?;
+        settle(&mut editor, &context)?;
+        let work = editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .ok_or("Clique na face não abriu a edição")?;
+        let plane = editor
+            .current()
+            .session
+            .document()
+            .sketch(work.id)
+            .ok_or("Rascunho ausente")?
+            .sketch
+            .plane;
+        assert!(nator_geometry::norm(nator_geometry::sub(plane.origin, [0., 0., 8.])) < 1e-8);
+        assert!(nator_geometry::dot(plane.normal(), [0., 0., 1.]) > 1. - 1e-8);
+        assert_eq!(editor.texture, texture);
+        assert!(editor.scene.is_some());
+        Ok(())
+    }
+    fn frame(
+        editor: &mut Editor,
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Result<egui::Rect, Box<dyn Error>> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280., 820.),
+            )),
+            events,
+            time: Some(context.input(|i| i.time) + 1. / 60.),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(input, |ui| editor.draw(ui));
+        output.textures_delta.clear();
+        let primitives = context.tessellate(output.shapes, output.pixels_per_point);
+        let images: Vec<_> = primitives
+            .iter()
+            .filter_map(|p| match &p.primitive {
+                egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == editor.texture => {
+                    Some(mesh.calc_bounds())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            images.len(),
+            1,
+            "Deve haver exatamente um canvas CAD, inclusive em edição."
+        );
+        images
+            .first()
+            .copied()
+            .ok_or_else(|| "Viewport ausente".into())
+    }
+    fn click(
+        editor: &mut Editor,
+        context: &egui::Context,
+        position: egui::Pos2,
+    ) -> Result<(), Box<dyn Error>> {
+        for pressed in [true, false] {
+            frame(
+                editor,
+                context,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )?;
+        }
+        Ok(())
+    }
+    fn settle(editor: &mut Editor, context: &egui::Context) -> Result<(), Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.busy() || editor.rendered != Some(editor.scene_key()) {
+            if Instant::now() > deadline {
+                return Err(format!("Trabalhador não terminou: {}", editor.status).into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            frame(editor, context, Vec::new())?;
+        }
+        Ok(())
+    }
 }

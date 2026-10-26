@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Rascunhos no viewport CAD
+
+- Edição integrada ao mesmo viewport 3D, preservando o modelo, a navegação e o cubo de orientação. A câmera se alinha suavemente ao plano; cursor, grade, entidades, cotas e capturas usam o mesmo referencial, incluindo ocorrências rotacionadas na montagem.
+- **Novo rascunho** aguarda a escolha de XY/XZ/YZ na origem ou de uma face plana do sólido. Seleção exata no B-rep em segundo plano; faces curvas e malhas são rejeitadas. A origem do rascunho de face é a projeção da origem da peça, independente do ponto clicado.
+- Origem da peça visível na área de trabalho, com controle de olho na árvore. Planos de referência aparecem durante a seleção, com alternativas na faixa superior e cancelamento sem modificar o projeto.
+- Rascunhos concluídos continuam visíveis. Extrusão, revolução e furo ocultam seu perfil após sucesso; controles de olho na árvore permitem reexibi-lo. Visibilidade participa de desfazer/refazer e do salvamento, e é preservada em recálculos posteriores.
+- Cena anterior mantida durante a preparação de uma nova revisão, evitando apagar os sólidos a cada segmento editado. Projetos apenas com rascunhos também são desenhados e enquadrados, incluindo círculos e pontos isolados.
+
 ### Navegação e área 3D
 
 - Reconstruído o cubo chanfrado como poliedro fechado, com seis faces, doze arestas chanfradas e oito cantos selecionáveis. A seleção usa os polígonos desenhados, com nomes das vistas que acompanham a orientação da face.

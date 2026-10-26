@@ -198,6 +198,89 @@ impl Camera {
         self.span = margin * (1. / aspect.max(0.01)).max(1.);
     }
 
+    /// Alinha a tela a um plano de trabalho em mm, mantendo a escala atual.
+    /// A normal vem de U×V; U fica para a direita e V para cima, inclusive em
+    /// peças rotacionadas na montagem. Não altera o modo de projeção.
+    pub fn align_plane(
+        &mut self,
+        origin: Point3,
+        u: Point3,
+        v: Point3,
+        bounds: Bounds,
+    ) -> Result<(), String> {
+        if origin
+            .iter()
+            .chain(u.iter())
+            .chain(v.iter())
+            .any(|x| !x.is_finite())
+            || (norm(u) - 1.).abs() > 1e-8
+            || (norm(v) - 1.).abs() > 1e-8
+            || dot(u, v).abs() > 1e-8
+        {
+            return Err("Plano de trabalho inválido.".into());
+        }
+        self.set_orientation(cross(u, v), u);
+        self.focus_world(origin, bounds);
+        Ok(())
+    }
+    pub fn focus_world(&mut self, point: Point3, bounds: Bounds) {
+        let scale = bounds.size().into_iter().fold(0_f64, f64::max);
+        if scale > 0. && scale.is_finite() && point.iter().all(|v| v.is_finite()) {
+            self.target = std::array::from_fn(|i| (point[i] - bounds.center()[i]) / scale);
+        }
+    }
+    pub fn copy_orientation(&mut self, other: &Self) {
+        self.yaw = other.yaw;
+        self.pitch = other.pitch;
+        self.roll = other.roll;
+    }
+    /// Interpolação rígida do referencial pelo eixo/ângulo relativo. O caso de
+    /// meia-volta usa uma linha de R+I para recuperar o eixo sem dividir por seno
+    /// quase nulo. Alvo e escala são interpolados no mesmo referencial da cena.
+    pub fn interpolated(&self, next: &Self, fraction: f64) -> Self {
+        let t = fraction.clamp(0., 1.);
+        if t >= 1. {
+            return next.clone();
+        }
+        let (a, b, c) = self.basis();
+        let (x, y, z) = next.basis();
+        let matrix: [[f64; 3]; 3] = std::array::from_fn(|i| {
+            std::array::from_fn(|j| x[i] * a[j] + y[i] * b[j] + z[i] * c[j])
+        });
+        let angle = ((matrix[0][0] + matrix[1][1] + matrix[2][2] - 1.) * 0.5)
+            .clamp(-1., 1.)
+            .acos();
+        let mut result = self.clone();
+        if angle > 1e-9 {
+            let axis = if (std::f64::consts::PI - angle).abs() < 1e-6 {
+                let rows: [Point3; 3] = std::array::from_fn(|i| {
+                    std::array::from_fn(|j| matrix[i][j] + if i == j { 1. } else { 0. })
+                });
+                rows.into_iter().fold(
+                    [0.; 3],
+                    |best, row| if norm(row) > norm(best) { row } else { best },
+                )
+            } else {
+                [
+                    matrix[2][1] - matrix[1][2],
+                    matrix[0][2] - matrix[2][0],
+                    matrix[1][0] - matrix[0][1],
+                ]
+            };
+            let length = norm(axis);
+            if length > 1e-12 {
+                let axis = axis.map(|v| v / length);
+                result.set_orientation(
+                    rotate_vector(c, axis, angle * t),
+                    rotate_vector(a, axis, angle * t),
+                );
+            }
+        }
+        result.target = std::array::from_fn(|i| self.target[i] * (1. - t) + next.target[i] * t);
+        result.span = self.span * (1. - t) + next.span * t;
+        result
+    }
+
     /// Campo vertical fixo de 45°; `span` mede a altura no plano do alvo em ambas as
     /// projeções. Alternar a projeção conserva o enquadramento nesse plano. O zoom em
     /// perspectiva desloca o observador, mantendo as mesmas regras de pan e zoom no cursor.
@@ -824,6 +907,70 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aligning_a_work_plane_preserves_projection_and_scale() -> Result<(), String> {
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Default::default()
+            };
+            camera.rotate_quarter_turn(true);
+            let span = camera.span;
+            let origin = [12., -8., 4.];
+            let u = [0., 1., 0.];
+            let v = [0., 0., 1.];
+            camera.align_plane(origin, u, v, BOUNDS)?;
+            assert_eq!(camera.span, span);
+            assert_eq!(camera.projection, projection);
+            let center = camera
+                .project_world(origin, BOUNDS, 1.6)
+                .ok_or("Origem sem projeção")?;
+            assert!(center[0].abs() < 1e-12 && center[1].abs() < 1e-12);
+            let right = camera
+                .project_world([12., -7., 4.], BOUNDS, 1.6)
+                .ok_or("U sem projeção")?;
+            let up = camera
+                .project_world([12., -8., 5.], BOUNDS, 1.6)
+                .ok_or("V sem projeção")?;
+            assert!(right[0] > 0. && right[1].abs() < 1e-12);
+            assert!(up[1] > 0. && up[0].abs() < 1e-12);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn work_plane_transition_stays_rigid_including_half_turns() -> Result<(), String> {
+        let from = Camera::default();
+        for (u, v) in [
+            ([1., 0., 0.], [0., 1., 0.]),
+            ([-1., 0., 0.], [0., -1., 0.]),
+            ([0., 1., 0.], [0., 0., 1.]),
+        ] {
+            let mut to = from.clone();
+            to.align_plane([10., 0., 0.], u, v, BOUNDS)?;
+            for step in 0..=100 {
+                let current = from.interpolated(&to, f64::from(step) / 100.);
+                let (x, y, z) = current.basis();
+                assert!(
+                    (norm(x) - 1.).abs() < 1e-12
+                        && (norm(y) - 1.).abs() < 1e-12
+                        && (norm(z) - 1.).abs() < 1e-12
+                );
+                assert!(dot(x, y).abs() < 1e-12 && dot(x, z).abs() < 1e-12);
+                assert!(norm(sub(cross(x, y), z)) < 1e-12);
+                if step == 100 {
+                    assert!(norm(sub(z, to.direction())) < 1e-12);
+                }
+            }
+        }
+        let mut opposite = from.clone();
+        opposite.rotate_quarter_turn(true);
+        opposite.rotate_quarter_turn(true);
+        let midway = from.interpolated(&opposite, 0.5);
+        assert!(dot(from.basis().0, midway.basis().0).abs() < 1e-7);
+        Ok(())
+    }
 
     const PROJECTIONS: [Projection; 2] = [Projection::Orthographic, Projection::Perspective];
     const BOUNDS: Bounds = Bounds {
