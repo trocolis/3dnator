@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Corpo modificado sem duplicação na árvore — 26/10/2026
+
+- Reproduzida a causa da apresentação: cada operação mantém seu resultado geométrico no histórico, oculta as entradas consumidas e a árvore enumerava todos esses registros como corpos independentes. A pasta agora usa `Part::listed_bodies`, retirando etapas históricas ocultas e preservando corpos atuais ocultados manualmente e etapas antigas explicitamente visíveis. O contador segue a mesma consulta.
+- Modificações passam a herdar o nome da entrada principal; o nome da operação continua independente na linha do tempo. Uma regressão com OCCT confirma que editar uma operação existente conserva a quantidade de resultados, preserva renomeações e recalcula a geometria. Também verifica salvamento/reabertura, recuo do marcador e desfazer/refazer. Outra regressão cobre corpos independentes ocultos, pastas ocultas e etapas antigas exibidas manualmente.
+- **138 testes sem OCCT e 180 com OCCT 7.9.3 aprovados**, com dois ensaios gráficos optativos ignorados. Formatação, Clippy do workspace com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados.
+- Ensaio `--validate-part` aprovado, incluindo recálculo e intercâmbio STEP/STL. Captura real egui/wgpu/GL llvmpipe inspecionada: o suporte com furo e arredondamento aparece como **Corpos (1)**, com suas operações na linha do tempo. Evidências em `target/codex-validation/body-history-20261026/`. Versão 0.3.0 e formato 15 preservados; Windows e janela nativa não foram exercitados.
+
 ## Revisão da montagem e validação de campos — 26/10/2026
 
 - Revisados os três incrementos recentes de montagem e árvore (`3fcaa1c`, `5dda7d0`, `b221ac6`): referências fora das peças, posicionamento ao lado e visibilidade hierárquica. O conjunto existente passou antes das alterações. A revisão identificou que o campo numérico descartava texto inválido ao perder foco e permitia confirmar o último valor válido; valores acima da faixa também eram truncados silenciosamente.

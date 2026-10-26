@@ -186,6 +186,20 @@ pub struct Part {
     pub folders: PartFolders,
 }
 impl Part {
+    /// Corpos apresentados como elementos da peça, sem acumular as etapas ocultas do
+    /// histórico. Um corpo independente ocultado pelo usuário continua listado para que
+    /// possa ser reexibido. Uma etapa antiga explicitamente visível também permanece
+    /// acessível; só os registros históricos ocultos são retirados da lista.
+    ///
+    /// A visibilidade da pasta não participa desta consulta: ocultar Corpos não pode
+    /// apagar seus nós da árvore. As etapas suprimidas/recuadas continuam no histórico.
+    pub fn listed_bodies(&self) -> impl Iterator<Item = &Body> {
+        let historical = features::hidden_by_history(self);
+        self.bodies
+            .iter()
+            .filter(move |b| b.visible || !historical.contains(&b.id))
+    }
+
     /// Corpos exibidos: visíveis e com a pasta Corpos visível. A visibilidade própria de
     /// cada corpo, que o histórico também usa, não muda quando a pasta é ocultada.
     pub fn shown_bodies(&self) -> impl Iterator<Item = &Body> {

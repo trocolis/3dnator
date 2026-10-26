@@ -774,18 +774,20 @@ fn add_feature(
     }
     let operation = features::normalize(doc, part, operation)?;
     let built = features::construct(doc, part, output, &operation)?;
-    // Refinamentos herdam a aparência da entrada principal. Uma edição explícita da cor
-    // de um resultado permanece independente e não é sobrescrita pelo recálculo.
-    let color = operation
-        .inputs()
-        .first()
-        .and_then(|id| doc.body(*id))
-        .and_then(|b| b.color);
+    // O resultado é uma nova etapa geométrica, não um novo corpo para o usuário:
+    // refinamentos preservam o nome e a aparência da entrada principal. O nome da
+    // operação pertence à linha do tempo; criações sem entrada ganham seu próprio nome.
+    // Edições posteriores de nome/cor do resultado não são sobrescritas pelo recálculo.
+    let source = operation.inputs().first().and_then(|id| doc.body(*id));
+    let body_name = source
+        .map(|b| b.name.clone())
+        .unwrap_or_else(|| name.clone());
+    let color = source.and_then(|b| b.color);
     doc.add_body(
         part,
         nator_document::Body {
             id: output,
-            name: name.clone(),
+            name: body_name,
             geometry: built.mesh,
             brep: Some(built.brep),
             face_names: built.faces,

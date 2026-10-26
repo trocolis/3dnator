@@ -953,6 +953,42 @@ mod tests {
     }
 
     #[test]
+    fn listed_bodies_distinguish_history_from_manual_visibility() -> Result<(), Box<dyn Error>> {
+        let mut part = chain()?;
+        let mut independent = part.bodies[0].clone();
+        independent.id = BodyId(14);
+        independent.name = "Corpo independente".into();
+        independent.visible = false;
+        part.bodies.push(independent);
+        let listed = |part: &Part| part.listed_bodies().map(|b| b.id).collect::<Vec<_>>();
+        assert_eq!(listed(&part), [BodyId(12), BodyId(13), BodyId(14)]);
+        // Ocultar um corpo atual ou a pasta não o remove da árvore: o olho deve
+        // continuar disponível para reexibi-lo, sem listar todas as etapas anteriores.
+        part.bodies[3].visible = false;
+        part.folders.bodies = false;
+        assert_eq!(listed(&part), [BodyId(12), BodyId(13), BodyId(14)]);
+        assert!(part.shown_bodies().next().is_none());
+        // Projetos antigos podem ter uma etapa anterior exibida explicitamente.
+        // Mantê-la na lista permite ocultá-la novamente.
+        part.bodies[0].visible = true;
+        assert_eq!(
+            listed(&part),
+            [BodyId(10), BodyId(12), BodyId(13), BodyId(14)]
+        );
+        part.bodies[0].visible = false;
+
+        let before = hidden_by_history(&part);
+        part.history_marker = Some(1);
+        sync_visibility(&mut part, &before);
+        assert_eq!(listed(&part), [BodyId(11), BodyId(14)]);
+        let before = hidden_by_history(&part);
+        part.history_marker = Some(0);
+        sync_visibility(&mut part, &before);
+        assert_eq!(listed(&part), [BodyId(10), BodyId(14)]);
+        Ok(())
+    }
+
+    #[test]
     fn inactive_operations_propagate_and_drive_visibility() -> Result<(), Box<dyn Error>> {
         let mut part = chain()?;
         assert_eq!(dependents(&part, BodyId(11)), [BodyId(12)]);

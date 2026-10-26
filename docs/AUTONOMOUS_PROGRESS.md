@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Corpos atuais e etapas geométricas — 26/10/2026
+
+- Investigado o relato de que modificar um corpo acrescentava outro e ocultava o original. O documento preserva resultados por operação para recalcular; a árvore apresentava também essas etapas intermediárias ocultas. A pasta Corpos e seu contador agora listam os resultados atuais, mantendo acessíveis corpos independentes ocultados manualmente e etapas antigas explicitamente mostradas.
+- Modificações herdam nome e cor da entrada principal; o nome da operação permanece na linha do tempo. Edição de operação existente verificada sem acrescentar resultados, com preservação da renomeação do corpo e de salvar/reabrir/desfazer/refazer.
+- Duas regressões novas aprovadas; 138 testes sem OCCT e 180 com OCCT aprovados, além de formatação, Clippy nas duas configurações e compilação desktop com OCCT. Ensaio da peça paramétrica e captura real da árvore com um corpo/furo/arredondamento aprovados em `target/codex-validation/body-history-20261026/`. Sem migração de formato, release ou publicação remota.
+
 ## Revisão dos incrementos do Claude e campos de montagem — 26/10/2026
 
 - Revisados os três commits recentes de fluxo de montagem, posicionamento automático e árvore com pastas. Mantidas as decisões de interface e a separação entre documento, comandos e apresentação; executado o conjunto de testes antes de refinar os campos numéricos.

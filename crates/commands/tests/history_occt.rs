@@ -131,6 +131,81 @@ fn part_states(session: &Session, part: PartId) -> Result<Vec<FeatureState>> {
 }
 
 #[test]
+fn refinements_keep_one_listed_body_and_editing_reuses_its_result() -> Result<()> {
+    let Chain {
+        mut session,
+        part,
+        a,
+        b,
+        c,
+        ..
+    } = chain()?;
+    let listed = |doc: &Document| -> Result<Vec<(BodyId, String)>> {
+        Ok(doc
+            .part(part)
+            .ok_or("Peça ausente")?
+            .listed_bodies()
+            .map(|body| (body.id, body.name.clone()))
+            .collect())
+    };
+    // As três etapas geométricas são necessárias para recalcular, mas só o
+    // resultado atual aparece como corpo. O nome da operação fica no histórico.
+    assert_eq!(
+        session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?
+            .bodies
+            .len(),
+        3
+    );
+    assert_eq!(listed(session.document())?, [(c, "Placa".into())]);
+    assert_eq!(
+        session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?
+            .features[2]
+            .name,
+        "Repetição"
+    );
+    assert!(!visible(&session, a)? && !visible(&session, b)?);
+    session.execute(Command::RenameBody {
+        id: c,
+        name: "Chassi".into(),
+    })?;
+    session.execute(Command::EditFeature {
+        part,
+        output: b,
+        operation: translate(a, 20.),
+    })?;
+    let piece = session.document().part(part).ok_or("Peça ausente")?;
+    assert_eq!(piece.bodies.len(), 3);
+    assert_eq!(piece.features.len(), 3);
+    assert_eq!(listed(session.document())?, [(c, "Chassi".into())]);
+    assert!((volume(&session, c)? - 2. * 60. * 40. * 8.).abs() < 1e-6);
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("corpo-editado.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    assert_eq!(
+        listed(&nator_project_io::read_project(&path)?)?,
+        [(c, "Chassi".into())]
+    );
+    // Recuar mostra a etapa correspondente, e desfazer/refazer restaura a mesma
+    // organização sem duplicar o resultado editado.
+    session.execute(Command::SetHistoryMarker {
+        part,
+        marker: Some(1),
+    })?;
+    assert_eq!(listed(session.document())?, [(a, "Placa".into())]);
+    assert!(session.undo());
+    assert_eq!(listed(session.document())?, [(c, "Chassi".into())]);
+    assert!(session.redo());
+    assert_eq!(listed(session.document())?, [(a, "Placa".into())]);
+    Ok(())
+}
+
+#[test]
 fn suppression_hides_dependents_and_reactivation_rebuilds_them() -> Result<()> {
     let Chain {
         mut session,

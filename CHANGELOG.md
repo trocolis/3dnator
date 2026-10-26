@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Corpos e etapas do histórico
+
+- A pasta **Corpos** lista os resultados atuais da peça sem acumular as etapas anteriores ocultas. Corpos independentes ocultados manualmente continuam acessíveis pelo olho; etapas antigas explicitamente exibidas também permanecem acessíveis.
+- Modificações de um corpo preservam seu nome e sua cor. Os nomes de operações como Arredondamento e Chanfro ficam na linha do tempo; editar uma operação existente reutiliza seu resultado.
+
 ### Validação dos campos de montagem
 
 - Mover e origem do padrão circular preservam expressões inválidas ao perder foco, destacam os campos e bloqueiam OK/Enter até a correção. Valores fora da faixa de ±10.000.000 mm/graus são recusados sem truncamento silencioso.

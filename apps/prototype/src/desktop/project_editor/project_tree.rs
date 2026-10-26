@@ -381,17 +381,20 @@ impl<'a> Tree<'a> {
                 false
             },
             |tree, ui| {
-                if !part.bodies.is_empty() {
+                // Resultados intermediários pertencem à linha do tempo. Listá-los aqui
+                // fazia cada modificação parecer uma cópia nova do corpo anterior.
+                let bodies = part.listed_bodies().collect::<Vec<_>>();
+                if !bodies.is_empty() {
                     tree.folder(
                         ui,
                         tree.id(("bodies", &path)),
                         Folder::Bodies(part.id),
                         Icon::Folder,
-                        format!("{} ({})", text(T::SolidBodies), part.bodies.len()),
+                        format!("{} ({})", text(T::SolidBodies), bodies.len()),
                         shown,
                         false,
                         |tree, ui, shown| {
-                            for body in &part.bodies {
+                            for body in bodies {
                                 tree.body(ui, part.id, body, shown);
                             }
                         },
