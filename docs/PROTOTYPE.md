@@ -22,6 +22,7 @@ Projetos abrem em abas. Cada aba mantém documento, seleção, câmera, contexto
 - Botão do meio arrasta a vista; Shift com botão do meio orbita.
 - Botões oferecem vistas frontal, superior, lateral e isométrica, além de enquadramento.
 - O seletor **Ortográfica / Perspectiva** muda a projeção da aba. A perspectiva tem campo vertical de 45°; o zoom e o movimento livre usam o plano do alvo. **Enquadrar** recentraliza o modelo. A vista ortográfica é o padrão.
+- As sombras opcionais (desligadas por padrão) podem ser ativadas pela opção **Sombras**, aplicando sombreamento direcional nas faces opostas e projeção suave de contato no plano de apoio.
 - O cubo de navegação possui faces, arestas e cantos clicáveis; X/Y/Z acompanham a câmera.
 - Ctrl+S salva; Ctrl+Z desfaz; Ctrl+Shift+Z ou Ctrl+Y refazem. Campos de texto conservam seu próprio desfazer.
 - As operações concluídas são atômicas e a sequência guarda até 100 ações, compartilhando as malhas entre snapshots.

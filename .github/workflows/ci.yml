@@ -30,6 +30,8 @@ jobs:
       - run: cargo run -p nator-prototype --locked -- --inspect reference.stl
       - run: cargo run -p nator-prototype --no-default-features --locked -- --validate-project validation-output/project
       - run: cargo run -p nator-prototype --no-default-features --locked -- --inspect-project validation-output/project/support.3dnator
+      - run: cargo run -p nator-prototype --no-default-features --locked -- --validate-sketch validation-output/sketch
+      - run: cargo run -p nator-prototype --locked -- --validate-editor validation-output/editor
       - uses: actions/upload-artifact@v4
         with:
           name: project-${{ runner.os }}
@@ -45,7 +47,7 @@ jobs:
       - name: Preparar SDK OCCT
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libocct-data-exchange-dev libocct-modeling-algorithms-dev
+          sudo apt-get install -y cmake libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-application-framework-dev
       - run: cargo clippy -p nator-prototype --no-default-features --features occt --locked -- -D warnings
       - run: cargo test -p nator-kernel -p nator-commands --features occt --locked
       - run: cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/linux
