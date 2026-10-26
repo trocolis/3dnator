@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Cancelamento de pré-visualizações
+
+- Cancelar uma ação restaura automaticamente a cena do documento, sem esperar outra interação no visualizador. Corrigidos o redesenho ausente ao encerrar a prévia e a chave de uma preparação de cena já concluída que bloqueava o retorno à cena original.
+- Regressões verificam Cancelar/Esc na cópia, restauração da malha e preservação do documento/desfazer, além de impedir redesenho contínuo quando o editor fica ocioso.
+
 ### Corpos e etapas do histórico
 
 - A pasta **Corpos** lista os resultados atuais da peça sem acumular as etapas anteriores ocultas. Corpos independentes ocultados manualmente continuam acessíveis pelo olho; etapas antigas explicitamente exibidas também permanecem acessíveis.

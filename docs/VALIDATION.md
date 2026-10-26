@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Restauração da cena ao cancelar prévias — 26/10/2026
+
+- Reproduzido o congelamento da cópia após Cancelar: a cena renderizada tinha a geração da prévia, mas a chave da cena original permanecia em `requested` mesmo sem trabalhador ativo. A solicitação agora é liberada ao receber a cena calculada (inclusive obsoleta). Encerrar uma prévia visível solicita outro quadro, pois os painéis fecham depois da verificação da cena.
+- Duas regressões sem GPU verificam agendamento ao cancelar explicitamente ou deixar de receber pedidos do painel, retorno ao estado ocioso e cancelamento sem prévia visível. Um ensaio egui/wgpu acrescentado reproduz a cópia no painel, cancela por botão e por Esc e verifica malha/limites restaurados com quadros sem eventos, chave pendente liberada, revisão e salvamento preservados e nenhuma ação de desfazer criada.
+- **140 testes sem OCCT e 182 com OCCT 7.9.3 aprovados**, com os três ensaios gráficos optativos executados separadamente em série e aprovados: cancelamento da cópia, digitação no Mover e fluxo de rascunho no viewport. A execução inicial simultânea desses ensaios encerrou o processo com SIGSEGV; a repetição com `--ignored --test-threads=1` passou. Não foi atribuída uma causa nativa sem diagnóstico adicional.
+- Formatação e Clippy com todos os alvos e avisos negados aprovados nas duas configurações. Logs em `target/codex-validation/cancel-preview-20261026/`. Sem alteração do formato 15 ou da versão de desenvolvimento 0.3.0; Windows e janela nativa não foram exercitados.
+
 ## Corpo modificado sem duplicação na árvore — 26/10/2026
 
 - Reproduzida a causa da apresentação: cada operação mantém seu resultado geométrico no histórico, oculta as entradas consumidas e a árvore enumerava todos esses registros como corpos independentes. A pasta agora usa `Part::listed_bodies`, retirando etapas históricas ocultas e preservando corpos atuais ocultados manualmente e etapas antigas explicitamente visíveis. O contador segue a mesma consulta.

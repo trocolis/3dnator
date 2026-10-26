@@ -118,6 +118,7 @@ As operações de construção e de montagem abrem um painel ancorado ao canto s
 - **Demais ferramentas:** revolução (eixo do plano ou linha do rascunho, ângulo ou volta completa), furo (tipo, extensão, ponta, rosca registrada), arredondamento, chanfro (distância igual ou distância e ângulo), casca (para dentro ou para fora), combinar (unir, cortar, interseção), padrões e espelhamento/divisão por plano. O índice topológico manual fica em **Avançado**.
 - **Prévia ao vivo:** a cada alteração, depois de uma breve pausa, o resultado é calculado em segundo plano numa cópia do documento e mostrado no lugar da cena, com o corpo resultante em azul. Ao editar uma operação, a prévia mostra o histórico até ela, e as seleções valem para o modelo antes dela. Erros aparecem no rodapé. **OK** publica o resultado já calculado sem recalcular; se a prévia falhou numa operação posterior, abre-se a decisão de falha no recálculo.
 - Seleções obrigatórias vazias desabilitam o OK. A prévia não entra no desfazer nem altera o documento.
+- Cancelar ou fechar o painel descarta a prévia e restaura automaticamente a cena do documento, sem precisar clicar ou navegar no visualizador. Esc fora dos campos tem o mesmo efeito; Esc dentro de um campo numérico restaura primeiro o valor em edição.
 
 ## Busca, ícones e acessibilidade
 

@@ -51,6 +51,26 @@ pub(super) struct LivePreview {
     generation: u64,
 }
 
+impl LivePreview {
+    /// Fim do quadro: sem comando completo, descarta a prévia e agenda a restauração
+    /// da cena real. Os painéis são processados depois de `ensure_scene`; sem outro
+    /// quadro, a GPU conservaria a cópia temporária até a próxima interação do usuário.
+    pub(super) fn finish_frame(&mut self, context: &egui::Context) {
+        if !std::mem::take(&mut self.requested) {
+            self.request = None;
+        }
+        if self.request.is_none() {
+            self.ready = None;
+            self.failed = None;
+            if std::mem::take(&mut self.shown) != 0 {
+                // Somente a transição pede redesenho. Quadros ociosos continuam sem
+                // repintura contínua; resultados tardios serão rejeitados sem request.
+                context.request_repaint();
+            }
+        }
+    }
+}
+
 /// Chave textual do comando: muda com qualquer parâmetro. Os comandos pré-visualizados
 /// não carregam malhas, então a representação é curta.
 fn key(command: &Command) -> String {
@@ -147,20 +167,6 @@ impl Editor {
             .as_ref()
             .filter(|(k, _)| *k == key)
             .map(|(_, e)| e.clone())
-    }
-
-    /// Fim do quadro: sem painel pedindo, a cena do documento volta à tela.
-    pub(super) fn finish_preview_frame(&mut self) {
-        if !std::mem::take(&mut self.preview.requested) {
-            self.preview.request = None;
-        }
-        if self.preview.request.is_none() {
-            self.preview.ready = None;
-            self.preview.failed = None;
-            if self.preview.shown != 0 {
-                self.preview.shown = 0;
-            }
-        }
     }
 
     /// Recebe resultados e inicia o cálculo pendente quando a edição para de mudar.
@@ -320,4 +326,83 @@ pub(super) fn roll_back(document: &mut Document, part: PartId, output: BodyId, b
 
 fn roll_back_after(document: &mut Document, part: PartId, output: BodyId) {
     roll_back(document, part, output, false);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+    fn frame(context: &egui::Context, preview: &mut LivePreview) -> TestResult<Duration> {
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            preview.finish_frame(ui.ctx());
+        });
+        output.textures_delta.clear();
+        Ok(output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .ok_or("Viewport principal ausente")?
+            .repaint_delay)
+    }
+
+    #[test]
+    fn leaving_a_visible_preview_schedules_restoration_without_more_input() -> TestResult<()> {
+        // Cobre tanto Cancelar no Mover (pedido explícito de None) quanto fechar um
+        // painel de operação (nenhum pedido no quadro), sem eventos de mouse/teclado.
+        for explicit_cancel in [true, false] {
+            let context = egui::Context::default();
+            let command = Command::DuplicateInstance { id: InstanceId(1) };
+            let mut preview = LivePreview {
+                request: Some(Request {
+                    tab: 1,
+                    revision: 0,
+                    key: key(&command),
+                    command,
+                    highlight: None,
+                    rollback: None,
+                    changed: Instant::now(),
+                }),
+                shown: 1,
+                generation: 1,
+                ..Default::default()
+            };
+            // Drena os redesenhos iniciais do egui. A prévia mantida pelo painel
+            // deve conseguir ficar ociosa, para o ensaio não depender de animações.
+            let mut delay = Duration::ZERO;
+            for _ in 0..4 {
+                preview.requested = true;
+                delay = frame(&context, &mut preview)?;
+            }
+            assert_eq!(delay, Duration::MAX);
+            assert_eq!(preview.shown, 1);
+
+            if explicit_cancel {
+                preview.requested = true;
+                preview.request = None;
+            }
+            assert_eq!(frame(&context, &mut preview)?, Duration::ZERO);
+            assert_eq!(preview.shown, 0);
+            assert!(preview.request.is_none());
+            // Restaurar não pode transformar a janela ociosa num laço de redesenho.
+            for _ in 0..4 {
+                delay = frame(&context, &mut preview)?;
+            }
+            assert_eq!(delay, Duration::MAX);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn canceling_before_a_preview_is_visible_keeps_the_viewport_idle() -> TestResult<()> {
+        let context = egui::Context::default();
+        let mut preview = LivePreview::default();
+        let mut delay = Duration::ZERO;
+        for _ in 0..4 {
+            delay = frame(&context, &mut preview)?;
+        }
+        assert_eq!(delay, Duration::MAX);
+        preview.requested = true;
+        assert_eq!(frame(&context, &mut preview)?, Duration::MAX);
+        Ok(())
+    }
 }

@@ -444,6 +444,7 @@ pub struct Editor {
     status: String,
     scene: Option<Mesh>,
     rendered: Option<SceneKey>,
+    /// Chave da preparação de cena; liberada ao receber a cena calculada.
     requested: Option<SceneKey>,
     import_scale: f64,
     pending_close: Option<u64>,
@@ -971,6 +972,12 @@ impl Editor {
                 mesh,
                 prepared,
             }) => {
+                // `requested` representa trabalho em voo, não uma cena em cache.
+                // Depois de exibir uma prévia, cancelar volta à mesma chave da cena
+                // original; uma chave concluída aqui bloquearia essa restauração.
+                if self.requested == Some(key) {
+                    self.requested = None;
+                }
                 if self.scene_key() == key {
                     self.show_scene(key, bounds, mesh, prepared);
                 }
@@ -1517,7 +1524,7 @@ impl Editor {
         self.timeline_dialogs(ui.ctx());
         self.select_other_popup(ui.ctx());
         self.browser_rename_dialog(ui.ctx());
-        self.finish_preview_frame();
+        self.preview.finish_frame(ui.ctx());
         window_frame::resize_handles(ui);
         self.maybe_recover(ui.ctx());
     }

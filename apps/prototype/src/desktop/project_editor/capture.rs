@@ -1006,6 +1006,132 @@ mod tests {
         assert!((moved[0] - 12.5).abs() < 1e-9, "{moved:?}");
         Ok(())
     }
+
+    /// A cópia só existe na prévia: Cancelar e Esc devem restaurar a malha original
+    /// sem qualquer novo gesto no canvas e sem alterar revisão, salvamento ou desfazer.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn canceling_a_copy_preview_restores_the_document_scene() -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        for escape in [false, true] {
+            let context = egui::Context::default();
+            let mut document = Document::new("Cancelar cópia")?;
+            let (part, body) = document.add_mesh(
+                None,
+                "Suporte".into(),
+                Arc::new(MeshAsset::new(reference_bracket()?)),
+            )?;
+            let mut editor =
+                Editor::from_gpu(state.clone(), &context, document).map_err(|e| e.to_string())?;
+            editor.recoveries.clear();
+            editor.show_recovery = false;
+            editor.current_mut().active_part = Some(part);
+            editor
+                .current_mut()
+                .select(Some(Selection::Body { part, id: body }));
+            settle(&mut editor, &context)?;
+            assert!(editor.requested.is_none());
+            let original = editor.scene.as_ref().ok_or("Cena inicial ausente")?.clone();
+            let revision = editor.current().session.revision();
+            let saved_state = editor.current().session.state();
+            editor.open_move();
+            editor.set_move_for_capture([100., 0., 0.], [0.; 3]);
+            frame(&mut editor, &context, Vec::new())?;
+            let copy = label_position(&mut editor, &context, text(T::CreateCopy))?;
+            click(&mut editor, &context, copy)?;
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while editor.preview.shown == 0 || !editor.preview_idle() {
+                if Instant::now() > deadline {
+                    return Err(format!("Prévia da cópia não chegou: {}", editor.status).into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                frame(&mut editor, &context, Vec::new())?;
+            }
+            assert_eq!(
+                editor
+                    .scene
+                    .as_ref()
+                    .ok_or("Prévia ausente")?
+                    .triangles()
+                    .len(),
+                2 * original.triangles().len()
+            );
+            if escape {
+                frame(
+                    &mut editor,
+                    &context,
+                    vec![egui::Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                )?;
+            } else {
+                let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+                click(&mut editor, &context, cancel)?;
+            }
+            assert!(editor.assembly_panel.is_none());
+            assert_eq!(editor.preview.shown, 0);
+            // Daqui em diante, só quadros sem eventos. A regressão do agendador em
+            // live_preview também verifica que esse redesenho é solicitado pelo editor.
+            settle(&mut editor, &context)?;
+            let restored = editor.scene.as_ref().ok_or("Cena não restaurada")?;
+            assert_eq!(restored.triangles().len(), original.triangles().len());
+            assert_eq!(restored.bounds().min, original.bounds().min);
+            assert_eq!(restored.bounds().max, original.bounds().max);
+            assert_eq!(editor.rendered, Some(editor.scene_key()));
+            assert!(editor.requested.is_none());
+            assert_eq!(editor.current().session.revision(), revision);
+            assert_eq!(editor.current().session.state(), saved_state);
+            assert!(!editor.current().session.is_dirty());
+            assert_eq!(
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .part(part)
+                    .ok_or("Peça ausente")?
+                    .bodies
+                    .len(),
+                1
+            );
+            assert!(!editor.current_mut().session.undo());
+        }
+        Ok(())
+    }
+
+    fn label_position(
+        editor: &mut Editor,
+        context: &egui::Context,
+        label: &str,
+    ) -> Result<egui::Pos2, Box<dyn Error>> {
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 820.),
+                )),
+                time: Some(context.input(|i| i.time) + 1. / 60.),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        let position = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(t) if t.galley.job.text == label => {
+                    Some(t.visual_bounding_rect().center())
+                }
+                _ => None,
+            });
+        output.textures_delta.clear();
+        position.ok_or_else(|| format!("Rótulo ausente: {label}").into())
+    }
+
     fn frame(
         editor: &mut Editor,
         context: &egui::Context,
@@ -1068,7 +1194,14 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         while editor.busy() || editor.rendered != Some(editor.scene_key()) {
             if Instant::now() > deadline {
-                return Err(format!("Trabalhador não terminou: {}", editor.status).into());
+                return Err(format!(
+                    "Trabalhador não terminou: {}; exibida: {:?}; pedida: {:?}; atual: {:?}",
+                    editor.status,
+                    editor.rendered,
+                    editor.requested,
+                    editor.scene_key()
+                )
+                .into());
             }
             std::thread::sleep(Duration::from_millis(5));
             frame(editor, context, Vec::new())?;

@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Cancelamento de prévias e restauração da cena — 26/10/2026
+
+- Corrigido o relato de cópia que continuava visível após cancelar. Dois fatores se combinavam: a prévia era encerrada depois da verificação da cena, sem pedir redesenho, e uma solicitação de cena concluída continuava bloqueando a mesma chave ao voltar ao documento. A chave pendente agora é liberada na entrega da cena calculada e a transição da prévia para o documento solicita redesenho sem criar laço ocioso.
+- Regressões sem GPU verificam agendamento e ociosidade. Ensaio com egui/wgpu reproduz cópia, Cancelar e Esc, restaura malha/limites e verifica documento, salvamento e desfazer sem alterações. Aprovados 140 testes sem OCCT, 182 com OCCT, formatação e Clippy nas duas configurações; os três ensaios gráficos passaram em série. A tentativa gráfica simultânea encerrou com SIGSEGV e está registrada em [VALIDATION.md](VALIDATION.md), com seus logs.
+- Evidências em `target/codex-validation/cancel-preview-20261026/`. Sem release, migração ou publicação remota.
+
 ## Corpos atuais e etapas geométricas — 26/10/2026
 
 - Investigado o relato de que modificar um corpo acrescentava outro e ocultava o original. O documento preserva resultados por operação para recalcular; a árvore apresentava também essas etapas intermediárias ocultas. A pasta Corpos e seu contador agora listam os resultados atuais, mantendo acessíveis corpos independentes ocultados manualmente e etapas antigas explicitamente mostradas.
