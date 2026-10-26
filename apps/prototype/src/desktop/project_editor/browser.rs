@@ -303,7 +303,7 @@ impl Editor {
     pub(super) fn apply_menu_action(&mut self, context: &egui::Context, action: MenuAction) {
         let tab = self.current().id;
         match action {
-            // Entrar na edição de uma peça leva da faixa Montagem à Modelo; sair, de volta.
+            // Entrar na edição de uma peça leva da faixa Montagem à Peça; sair, de volta.
             MenuAction::Activate(part) => {
                 self.current_mut().active_part = Some(part);
                 self.finish_sketch();

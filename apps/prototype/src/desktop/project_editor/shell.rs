@@ -74,6 +74,8 @@ enum Action {
     SketchYZ,
     SketchFace,
     Solid(SolidTool),
+    MoveBody,
+    CopyBody,
     MoveCopy,
     Align,
     NewInstance,
@@ -126,6 +128,8 @@ impl Action {
             Self::SketchYZ => T::SketchYZ,
             Self::SketchFace => T::SketchOnFace,
             Self::Solid(tool) => tool.label(),
+            Self::MoveBody => T::MoveMenu,
+            Self::CopyBody => T::CopyMenu,
             Self::MoveCopy => T::MoveCopyTool,
             Self::Align => T::AlignTool,
             Self::NewInstance => T::NewInstanceTool,
@@ -167,6 +171,7 @@ impl Action {
         match self {
             Self::Solid(SolidTool::Fillet) => T::FilletShort,
             Self::Solid(SolidTool::Mirror) => T::MirrorShort,
+            Self::Solid(SolidTool::Split) => T::SplitShort,
             Self::SketchTool(sketch_editor::Tool::Arc) => T::ArcShort,
             Self::InstancePattern(false) => T::RectangularPattern,
             Self::InstancePattern(true) => T::CircularPattern,
@@ -203,7 +208,8 @@ impl Action {
                 SolidTool::Split => Icon::Split,
                 SolidTool::Join | SolidTool::Cut | SolidTool::Intersect => Icon::Boolean,
             },
-            Self::MoveCopy => Icon::Move,
+            Self::MoveCopy | Self::MoveBody => Icon::Move,
+            Self::CopyBody => Icon::Copy,
             Self::Align => Icon::Align,
             Self::NewInstance => Icon::NewBody,
             Self::CloneInstance => Icon::Boolean,
@@ -284,6 +290,8 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Mirror),
     Action::Solid(SolidTool::Split),
     Action::MoveCopy,
+    Action::MoveBody,
+    Action::CopyBody,
     Action::Align,
     Action::NewInstance,
     Action::CloneInstance,
@@ -374,6 +382,15 @@ impl Editor {
                     })
             }
             Action::MoveCopy | Action::Align => editable && self.current().sketch_edit.is_none(),
+            Action::MoveBody | Action::CopyBody => {
+                editable
+                    && self.current().sketch_edit.is_none()
+                    && self
+                        .current()
+                        .active_part
+                        .and_then(|id| self.current().session.document().part(id))
+                        .is_some_and(|p| p.listed_bodies().next().is_some())
+            }
             Action::InsertPart => {
                 editable && self.current().sketch_edit.is_none() && self.tabs.len() > 1
             }
@@ -531,6 +548,8 @@ impl Editor {
             Action::SketchFace => self.sketch_on_selected_face(context),
             Action::Solid(tool) => self.open_feature_tool(tool),
             Action::MoveCopy => self.open_move(),
+            Action::MoveBody => self.open_body_move(false),
+            Action::CopyBody => self.open_body_move(true),
             Action::Align => self.open_align(navigation::PickMode::Face),
             Action::NewInstance => self.duplicate_selection(context),
             Action::CloneInstance => self.clone_selection(context),
@@ -949,26 +968,23 @@ impl Editor {
                 );
                 self.ribbon_group(
                     ui,
-                    T::ModifyGroup,
+                    T::FinishingGroup,
                     &[
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
                         Action::Solid(SolidTool::Shell),
-                        Action::Solid(SolidTool::Join),
-                        Action::Solid(SolidTool::Split),
-                        Action::MoveCopy,
                     ],
                 );
                 self.ribbon_group(
                     ui,
-                    T::ArrangeGroup,
+                    T::ModifyGroup,
                     &[
-                        Action::Solid(SolidTool::Mirror),
-                        Action::Solid(SolidTool::LinearPattern),
-                        Action::Solid(SolidTool::CircularPattern),
+                        Action::MoveBody,
+                        Action::CopyBody,
+                        Action::Solid(SolidTool::Join),
+                        Action::Solid(SolidTool::Split),
                     ],
                 );
-                self.ribbon_group(ui, T::ManageGroup, &[Action::Parameters]);
             }
             // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
             // posicionamento, cópias e organização.

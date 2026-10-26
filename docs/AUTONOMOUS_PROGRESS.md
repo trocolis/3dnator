@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Reorganização da aba Peça — 26/10/2026
+
+- Aba Modelo renomeada para Peça e ferramentas reagrupadas conforme os itens definidos: Novo rascunho; Extrusão/Revolução/Furo; Arredondar/Chanfro/Casca; Mover/Copiar/Combinar/Dividir. Mover e Copiar abrem modos próprios; a cópia não desloca o original. Ferramentas retiradas da faixa continuam na busca e parâmetros em Inspecionar.
+- Ensaio novo com cliques reais na faixa verifica cópia, movimento, preservação do original e desfazer. Aprovados 140 testes sem OCCT, 182 com OCCT, quatro ensaios gráficos em série, formatação e Clippy nas duas configurações. Captura inspecionada e compilação desktop com OCCT aprovadas; logs e imagem em `target/codex-validation/part-ribbon-20261026/`.
+- Pendente de esclarecimento: significado de “Plano extendido” (plano de referência deslocado, exibição ampliada dos planos da origem ou menu de construção de planos). A pergunta foi apresentada durante a implementação dos demais itens.
+
 ## Cancelamento de prévias e restauração da cena — 26/10/2026
 
 - Corrigido o relato de cópia que continuava visível após cancelar. Dois fatores se combinavam: a prévia era encerrada depois da verificação da cena, sem pedir redesenho, e uma solicitação de cena concluída continuava bloqueando a mesma chave ao voltar ao documento. A chave pendente agora é liberada na entrega da cena calculada e a transição da prévia para o documento solicita redesenho sem criar laço ocioso.

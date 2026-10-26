@@ -1103,6 +1103,144 @@ mod tests {
         Ok(())
     }
 
+    /// As duas entradas da aba Peça produzem intenções diferentes sem exigir que
+    /// o usuário alterne uma opção escondida no painel. Ambas continuam reversíveis.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn part_ribbon_move_and_copy_preserve_their_distinct_intents() -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut document = Document::new("Ferramentas da peça")?;
+        let (part, original) = document.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: original }));
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        assert_eq!(text(T::ModelTab), "Peça");
+
+        let copy = label_position(&mut editor, &context, text(T::CopyMenu))?;
+        click(&mut editor, &context, copy)?;
+        assert!(editor.assembly_panel.is_some());
+        editor.set_move_for_capture([100., 0., 0.], [0.; 3]);
+        let enter = || egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, &context, vec![enter()])?;
+        settle(&mut editor, &context)?;
+        let piece = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?;
+        assert_eq!(piece.bodies.len(), 2);
+        let copy = piece
+            .bodies
+            .iter()
+            .find(|b| b.id != original)
+            .ok_or("Cópia ausente")?
+            .id;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(original)
+                .ok_or("Original ausente")?
+                .placement
+                .translation_mm(),
+            [0.; 3]
+        );
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(copy)
+                .ok_or("Cópia ausente")?
+                .placement
+                .translation_mm(),
+            [100., 0., 0.]
+        );
+
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: copy }));
+        settle(&mut editor, &context)?;
+        let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
+        click(&mut editor, &context, move_button)?;
+        editor.set_move_for_capture([50., 0., 0.], [0.; 3]);
+        frame(&mut editor, &context, vec![enter()])?;
+        settle(&mut editor, &context)?;
+        let piece = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?;
+        assert_eq!(piece.bodies.len(), 2);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(original)
+                .ok_or("Original ausente")?
+                .placement
+                .translation_mm(),
+            [0.; 3]
+        );
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(copy)
+                .ok_or("Cópia ausente")?
+                .placement
+                .translation_mm(),
+            [150., 0., 0.]
+        );
+        assert!(editor.current_mut().session.undo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(copy)
+                .ok_or("Cópia ausente")?
+                .placement
+                .translation_mm(),
+            [100., 0., 0.]
+        );
+        assert!(editor.current_mut().session.undo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça ausente")?
+                .bodies
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
     fn label_position(
         editor: &mut Editor,
         context: &egui::Context,

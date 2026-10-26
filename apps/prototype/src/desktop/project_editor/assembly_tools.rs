@@ -75,6 +75,19 @@ struct GizmoDrag {
     angle: f32,
 }
 
+/// As ferramentas da aba Peça mantêm a intenção escolhida. O menu de contexto
+/// conserva a alternância Mover/Copiar que já existia.
+enum MoveMode {
+    Move,
+    Copy,
+    MoveOrCopy(bool),
+}
+impl MoveMode {
+    fn copies(&self) -> bool {
+        matches!(self, Self::Copy | Self::MoveOrCopy(true))
+    }
+}
+
 pub(super) struct MoveDraft {
     tab: u64,
     targets: Vec<Selection>,
@@ -87,7 +100,7 @@ pub(super) struct MoveDraft {
     translation_inputs: [panel::NumberInput; 3],
     rotation_inputs: [panel::NumberInput; 3],
     pivot: Pivot,
-    copy: bool,
+    mode: MoveMode,
     drag: Option<GizmoDrag>,
 }
 
@@ -470,7 +483,7 @@ impl MoveDraft {
             translation_inputs: Default::default(),
             rotation_inputs: Default::default(),
             pivot: Pivot::Center,
-            copy: false,
+            mode: MoveMode::MoveOrCopy(false),
             drag: None,
         }
     }
@@ -514,6 +527,14 @@ impl Editor {
             self.current().id,
             targets,
         ))));
+    }
+    /// Entradas separadas da aba Peça: copiar nunca move o original, e mover não
+    /// cria uma cópia. A seleção continua disponível no painel e no viewport.
+    pub(super) fn open_body_move(&mut self, copy: bool) {
+        self.open_move();
+        if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
+            draft.mode = if copy { MoveMode::Copy } else { MoveMode::Move };
+        }
     }
     /// Translação e rotação do Mover/Copiar aberto, para capturas de ensaio.
     pub(super) fn set_move_for_capture(&mut self, translation: Point3, rotation: Point3) {
@@ -813,6 +834,7 @@ impl Editor {
             },
         };
         let (icon, title) = match &panel {
+            Panel::Move(d) if matches!(d.mode, MoveMode::Copy) => (Icon::Copy, T::CopyMenu),
             Panel::Move(_) => (Icon::Move, T::MoveMenu),
             Panel::Align(d) => match d.kind {
                 navigation::PickMode::Face => (Icon::FaceToFace, T::MoveFaceToFace),
@@ -883,16 +905,16 @@ impl Editor {
                     .iter()
                     .chain(&d.rotation)
                     .all(|v| v.abs() < 1e-12);
-                if unchanged && !d.copy {
+                if unchanged && !d.mode.copies() {
                     return None;
                 }
                 batch(
-                    if d.copy {
+                    if d.mode.copies() {
                         "Copiar elementos"
                     } else {
                         "Mover elementos"
                     },
-                    move_commands(tab, &frames, delta, d.copy),
+                    move_commands(tab, &frames, delta, d.mode.copies()),
                 )
             }
             Panel::Align(d) => {
@@ -1355,14 +1377,17 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
             d.pivot = Pivot::Point(point);
         }
     });
-    // Cópias de componentes ficam no menu Copiar; aqui, só corpos da peça em construção.
-    if d.targets
-        .iter()
-        .any(|t| matches!(t, Selection::Body { .. }))
-    {
-        ui.checkbox(&mut d.copy, text(T::CreateCopy));
-    } else {
-        d.copy = false;
+    // A alternância permanece só no painel genérico do menu de contexto. Mover e
+    // Copiar na aba Peça têm intenção fixa desde a abertura, inclusive sem seleção.
+    if let MoveMode::MoveOrCopy(copy) = &mut d.mode {
+        if d.targets
+            .iter()
+            .any(|t| matches!(t, Selection::Body { .. }))
+        {
+            ui.checkbox(copy, text(T::CreateCopy));
+        } else {
+            *copy = false;
+        }
     }
     ui.horizontal(|ui| {
         if ui.small_button(text(T::ResetTransform)).clicked() {

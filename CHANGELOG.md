@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Aba Peça
+
+- Modelo passa a se chamar **Peça**, com os grupos: Novo rascunho; Criar (Extrusão, Revolução, Furo); Acabamento (Arredondar, Chanfro, Casca); Modificar (Mover, Copiar, Combinar, Dividir).
+- Mover e Copiar têm entradas e modos próprios, com o mesmo manipulador e a prévia ao vivo. Copiar conserva o original e cria um corpo independente; Mover altera sua posição. O menu de contexto mantém o painel com alternância Mover/Copiar.
+- Espelhamento e padrões permanecem disponíveis na busca de ferramentas; parâmetros continuam em Inspecionar.
+
 ### Cancelamento de pré-visualizações
 
 - Cancelar uma ação restaura automaticamente a cena do documento, sem esperar outra interação no visualizador. Corrigidos o redesenho ausente ao encerrar a prévia e a chave de uma preparação de cena já concluída que bloqueava o retorno à cena original.

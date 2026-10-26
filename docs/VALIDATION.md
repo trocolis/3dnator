@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Aba Peça e modos Mover/Copiar — 26/10/2026
+
+- Modelo renomeada para Peça pelo identificador de tradução existente. Faixa organizada em Rascunho; Criar (Extrusão, Revolução, Furo); Acabamento (Arredondar, Chanfro, Casca); Modificar (Mover, Copiar, Combinar, Dividir). Espelhamento e padrões continuam na busca; parâmetros continuam em Inspecionar. A definição do item solicitado como “Plano extendido” permanece aguardando esclarecimento.
+- Ensaio egui/wgpu novo clica nas duas entradas da faixa, copia um corpo com deslocamento de 100 mm, move a cópia mais 50 mm e desfaz as duas ações. Verifica quantidade de corpos e posições do original e da cópia. Os modos da faixa são fixos; o painel genérico do menu de contexto conserva a alternância existente.
+- **140 testes sem OCCT e 182 com OCCT aprovados**, com os quatro ensaios gráficos optativos executados em série e aprovados. Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Captura real 1440 × 900 inspecionada, pelo egui/wgpu/GL llvmpipe.
+- Evidências em `target/codex-validation/part-ribbon-20261026/`. Versão de desenvolvimento 0.3.0 e formato 15 preservados; Windows e janela nativa não foram exercitados.
+
 ## Restauração da cena ao cancelar prévias — 26/10/2026
 
 - Reproduzido o congelamento da cópia após Cancelar: a cena renderizada tinha a geração da prévia, mas a chave da cena original permanecia em `requested` mesmo sem trabalhador ativo. A solicitação agora é liberada ao receber a cena calculada (inclusive obsoleta). Encerrar uma prévia visível solicita outro quadro, pois os painéis fecham depois da verificação da cena.
