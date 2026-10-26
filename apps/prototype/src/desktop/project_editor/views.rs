@@ -127,6 +127,36 @@ impl Editor {
                                 ui.close();
                             }
                         }
+                        // Face clicada (de qualquer peça visível): o plano é capturado em
+                        // coordenadas da peça de destino, sem vínculo com a face de origem.
+                        let picked = self.current().picked.clone();
+                        if ui
+                            .add_enabled(picked.is_some(), egui::Button::new(text(T::SketchOnFace)))
+                            .clicked()
+                            && let Some(pick) = picked
+                        {
+                            let document = self.current().session.document();
+                            let destination = self.current().active_part.unwrap_or(pick.part);
+                            let target = document
+                                .instances()
+                                .iter()
+                                .find(|i| i.part == destination)
+                                .map(|i| i.placement)
+                                .unwrap_or_default();
+                            let origin = target.inverse_apply(pick.point);
+                            let normal = nator_geometry::sub(
+                                target.inverse_apply(pick.normal),
+                                target.inverse_apply([0.; 3]),
+                            );
+                            match nator_sketch::Plane::from_normal(origin, normal) {
+                                Ok(plane) => self.execute(Command::AddSketch {
+                                    destination: Some(destination),
+                                    sketch: nator_sketch::Sketch::new(text(T::Sketch), plane),
+                                }),
+                                Err(error) => self.status = error.to_string(),
+                            }
+                            ui.close();
+                        }
                     });
                     if ui
                         .add_enabled(

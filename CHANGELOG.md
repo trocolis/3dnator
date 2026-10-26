@@ -18,6 +18,12 @@
 - Padrões linear e circular de entidades no rascunho, com direção dada por uma linha ou centro dado por um círculo ou arco.
 - Editor de operações reorganizado por ferramenta, com seções para cada operação.
 
+### Montagem
+
+- Padrão linear ou circular de instâncias, que compartilham a definição e ficam reunidas em um grupo; desagrupar libera cada posição.
+- Espelhamento de instância como peça nova e independente: sólidos recebem uma operação final de espelhamento no histórico do clone, que continua paramétrico; corpos de malha são refletidos com a orientação das faces corrigida.
+- Novo rascunho na face selecionada, de qualquer peça visível, com o plano capturado em coordenadas da peça de destino.
+
 ### Referências estáveis
 
 - Faces de sólidos recebem nomes pela origem (entidade do rascunho, tampa, arredondamento, face herdada), registrados pelo histórico do OCCT na ponte C++.

@@ -54,6 +54,33 @@ impl Plane {
             v: [0., 0., 1.],
         }
     }
+    /// Plano por um ponto e uma normal, com eixos U/V escolhidos de forma determinística
+    /// (U perpendicular à normal e ao eixo principal menos alinhado com ela; V = N × U),
+    /// de modo que U × V = N.
+    pub fn from_normal(origin: [f64; 3], normal: [f64; 3]) -> Result<Self> {
+        use nator_geometry::{cross, norm};
+        let length = norm(normal);
+        if !length.is_finite() || length < 1e-9 || origin.iter().any(|v| !v.is_finite()) {
+            return Err(SketchError(
+                "Face sem normal definida para o rascunho.".into(),
+            ));
+        }
+        let n = normal.map(|v| v / length);
+        let helper = if n[2].abs() < 0.9 {
+            [0., 0., 1.]
+        } else {
+            [0., 1., 0.]
+        };
+        let u = cross(helper, n);
+        let u = u.map(|v| v / norm(u));
+        let plane = Self {
+            origin,
+            u,
+            v: cross(n, u),
+        };
+        plane.validate()?;
+        Ok(plane)
+    }
     pub fn validate(self) -> Result<()> {
         use nator_geometry::{dot, norm};
         if self
@@ -434,4 +461,28 @@ pub fn cross(a: Point2, b: Point2) -> f64 {
 pub fn distance(a: Point2, b: Point2) -> f64 {
     let d = sub(a, b);
     d[0].hypot(d[1])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planes_from_normals_are_right_handed_and_contain_the_origin() -> Result<()> {
+        for normal in [[0., 0., 1.], [0., 0., -2.], [1., 1., 0.], [0.3, -0.2, 0.9]] {
+            let plane = Plane::from_normal([5., 6., 7.], normal)?;
+            let n = plane.normal();
+            let length = nator_geometry::norm(normal);
+            for (a, b) in n.iter().zip(normal.map(|v| v / length)) {
+                assert!((a - b).abs() < 1e-12);
+            }
+            assert_eq!(plane.world([0., 0.]), [5., 6., 7.]);
+            assert_eq!(
+                plane.project(plane.world([3., -4.])).map(|v| v.round()),
+                [3., -4.]
+            );
+        }
+        assert!(Plane::from_normal([0.; 3], [0.; 3]).is_err());
+        Ok(())
+    }
 }

@@ -242,3 +242,50 @@ fn pattern_mirror_split_and_revolve_about_a_sketch_line() -> Result<()> {
     assert!((volume(&session, ring)? - expected).abs() < 1e-3);
     Ok(())
 }
+
+/// Espelhar a instância de um sólido cria uma peça independente cujo histórico termina em
+/// um espelhamento: ela continua paramétrica e não altera a original.
+#[test]
+fn mirrored_solid_instance_keeps_its_own_parametric_history() -> Result<()> {
+    let mut session = Session::new(Document::new("Esquerda e direita")?)?;
+    let (part, _) = plate(&mut session)?;
+    let instance = session.document().instances()[0].id;
+    session.execute(Command::MirrorInstance {
+        id: instance,
+        origin: [-10., 0., 0.],
+        normal: [1., 0., 0.],
+        name: "Placa espelhada".into(),
+    })?;
+    let doc = session.document();
+    let mirrored = doc
+        .parts()
+        .iter()
+        .find(|p| p.id != part)
+        .ok_or("Peça espelhada ausente")?;
+    let last = mirrored.features.last().ok_or("Histórico vazio")?;
+    assert!(matches!(last.operation, Operation::Mirror { .. }));
+    let image = last.output;
+    let clone = mirrored.id;
+    assert!((volume(&session, image)? - 60. * 40. * 8.).abs() < 1e-3);
+    // A imagem fica em x ∈ [-80, -20]: reflexão de [0, 60] pelo plano x = -10.
+    let bounds = session
+        .document()
+        .body(image)
+        .ok_or("Corpo ausente")?
+        .geometry
+        .mesh()
+        .bounds();
+    assert!((bounds.min[0] + 80.).abs() < 1e-6 && (bounds.max[0] + 20.).abs() < 1e-6);
+    // O clone tem parâmetros próprios: engrossá-lo não altera a placa original.
+    session.execute(Command::SetParameter {
+        part: clone,
+        name: "espessura".into(),
+        expression: Some("15 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    assert!((volume(&session, image)? - 60. * 40. * 15.).abs() < 1e-3);
+    let original = session.document().part(part).ok_or("Original ausente")?;
+    let output = original.features[0].output;
+    assert!((volume(&session, output)? - 60. * 40. * 8.).abs() < 1e-3);
+    Ok(())
+}

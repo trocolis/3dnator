@@ -35,6 +35,20 @@ pub enum Command {
         part: PartId,
         output: BodyId,
     },
+    /// Instâncias adicionais da mesma definição, em padrão linear ou circular a partir da
+    /// posição da instância de origem, reunidas em um grupo.
+    PatternInstance {
+        id: InstanceId,
+        layout: nator_document::features::PatternLayout,
+    },
+    /// Versão espelhada de uma instância como peça nova e independente. O plano é dado nas
+    /// coordenadas do pai da instância.
+    MirrorInstance {
+        id: InstanceId,
+        origin: [f64; 3],
+        normal: [f64; 3],
+        name: String,
+    },
     AddInstance {
         part: PartId,
         parent: Option<PartId>,
@@ -126,6 +140,8 @@ impl Command {
             Self::EditFeature { .. } => "Editar operação paramétrica",
             Self::RemoveFeature { .. } => "Remover operação paramétrica",
             Self::AddInstance { .. } => "Adicionar instância",
+            Self::PatternInstance { .. } => "Padrão de instâncias",
+            Self::MirrorInstance { .. } => "Espelhar instância como nova peça",
             Self::CloneInstance { .. } => "Clonar peça independente",
             Self::ReparentInstance { .. } => "Organizar subpeça",
             Self::RemoveInstance { .. } => "Remover instância",
@@ -182,35 +198,35 @@ impl Command {
                 name,
                 operation,
             } => {
-                // O identificador vem antes da construção porque os nomes das faces levam
-                // o corpo dono; em caso de falha, a cópia candidata é descartada inteira.
-                let output = doc.allocate_body_id()?;
-                let operation = features::normalize(doc, part, operation)?;
-                let built = features::construct(doc, part, output, &operation)?;
-                doc.add_body(
-                    part,
-                    nator_document::Body {
-                        id: output,
-                        name: name.clone(),
-                        geometry: built.mesh,
-                        brep: Some(built.brep),
-                        face_names: built.faces,
-                        placement: Placement::default(),
-                        visible: true,
-                    },
-                )?;
-                for input in operation.inputs() {
-                    doc.body_mut(input)?.visible = false;
-                }
-                doc.part_mut(part)?
-                    .features
-                    .push(nator_document::features::Feature {
-                        name,
-                        output,
-                        operation,
-                    });
+                let output = add_feature(doc, part, name, operation)?;
                 return Ok(Effect::Imported { part, body: output });
             }
+            Self::PatternInstance { id, layout } => {
+                let source = doc
+                    .instance(id)
+                    .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+                    .clone();
+                // Montagens não têm parâmetros: medidas com unidade são avaliadas diretamente.
+                let steps = nator_document::features::pattern_placements(
+                    &layout,
+                    &nator_document::parameters::Parameters::default(),
+                )?;
+                let mut members = vec![id];
+                for step in steps.iter().skip(1) {
+                    let placement = step
+                        .compose(source.placement)
+                        .map_err(|e| DocumentError(e.to_string()))?;
+                    members.push(doc.add_instance(source.part, source.parent, placement)?);
+                }
+                // O grupo move o padrão inteiro; desagrupar libera cada posição.
+                doc.add_group(format!("Padrão de {}", source.name), members)?;
+            }
+            Self::MirrorInstance {
+                id,
+                origin,
+                normal,
+                name,
+            } => mirror_instance(doc, id, origin, normal, name)?,
             Self::EditFeature {
                 part,
                 output,
@@ -366,6 +382,117 @@ impl Command {
         }
         Ok(Effect::Changed)
     }
+}
+
+/// Acrescenta uma operação ao histórico da peça e devolve o corpo resultante.
+fn add_feature(
+    doc: &mut Document,
+    part: PartId,
+    name: String,
+    operation: nator_document::features::Operation,
+) -> Result<BodyId, DocumentError> {
+    // O identificador vem antes da construção porque os nomes das faces levam o corpo dono;
+    // em caso de falha, a cópia candidata do documento é descartada inteira.
+    let output = doc.allocate_body_id()?;
+    let operation = features::normalize(doc, part, operation)?;
+    let built = features::construct(doc, part, output, &operation)?;
+    doc.add_body(
+        part,
+        nator_document::Body {
+            id: output,
+            name: name.clone(),
+            geometry: built.mesh,
+            brep: Some(built.brep),
+            face_names: built.faces,
+            placement: Placement::default(),
+            visible: true,
+        },
+    )?;
+    for input in operation.inputs() {
+        doc.body_mut(input)?.visible = false;
+    }
+    doc.part_mut(part)?
+        .features
+        .push(nator_document::features::Feature {
+            name,
+            output,
+            operation,
+        });
+    Ok(output)
+}
+
+/// Espelhamento de montagem: uma reflexão não é uma posição rígida, então a imagem vira uma
+/// peça nova (clone independente) na mesma posição, com a geometria refletida em
+/// coordenadas locais. Sólidos recebem uma operação final de espelhamento no histórico do
+/// clone, que continua paramétrico; corpos de malha são refletidos diretamente.
+fn mirror_instance(
+    doc: &mut Document,
+    id: InstanceId,
+    origin: [f64; 3],
+    normal: [f64; 3],
+    name: String,
+) -> Result<(), DocumentError> {
+    use nator_geometry::sub;
+    let source = doc
+        .instance(id)
+        .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+        .clone();
+    if doc
+        .instances()
+        .iter()
+        .any(|i| i.parent == Some(source.part))
+    {
+        return Err(DocumentError(
+            "Espelhar uma peça com subpeças ainda não é suportado; espelhe as subpeças individualmente."
+                .into(),
+        ));
+    }
+    if nator_geometry::norm(normal) < 1e-9 || normal.iter().chain(&origin).any(|v| !v.is_finite()) {
+        return Err(DocumentError("Plano de espelhamento inválido.".into()));
+    }
+    let part = doc.clone_part(source.part, name)?;
+    // Plano nas coordenadas da peça: a instância conserva a posição da original.
+    let to_local = |p: Placement, point: [f64; 3], vector: [f64; 3]| {
+        (
+            p.inverse_apply(point),
+            sub(p.inverse_apply(vector), p.inverse_apply([0.; 3])),
+        )
+    };
+    let (local_origin, local_normal) = to_local(source.placement, origin, normal);
+    let visible = doc
+        .part(part)
+        .ok_or_else(|| DocumentError("Peça espelhada ausente.".into()))?
+        .bodies
+        .iter()
+        .filter(|b| b.visible)
+        .map(|b| (b.id, b.brep.is_some(), b.placement))
+        .collect::<Vec<_>>();
+    for (body, solid, placement) in visible {
+        if solid {
+            add_feature(
+                doc,
+                part,
+                "Espelhamento da montagem".into(),
+                nator_document::features::Operation::Mirror {
+                    base: body,
+                    origin: local_origin,
+                    normal: local_normal,
+                    keep_original: false,
+                },
+            )?;
+        } else {
+            let (o, n) = to_local(placement, local_origin, local_normal);
+            let target = doc.body_mut(body)?;
+            let mesh = target
+                .geometry
+                .mesh()
+                .reflected(o, n)
+                .map_err(|e| DocumentError(e.to_string()))?;
+            target.geometry = Arc::new(MeshAsset::new(mesh));
+        }
+    }
+    doc.add_instance(part, source.parent, source.placement)?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -635,6 +762,70 @@ mod tests {
         assert!(!session.is_dirty());
         Ok(())
     }
+    #[test]
+    fn instance_patterns_share_the_definition_inside_a_group() -> Result<(), Box<dyn Error>> {
+        use nator_document::features::{LinearAxis, PatternLayout};
+        let mut session = Session::new(Document::new("Montagem")?)?;
+        session.execute(import()?)?;
+        let instance = session.document().instances()[0].id;
+        session.execute(Command::PatternInstance {
+            id: instance,
+            layout: PatternLayout::Linear {
+                first: LinearAxis {
+                    direction: [1., 0., 0.],
+                    count: 3,
+                    spacing: "100 mm".into(),
+                },
+                second: None,
+            },
+        })?;
+        let doc = session.document();
+        assert_eq!(doc.parts().len(), 1);
+        assert_eq!(doc.instances().len(), 3);
+        assert_eq!(doc.groups()[0].members.len(), 3);
+        let scene = doc.scene_mesh()?.ok_or("Cena ausente")?;
+        assert_eq!(scene.bounds().max[0], 260.);
+        assert!(session.undo());
+        assert_eq!(session.document().instances().len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn mirrored_mesh_instance_is_an_independent_reflected_part() -> Result<(), Box<dyn Error>> {
+        let mut session = Session::new(Document::new("Montagem")?)?;
+        session.execute(import()?)?;
+        let instance = session.document().instances()[0].id;
+        session.execute(Command::MoveInstance {
+            id: instance,
+            placement: Placement::new([10., 0., 0.], [0., 0., 0.3])?,
+        })?;
+        session.execute(Command::MirrorInstance {
+            id: instance,
+            origin: [0.; 3],
+            normal: [1., 0., 0.],
+            name: "Suporte esquerdo".into(),
+        })?;
+        let doc = session.document();
+        assert_eq!(doc.parts().len(), 2);
+        let original = doc.parts()[0].bodies[0].geometry.mesh();
+        let mirrored = doc.parts()[1].bodies[0].geometry.mesh();
+        assert!((mirrored.signed_volume() - original.signed_volume()).abs() < 1e-9);
+        assert!(mirrored.topology().has_closed_oriented_edges());
+        // A cena da imagem é a reflexão da cena original pelo plano x = 0.
+        let world = |part: usize| -> Result<nator_geometry::Bounds, Box<dyn Error>> {
+            let mut copy = doc.clone();
+            let keep = copy.instances()[part].id;
+            for other in copy.instances().iter().map(|i| i.id).collect::<Vec<_>>() {
+                copy.instance_mut(other)?.visible = other == keep;
+            }
+            Ok(copy.scene_mesh()?.ok_or("Cena ausente")?.bounds())
+        };
+        let (a, b) = (world(0)?, world(1)?);
+        assert!((a.min[0] + b.max[0]).abs() < 1e-9 && (a.max[0] + b.min[0]).abs() < 1e-9);
+        assert!((a.min[1] - b.min[1]).abs() < 1e-9);
+        Ok(())
+    }
+
     #[test]
     fn failed_command_preserves_document_and_redo() -> Result<(), Box<dyn Error>> {
         let mut session = Session::new(Document::new("Ensaio")?)?;

@@ -140,6 +140,31 @@ impl Mesh {
         }
     }
 
+    /// Imagem espelhada pelo plano (origem, normal). A reflexão inverte a orientação, então
+    /// a ordem dos vértices de cada triângulo também é invertida para manter as normais
+    /// apontando para fora.
+    pub fn reflected(&self, origin: Point3, normal: Point3) -> Result<Mesh, GeometryError> {
+        let length = norm(normal);
+        if !length.is_finite() || length < 1e-12 || origin.iter().any(|v| !v.is_finite()) {
+            return Err(GeometryError("Plano de espelhamento inválido.".into()));
+        }
+        let n = normal.map(|v| v / length);
+        let vertices = self
+            .vertices
+            .iter()
+            .map(|p| {
+                let distance = dot(sub(*p, origin), n);
+                std::array::from_fn(|i| p[i] - 2. * distance * n[i])
+            })
+            .collect();
+        let triangles = self
+            .triangles
+            .iter()
+            .map(|[a, b, c]| [*a, *c, *b])
+            .collect();
+        Mesh::new(vertices, triangles)
+    }
+
     /// Usa coordenadas exatas para reconhecer vértices repetidos no STL, sem solda por tolerância.
     /// Uma borda quase coincidente permanece aberta e precisa de reparo explícito.
     pub fn topology(&self) -> Topology {
@@ -354,6 +379,17 @@ mod tests {
         triangles[0].swap(0, 1);
         let reversed = Mesh::new(mesh.vertices().to_vec(), triangles)?;
         assert!(reversed.topology().inconsistent_edges > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn reflection_keeps_volume_and_outward_orientation() -> Result<(), Box<dyn Error>> {
+        let mesh = reference_bracket()?;
+        let mirrored = mesh.reflected([0.; 3], [1., 0., 0.])?;
+        assert_eq!(mirrored.bounds().min, [-60., 0., 0.]);
+        assert!((mirrored.signed_volume() - mesh.signed_volume()).abs() < 1e-9);
+        assert!(mirrored.topology().has_closed_oriented_edges());
+        assert!(mesh.reflected([0.; 3], [0.; 3]).is_err());
         Ok(())
     }
 

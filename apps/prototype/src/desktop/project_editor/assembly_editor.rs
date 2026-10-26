@@ -1,6 +1,22 @@
 //! Operações de organização são comandos explícitos: desagrupar preserva os elementos.
 use super::*;
-use nator_document::GroupId;
+use nator_document::{
+    GroupId,
+    features::{LinearAxis, PatternLayout},
+};
+
+/// Eixos e planos principais da montagem para padrões e espelhamento.
+const AXES: [(&str, [f64; 3]); 3] = [
+    ("X", [1., 0., 0.]),
+    ("Y", [0., 1., 0.]),
+    ("Z", [0., 0., 1.]),
+];
+const PLANES: [(&str, [f64; 3]); 3] = [
+    ("XY", [0., 0., 1.]),
+    ("XZ", [0., 1., 0.]),
+    ("YZ", [1., 0., 0.]),
+];
+
 pub(super) struct Draft {
     tab: u64,
     name: String,
@@ -8,6 +24,16 @@ pub(super) struct Draft {
     delta: Point3,
     group: Option<GroupId>,
     parent: Option<PartId>,
+    /// Padrão de instâncias: circular em vez de linear.
+    circular: bool,
+    axis: usize,
+    count: u32,
+    spacing: String,
+    angle: String,
+    origin: Point3,
+    /// Espelhamento: plano principal pela normal e deslocamento em mm.
+    plane: usize,
+    offset: f64,
 }
 impl Draft {
     pub fn new(tab: u64) -> Self {
@@ -18,6 +44,33 @@ impl Draft {
             delta: [0.; 3],
             group: None,
             parent: None,
+            circular: false,
+            axis: 0,
+            count: 3,
+            spacing: "100 mm".into(),
+            angle: "360 deg".into(),
+            origin: [0.; 3],
+            plane: 2,
+            offset: 0.,
+        }
+    }
+    fn layout(&self) -> PatternLayout {
+        if self.circular {
+            PatternLayout::Circular {
+                axis_origin: self.origin,
+                axis_direction: AXES[self.axis].1,
+                count: self.count,
+                angle: self.angle.clone(),
+            }
+        } else {
+            PatternLayout::Linear {
+                first: LinearAxis {
+                    direction: AXES[self.axis].1,
+                    count: self.count,
+                    spacing: self.spacing.clone(),
+                },
+                second: None,
+            }
         }
     }
 }
@@ -125,6 +178,58 @@ impl Editor {
                         }
                         if ui.button(text(T::DeleteInstance)).clicked() {
                             command = Some(Command::RemoveInstance { id });
+                        }
+                        ui.separator();
+                        ui.checkbox(&mut draft.circular, text(T::CircularPattern));
+                        egui::ComboBox::new("assembly_axis", text(T::PatternDirection))
+                            .selected_text(AXES[draft.axis].0)
+                            .show_ui(ui, |ui| {
+                                for (i, (name, _)) in AXES.iter().enumerate() {
+                                    ui.selectable_value(&mut draft.axis, i, *name);
+                                }
+                            });
+                        ui.add(
+                            egui::DragValue::new(&mut draft.count)
+                                .range(2..=1000)
+                                .prefix(format!("{} ", text(T::PatternCount))),
+                        );
+                        if draft.circular {
+                            ui.label(text(T::AxisOrigin));
+                            ui.horizontal(|ui| {
+                                for v in &mut draft.origin {
+                                    ui.add(egui::DragValue::new(v).speed(0.5));
+                                }
+                            });
+                            ui.text_edit_singleline(&mut draft.angle);
+                        } else {
+                            ui.text_edit_singleline(&mut draft.spacing);
+                        }
+                        if ui.button(text(T::InstancePattern)).clicked() {
+                            command = Some(Command::PatternInstance {
+                                id,
+                                layout: draft.layout(),
+                            });
+                        }
+                        ui.separator();
+                        egui::ComboBox::new("assembly_plane", text(T::PlaneChoice))
+                            .selected_text(PLANES[draft.plane].0)
+                            .show_ui(ui, |ui| {
+                                for (i, (name, _)) in PLANES.iter().enumerate() {
+                                    ui.selectable_value(&mut draft.plane, i, *name);
+                                }
+                            });
+                        ui.horizontal(|ui| {
+                            ui.label(text(T::PlaneOffset));
+                            ui.add(egui::DragValue::new(&mut draft.offset).speed(0.5));
+                        });
+                        if ui.button(text(T::MirrorInstance)).clicked() {
+                            let normal = PLANES[draft.plane].1;
+                            command = Some(Command::MirrorInstance {
+                                id,
+                                origin: normal.map(|v| v * draft.offset),
+                                normal,
+                                name: format!("{} ({})", instance.name, text(T::MirroredSuffix)),
+                            });
                         }
                     } else {
                         ui.label(text(T::SelectElement));
