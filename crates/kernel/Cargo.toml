@@ -1,0 +1,16 @@
+[package]
+name = "nator-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+occt = []
+
+[dependencies]
+nator-geometry.workspace = true
+nator-sketch.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "nator-commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+occt = ["nator-kernel/occt"]
+
+[dependencies]
+nator-drawing.workspace = true
+nator-kernel.workspace = true
+nator-document.workspace = true
+nator-geometry.workspace = true
+nator-sketch.workspace = true
+
+[lints]
+workspace = true

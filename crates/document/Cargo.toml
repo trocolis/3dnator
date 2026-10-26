@@ -1,0 +1,15 @@
+[package]
+name = "nator-document"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nator-drawing.workspace = true
+nator-geometry.workspace = true
+nator-sketch.workspace = true
+uuid.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

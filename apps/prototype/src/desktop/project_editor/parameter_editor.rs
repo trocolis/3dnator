@@ -1,0 +1,163 @@
+//! Tabela de parâmetros por definição de peça, sem ligações entre projetos ou peças.
+use super::*;
+use nator_document::parameters::Dimension;
+
+pub(super) struct Draft {
+    pub tab: u64,
+    pub part: PartId,
+    name: String,
+    expression: String,
+    dimension: Dimension,
+}
+impl Editor {
+    pub(super) fn open_parameters(&mut self) {
+        if let Some(part) = self.current().active_part {
+            self.parameters_edit = Some(Draft {
+                tab: self.current().id,
+                part,
+                name: String::new(),
+                expression: "10 mm".into(),
+                dimension: Dimension::Length,
+            });
+        }
+    }
+    pub(super) fn prepare_command(
+        &mut self,
+        context: &egui::Context,
+        tab_id: u64,
+        command: Command,
+    ) {
+        if self.busy() {
+            return;
+        }
+        let Some(tab) = self.tabs.iter().find(|t| t.id == tab_id) else {
+            return;
+        };
+        if tab
+            .sketch_edit
+            .as_ref()
+            .is_some_and(|w| w.pending.is_some())
+        {
+            self.status = text(T::PendingEdit).into();
+            return;
+        }
+        let document = tab.session.document().clone();
+        let revision = tab.session.revision();
+        self.start(context, None, move || {
+            PreparedCommand::new(document, revision, command)
+                .map(|command| Outcome::Prepared {
+                    tab: tab_id,
+                    command,
+                })
+                .map_err(|e| e.to_string())
+        });
+    }
+    pub(super) fn parameter_dialog(&mut self, context: &egui::Context) {
+        let Some(mut draft) = self.parameters_edit.take() else {
+            return;
+        };
+        let Some(part) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == draft.tab)
+            .and_then(|t| t.session.document().part(draft.part))
+            .cloned()
+        else {
+            return;
+        };
+        let mut open = true;
+        let mut command = None;
+        egui::Window::new(format!("{} · {}", text(T::Parameters), part.name))
+            .id(egui::Id::new("parameters"))
+            .open(&mut open)
+            .default_width(540.)
+            .show(context, |ui| {
+                egui::Grid::new("parameters_table")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong(text(T::ParameterName));
+                        ui.strong(text(T::Expression));
+                        ui.strong(text(T::CurrentValue));
+                        ui.end_row();
+                        for (name, parameter) in &part.parameters.entries {
+                            if ui.selectable_label(draft.name == *name, name).clicked() {
+                                draft.name = name.clone();
+                                draft.expression = parameter.expression.clone();
+                                draft.dimension = parameter.dimension;
+                            }
+                            ui.label(&parameter.expression);
+                            match part
+                                .parameters
+                                .evaluate(&parameter.expression, parameter.dimension)
+                            {
+                                Ok(value) => {
+                                    ui.monospace(match parameter.dimension {
+                                        Dimension::Length => format!("{value:.4} mm"),
+                                        Dimension::Angle => {
+                                            format!("{:.4} graus", value.to_degrees())
+                                        }
+                                        Dimension::Scalar => format!("{value:.4}"),
+                                    });
+                                }
+                                Err(error) => {
+                                    ui.colored_label(egui::Color32::LIGHT_RED, error.to_string());
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    });
+                ui.separator();
+                ui.label(text(T::ParameterName));
+                ui.text_edit_singleline(&mut draft.name);
+                ui.label(text(T::Expression));
+                ui.text_edit_singleline(&mut draft.expression);
+                let label = |kind: Dimension| {
+                    text(match kind {
+                        Dimension::Length => T::LengthKind,
+                        Dimension::Angle => T::AngleKind,
+                        Dimension::Scalar => T::ScalarKind,
+                    })
+                };
+                egui::ComboBox::from_id_salt("parameter_dimension")
+                    .selected_text(label(draft.dimension))
+                    .show_ui(ui, |ui| {
+                        for kind in [Dimension::Length, Dimension::Angle, Dimension::Scalar] {
+                            ui.selectable_value(&mut draft.dimension, kind, label(kind));
+                        }
+                    });
+                ui.small(text(T::ExpressionHint));
+                ui.add_enabled_ui(!self.busy(), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button(text(T::ApplyParameter)).clicked() {
+                            command = Some(Command::SetParameter {
+                                part: draft.part,
+                                name: draft.name.trim().into(),
+                                expression: Some(draft.expression.clone()),
+                                dimension: draft.dimension,
+                            });
+                        }
+                        if ui
+                            .add_enabled(
+                                part.parameters.entries.contains_key(&draft.name),
+                                egui::Button::new(text(T::DeleteParameter)),
+                            )
+                            .clicked()
+                        {
+                            command = Some(Command::SetParameter {
+                                part: draft.part,
+                                name: draft.name.clone(),
+                                expression: None,
+                                dimension: draft.dimension,
+                            });
+                        }
+                    });
+                });
+            });
+        if let Some(command) = command {
+            self.prepare_command(context, draft.tab, command);
+        }
+        if open {
+            self.parameters_edit = Some(draft);
+        }
+    }
+}

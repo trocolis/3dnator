@@ -1,0 +1,6 @@
+/target/
+/exports/
+/validation-output/
+*.tmp
+*.swp
+.DS_Store

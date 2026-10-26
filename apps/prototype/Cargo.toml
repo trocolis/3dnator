@@ -1,0 +1,30 @@
+[package]
+name = "nator-prototype"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "nator-prototype"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:eframe", "dep:nator-renderer", "dep:png", "dep:pollster", "dep:rfd"]
+occt = ["nator-kernel/occt", "nator-commands/occt"]
+
+[dependencies]
+nator-drawing.workspace = true
+nator-geometry.workspace = true
+nator-sketch.workspace = true
+nator-kernel.workspace = true
+nator-document.workspace = true
+nator-commands.workspace = true
+nator-project-io.workspace = true
+nator-renderer = { workspace = true, optional = true }
+eframe = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+png = { version = "0.18", optional = true }
+pollster = { version = "0.4", optional = true }
+rfd = { version = "0.17", optional = true }
+
+[lints]
+workspace = true

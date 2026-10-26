@@ -1,0 +1,633 @@
+//! Documento independente da interface. Corpos mantêm malhas locais compartilhadas por Arc.
+//! Instâncias referenciam definições de peças; nunca duplicam a geometria automaticamente.
+use nator_geometry::{Mesh, Placement, Topology};
+use std::{collections::HashSet, error::Error, fmt, sync::Arc};
+pub mod assembly;
+pub mod features;
+pub mod parameters;
+
+pub const MAX_ELEMENTS: usize = 10_000;
+pub const MAX_SCENE_TRIANGLES: usize = 2_000_000;
+
+macro_rules! identifier {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        pub struct $name(pub u64);
+    };
+}
+identifier!(PartId);
+identifier!(BodyId);
+identifier!(InstanceId);
+identifier!(SketchId);
+identifier!(GroupId);
+identifier!(SheetId);
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SheetRecord {
+    pub id: SheetId,
+    pub target: Option<PartId>,
+    pub specification: nator_drawing::Specification,
+}
+
+#[derive(Debug, Clone)]
+pub struct SketchRecord {
+    pub id: SketchId,
+    pub sketch: nator_sketch::Sketch,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DocumentError(pub String);
+impl fmt::Display for DocumentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl Error for DocumentError {}
+
+/// A análise das arestas ocorre uma vez por geometria, fora do redesenho da interface.
+#[derive(Debug)]
+pub struct MeshAsset {
+    mesh: Mesh,
+    topology: Topology,
+}
+impl MeshAsset {
+    pub fn new(mesh: Mesh) -> Self {
+        let topology = mesh.topology();
+        Self { mesh, topology }
+    }
+    pub fn mesh(&self) -> &Mesh {
+        &self.mesh
+    }
+    pub fn topology(&self) -> Topology {
+        self.topology
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Body {
+    pub id: BodyId,
+    pub name: String,
+    pub geometry: Arc<MeshAsset>,
+    pub brep: Option<Arc<Vec<u8>>>,
+    pub placement: Placement,
+    pub visible: bool,
+}
+#[derive(Debug, Clone)]
+pub struct Part {
+    pub id: PartId,
+    pub name: String,
+    pub bodies: Vec<Body>,
+    pub sketches: Vec<SketchRecord>,
+    pub parameters: parameters::Parameters,
+    pub features: Vec<features::Feature>,
+}
+#[derive(Debug, Clone)]
+pub struct Instance {
+    pub parent: Option<PartId>,
+    pub id: InstanceId,
+    pub part: PartId,
+    pub name: String,
+    pub placement: Placement,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Document {
+    id: String,
+    name: String,
+    next_id: u64,
+    parts: Vec<Part>,
+    instances: Vec<Instance>,
+    groups: Vec<assembly::Group>,
+    sheets: Vec<SheetRecord>,
+}
+
+pub fn validate_name(name: &str) -> Result<(), DocumentError> {
+    if name.trim().is_empty() || name.len() > 1024 || name.contains('\0') {
+        Err(DocumentError(
+            "O nome deve ter entre 1 e 1024 bytes e não pode conter NUL.".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+impl Document {
+    pub fn new(name: impl Into<String>) -> Result<Self, DocumentError> {
+        let name = name.into();
+        validate_name(&name)?;
+        Ok(Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            next_id: 1,
+            parts: Vec::new(),
+            instances: Vec::new(),
+            groups: Vec::new(),
+            sheets: Vec::new(),
+        })
+    }
+    /// Toda entrada de persistência passa pelas mesmas invariantes das edições.
+    pub fn restore(
+        id: String,
+        name: String,
+        next_id: u64,
+        parts: Vec<Part>,
+        instances: Vec<Instance>,
+    ) -> Result<Self, DocumentError> {
+        let document = Self {
+            id,
+            name,
+            next_id,
+            parts,
+            instances,
+            groups: Vec::new(),
+            sheets: Vec::new(),
+        };
+        document.validate()?;
+        Ok(document)
+    }
+    pub fn sheets(&self) -> &[SheetRecord] {
+        &self.sheets
+    }
+    pub fn restore_sheets(&mut self, sheets: Vec<SheetRecord>) -> Result<(), DocumentError> {
+        let mut next = self.clone();
+        next.sheets = sheets;
+        next.validate()?;
+        *self = next;
+        Ok(())
+    }
+    pub fn set_sheet(
+        &mut self,
+        id: Option<SheetId>,
+        target: Option<PartId>,
+        specification: nator_drawing::Specification,
+    ) -> Result<SheetId, DocumentError> {
+        if let Some(id) = id {
+            let record = self
+                .sheets
+                .iter_mut()
+                .find(|s| s.id == id)
+                .ok_or_else(|| DocumentError("Folha inexistente.".into()))?;
+            *record = SheetRecord {
+                id,
+                target,
+                specification,
+            };
+            Ok(id)
+        } else {
+            let id = SheetId(self.allocate_id()?);
+            self.sheets.push(SheetRecord {
+                id,
+                target,
+                specification,
+            });
+            Ok(id)
+        }
+    }
+    /// A folha de peça usa sua origem local e inclui as subpeças, sem colocar a montagem na peça.
+    pub fn drawing_mesh(&self, target: Option<PartId>) -> Result<Mesh, DocumentError> {
+        let mesh = if let Some(part) = target {
+            let mut local = self.clone();
+            local.instances.retain(|i| i.parent.is_some());
+            local.groups.clear();
+            local.add_instance(part, None, Placement::default())?;
+            local.scene_mesh()?
+        } else {
+            self.scene_mesh()?
+        };
+        mesh.ok_or_else(|| DocumentError("Não há corpos visíveis para gerar a folha.".into()))
+    }
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+    pub fn parts(&self) -> &[Part] {
+        &self.parts
+    }
+    pub fn instances(&self) -> &[Instance] {
+        &self.instances
+    }
+    pub fn part(&self, id: PartId) -> Option<&Part> {
+        self.parts.iter().find(|p| p.id == id)
+    }
+    pub fn body(&self, id: BodyId) -> Option<&Body> {
+        self.parts
+            .iter()
+            .flat_map(|p| &p.bodies)
+            .find(|b| b.id == id)
+    }
+    pub fn instance(&self, id: InstanceId) -> Option<&Instance> {
+        self.instances.iter().find(|i| i.id == id)
+    }
+    pub fn sketch(&self, id: SketchId) -> Option<&SketchRecord> {
+        self.parts
+            .iter()
+            .flat_map(|p| &p.sketches)
+            .find(|s| s.id == id)
+    }
+    pub fn create_part(&mut self, name: String) -> Result<PartId, DocumentError> {
+        validate_name(&name)?;
+        let id = PartId(self.allocate_id()?);
+        let instance = InstanceId(self.allocate_id()?);
+        self.parts.push(Part {
+            id,
+            name: name.clone(),
+            bodies: Vec::new(),
+            sketches: Vec::new(),
+            parameters: parameters::Parameters::default(),
+            features: Vec::new(),
+        });
+        self.instances.push(Instance {
+            parent: None,
+            id: instance,
+            part: id,
+            name,
+            placement: Placement::default(),
+            visible: true,
+        });
+        Ok(id)
+    }
+    pub fn add_sketch(
+        &mut self,
+        destination: Option<PartId>,
+        sketch: nator_sketch::Sketch,
+    ) -> Result<(PartId, SketchId), DocumentError> {
+        sketch
+            .validate()
+            .map_err(|e| DocumentError(e.to_string()))?;
+        let part = if let Some(id) = destination {
+            self.part_mut(id)?;
+            id
+        } else {
+            self.create_part("Peça".into())?
+        };
+        let id = SketchId(self.allocate_id()?);
+        self.part_mut(part)?.sketches.push(SketchRecord {
+            id,
+            sketch,
+            visible: true,
+        });
+        Ok((part, id))
+    }
+    pub fn update_sketch(
+        &mut self,
+        id: SketchId,
+        sketch: nator_sketch::Sketch,
+    ) -> Result<(), DocumentError> {
+        sketch
+            .validate()
+            .map_err(|e| DocumentError(e.to_string()))?;
+        let record = self
+            .parts
+            .iter_mut()
+            .flat_map(|p| &mut p.sketches)
+            .find(|s| s.id == id)
+            .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))?;
+        record.sketch = sketch;
+        Ok(())
+    }
+    pub fn part_mut(&mut self, id: PartId) -> Result<&mut Part, DocumentError> {
+        self.parts
+            .iter_mut()
+            .find(|p| p.id == id)
+            .ok_or_else(|| DocumentError("Peça inexistente.".into()))
+    }
+    pub fn body_mut(&mut self, id: BodyId) -> Result<&mut Body, DocumentError> {
+        self.parts
+            .iter_mut()
+            .flat_map(|p| &mut p.bodies)
+            .find(|b| b.id == id)
+            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))
+    }
+    pub fn instance_mut(&mut self, id: InstanceId) -> Result<&mut Instance, DocumentError> {
+        self.instances
+            .iter_mut()
+            .find(|i| i.id == id)
+            .ok_or_else(|| DocumentError("Instância inexistente.".into()))
+    }
+    fn allocate_id(&mut self) -> Result<u64, DocumentError> {
+        let id = self.next_id;
+        self.next_id = id
+            .checked_add(1)
+            .ok_or_else(|| DocumentError("Identificadores esgotados.".into()))?;
+        Ok(id)
+    }
+    pub fn add_mesh(
+        &mut self,
+        destination: Option<PartId>,
+        name: String,
+        geometry: Arc<MeshAsset>,
+    ) -> Result<(PartId, BodyId), DocumentError> {
+        validate_name(&name)?;
+        if let Some(part) = destination {
+            self.part(part)
+                .ok_or_else(|| DocumentError("Peça de destino inexistente.".into()))?;
+        }
+        let part = match destination {
+            Some(id) => id,
+            None => {
+                let id = PartId(self.allocate_id()?);
+                let instance = InstanceId(self.allocate_id()?);
+                self.parts.push(Part {
+                    id,
+                    name: name.clone(),
+                    bodies: Vec::new(),
+                    sketches: Vec::new(),
+                    parameters: parameters::Parameters::default(),
+                    features: Vec::new(),
+                });
+                self.instances.push(Instance {
+                    parent: None,
+                    id: instance,
+                    part: id,
+                    name: name.clone(),
+                    placement: Placement::default(),
+                    visible: true,
+                });
+                id
+            }
+        };
+        let body = BodyId(self.allocate_id()?);
+        self.part_mut(part)?.bodies.push(Body {
+            id: body,
+            name,
+            geometry,
+            brep: None,
+            placement: Placement::default(),
+            visible: true,
+        });
+        Ok((part, body))
+    }
+    pub fn remove_body(&mut self, id: BodyId) -> Result<(), DocumentError> {
+        let part = self
+            .parts
+            .iter_mut()
+            .find(|p| p.bodies.iter().any(|b| b.id == id))
+            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+        part.bodies.retain(|b| b.id != id);
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), DocumentError> {
+        validate_name(&self.name)?;
+        if self.next_id == 0 {
+            return Err(DocumentError(
+                "Contador de identificadores inválido.".into(),
+            ));
+        }
+        uuid::Uuid::parse_str(&self.id)
+            .map_err(|_| DocumentError("Identificador do projeto inválido.".into()))?;
+        let count = self.parts.len()
+            + self.instances.len()
+            + self.groups.len()
+            + self.sheets.len()
+            + self
+                .parts
+                .iter()
+                .map(|p| {
+                    p.bodies.len()
+                        + p.sketches
+                            .iter()
+                            .map(|s| {
+                                1 + s.sketch.points.len()
+                                    + s.sketch.entities.len()
+                                    + s.sketch.constraints.len()
+                            })
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+        if count > MAX_ELEMENTS {
+            return Err(DocumentError(
+                "O projeto excede dez mil elementos neste protótipo.".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        let mut register = |id: u64| {
+            if id == 0 || id >= self.next_id || !ids.insert(id) {
+                Err(DocumentError(
+                    "Identificadores duplicados ou contador inválido.".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        let mut total_triangles = 0_usize;
+        let mut total_vertices = 0_usize;
+        for part in &self.parts {
+            register(part.id.0)?;
+            validate_name(&part.name)?;
+            part.parameters.validate()?;
+            features::validate(part)?;
+            for record in &part.sketches {
+                register(record.id.0)?;
+                record
+                    .sketch
+                    .validate()
+                    .map_err(|e| DocumentError(e.to_string()))?;
+                let mut resolved = record.sketch.clone();
+                parameters::resolve_sketch(&mut resolved, &part.parameters)?;
+                for (expected, stored) in
+                    resolved.constraints.iter().zip(&record.sketch.constraints)
+                {
+                    if expected.kind != stored.kind {
+                        return Err(DocumentError(
+                            "Uma cota não corresponde à expressão armazenada.".into(),
+                        ));
+                    }
+                }
+            }
+            for body in &part.bodies {
+                register(body.id.0)?;
+                if body
+                    .brep
+                    .as_ref()
+                    .is_some_and(|b| b.is_empty() || b.len() > 64 * 1024 * 1024)
+                {
+                    return Err(DocumentError("B-rep vazio ou excessivo.".into()));
+                }
+                validate_name(&body.name)?;
+                total_triangles = total_triangles
+                    .checked_add(body.geometry.mesh().triangles().len())
+                    .ok_or_else(|| DocumentError("Contagem geométrica excessiva.".into()))?;
+                total_vertices = total_vertices
+                    .checked_add(body.geometry.mesh().vertices().len())
+                    .ok_or_else(|| DocumentError("Contagem geométrica excessiva.".into()))?;
+            }
+        }
+        if total_triangles > MAX_SCENE_TRIANGLES || total_vertices > MAX_SCENE_TRIANGLES * 3 {
+            return Err(DocumentError(
+                "O projeto excede os limites geométricos deste protótipo.".into(),
+            ));
+        }
+        for instance in &self.instances {
+            register(instance.id.0)?;
+            validate_name(&instance.name)?;
+            if self.part(instance.part).is_none() {
+                return Err(DocumentError(
+                    "Instância referencia uma peça inexistente.".into(),
+                ));
+            }
+        }
+        for sheet in &self.sheets {
+            register(sheet.id.0)?;
+            sheet
+                .specification
+                .validate()
+                .map_err(|e| DocumentError(e.to_string()))?;
+            if sheet.target.is_some_and(|id| self.part(id).is_none()) {
+                return Err(DocumentError("Folha referencia peça inexistente.".into()));
+            }
+        }
+        for group in &self.groups {
+            register(group.id.0)?;
+            validate_name(&group.name)?;
+            let mut members = HashSet::new();
+            let mut parent = None;
+            for id in &group.members {
+                if !members.insert(*id) {
+                    return Err(DocumentError("Elemento repetido no grupo.".into()));
+                }
+                let i = self.instance(*id).ok_or_else(|| {
+                    DocumentError("Grupo referencia instância inexistente.".into())
+                })?;
+                if let Some(p) = parent {
+                    if p != i.parent {
+                        return Err(DocumentError(
+                            "Um grupo deve pertencer a um único nível da montagem.".into(),
+                        ));
+                    }
+                } else {
+                    parent = Some(i.parent);
+                }
+            }
+        }
+        self.validate_assembly()?;
+        // Instâncias também amplificam vértices não utilizados: limitar ambos os custos.
+        let mut scene_triangles = 0_usize;
+        let mut scene_vertices = 0_usize;
+        for occurrence in self.occurrences()? {
+            let instance = self
+                .instance(occurrence.instance)
+                .ok_or_else(|| DocumentError("Instância ausente.".into()))?;
+            let part = self
+                .part(instance.part)
+                .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+            for body in part.bodies.iter().filter(|b| b.visible) {
+                scene_triangles = scene_triangles
+                    .checked_add(body.geometry.mesh().triangles().len())
+                    .ok_or_else(|| DocumentError("Cena excede o limite numérico.".into()))?;
+                scene_vertices = scene_vertices
+                    .checked_add(body.geometry.mesh().vertices().len())
+                    .ok_or_else(|| DocumentError("Cena excede o limite numérico.".into()))?;
+            }
+        }
+        if scene_triangles > MAX_SCENE_TRIANGLES || scene_vertices > MAX_SCENE_TRIANGLES * 3 {
+            return Err(DocumentError(
+                "A cena excede os limites geométricos deste protótipo.".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// A cena é derivada. Posições de montagem nunca são gravadas nos vértices locais.
+    pub fn scene_mesh(&self) -> Result<Option<Mesh>, DocumentError> {
+        self.validate()?;
+        let mut vertices = Vec::new();
+        let mut triangles = Vec::new();
+        for occurrence in self.occurrences()? {
+            let instance = self
+                .instance(occurrence.instance)
+                .ok_or_else(|| DocumentError("Instância ausente.".into()))?;
+            let part = self
+                .part(instance.part)
+                .ok_or_else(|| DocumentError("Peça da instância inexistente.".into()))?;
+            for body in part.bodies.iter().filter(|b| b.visible) {
+                let mesh = body.geometry.mesh();
+                let base = u32::try_from(vertices.len())
+                    .map_err(|_| DocumentError("Cena com vértices excessivos.".into()))?;
+                vertices.extend(
+                    mesh.vertices()
+                        .iter()
+                        .map(|point| occurrence.placement.apply(body.placement.apply(*point))),
+                );
+                triangles.extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
+            }
+        }
+        if triangles.is_empty() {
+            Ok(None)
+        } else {
+            Mesh::new(vertices, triangles)
+                .map(Some)
+                .map_err(|e| DocumentError(e.to_string()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prevents_vertex_amplification_by_instances() -> Result<(), Box<dyn Error>> {
+        let mut vertices = vec![[0.; 3]; 1000];
+        vertices[1] = [1., 0., 0.];
+        vertices[2] = [0., 1., 0.];
+        let asset = Arc::new(MeshAsset::new(Mesh::new(vertices, vec![[0, 1, 2]])?));
+        let mut doc = Document::new("Ensaio")?;
+        let (part, _) = doc.add_mesh(None, "Base".into(), asset)?;
+        for id in 4..6004 {
+            doc.instances.push(Instance {
+                parent: None,
+                id: InstanceId(id),
+                part,
+                name: format!("Instância {id}"),
+                placement: Placement::default(),
+                visible: true,
+            });
+        }
+        doc.next_id = 6004;
+        assert!(doc.validate().is_err());
+        Ok(())
+    }
+    #[test]
+    fn assembly_placement_preserves_body_coordinates() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Ensaio")?;
+        let asset = Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?));
+        let (_, body) = doc.add_mesh(None, "Suporte".into(), asset)?;
+        let instance = doc.instances()[0].id;
+        doc.instance_mut(instance)?.placement = Placement::new([100., 0., 0.], [0.; 3])?;
+        let scene = doc.scene_mesh()?.ok_or("Cena ausente")?;
+        assert_eq!(scene.bounds().min, [100., 0., 0.]);
+        assert_eq!(
+            doc.body(body)
+                .ok_or("Corpo ausente")?
+                .geometry
+                .mesh()
+                .bounds()
+                .min,
+            [0.; 3]
+        );
+        Ok(())
+    }
+    #[test]
+    fn rejects_dangling_and_duplicate_identifiers() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Ensaio")?;
+        let (part, _) = doc.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let mut broken = doc.clone();
+        broken.instances[0].part = PartId(u64::MAX);
+        assert!(broken.validate().is_err());
+        doc.parts
+            .push(doc.part(part).ok_or("Peça ausente")?.clone());
+        assert!(doc.validate().is_err());
+        Ok(())
+    }
+}

@@ -1,0 +1,39 @@
+[workspace]
+members = ["crates/geometry", "crates/sketch", "crates/kernel", "crates/document", "crates/commands", "crates/project_io", "crates/renderer", "crates/drawing", "apps/prototype"]
+resolver = "3"
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+
+[workspace.dependencies]
+nator-geometry = { path = "crates/geometry" }
+nator-sketch = { path = "crates/sketch" }
+nator-kernel = { path = "crates/kernel", default-features = false }
+nator-document = { path = "crates/document" }
+nator-commands = { path = "crates/commands" }
+nator-project-io = { path = "crates/project_io" }
+nator-drawing = {path="crates/drawing"}
+nator-renderer = { path = "crates/renderer" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.27", features = ["v4"] }
+wgpu = { version = "30.0", default-features = false, features = ["std", "wgsl", "vulkan", "dx12", "metal"] }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+
