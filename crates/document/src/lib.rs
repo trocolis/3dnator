@@ -159,6 +159,8 @@ pub struct Instance {
     pub name: String,
     pub placement: Placement,
     pub visible: bool,
+    /// Cor de ocorrência vinda do STEP; sobrepõe a aparência da definição sem duplicá-la.
+    pub color: Option<RgbColor>,
 }
 
 #[derive(Debug, Clone)]
@@ -347,6 +349,7 @@ impl Document {
             name,
             placement: Placement::default(),
             visible: true,
+            color: None,
         });
         Ok(id)
     }
@@ -446,6 +449,7 @@ impl Document {
                     name: name.clone(),
                     placement: Placement::default(),
                     visible: true,
+                    color: None,
                 });
                 id
             }
@@ -702,6 +706,11 @@ impl Document {
                 continue;
             };
             let group = &mut groups[usize::from(look != Style::Normal)];
+            let occurrence_color = occurrence
+                .path
+                .iter()
+                .filter_map(|id| self.instance(*id).and_then(|i| i.color))
+                .next_back();
             for body in part.bodies.iter().filter(|b| b.visible) {
                 let mesh = body.geometry.mesh();
                 let base = u32::try_from(group.vertices.len())
@@ -716,7 +725,7 @@ impl Document {
                     .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
                 group.creases.extend_from_slice(body.geometry.creases());
                 group.colors.extend(std::iter::repeat_n(
-                    body.color.unwrap_or(RgbColor::NEUTRAL),
+                    occurrence_color.or(body.color).unwrap_or(RgbColor::NEUTRAL),
                     mesh.triangles().len(),
                 ));
                 group
@@ -795,6 +804,7 @@ mod tests {
                 name: format!("Instância {id}"),
                 placement: Placement::default(),
                 visible: true,
+                color: None,
             });
         }
         doc.next_id = 6004;

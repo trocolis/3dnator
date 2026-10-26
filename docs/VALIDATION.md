@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — montagem STEP (26/10/2026)
+
+- 79 testes sem OCCT e 105 com OCCT 7.9.3 aprovados. Três regressões novas verificam nomes UTF-8, definições compartilhadas por raízes e subpeças, cores de corpo e ocorrência, posições rotacionadas, persistência sem o STEP de origem, exportação/reimportação, atomicidade e rejeição de ciclos e malhas no escopo de exportação.
+- `--validate-step target/codex-validation/step-001` aprovado: bloco de 6.000 mm³, duas ocorrências com cores distintas e montagem posicionada. O arquivo de origem foi removido antes da reabertura e da segunda exportação. Projeto resultante em `imported.3dnator`, STEP em `assembly.step` e relatório em `report.json`.
+- A ponte XCAF foi compilada localmente com o SDK 7.9.3. A CI Linux/Windows recebeu o ensaio; execução com OCCT 7.6 e no Windows permanece pendente. Superfícies abertas, referências externas e cores por face não foram declaradas como suportadas.
+
 ## Continuação 0.3.0 — cores sólidas (26/10/2026)
 
 79 testes sem OCCT e 102 com OCCT aprovados. Formatação e Clippy com avisos negados aprovados nas duas configurações. A regressão nova verifica comando de cor, cena, clonagem, salvamento/reabertura e desfazer/refazer. A captura `target/codex-validation/colors-001.png` verificou por leitura real de pixels 31.727 pixels da cor de teste, além de triangulação e transparência. Formato de projeto 8; projetos antigos permanecem com a cor neutra. O buffer passa de 84 para 96 bytes por triângulo; medições históricas de memória anteriores a essa mudança não foram repetidas.

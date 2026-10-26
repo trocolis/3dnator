@@ -19,6 +19,18 @@ use std::{
     ptr::NonNull,
     rc::Rc,
 };
+mod step;
+pub use step::{StepAssembly, StepBody, StepOccurrence, StepPart};
+
+// O intercâmbio STEP usa configurações globais do OCCT (Interface_Static e XCAF).
+// Serializar leitores/escritores evita que transferências de projetos em threads
+// distintas troquem nomes ou configurações, sem bloquear a thread da interface.
+static STEP_INTERCHANGE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn step_guard() -> Result<std::sync::MutexGuard<'static, ()>, KernelError> {
+    STEP_INTERCHANGE.lock().map_err(|_| {
+        KernelError("O intercâmbio STEP foi interrompido por uma falha anterior.".into())
+    })
+}
 
 unsafe extern "C" {
     fn nator_profile(
@@ -823,6 +835,7 @@ impl Solid {
 
     /// Lê a geometria de um STEP. As faces ficam sem nome até `name_faces_by_index`.
     pub fn read_step(path: &Path) -> Result<Self, KernelError> {
+        let _guard = step_guard()?;
         let metadata = std::fs::metadata(path)
             .map_err(|e| KernelError(format!("Não foi possível ler o STEP: {e}")))?;
         if !metadata.is_file() || metadata.len() > 256 * 1024 * 1024 {
@@ -838,6 +851,7 @@ impl Solid {
     }
 
     pub fn write_step(&self, path: &Path) -> Result<(), KernelError> {
+        let _guard = step_guard()?;
         let path = path_string(path)?;
         // SAFETY: sólido e caminho válidos durante a chamada; não há retenção do caminho.
         if unsafe { nator_write_step(self.pointer.as_ptr(), path.as_ptr()) } {

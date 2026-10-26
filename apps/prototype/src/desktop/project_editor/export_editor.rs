@@ -182,6 +182,10 @@ impl Editor {
                     }
                 }
                 ui.add_enabled_ui(!self.busy(), |ui| {
+                    #[cfg(feature = "occt")]
+                    if !solid_body {
+                        ui.small(text(T::MeshIsNotSolid));
+                    }
                     ui.horizontal(|ui| {
                         if ui.button(text(T::ComputeSummary)).clicked() {
                             action = Some(false);
@@ -189,8 +193,21 @@ impl Editor {
                         if ui.button(text(T::ExportFiles)).clicked() {
                             action = Some(true);
                         }
-                        if solid_body && ui.button(text(T::ExportStep)).clicked() {
-                            self.export_step(ctx);
+                        if solid_body
+                            && ui.button(text(T::ExportStep)).clicked()
+                            && let Some(body) = draft.body
+                        {
+                            self.export_step(ctx, draft.tab, export::StepScope::Body(body));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if let Some(part) = draft.part
+                            && ui.button(text(T::ExportPartStep)).clicked()
+                        {
+                            self.export_step(ctx, draft.tab, export::StepScope::Part(part));
+                        }
+                        if ui.button(text(T::ExportAssemblyStep)).clicked() {
+                            self.export_step(ctx, draft.tab, export::StepScope::Assembly);
                         }
                     });
                 });

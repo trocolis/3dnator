@@ -810,26 +810,13 @@ impl Editor {
                 }) {
                     #[cfg(feature = "occt")]
                     {
-                        let mut solid =
-                            nator_kernel::Solid::read_step(&path).map_err(|e| e.to_string())?;
-                        let brep = Arc::new(solid.to_brep().map_err(|e| e.to_string())?);
-                        let faces = solid.face_count().map_err(|e| e.to_string())?;
-                        let (mesh, triangle_faces) = solid
-                            .tessellate_with_faces(0.05, 0.25)
-                            .map_err(|e| e.to_string())?;
-                        let geometry = Arc::new(
-                            MeshAsset::with_faces(mesh, triangle_faces)
-                                .map_err(|e| e.to_string())?,
-                        );
                         let command = PreparedCommand::new(
                             document,
                             revision,
-                            Command::ImportSolid {
+                            Command::ImportStep {
+                                path,
                                 destination,
                                 name,
-                                geometry,
-                                brep,
-                                faces,
                             },
                         )
                         .map_err(|e| e.to_string())?;
@@ -940,33 +927,28 @@ impl Editor {
             })
         });
     }
-    /// Exporta o corpo sólido selecionado como STEP, em coordenadas da peça.
-    fn export_step(&mut self, context: &egui::Context) {
-        let Some(Selection::Body { id, part }) = self.current().selection else {
+    /// Exporta o escopo da aba capturada com cores e estrutura de montagem.
+    fn export_step(
+        &mut self,
+        context: &egui::Context,
+        tab: u64,
+        scope: nator_commands::export::StepScope,
+    ) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == tab) else {
             return;
         };
-        let Some(body) = self.current().session.document().body(id) else {
-            return;
-        };
-        let brep = body.brep.clone();
-        let part_name = self
-            .current()
-            .session
-            .document()
-            .part(part)
-            .map(|p| p.name.as_str())
-            .unwrap_or("");
-        let name = format!("{}_{}", part_name, body.name)
+        let document = tab.session.document().clone();
+        let name = document
+            .name()
             .chars()
             .map(|c| {
-                if c.is_control() || "/\\<>:\"|?*".contains(c) {
-                    '_'
-                } else {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
                     c
+                } else {
+                    '_'
                 }
             })
             .collect::<String>();
-        let placement = body.placement;
         self.start(context, None, move || {
             let Some(mut path) = rfd::FileDialog::new()
                 .add_filter(text(T::StepFilter), &["step", "stp"])
@@ -986,21 +968,18 @@ impl Editor {
             }
             #[cfg(feature = "occt")]
             {
-                let bytes = brep.ok_or_else(|| text(T::MeshIsNotSolid).to_owned())?;
-                // A exportação não usa referências: os nomes das faces são dispensáveis.
-                let solid = nator_kernel::Solid::from_brep(&bytes, None)
-                    .and_then(|s| s.transformed(placement))
+                let scene = nator_commands::export::step_scene(&document, scope)
                     .map_err(|e| e.to_string())?;
                 // Gerar em temporário e publicar sem substituir um arquivo existente.
                 nator_project_io::export_step(&path, |temp| {
-                    solid.write_step(temp).map_err(|e| e.to_string())
+                    scene.write(temp).map_err(|e| e.to_string())
                 })
                 .map_err(|e| e.to_string())?;
                 Ok(Outcome::Exported)
             }
             #[cfg(not(feature = "occt"))]
             {
-                let _ = (brep, placement);
+                let _ = (document, scope);
                 nator_kernel::require_available().map_err(|e| e.to_string())?;
                 Err(text(T::KernelUnavailable).into())
             }

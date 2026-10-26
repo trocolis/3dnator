@@ -48,8 +48,103 @@ pub(super) fn mirror_instance(
             pending.push((child, [0.; 3], [1., 0., 0.]));
         }
     }
-    doc.add_instance(part, source.parent, source.placement)?;
+    let instance = doc.add_instance(part, source.parent, source.placement)?;
+    doc.instance_mut(instance)?.color = source.color;
     Ok(())
+}
+
+/// Cada definição STEP é importada uma vez; instâncias só carregam referências e posições.
+/// O destino de construção recebe as raízes como subpeças independentes, sem mesclar
+/// definições nem criar vínculos com o arquivo de origem.
+pub(super) fn import_step(
+    doc: &mut Document,
+    path: &std::path::Path,
+    destination: Option<PartId>,
+    name: String,
+) -> Result<super::Effect, DocumentError> {
+    nator_document::validate_name(&name)?;
+    if destination.is_some_and(|id| doc.part(id).is_none()) {
+        return Err(DocumentError("Peça de destino inexistente.".into()));
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = path;
+        nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
+        Err(DocumentError("Importação STEP indisponível.".into()))
+    }
+    #[cfg(feature = "occt")]
+    {
+        let mut scene =
+            nator_kernel::StepAssembly::read(path).map_err(|e| DocumentError(e.to_string()))?;
+        let mut parts = Vec::with_capacity(scene.parts.len());
+        let mut first_body = None;
+        let mut triangles = 0;
+        for part in &mut scene.parts {
+            let id = doc.create_part(part.name.clone())?;
+            let automatic = doc
+                .instances()
+                .last()
+                .ok_or_else(|| DocumentError("Instância automática ausente.".into()))?
+                .id;
+            doc.remove_instance(automatic)?;
+            for body in &mut part.bodies {
+                let faces = body
+                    .solid
+                    .face_count()
+                    .map_err(|e| DocumentError(e.to_string()))?;
+                let brep = body
+                    .solid
+                    .to_brep()
+                    .map_err(|e| DocumentError(e.to_string()))?;
+                let (mesh, face_indices) = body
+                    .solid
+                    .tessellate_with_faces(0.05, 0.25)
+                    .map_err(|e| DocumentError(e.to_string()))?;
+                triangles += mesh.triangles().len();
+                if triangles > nator_document::MAX_SCENE_TRIANGLES {
+                    return Err(DocumentError(
+                        "STEP excede dois milhões de triângulos.".into(),
+                    ));
+                }
+                let (_, b) = doc.add_mesh(
+                    Some(id),
+                    body.name.clone(),
+                    Arc::new(MeshAsset::with_faces(mesh, face_indices)?),
+                )?;
+                let record = doc.body_mut(b)?;
+                record.brep = Some(Arc::new(brep));
+                record.face_names = Arc::new(nator_kernel::indexed_face_names(
+                    &nator_document::features::body_owner(b),
+                    faces,
+                ));
+                record.color = body.color;
+                first_body.get_or_insert((id, b));
+            }
+            parts.push(id);
+        }
+        for occurrence in scene.instances {
+            let part = *parts
+                .get(occurrence.part)
+                .ok_or_else(|| DocumentError("Definição STEP ausente.".into()))?;
+            let parent = occurrence
+                .parent
+                .map(|p| {
+                    parts
+                        .get(p)
+                        .copied()
+                        .ok_or_else(|| DocumentError("Pai STEP ausente.".into()))
+                })
+                .transpose()?
+                .or(destination);
+            let instance = doc.add_instance(part, parent, occurrence.placement)?;
+            let record = doc.instance_mut(instance)?;
+            record.name = occurrence.name;
+            record.color = occurrence.color;
+        }
+        let (part, body) =
+            first_body.ok_or_else(|| DocumentError("STEP não contém corpos sólidos.".into()))?;
+        Ok(super::Effect::Imported { part, body })
+    }
 }
 
 /// Pontos incluem translação; normais incluem somente a rotação inversa. Retirar a

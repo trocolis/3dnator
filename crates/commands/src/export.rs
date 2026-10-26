@@ -13,6 +13,149 @@ use nator_document::{BodyId, Document, DocumentError, PartId};
 use nator_geometry::{Bounds, Mesh, Placement};
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone, Copy)]
+pub enum StepScope {
+    Body(BodyId),
+    Part(PartId),
+    Assembly,
+}
+
+/// Constrói o intercâmbio sobre B-reps precisos. Malhas visíveis geram erro explícito;
+/// omiti-las ou convertê-las silenciosamente mudaria o conteúdo exportado.
+#[cfg(feature = "occt")]
+pub fn step_scene(
+    doc: &Document,
+    scope: StepScope,
+) -> Result<nator_kernel::StepAssembly, DocumentError> {
+    use nator_kernel::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart};
+    let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
+    let body_data = |body: &nator_document::Body| -> Result<StepBody, DocumentError> {
+        let brep = body.brep.as_ref().ok_or_else(|| DocumentError("O escopo contém corpos de malha. Use STL ou selecione apenas sólidos CAD para exportar STEP.".into()))?;
+        Ok(StepBody {
+            name: body.name.clone(),
+            solid: Solid::from_brep(brep, None)
+                .and_then(|s| s.transformed(body.placement))
+                .map_err(error)?,
+            color: body.color,
+        })
+    };
+    if let StepScope::Body(id) = scope {
+        let body = doc
+            .body(id)
+            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+        return Ok(StepAssembly {
+            parts: vec![StepPart {
+                name: body.name.clone(),
+                bodies: vec![body_data(body)?],
+            }],
+            instances: vec![StepOccurrence {
+                part: 0,
+                parent: None,
+                name: body.name.clone(),
+                placement: Placement::default(),
+                color: None,
+            }],
+        });
+    }
+    doc.validate()?;
+    fn keep(
+        doc: &Document,
+        part: PartId,
+        retained: &mut HashMap<PartId, bool>,
+    ) -> Result<bool, DocumentError> {
+        if let Some(found) = retained.get(&part) {
+            return Ok(*found);
+        }
+        let piece = doc
+            .part(part)
+            .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+        let mut visible = piece.bodies.iter().any(|b| b.visible);
+        for child in doc
+            .instances()
+            .iter()
+            .filter(|i| i.parent == Some(part) && i.visible)
+        {
+            visible |= keep(doc, child.part, retained)?;
+        }
+        retained.insert(part, visible);
+        Ok(visible)
+    }
+    let roots = match scope {
+        StepScope::Part(part) => vec![(
+            part,
+            Placement::default(),
+            doc.part(part)
+                .ok_or_else(|| DocumentError("Peça inexistente.".into()))?
+                .name
+                .clone(),
+            None,
+        )],
+        _ => doc
+            .instances()
+            .iter()
+            .filter(|i| i.parent.is_none() && i.visible)
+            .map(|i| (i.part, i.placement, i.name.clone(), i.color))
+            .collect(),
+    };
+    let mut retained = HashMap::new();
+    for (part, _, _, _) in &roots {
+        keep(doc, *part, &mut retained)?;
+    }
+    let selected = doc
+        .parts()
+        .iter()
+        .filter(|p| retained.get(&p.id) == Some(&true))
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        return Err(DocumentError("O escopo não contém corpos visíveis.".into()));
+    }
+    let indices = selected
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.id, i))
+        .collect::<HashMap<_, _>>();
+    let parts = selected
+        .iter()
+        .map(|p| {
+            Ok(StepPart {
+                name: p.name.clone(),
+                bodies: p
+                    .bodies
+                    .iter()
+                    .filter(|b| b.visible)
+                    .map(body_data)
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
+        })
+        .collect::<Result<Vec<_>, DocumentError>>()?;
+    let mut instances = Vec::new();
+    for (part, placement, name, color) in roots {
+        if let Some(index) = indices.get(&part) {
+            instances.push(StepOccurrence {
+                part: *index,
+                parent: None,
+                name,
+                placement,
+                color,
+            });
+        }
+    }
+    for i in doc.instances().iter().filter(|i| i.visible) {
+        if let Some(parent) = i.parent.and_then(|p| indices.get(&p))
+            && let Some(part) = indices.get(&i.part)
+        {
+            instances.push(StepOccurrence {
+                part: *part,
+                parent: Some(*parent),
+                name: i.name.clone(),
+                placement: i.placement,
+                color: i.color,
+            });
+        }
+    }
+    Ok(StepAssembly { parts, instances })
+}
+
 /// Tolerâncias de tesselação da exportação.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Quality {

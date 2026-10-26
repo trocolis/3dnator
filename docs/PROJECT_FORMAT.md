@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 8
+# Formato de projeto — versão interna 9
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 8; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 9; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -24,6 +24,8 @@ Cada peça contém:
 - histórico de operações (`features`), cada uma com nome, corpo resultante e operação.
 
 Cada instância referencia uma definição de peça, a peça pai opcional (subconjuntos) e guarda posição/orientação relativas ao pai. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
+
+Desde a versão 9, instâncias também aceitam `color_srgb` opcional. A cor da ocorrência mais específica no caminho de montagem prevalece sobre a cor do corpo, permitindo importar cores distintas em instâncias de uma definição compartilhada. Ausência conserva a aparência da definição.
 
 Transformações usam deslocamentos em milímetros e rotações em radianos, aplicando X, depois Y, depois Z. A transformação do corpo é aplicada antes da transformação da instância. Movimentar a montagem não altera os vértices locais.
 
@@ -78,6 +80,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 8 → 9: `color_srgb` ausente em uma instância assume `None`; geometria, cores de corpos e compartilhamento são preservados.
 - 7 → 8: `color_srgb` ausente assume `None`, preservando a aparência neutra dos projetos anteriores. A cor não altera malhas, B-rep ou referências.
 - Versões 1 a 6: campos acrescentados ao longo dessas versões (rascunhos, parâmetros, histórico, B-rep, subconjuntos, grupos, folhas) são opcionais e assumem valores vazios quando ausentes.
 - 6 → 7 (`migrate_to_7`): antes da desserialização tipada, a região numérica de extrusões/revoluções vira `{"Index": n}`, e o par `edge`/`face` + `signature` de arredondamento, chanfro e casca vira `{"Index": {"index": n, "signature": s}}`. Um histórico com campos ausentes é rejeitado inteiro, sem migração parcial.

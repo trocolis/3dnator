@@ -19,6 +19,34 @@ impl Default for Placement {
 }
 
 impl Placement {
+    /// Matriz afim 3×4 em linhas para intercâmbio. Só aceita rotações próprias:
+    /// escala, cisalhamento e reflexão precisam ser aplicados à geometria explicitamente.
+    pub fn from_affine_rows(rows: [f64; 12]) -> Result<Self, GeometryError> {
+        let matrix: [[f64; 3]; 3] =
+            std::array::from_fn(|i| std::array::from_fn(|j| rows[i * 4 + j]));
+        let valid = rows.iter().all(|v| v.is_finite())
+            && (0..3).all(|i| {
+                (0..3).all(|j| {
+                    (crate::dot(matrix[i], matrix[j]) - if i == j { 1. } else { 0. }).abs() < 1e-8
+                })
+            })
+            && (crate::dot(crate::cross(matrix[0], matrix[1]), matrix[2]) - 1.).abs() < 1e-8;
+        if !valid {
+            return Err(GeometryError(
+                "A transformação importada não é uma posição rígida válida.".into(),
+            ));
+        }
+        Self::from_matrix([rows[3], rows[7], rows[11]], matrix)
+    }
+    pub fn affine_rows(self) -> [f64; 12] {
+        std::array::from_fn(|i| {
+            if i % 4 == 3 {
+                self.translation[i / 4]
+            } else {
+                self.matrix[i / 4][i % 4]
+            }
+        })
+    }
     pub fn new(translation_mm: Point3, rotation_rad: Point3) -> Result<Self, GeometryError> {
         if translation_mm
             .into_iter()

@@ -26,6 +26,13 @@
 - A malha exportada de sólidos vem do B-rep com a tolerância escolhida, não da malha de exibição.
 - Nomes por peça e corpo sem colisões; arquivos existentes recebem sufixo em vez de serem sobrescritos.
 
+### Intercâmbio STEP
+
+- Importação XCAF de montagens com nomes UTF-8, subpeças, definições compartilhadas, posições rígidas e cores sólidas por corpo e por ocorrência, sem depender do arquivo original após salvar.
+- Exportação STEP de corpo, definição de peça ou montagem visível com cores e hierarquia. Malhas no escopo geram erro explícito, sem omissão ou conversão automática.
+- Leitura e escrita STEP serializadas entre threads devido ao estado global do OCCT; ciclos, transformações não rígidas e referências inválidas são rejeitados. Referências externas e peças sem sólidos não fazem parte do intercâmbio suportado.
+- Formato `.3dnator` versão 9 acrescenta cor opcional por ocorrência, com migração por valor ausente para versões anteriores. Ensaio `--validate-step` incluído na CI Linux/Windows.
+
 ### Montagem
 
 - Padrão linear ou circular de instâncias, que compartilham a definição e ficam reunidas em um grupo; desagrupar libera cada posição.

@@ -9,7 +9,7 @@ Incremento 0.3.0, em 26/10/2026. As cinco etapas têm seus itens principais impl
 Pendências conhecidas, por etapa:
 
 1. **Base técnica:** compilação, testes e validação OCCT no Windows e no Ubuntu (OCCT 7.6), já preparados na CI mas ainda não executados por falta de repositório remoto; medições na máquina de referência de 8 GB (as atuais foram feitas na GPU integrada de um notebook mais forte); interação real com teclado, mouse e diálogos, que os ensaios automáticos não cobrem.
-2. **Primeira peça:** importação STEP sem cores nem estrutura de montagem.
+2. **Primeira peça:** intercâmbio STEP com cores sólidas e estrutura de montagem implementado e validado no Linux por `--validate-step`; cores individuais de faces, materiais e montagens STEP com arquivos externos ficam fora do intercâmbio atual.
 3. **Construção mecânica:** hélice real de rosca (adiada por decisão de escopo); arredondamento de raio variável não faz parte do escopo inicial.
 4. **Montagem:** espelhamento de peças com subpeças implementado, preservando definições compartilhadas, grupos internos e histórico independente; validação manual dos fluxos ainda pendente conforme a base técnica. Alinhamento contínuo por restrições não faz parte do escopo inicial.
 5. **Documentação técnica:** folhas derivadas da malha de exibição (remoção aproximada de linhas ocultas, sem HLR exato do B-rep); cotas apenas gerais e não reposicionáveis; uma vista em corte por folha.
@@ -57,4 +57,4 @@ Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombr
 
 A aplicação permanece em Rust; dependências C/C++ são permitidas para o núcleo CAD. OCCT foi integrado por uma ponte C++ própria e validado no Linux (OCCT 7.9.3): extrusão, revolução, booleanas, chanfro, arredondamento, casca, tesselação, ida e volta STEP/STL, gestão de erros e de propriedade de memória. Truck permanece como alternativa em Rust, sem avaliação.
 
-Antes de consolidar a dependência para distribuição, falta verificar no Windows, preservar cores e montagem na importação/exportação STEP, avaliar o empacotamento das bibliotecas compartilhadas e reunir os avisos de licença (LGPL 2.1 com exceção). Medir tempo e memória na máquina de referência, sem presumir leveza pelo idioma de implementação.
+Antes de consolidar a dependência para distribuição, falta verificar no Windows, avaliar o empacotamento das bibliotecas compartilhadas e reunir os avisos de licença (LGPL 2.1 com exceção). Cores sólidas e estrutura de montagem STEP já percorrem o ciclo de importação/exportação no Linux. Medir tempo e memória na máquina de referência, sem presumir leveza pelo idioma de implementação.

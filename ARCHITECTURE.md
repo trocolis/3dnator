@@ -48,7 +48,7 @@ A lógica de nomes fica em `kernel/src/naming.rs` (Rust puro, testado sem o SDK)
 - No incremento atual, o documento usa identificadores tipados e geometria de malha imutável compartilhada por Arc. Transformações de corpos são locais à peça; instâncias aplicam uma transformação adicional na montagem.
 - `Session` publica uma edição somente após validar sua cópia candidata; desfazer/refazer mantém até 100 snapshots leves. A revisão da sessão cresce também ao desfazer/refazer, enquanto o identificador do estado permite reconhecer o último salvamento.
 - Cenas e buffers CPU são preparados na thread de trabalho. O resultado de importação identifica a aba e a revisão originais, e uma cena antiga não substitui a revisão atual. A interface mantém apenas os buffers GPU da aba ativa.
-- O formato de projeto (versão 8) serializa peças, corpos de malha e sólidos (B-rep, nomes de faces e face de origem de cada triângulo), rascunhos, parâmetros, histórico paramétrico, montagem, grupos e folhas. O recálculo de cada operação ocorre na preparação do comando, fora da thread da interface, sobre uma cópia candidata do documento.
+- O formato de projeto (versão 9) serializa peças, corpos de malha e sólidos (B-rep, nomes de faces e face de origem de cada triângulo), rascunhos, parâmetros, histórico paramétrico, montagem, grupos e folhas. O recálculo de cada operação ocorre na preparação do comando, fora da thread da interface, sobre uma cópia candidata do documento.
 
 - Uma operação confirmada é atômica: sua conclusão atualiza o documento e adiciona uma ação à sequência de desfazer, ou a falha preserva o documento anterior.
 - Prévias e edições pendentes usam estado separado até a confirmação. Uma edição paramétrica com falha permanece pendente para correção, supressão da etapa afetada ou cancelamento, conforme as regras do editor.
@@ -59,3 +59,7 @@ A lógica de nomes fica em `kernel/src/naming.rs` (Rust puro, testado sem o SDK)
 ## Próxima validação
 
 OCCT está integrado e validado no Linux. Falta a mesma validação no Windows (job `occt-windows` da CI) e no Ubuntu com OCCT 7.6, além da avaliação de distribuição das bibliotecas compartilhadas.
+
+## Intercâmbio STEP
+
+A ponte XCAF isola documentos, definições e ocorrências do OCCT atrás de `StepAssembly`. A camada de comandos converte a importação em definições independentes, com B-reps, malhas e nomes posicionais de faces; a aplicação publica o comando preparado apenas na revisão capturada. Corpos e ocorrências guardam cores sRGB, com a ocorrência mais específica sobrepondo a aparência da definição. Matrizes de intercâmbio passam por validação de ortonormalidade e determinante antes de se tornarem `Placement`. Leitores e escritores STEP compartilham uma exclusão mútua porque o intercâmbio OCCT usa configurações globais; a espera fica na thread de trabalho.

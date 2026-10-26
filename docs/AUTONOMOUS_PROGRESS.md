@@ -9,6 +9,14 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - 79 testes sem OCCT e 102 com OCCT aprovados; captura wgpu em perspectiva confirmou 31.727 pixels com a cor de teste aplicada, além de triangulação e transparência.
 - Próxima frente: importação/exportação STEP com nomes, cores e hierarquia pelo XCAF do OCCT; depois documentação técnica e sombras opcionais.
 
+### STEP com cores e montagem
+
+- Implementado intercâmbio XCAF com definições compartilhadas, nomes UTF-8, posições e cores de corpo/ocorrência, incluindo montagem no contexto de construção. Arquivos STEP com referências externas, superfícies abertas ou transformações não rígidas geram erros explícitos.
+- Exportação de corpo, peça ou montagem visível; raízes posicionadas usam contêineres quando necessários para separar definição e transformação, sem acrescentar níveis em cada reexportação. Malhas não são omitidas ou convertidas silenciosamente.
+- Formato de projeto 9 armazena cores de ocorrência. O intercâmbio é serializado entre threads para evitar interferência do estado global do OCCT, observada nos testes concorrentes.
+- 79 testes sem OCCT e 105 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. `--validate-step` aprovado em `target/codex-validation/step-002/`; projeto `imported.3dnator`, STEP `assembly.step`, relatório `report.json` e captura real `target/codex-validation/step-editor-001.png`.
+- A CI recebeu o ensaio STEP. Windows/OCCT 7.6 continuam sem execução local; a próxima frente funcional é documentação técnica (HLR, cotagem associativa e múltiplos cortes), seguida de sombras e preparação de distribuição.
+
 ## Critério de trabalho
 
 Concluir incrementos verificáveis, preservar decisões já aprovadas, executar os testes pertinentes e atualizar este registro. Não publicar o repositório, não substituir malhas por sólidos simulados e não declarar validações que não foram executadas.

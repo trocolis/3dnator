@@ -48,6 +48,7 @@ impl Document {
             name,
             placement,
             visible: true,
+            color: None,
         });
         self.validate_assembly()?;
         Ok(id)

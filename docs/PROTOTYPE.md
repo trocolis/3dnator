@@ -37,7 +37,7 @@ Sólidos recebem uma operação final de espelhamento no histórico de cada defi
 
 ## Salvar e recuperar
 
-**Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 8, independente da versão do aplicativo, com migração de projetos anteriores.
+**Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 9, independente da versão do aplicativo, com migração de projetos anteriores.
 
 A gravação temporária é validada antes de substituir o projeto anterior. A recuperação é gravada separadamente, após dois segundos de inatividade e disponibilidade da thread de trabalho, e é oferecida ao iniciar a aplicação. Uma cópia recuperada precisa ser salva explicitamente. `NATOR_RECOVERY_DIR` permite escolher o diretório das cópias.
 
@@ -102,7 +102,13 @@ cargo test -p nator-kernel -p nator-commands --features occt --locked
 
 `--validate` verifica volumes, cortes, chanfro/arredondamento e ida e volta STEP/STL com primitivas. `--validate-part` executa o critério de entrega da etapa 2 com comandos do documento: suporte em L cotado por parâmetros, extrusão, furo, arredondamento, alteração das cotas com recálculo, desfazer/refazer, salvar, reabrir e exportar STEP e STL, conferindo volume analítico, dimensões e topologia da malha. Os testes com `--features occt` cobrem a nomeação estável de faces e as referências do histórico.
 
-A importação STEP lê geometria, sem preservar cores ou hierarquia. Um sólido STEP importado entra no documento com B-rep e faces nomeadas pela posição, estáveis porque essa geometria não é recalculada.
+A importação STEP usa XCAF para preservar nomes, hierarquia, definições compartilhadas, posições e cores sólidas por corpo ou ocorrência. Na construção, as raízes entram como subpeças independentes da peça ativa. O projeto guarda os B-reps e as malhas, sem vínculo com o arquivo STEP. Faces importadas recebem nomes posicionais estáveis, porque a importação não é recalculada.
+
+O diálogo de exportação oferece STEP por corpo, peça ou montagem visível. A exportação usa os B-reps e mantém cores e compartilhamento. Corpos próprios de uma peça que também tem subpeças podem aparecer como componentes sólidos no STEP. Raízes posicionadas podem receber um contêiner para separar a transformação da definição. Malhas visíveis no escopo geram erro explícito: use STL ou selecione apenas sólidos. Cores por face, materiais, superfícies abertas e STEP com arquivos externos não são suportados.
+
+```sh
+cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate-step target/step-check/run-001
+```
 
 Sem o SDK e a feature `occt`, CAD/STEP falham explicitamente; não há núcleo simulado.
 

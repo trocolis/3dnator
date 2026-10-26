@@ -16,9 +16,10 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-/// Versão 8: cor sólida sRGB opcional por corpo. Projetos anteriores usam a cor neutra;
+/// Versão 9: cor sRGB opcional por ocorrência, além das cores de corpo da versão 8.
+/// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 8;
+pub const FORMAT_VERSION: u32 = 9;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -94,6 +95,8 @@ struct GroupRecord {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InstanceRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color_srgb: Option<[u8; 3]>,
     #[serde(default)]
     parent: Option<u64>,
     id: u64,
@@ -360,6 +363,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         .into_iter()
         .map(|i| {
             Ok(Instance {
+                color: i.color_srgb.map(RgbColor::new),
                 parent: i.parent.map(PartId),
                 id: InstanceId(i.id),
                 part: PartId(i.part),
@@ -526,6 +530,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .instances()
             .iter()
             .map(|i| InstanceRecord {
+                color_srgb: i.color.map(RgbColor::channels),
                 parent: i.parent.map(|p| p.0),
                 id: i.id.0,
                 part: i.part.0,

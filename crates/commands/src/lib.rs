@@ -11,6 +11,12 @@ use std::{collections::VecDeque, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// A leitura e a tesselação ocorrem na preparação do comando, na thread de trabalho.
+    ImportStep {
+        path: std::path::PathBuf,
+        destination: Option<PartId>,
+        name: String,
+    },
     SetSheet {
         id: Option<nator_document::SheetId>,
         target: Option<PartId>,
@@ -141,6 +147,7 @@ pub enum Effect {
 impl Command {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::ImportStep { .. } => "Importar montagem STEP",
             Self::SetSheet { .. } => "Salvar folha técnica associada",
             Self::ImportSolid { .. } => "Importar sólido CAD",
             Self::AddFeature { .. } => "Adicionar operação paramétrica",
@@ -172,6 +179,11 @@ impl Command {
     }
     fn apply(self, doc: &mut Document) -> Result<Effect, DocumentError> {
         match self {
+            Self::ImportStep {
+                path,
+                destination,
+                name,
+            } => return assembly::import_step(doc, &path, destination, name),
             Self::SetSheet {
                 id,
                 target,
@@ -224,7 +236,9 @@ impl Command {
                     let placement = step
                         .compose(source.placement)
                         .map_err(|e| DocumentError(e.to_string()))?;
-                    members.push(doc.add_instance(source.part, source.parent, placement)?);
+                    let copy = doc.add_instance(source.part, source.parent, placement)?;
+                    doc.instance_mut(copy)?.color = source.color;
+                    members.push(copy);
                 }
                 // O grupo move o padrão inteiro; desagrupar libera cada posição.
                 doc.add_group(format!("Padrão de {}", source.name), members)?;
@@ -268,7 +282,8 @@ impl Command {
                     .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
                     .clone();
                 let part = doc.clone_part(source.part, name)?;
-                doc.add_instance(part, source.parent, source.placement)?;
+                let copy = doc.add_instance(part, source.parent, source.placement)?;
+                doc.instance_mut(copy)?.color = source.color;
             }
             Self::ReparentInstance { id, parent } => doc.reparent(id, parent)?,
             Self::RemoveInstance { id } => doc.remove_instance(id)?,
