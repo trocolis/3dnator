@@ -6,8 +6,11 @@
 //! pela ponte, de modo que referências do histórico paramétrico sobrevivam a mudanças de cota.
 
 use super::KernelError;
-use crate::naming::{self, Inheritance, Origin};
-use nator_geometry::{Mesh, Point3};
+use crate::{
+    hole::{self, HoleGeometry},
+    naming::{self, Inheritance, Origin},
+};
+use nator_geometry::{Mesh, Placement, Point3};
 use nator_sketch::{Sketch, profiles::Region};
 use std::{
     ffi::{CStr, CString, c_char, c_void},
@@ -59,6 +62,9 @@ unsafe extern "C" {
     fn nator_edge_faces(body: *const c_void, output: *mut i32, length: usize) -> bool;
     fn nator_origins_size(body: *const c_void) -> usize;
     fn nator_origins_copy(body: *const c_void, output: *mut i32, length: usize) -> bool;
+    fn nator_mirror(body: *const c_void, origin: *const f64, normal: *const f64) -> *mut c_void;
+    fn nator_half_space(body: *const c_void, origin: *const f64, normal: *const f64)
+    -> *mut c_void;
 }
 
 /// Limite defensivo de faces/arestas copiadas da ponte (um modelo de protótipo tem centenas).
@@ -104,6 +110,22 @@ fn path_string(path: &Path) -> Result<CString, KernelError> {
         .to_str()
         .ok_or_else(|| KernelError("O caminho deve ser UTF-8 válido.".into()))?;
     CString::new(text).map_err(|_| KernelError("O caminho contém um caractere NUL.".into()))
+}
+
+/// Vetor finito e não nulo, normalizado.
+fn unit(vector: Point3, name: &str) -> Result<Point3, KernelError> {
+    let length = nator_geometry::norm(vector);
+    if vector.iter().all(|v| v.is_finite()) && length > 1e-9 {
+        Ok(vector.map(|v| v / length))
+    } else {
+        Err(KernelError(format!(
+            "{name} deve ser um vetor finito e não nulo."
+        )))
+    }
+}
+
+fn sketch_error(error: nator_sketch::SketchError) -> KernelError {
+    KernelError(error.to_string())
 }
 
 fn owner_name(owner: &str) -> Result<(), KernelError> {
@@ -249,6 +271,13 @@ impl Solid {
             .ok_or_else(|| KernelError("A face não possui nome estável.".into()))
     }
 
+    /// Renomeia as faces nomeadas, por exemplo para distinguir cópias de um padrão.
+    pub fn map_face_names(&mut self, rename: impl Fn(&str) -> String) {
+        for name in self.faces.iter_mut().filter(|n| !n.is_empty()) {
+            *name = rename(name);
+        }
+    }
+
     fn with_inherited(
         mut self,
         inputs: &[&[String]],
@@ -303,6 +332,123 @@ impl Solid {
                 modified_suffix: None,
             },
         )
+    }
+
+    /// Cópia espelhada pelo plano (origem, normal); as faces mantêm seus nomes.
+    pub fn mirrored(&self, origin: Point3, normal: Point3) -> Result<Self, KernelError> {
+        coordinates(origin)?;
+        let normal = unit(normal, "A normal do plano de espelhamento")?;
+        // SAFETY: buffers de três coordenadas vivos durante a chamada; resultado novo.
+        Self::from_pointer(unsafe {
+            nator_mirror(self.pointer.as_ptr(), origin.as_ptr(), normal.as_ptr())
+        })?
+        .with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner: "mirror",
+                generated: "mirror",
+                modified_suffix: None,
+            },
+        )
+    }
+
+    /// Parte do corpo do lado para onde `normal` aponta. A face criada no plano de corte
+    /// recebe o nome `{dono}:split`.
+    pub fn split(&self, origin: Point3, normal: Point3, owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        coordinates(origin)?;
+        let normal = unit(normal, "A normal do plano de divisão")?;
+        // SAFETY: corpo vivo e buffers fixos durante a chamada; o bloco é um sólido novo.
+        let mut half = Self::from_pointer(unsafe {
+            nator_half_space(self.pointer.as_ptr(), origin.as_ptr(), normal.as_ptr())
+        })?;
+        half.faces = vec![format!("{owner}:split"); half.face_count()?];
+        let part = self.boolean(&half, 2, owner)?;
+        part.volume()
+            .map_err(|_| KernelError("O plano não deixa material do lado escolhido.".into()))?;
+        Ok(part)
+    }
+
+    /// Ferramenta de furo com eixo em `center` e furação na direção `direction`. As faces se
+    /// chamam `{dono}:hole{índice}:{papel}` (parede, rebaixo, escareado, ponta...).
+    pub fn hole_tool(
+        center: Point3,
+        direction: Point3,
+        geometry: &HoleGeometry,
+        owner: &str,
+        index: usize,
+    ) -> Result<Self, KernelError> {
+        use nator_sketch::{Curve, Plane};
+        owner_name(owner)?;
+        coordinates(center)?;
+        let axis = unit(direction, "A direção do furo")?;
+        // Plano do meio-corte: U radial (qualquer perpendicular ao eixo) e V ao longo do eixo.
+        let helper = if axis[0].abs() < 0.9 {
+            [1., 0., 0.]
+        } else {
+            [0., 1., 0.]
+        };
+        let radial = unit(nator_geometry::cross(axis, helper), "O eixo radial do furo")?;
+        let plane = Plane {
+            origin: center,
+            u: radial,
+            v: axis,
+        };
+        let points = hole::profile(geometry)?;
+        let mut sketch = Sketch::new("Furo", plane);
+        let ids = points
+            .iter()
+            .map(|(p, _)| sketch.add_point(*p))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sketch_error)?;
+        let mut roles = std::collections::HashMap::new();
+        for i in 0..ids.len() {
+            let line = sketch
+                .add_curve(
+                    Curve::Line {
+                        start: ids[i],
+                        end: ids[(i + 1) % ids.len()],
+                    },
+                    false,
+                )
+                .map_err(sketch_error)?;
+            roles.insert(format!("{owner}:e{line}"), points[i].1);
+        }
+        let region = nator_sketch::profiles::regions(&sketch)
+            .map_err(sketch_error)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| KernelError("Perfil de furo sem região.".into()))?;
+        let mut tool = Self::revolve(&sketch, &region, center, axis, std::f64::consts::TAU, owner)?;
+        tool.map_face_names(|name| match roles.get(name) {
+            Some(role) => format!("{owner}:hole{index}:{role}"),
+            None => name.to_owned(),
+        });
+        Ok(tool)
+    }
+
+    /// União do corpo com cópias posicionadas por `placements`. A cópia k recebe nomes com
+    /// sufixo `:p{k}` (o original, k = 0, mantém os seus), para que cada cópia possa ser
+    /// referenciada sem ambiguidade.
+    pub fn pattern(&self, placements: &[Placement], owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        if placements.is_empty() || placements.len() > 1000 {
+            return Err(KernelError(
+                "O padrão deve ter entre 2 e 1000 ocorrências.".into(),
+            ));
+        }
+        let mut result: Option<Self> = None;
+        for (k, placement) in placements.iter().enumerate() {
+            let mut copy = self.transformed(*placement)?;
+            if k > 0 {
+                copy.map_face_names(|name| format!("{name}:p{k}"));
+            }
+            result = Some(match result {
+                None => copy,
+                Some(previous) => previous.boolean(&copy, 0, owner)?,
+            });
+        }
+        result.ok_or_else(|| KernelError("Padrão vazio.".into()))
     }
 
     /// Casca para dentro, removendo a face `face`.

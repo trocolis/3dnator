@@ -8,10 +8,16 @@
 //   determinística para a mesma estrutura topológica e preservada na serialização B-rep.
 // - Cada operação registra a origem das faces do resultado (`origins`), em trios
 //   (tipo, entrada, índice). O lado Rust transforma essas origens em nomes estáveis.
+#include <Bnd_Box.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeShape.hxx>
@@ -28,30 +34,9 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepTools.hxx>
-#include <BRep_Builder.hxx>
-#include <BRep_Tool.hxx>
+#include <ElSLib.hxx>
 #include <GC_MakeArcOfCircle.hxx>
-#include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
-#include <IFSelect_ReturnStatus.hxx>
-#include <Message.hxx>
-#include <Message_Messenger.hxx>
-#include <Message_PrinterOStream.hxx>
-#include <Poly_Triangulation.hxx>
-#include <STEPControl_Reader.hxx>
-#include <STEPControl_Writer.hxx>
-#include <Standard_Failure.hxx>
-#include <Standard_Version.hxx>
-#include <TopExp.hxx>
-#include <TopExp_Explorer.hxx>
-#include <TopLoc_Location.hxx>
-#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
-#include <TopTools_IndexedMapOfShape.hxx>
-#include <TopTools_ListOfShape.hxx>
-#include <TopoDS.hxx>
-#include <TopoDS_Edge.hxx>
-#include <TopoDS_Face.hxx>
-#include <TopoDS_Wire.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
@@ -61,8 +46,31 @@
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
+#include <GProp_GProps.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
+#include <Message_PrinterOStream.hxx>
+#include <Poly_Triangulation.hxx>
+#include <Standard_Failure.hxx>
+#include <Standard_Version.hxx>
+#include <STEPControl_Reader.hxx>
+#include <STEPControl_Writer.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <TopoDS_Wire.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <initializer_list>
@@ -189,6 +197,24 @@ public:
 
     std::vector<std::int32_t> take() { return std::move(values_); }
 
+    // Faces ainda sem origem, com sua posição base 0 na tabela.
+    std::vector<std::pair<int, TopoDS_Face>> unknown() const {
+        std::vector<std::pair<int, TopoDS_Face>> faces;
+        for (int i = 1; i <= faces_.Extent(); ++i) {
+            if (values_[static_cast<std::size_t>(i - 1) * 3] == Unknown) {
+                faces.emplace_back(i - 1, TopoDS::Face(faces_(i)));
+            }
+        }
+        return faces;
+    }
+
+    void set(int position, Origin kind, int input, int index) {
+        auto* slot = &values_[static_cast<std::size_t>(position) * 3];
+        slot[0] = kind;
+        slot[1] = input;
+        slot[2] = index;
+    }
+
 private:
     TopTools_IndexedMapOfShape faces_;
     std::vector<std::int32_t> values_;
@@ -229,10 +255,89 @@ std::vector<std::int32_t> history(BRepBuilderAPI_MakeShape& operation, const Top
     return table.take();
 }
 
+// Coordenadas (raio, altura) de um ponto em relação a um eixo.
+std::array<double, 2> radial(const gp_Ax1& axis, const gp_Pnt& point) {
+    const gp_Vec delta(axis.Location(), point);
+    const gp_Vec direction(axis.Direction());
+    const double height = delta.Dot(direction);
+    return {(delta - direction * height).Magnitude(), height};
+}
+
+// O BRepPrimAPI_MakeRevol do OCCT 7.9 não informa em Generated() as faces planas geradas
+// por segmentos perpendiculares ao eixo (topos, pisos de rebaixo, fundos de furo). Essas
+// faces são identificadas pela definição da revolução: em coordenadas (raio, altura), os
+// pontos do contorno de uma face plana assim gerada estão todos sobre o segmento de origem,
+// e o centroide deles também. Só segmentos retos perpendiculares ao eixo são candidatos, e
+// a correspondência precisa ser exata dentro da tolerância; caso contrário a face continua
+// sem nome, e nenhuma outra origem é atribuída.
+void match_planar_revolution_faces(OriginTable& table, const Shape* profile, const gp_Ax1& axis) {
+    constexpr double tolerance = 1e-6;
+    struct Segment {
+        std::array<double, 2> a, b;
+    };
+    std::vector<std::pair<std::size_t, Segment>> candidates;
+    for (std::size_t i = 0; i < profile->profile_edges.size(); ++i) {
+        const TopoDS_Edge& edge = profile->profile_edges[i];
+        BRepAdaptor_Curve curve(edge);
+        if (curve.GetType() != GeomAbs_Line) {
+            continue;
+        }
+        TopoDS_Vertex first, last;
+        TopExp::Vertices(edge, first, last);
+        const auto a = radial(axis, BRep_Tool::Pnt(first));
+        const auto b = radial(axis, BRep_Tool::Pnt(last));
+        if (std::abs(a[1] - b[1]) < tolerance && std::abs(a[0] - b[0]) > tolerance) {
+            candidates.push_back({i, Segment{a, b}});
+        }
+    }
+    for (const auto& [position, face] : table.unknown()) {
+        if (BRepAdaptor_Surface(face).GetType() != GeomAbs_Plane) {
+            continue;
+        }
+        // Centroide (raio, altura) de pontos amostrados no contorno da face.
+        double r = 0, h = 0;
+        int samples = 0;
+        for (TopExp_Explorer explorer(face, TopAbs_EDGE); explorer.More(); explorer.Next()) {
+            const TopoDS_Edge& edge = TopoDS::Edge(explorer.Current());
+            if (BRep_Tool::Degenerated(edge)) {
+                continue;
+            }
+            BRepAdaptor_Curve curve(edge);
+            for (int k = 0; k <= 8; ++k) {
+                const double t = curve.FirstParameter() +
+                                 (curve.LastParameter() - curve.FirstParameter()) * k / 8.0;
+                const auto point = radial(axis, curve.Value(t));
+                r += point[0];
+                h += point[1];
+                ++samples;
+            }
+        }
+        if (samples == 0) {
+            continue;
+        }
+        r /= samples;
+        h /= samples;
+        int match = -1;
+        for (const auto& [index, segment] : candidates) {
+            const double low = std::min(segment.a[0], segment.b[0]) - tolerance;
+            const double high = std::max(segment.a[0], segment.b[0]) + tolerance;
+            if (std::abs(h - segment.a[1]) < tolerance && r >= low && r <= high) {
+                // Dois segmentos sobrepostos tornariam a origem ambígua: a face fica sem nome.
+                match = match == -1 ? static_cast<int>(index) : -2;
+            }
+        }
+        if (match >= 0) {
+            table.set(position, Side, 0, match);
+        }
+    }
+}
+
 // Varredura de um perfil: laterais nomeadas pelos segmentos do perfil e tampas pelas
-// formas inicial e final. Funciona para prismas e revoluções.
+// formas inicial e final. Funciona para prismas e revoluções; para revoluções, as faces
+// planas que o OCCT não informa são completadas por `match_planar_revolution_faces`.
 template <typename Sweep>
-std::vector<std::int32_t> sweep_history(Sweep& sweep, const Shape* profile) {
+std::vector<std::int32_t> sweep_history(Sweep& sweep, const Shape* profile,
+                                        const gp_Ax1* revolution_axis = nullptr) {
     const TopoDS_Shape result = sweep.Shape();
     OriginTable table(result);
     for (std::size_t i = 0; i < profile->profile_edges.size(); ++i) {
@@ -242,6 +347,9 @@ std::vector<std::int32_t> sweep_history(Sweep& sweep, const Shape* profile) {
     }
     table.mark_all(sweep.FirstShape(), StartCap, 0, 0);
     table.mark_all(sweep.LastShape(), EndCap, 0, 0);
+    if (revolution_axis != nullptr) {
+        match_planar_revolution_faces(table, profile, *revolution_axis);
+    }
     return table.take();
 }
 
@@ -371,6 +479,49 @@ Shape* nator_transform(const Shape* body, const double* m) noexcept {
         BRepBuilderAPI_Transform operation(body->value, transformation, true);
         shape.value = operation.Shape();
         shape.origins = history(operation, shape.value, {&body->value});
+    });
+}
+
+// Espelhamento pelo plano (origem, normal). A reflexão inverte a orientação; o
+// BRepBuilderAPI_Transform corrige as faces, e o histórico preserva os nomes.
+Shape* nator_mirror(const Shape* body, const double* origin, const double* normal) noexcept {
+    return build([&](Shape& shape) {
+        gp_Trsf reflection;
+        reflection.SetMirror(gp_Ax2(gp_Pnt(origin[0], origin[1], origin[2]),
+                                    gp_Dir(normal[0], normal[1], normal[2])));
+        BRepBuilderAPI_Transform operation(body->value, reflection, true);
+        shape.value = operation.Shape();
+        shape.origins = history(operation, shape.value, {&body->value});
+    });
+}
+
+// Bloco finito do lado para onde a normal aponta, grande o bastante para conter a parte do
+// corpo nesse lado. Usado na divisão por plano (interseção com o corpo); um semiespaço
+// infinito seria rejeitado pela verificação de validade B-rep.
+Shape* nator_half_space(const Shape* body, const double* origin, const double* normal) noexcept {
+    return build([&](Shape& shape) {
+        Bnd_Box box;
+        BRepBndLib::Add(body->value, box);
+        if (box.IsVoid()) {
+            throw std::runtime_error("Corpo sem extensão para dividir.");
+        }
+        const double size = std::sqrt(box.SquareExtent()) * 2.0 + 10.0;
+        const gp_Pnt center(origin[0], origin[1], origin[2]);
+        const gp_Dir direction(normal[0], normal[1], normal[2]);
+        const gp_Pln plane(center, direction);
+        // Quadrado no plano centrado na projeção do centro da caixa do corpo.
+        double xmin, ymin, zmin, xmax, ymax, zmax;
+        box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        const gp_Pnt middle((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2);
+        double u, v;
+        ElSLib::Parameters(plane, middle, u, v);
+        const TopoDS_Face face =
+            BRepBuilderAPI_MakeFace(plane, u - size, u + size, v - size, v + size).Face();
+        BRepPrimAPI_MakePrism prism(face, gp_Vec(direction) * (2 * size), false);
+        if (!prism.IsDone()) {
+            throw std::runtime_error("Falha ao construir o semiespaço da divisão.");
+        }
+        shape.value = prism.Shape();
     });
 }
 
@@ -542,7 +693,7 @@ Shape* nator_revolve(const Shape* face, const double* origin, const double* dire
             throw std::runtime_error("Falha na revolução do perfil.");
         }
         shape.value = revolution.Shape();
-        shape.origins = sweep_history(revolution, face);
+        shape.origins = sweep_history(revolution, face, &axis);
     });
 }
 

@@ -15,7 +15,10 @@ pub fn is_available() -> bool {
     cfg!(feature = "occt")
 }
 
-// A nomeação é Rust puro e testada sem o SDK; só o módulo nativo a usa em produção.
+// Perfil de furos e nomeação são Rust puro, testados sem o SDK; em produção, só o módulo
+// nativo os usa.
+#[cfg_attr(not(feature = "occt"), allow(dead_code))]
+pub mod hole;
 #[cfg_attr(not(feature = "occt"), allow(dead_code))]
 mod naming;
 #[cfg(feature = "occt")]
