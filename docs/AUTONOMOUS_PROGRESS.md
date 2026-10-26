@@ -31,6 +31,13 @@ Autorização do usuário: continuar todas as etapas sem solicitar acompanhament
 - 82 testes sem OCCT e 111 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. Ensaio `target/codex-validation/multiple-sections-001/` gerou a folha em retrato com cortes perpendiculares A–A/B–B, inspecionada visualmente.
 - Próximas tarefas funcionais: corte preciso do B-rep, cotas associativas reposicionáveis e sombras opcionais; depois preparação de distribuição. As validações externas permanecem registradas no roadmap.
 
+### Cortes precisos do B-rep
+
+- Interseções calculadas sobre cada corpo CAD posicionado, sem alterar sua geometria, com curvas amostradas pelo mesmo controle de desvio usado em HLR. Os dados de corte são preparados uma vez e reutilizados nas vistas e nos traços dos planos.
+- Preservados furos internos e grupos por corpo na hachura; sobreposições de peças distintas não viram vazios artificiais. A legenda distingue a precisão das vistas e dos cortes.
+- 83 testes sem OCCT e 113 com OCCT aprovados; formatação e Clippy aprovados. `target/codex-validation/precise-sections-001/` contém relatório, projeto, STEP e folha PNG/PDF com cortes A–A/B–B da montagem. Imagem inspecionada.
+- Próximas tarefas funcionais: cotas associativas reposicionáveis e sombras opcionais; depois preparação de distribuição. Formato de projeto mantido em 10.
+
 ## Critério de trabalho
 
 Concluir incrementos verificáveis, preservar decisões já aprovadas, executar os testes pertinentes e atualizar este registro. Não publicar o repositório, não substituir malhas por sólidos simulados e não declarar validações que não foram executadas.

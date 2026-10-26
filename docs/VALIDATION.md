@@ -1,5 +1,9 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — cortes precisos do B-rep (26/10/2026)
+
+83 testes sem OCCT e 113 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. Uma seção anular no núcleo preserva os dois contornos, a área esperada dentro da tolerância de amostragem e o volume do sólido original. Outra regressão impede que sobreposições de corpos distintos cancelem suas hachuras. Vistas e traços dos planos usam a interseção preparada uma única vez por corte; curvas de HLR e corte compartilham amostragem por intervalos C2 com desvio de 0,01 mm. O ensaio `--validate-step target/codex-validation/precise-sections-001` gerou PNG/PDF com cortes precisos A–A/B–B da montagem posicionada. A legenda identifica **HLR E CORTES DO B-REP**; contextos com malhas continuam aproximados. O formato de projeto permanece em 10.
+
 ## Continuação 0.3.0 — múltiplos cortes e formato da folha (26/10/2026)
 
 82 testes sem OCCT e 111 com OCCT aprovados; formatação e Clippy aprovados nas duas configurações. As regressões verificam manutenção de identificadores após remoção de A–A, retrato/paisagem, dimensões do PNG na resolução escolhida, rejeição de cortes repetidos ou inválidos e salvamento/reabertura/desfazer/refazer das configurações. `--validate-editor target/codex-validation/multiple-sections-001` aprovado, com folha A4 em retrato, cortes A–A/B–B perpendiculares e PNG em 96 DPI. Projeto, PNG e PDF estão no diretório do ensaio; a imagem foi inspecionada. O formato de projeto passou a 10, com cortes adicionais vazios, paisagem e 150 DPI por padrão em folhas anteriores.

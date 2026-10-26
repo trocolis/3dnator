@@ -20,6 +20,7 @@ use std::{
     rc::Rc,
 };
 mod projection;
+mod section;
 mod step;
 pub use projection::projected_edges;
 pub use step::{StepAssembly, StepBody, StepOccurrence, StepPart};

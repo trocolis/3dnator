@@ -116,14 +116,41 @@ fn native_run(directory: &Path) -> Result<(), Box<dyn Error>> {
         return Err("Volume STEP divergente".into());
     }
     let output = directory.join("assembly.step");
+    let mut cut_center = None;
+    for occurrence in reopened.occurrences()? {
+        let piece = reopened
+            .instance(occurrence.instance)
+            .and_then(|i| reopened.part(i.part))
+            .ok_or("Peça ausente")?;
+        if let Some(body) = piece.bodies.iter().find(|b| b.visible) {
+            cut_center = Some(
+                occurrence
+                    .placement
+                    .apply(measure::body_properties(&reopened, body.id)?.center_mm),
+            );
+            break;
+        }
+    }
+    let cut_center = cut_center.ok_or("Corpo para corte ausente")?;
     let specification = nator_drawing::Specification {
         title: "Montagem STEP — vistas precisas".into(),
         scale: 0.5,
         hidden_lines: true,
+        section: Some(nator_drawing::Section {
+            origin: cut_center,
+            normal: [0., 0., 1.],
+        }),
+        additional_sections: vec![nator_drawing::SectionView {
+            id: 1,
+            section: nator_drawing::Section {
+                origin: cut_center,
+                normal: [1., 0., 0.],
+            },
+        }],
         ..Default::default()
     };
     let sheet = nator_commands::drawing::generate(&reopened, None, &specification)?;
-    if !sheet.exact_projection {
+    if !sheet.exact_projection || !sheet.exact_sections {
         return Err("A folha da montagem sólida não usou o B-rep".into());
     }
     nator_project_io::write_export(&directory.join("drawing.pdf"), &nator_drawing::pdf(&sheet)?)?;
@@ -153,7 +180,7 @@ fn native_run(directory: &Path) -> Result<(), Box<dyn Error>> {
     {
         return Err("Geometria STEP mudou no segundo ciclo".into());
     }
-    let report = serde_json::json!({"status":"passed","app_version":env!("CARGO_PKG_VERSION"),"format_version":nator_project_io::FORMAT_VERSION,"occt_version":nator_kernel::version(),"elapsed_ms":started.elapsed().as_secs_f64()*1000.,"checks":["UTF-8 names","shared part definition","rotated assembly positions","body and occurrence colors","self-contained save/reopen without source STEP","exact volume","assembly export and reimport","precise B-rep drawing with PNG/PDF export"],"body_volume_mm3":volume,"instances":reopened.instances().len(),"parts":reopened.parts().len()});
+    let report = serde_json::json!({"status":"passed","app_version":env!("CARGO_PKG_VERSION"),"format_version":nator_project_io::FORMAT_VERSION,"occt_version":nator_kernel::version(),"elapsed_ms":started.elapsed().as_secs_f64()*1000.,"checks":["UTF-8 names","shared part definition","rotated assembly positions","body and occurrence colors","self-contained save/reopen without source STEP","exact volume","assembly export and reimport","precise B-rep drawing with PNG/PDF export","precise B-rep sections"],"body_volume_mm3":volume,"instances":reopened.instances().len(),"parts":reopened.parts().len()});
     std::fs::write(
         directory.join("report.json"),
         serde_json::to_vec_pretty(&report)?,

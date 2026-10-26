@@ -15,7 +15,7 @@ pub fn generate(
     let notes = document.drawing_notes(target);
     #[cfg(feature = "occt")]
     {
-        use nator_drawing::{ProjectedView, View};
+        use nator_drawing::{ProjectedSection, ProjectedView, View};
         let mut solids = Vec::new();
         let mut mesh_body = false;
         let mut faces = 0;
@@ -65,11 +65,30 @@ pub fn generate(
                     segments,
                 });
             }
-            return nator_drawing::generate_with_projections(
+            let mut sections = Vec::new();
+            let mut count = 0;
+            for (plane, label) in spec.section_views() {
+                let mut groups = Vec::new();
+                for solid in &solids {
+                    let segments = solid
+                        .section_segments(plane.origin, plane.normal, 0.01)
+                        .map_err(|e| DocumentError(e.to_string()))?;
+                    count += segments.len();
+                    if count > 500000 {
+                        return Err(DocumentError(
+                            "Os cortes excedem quinhentos mil segmentos.".into(),
+                        ));
+                    }
+                    groups.push(segments);
+                }
+                sections.push(ProjectedSection { label, groups });
+            }
+            return nator_drawing::generate_with_geometry(
                 &mesh,
                 spec,
                 &notes,
                 Some(&projections),
+                Some(&sections),
             )
             .map_err(|e| DocumentError(e.to_string()));
         }

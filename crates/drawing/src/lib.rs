@@ -224,11 +224,23 @@ pub struct Sheet {
     /// A visibilidade das vistas veio do B-rep; curvas continuam discretizadas para
     /// exportação vetorial. Cortes gerados a partir de malhas são identificados à parte.
     pub exact_projection: bool,
+    pub exact_sections: bool,
 }
 
 pub struct ProjectedView {
     pub view: View,
     pub segments: Vec<ProjectedSegment>,
+}
+/// Curvas de corte em coordenadas da folha/modelo (mm), agrupadas por corpo. Manter
+/// os grupos evita transformar a sobreposição de peças distintas em um vazio de hachura.
+pub struct ProjectedSection {
+    pub label: char,
+    pub groups: Vec<Vec<[Point3; 2]>>,
+}
+struct CutGeometry<'a> {
+    plane: &'a Section,
+    label: char,
+    groups: Vec<Vec<[Point3; 2]>>,
 }
 impl Sheet {
     pub fn line(&mut self, a: [f64; 2], b: [f64; 2], width: f64, dashed: bool) {
@@ -389,6 +401,16 @@ pub fn generate_with_projections(
     notes: &[String],
     projections: Option<&[ProjectedView]>,
 ) -> Result<Sheet> {
+    generate_with_geometry(mesh, spec, notes, projections, None)
+}
+
+pub fn generate_with_geometry(
+    mesh: &Mesh,
+    spec: &Specification,
+    notes: &[String],
+    projections: Option<&[ProjectedView]>,
+    sections: Option<&[ProjectedSection]>,
+) -> Result<Sheet> {
     spec.validate()?;
     if notes.len() > 64
         || notes
@@ -408,6 +430,7 @@ pub fn generate_with_projections(
         style: spec.style,
         primitives: Vec::new(),
         exact_projection: projections.is_some(),
+        exact_sections: sections.is_some() && spec.has_sections(),
     };
     for (a, b) in [
         ([8., 8.], [size[0] - 8., 8.]),
@@ -437,11 +460,15 @@ pub fn generate_with_projections(
                 spec.date.as_str()
             },
             if projections.is_some() {
-                if spec.has_sections() {
-                    "HLR DO B-REP / CORTE DA MALHA"
+                if spec.has_sections() && sections.is_none() {
+                    "HLR DO B-REP / CORTES DA MALHA"
+                } else if spec.has_sections() {
+                    "HLR E CORTES DO B-REP"
                 } else {
                     "HLR DO B-REP"
                 }
+            } else if sections.is_some() && spec.has_sections() {
+                "VISTAS DA MALHA / CORTES DO B-REP"
             } else {
                 "VISTAS DERIVADAS DA MALHA"
             }
@@ -487,7 +514,49 @@ pub fn generate_with_projections(
             "Malha com arestas demais para a folha.".into(),
         ));
     }
-    let sections = spec.section_views();
+    if let Some(projected) = sections {
+        let mut count = 0;
+        if projected.len() != spec.section_views().len() {
+            return Err(DrawingError(
+                "Quantidade de cortes precisos divergente.".into(),
+            ));
+        }
+        for (index, cut) in projected.iter().enumerate() {
+            if projected[..index].iter().any(|s| s.label == cut.label) || cut.groups.len() > 10000 {
+                return Err(DrawingError("Cortes precisos inválidos.".into()));
+            }
+            for group in &cut.groups {
+                count += group.len();
+                if count > 500000 || group.iter().flatten().flatten().any(|v| !v.is_finite()) {
+                    return Err(DrawingError(
+                        "Corte preciso excessivo ou com coordenadas inválidas.".into(),
+                    ));
+                }
+            }
+        }
+    }
+    // A interseção é preparada uma vez, não a cada traço de plano e vista em corte.
+    let sections = spec
+        .section_views()
+        .into_iter()
+        .map(|(plane, label)| {
+            let groups = if let Some(projected) = sections {
+                projected
+                    .iter()
+                    .find(|s| s.label == label)
+                    .ok_or_else(|| DrawingError("Corte preciso ausente.".into()))?
+                    .groups
+                    .clone()
+            } else {
+                vec![section_segments(mesh, plane)?]
+            };
+            Ok(CutGeometry {
+                plane,
+                label,
+                groups,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let rows = if sections.is_empty() {
         2
     } else {
@@ -613,8 +682,8 @@ pub fn generate_with_projections(
                 }
             }
         }
-        for (section, label) in &sections {
-            cutting_plane_trace(&mut sheet, mesh, section, basis, &map, &label.to_string())?;
+        for section in &sections {
+            cutting_plane_trace(&mut sheet, section, basis, &map)?;
         }
         if spec.dimensions && view != View::Isometric {
             let a = map(min);
@@ -623,21 +692,13 @@ pub fn generate_with_projections(
             sheet.dimension(a, [a[0], b[1]], [-7., 0.], format_mm(extent[1]));
         }
     }
-    for (index, (section, label)) in sections.iter().enumerate() {
+    for (index, section) in sections.iter().enumerate() {
         let position = index + 3;
         let origin = [
             18. + cell[0] * (0.5 + (position % 2) as f64),
             12. + cell[1] * (0.5 + (position / 2) as f64),
         ];
-        section_view(
-            &mut sheet,
-            mesh,
-            section,
-            spec.scale,
-            origin,
-            cell,
-            &label.to_string(),
-        )?;
+        section_view(&mut sheet, section, spec.scale, origin, cell)?;
     }
     if sheet.primitives.len() > 500_000 {
         return Err(DrawingError("Folha contém elementos demais.".into()));
@@ -741,20 +802,23 @@ pub fn hatch(loops: &[Vec<[f64; 2]>], spacing: f64) -> Vec<[[f64; 2]; 2]> {
 /// Traço do plano nas vistas em que aparece como linha, com o identificador do corte.
 fn cutting_plane_trace(
     sheet: &mut Sheet,
-    mesh: &Mesh,
-    section: &Section,
+    cut: &CutGeometry<'_>,
     basis: (Point3, Point3, Point3),
     map: &dyn Fn([f64; 2]) -> [f64; 2],
-    label: &str,
 ) -> Result<()> {
+    let section = cut.plane;
+    let label = cut.label.to_string();
     let n = section.normal.map(|v| v / norm(section.normal));
     // O plano só vira linha quando é perpendicular ao plano da vista.
     if dot(n, basis.2).abs() > 1e-6 {
         return Ok(());
     }
-    let points = section_segments(mesh, section)?
-        .into_iter()
+    let points = cut
+        .groups
+        .iter()
         .flatten()
+        .flatten()
+        .copied()
         .map(|p| map([dot(p, basis.0), dot(p, basis.1)]))
         .collect::<Vec<_>>();
     let direction = [dot(n, basis.1), -dot(n, basis.0)];
@@ -782,31 +846,38 @@ fn cutting_plane_trace(
         [b[0] + u[0] * 6., b[1] + u[1] * 6.],
     );
     sheet.line(p, q, 0.25, true);
-    sheet.text([p[0] - 2., p[1] - 1.], 3.5, label);
-    sheet.text([q[0] + 1., q[1] - 1.], 3.5, label);
+    sheet.text([p[0] - 2., p[1] - 1.], 3.5, &label);
+    sheet.text([q[0] + 1., q[1] - 1.], 3.5, &label);
     Ok(())
 }
 
 /// Vista em corte identificada: contornos da seção no plano de corte, hachurados.
 fn section_view(
     sheet: &mut Sheet,
-    mesh: &Mesh,
-    section: &Section,
+    cut: &CutGeometry<'_>,
     scale: f64,
     origin: [f64; 2],
     cell: [f64; 2],
-    label: &str,
 ) -> Result<()> {
+    let section = cut.plane;
+    let label = cut.label;
     let (u, v, _) = section_basis(section);
-    let loops = section_loops(&section_segments(mesh, section)?)
-        .into_iter()
-        .map(|l| {
-            l.into_iter()
-                .map(|p| {
-                    [
-                        dot(sub(p, section.origin), u),
-                        dot(sub(p, section.origin), v),
-                    ]
+    let groups = cut
+        .groups
+        .iter()
+        .map(|segments| {
+            section_loops(segments)
+                .into_iter()
+                .map(|contour| {
+                    contour
+                        .into_iter()
+                        .map(|p| {
+                            [
+                                dot(sub(p, section.origin), u),
+                                dot(sub(p, section.origin), v),
+                            ]
+                        })
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>()
         })
@@ -816,11 +887,11 @@ fn section_view(
         2.5,
         format!("CORTE {label}-{label}"),
     );
-    if loops.is_empty() {
+    if groups.iter().all(Vec::is_empty) {
         sheet.text(origin, 2.5, "O PLANO NÃO CORTA O MODELO");
         return Ok(());
     }
-    let (min, max) = loops.iter().flatten().fold(
+    let (min, max) = groups.iter().flatten().flatten().fold(
         ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]),
         |(lo, hi), p| {
             (
@@ -840,14 +911,16 @@ fn section_view(
             origin[1] - (p[1] - (min[1] + max[1]) / 2.) * scale,
         ]
     };
-    for l in &loops {
+    for l in groups.iter().flatten() {
         for i in 0..l.len() {
             sheet.line(map(l[i]), map(l[(i + 1) % l.len()]), 0.35, false);
         }
     }
     // Hachura com 2,5 mm de espaçamento no papel.
-    for [a, b] in hatch(&loops, 2.5 / scale) {
-        sheet.line(map(a), map(b), 0.13, false);
+    for group in &groups {
+        for [a, b] in hatch(group, 2.5 / scale) {
+            sheet.line(map(a), map(b), 0.13, false);
+        }
     }
     Ok(())
 }
@@ -886,6 +959,41 @@ pub fn section_segments(mesh: &Mesh, section: &Section) -> Result<Vec<[Point3; 2
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn overlapping_body_sections_do_not_cancel_each_others_hatching() -> Result<()> {
+        let mesh = nator_geometry::reference_bracket().map_err(|e| DrawingError(e.to_string()))?;
+        let spec = Specification {
+            section: Some(Section {
+                origin: [0., 0., 3.],
+                normal: [0., 0., 1.],
+            }),
+            ..Default::default()
+        };
+        let points = [[0., 0., 3.], [60., 0., 3.], [60., 20., 3.], [0., 20., 3.]];
+        let group = (0..4)
+            .map(|i| [points[i], points[(i + 1) % 4]])
+            .collect::<Vec<_>>();
+        let one = [ProjectedSection {
+            label: 'A',
+            groups: vec![group.clone()],
+        }];
+        let two = [ProjectedSection {
+            label: 'A',
+            groups: vec![group.clone(), group],
+        }];
+        let a = generate_with_geometry(&mesh, &spec, &[], None, Some(&one))?;
+        let b = generate_with_geometry(&mesh, &spec, &[], None, Some(&two))?;
+        let hatches = |s: &Sheet| {
+            s.primitives
+                .iter()
+                .filter(|p| matches!(p,Primitive::Line {width,..} if (*width-0.13).abs()<1e-12))
+                .count()
+        };
+        assert!(a.exact_sections && !a.exact_projection);
+        assert!(hatches(&a) > 0);
+        assert_eq!(hatches(&b), 2 * hatches(&a));
+        Ok(())
+    }
     #[test]
     fn multiple_sections_keep_their_labels_in_portrait_and_landscape() -> Result<()> {
         let mesh = nator_geometry::reference_bracket().map_err(|e| DrawingError(e.to_string()))?;

@@ -4,9 +4,7 @@
 #include <HLRBRep_Algo.hxx>
 #include <HLRBRep_HLRToShape.hxx>
 #include <HLRAlgo_Projector.hxx>
-#include <BRepLib.hxx>
-#include <GCPnts_UniformDeflection.hxx>
-#include <TColStd_Array1OfReal.hxx>
+#include "curve_sampling.hpp"
 namespace {
 struct Projection { std::vector<double> segments; };
 }
@@ -22,28 +20,10 @@ Projection* nator_project(const Shape* const* bodies, std::size_t count, const d
         algorithm->Hide();
         HLRBRep_HLRToShape extracted(algorithm);
         const auto append = [&](const TopoDS_Shape& shape, bool hidden) {
-            if (shape.IsNull()) return;
-            BRepLib::BuildCurves3d(shape);
-            for (TopExp_Explorer it(shape,TopAbs_EDGE);it.More();it.Next()) {
-                BRepAdaptor_Curve curve(TopoDS::Edge(it.Current()));
-                // Separar intervalos C2 mantém a garantia de desvio do amostrador
-                // também em splines com nós de continuidade menor que C2.
-                const int intervals_count = curve.NbIntervals(GeomAbs_C2);
-                if (intervals_count > 500000) throw std::runtime_error("Curva projetada tem intervalos demais.");
-                TColStd_Array1OfReal intervals(1,intervals_count+1);
-                curve.Intervals(intervals,GeomAbs_C2);
-                for (int interval=1;interval<=intervals_count;++interval) {
-                    GCPnts_UniformDeflection points(curve,tolerance,intervals(interval),intervals(interval+1),true);
-                    if (!points.IsDone()) throw std::runtime_error("Falha ao discretizar uma curva da vista.");
-                    if (points.NbPoints() > 500000) throw std::runtime_error("Curva projetada complexa demais.");
-                    for (int i=2;i<=points.NbPoints();++i) {
-                        const auto a=points.Value(i-1), b=points.Value(i);
-                        if (a.Distance(b)<1e-10) continue;
-                        if (result->segments.size()/5 >= 500000) throw std::runtime_error("Projeção excede quinhentos mil segmentos.");
-                        result->segments.insert(result->segments.end(),{a.X(),a.Y(),b.X(),b.Y(),hidden?1.:0.});
-                    }
-                }
-            }
+            sample_edges(shape,tolerance,[&](const gp_Pnt& a,const gp_Pnt& b){
+                if (result->segments.size()/5>=500000) throw std::runtime_error("Projeção excede quinhentos mil segmentos.");
+                result->segments.insert(result->segments.end(),{a.X(),a.Y(),b.X(),b.Y(),hidden?1.:0.});
+            });
         };
         append(extracted.VCompound(),false);
         append(extracted.OutLineVCompound(),false);
