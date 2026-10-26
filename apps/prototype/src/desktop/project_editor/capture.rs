@@ -38,11 +38,11 @@ pub(crate) fn render_ui_scenario(
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
-        | "assembly-ribbon" | "section" => {}
+        | "assembly-ribbon" | "section" | "repair" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair."
                     .into(),
             );
         }
@@ -231,6 +231,32 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(Some(Selection::Body { part, id: body }));
+        }
+        "repair" => {
+            // Rascunho pendente com uma duplicata e uma folga de 0,3 mm, fora do perfil.
+            let (id, mut sketch) = editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .and_then(|p| p.sketches.first())
+                .map(|s| (s.id, s.sketch.clone()))
+                .ok_or("Peça sem rascunho.")?;
+            editor.begin_sketch(part, id);
+            let first = sketch
+                .entities
+                .iter()
+                .find(|e| matches!(e.curve, nator_sketch::Curve::Line { .. }))
+                .map(|e| e.id)
+                .ok_or("Rascunho sem linhas.")?;
+            let (a, b) = sketch.line(first)?;
+            sketch.add_line(a, b, false)?;
+            sketch.add_line([80., 0.], [90., 0.], false)?;
+            sketch.add_line([90.3, 0.], [90., 10.], false)?;
+            if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
+                work.pending = Some(sketch);
+            }
+            editor.open_sketch_repair();
         }
         "section" => {
             editor.current_mut().select(None);

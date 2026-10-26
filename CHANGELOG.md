@@ -14,6 +14,11 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Reparar rascunho
+
+- Ferramenta **Reparar rascunho** no editor de rascunho: sugere remover entidades duplicadas, remover trechos colineares contidos em outra linha e unir pontas abertas mais próximas que a folga escolhida (por restrição de coincidência resolvida pelo solver).
+- Cada correção aparece em laranja sobre o rascunho e só é aplicada se marcada e confirmada; cruzamentos são indicados em vermelho, sem reparo automático. Centros de furo isolados são preservados.
+
 ### Corte de seção na área 3D
 
 - Ferramenta **Corte de seção** (Inspecionar e Vista): plano principal (XY, XZ, YZ) ou da face escolhida, deslocamento por campo ou seta arrastável na área 3D e inversão do lado. A parte cortada não é desenhada e o interior exposto vira tampa hachurada, pelo próprio shader.

@@ -449,6 +449,15 @@ pub enum Text {
     SectionHint,
     AnalysesGroup,
     EditFeatureShort,
+    RepairSketch,
+    RepairTolerance,
+    RepairDuplicate,
+    RepairContained,
+    RepairGap,
+    RepairCrossing,
+    RepairCrossingHint,
+    RepairNothing,
+    RepairHint,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -935,5 +944,16 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::AnalysesGroup => "Análises",
         Text::EditFeatureShort => "Editar",
+        Text::RepairSketch => "Reparar rascunho",
+        Text::RepairTolerance => "Folga máxima",
+        Text::RepairDuplicate => "Remover entidade duplicada",
+        Text::RepairContained => "Remover trecho sobreposto",
+        Text::RepairGap => "Unir pontas abertas",
+        Text::RepairCrossing => "Cruzamento em",
+        Text::RepairCrossingHint => "use Aparar para escolher o trecho",
+        Text::RepairNothing => "Nenhum problema corrigível encontrado.",
+        Text::RepairHint => {
+            "As correções marcadas aparecem em laranja no rascunho e só são aplicadas com OK. Unir pontas acrescenta uma coincidência resolvida pelo solver."
+        }
     }
 }

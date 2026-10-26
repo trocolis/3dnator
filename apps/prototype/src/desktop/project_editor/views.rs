@@ -735,6 +735,7 @@ impl Editor {
                 }
                 let visible_sketches = self.visible_sketches(ui, response.rect);
                 self.sketch_overlay(ui, &response);
+                self.sketch_repair_overlay(ui, &response);
                 if self.scene.is_none()
                     && !visible_sketches
                     && !self.busy()

@@ -16,6 +16,7 @@ mod section;
 mod selection_tools;
 mod shell;
 mod sketch_editor;
+mod sketch_repair;
 mod sketch_scene;
 mod theme;
 mod timeline;
@@ -474,6 +475,8 @@ pub struct Editor {
     pending_menu: Option<browser::MenuAction>,
     /// Painel do corte de seção aberto.
     section_edit: Option<section::SectionDraft>,
+    /// Reparo do rascunho em edição.
+    sketch_repair: Option<sketch_repair::RepairDraft>,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -579,6 +582,7 @@ impl Editor {
             rename: None,
             pending_menu: None,
             section_edit: None,
+            sketch_repair: None,
         })
     }
     fn busy(&self) -> bool {
@@ -1409,6 +1413,7 @@ impl Editor {
         self.feature_dialog(ui.ctx());
         self.assembly_panel(ui.ctx());
         self.section_panel(ui.ctx());
+        self.sketch_repair_panel(ui.ctx());
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());

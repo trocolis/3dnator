@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt};
 
 pub mod profiles;
+pub mod repair;
 pub mod snapping;
 pub mod solver;
 pub mod tools;

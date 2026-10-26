@@ -284,6 +284,7 @@ impl Editor {
             .unwrap_or_default();
         let mut submit = false;
         let mut issue = None;
+        let mut open_repair = false;
         egui::Panel::right("properties")
             .default_size(285.)
             .min_size(250.)
@@ -325,6 +326,13 @@ impl Editor {
                             work.status = Status::UnderConstrained {
                                 degrees_of_freedom: 0,
                             };
+                        }
+                        if ui
+                            .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
+                            .on_hover_text(text(T::RepairHint))
+                            .clicked()
+                        {
+                            open_repair = true;
                         }
                         ui.separator();
                         ui.label(
@@ -651,6 +659,9 @@ impl Editor {
             self.status = issue;
         } else if submit {
             self.solve_sketch(ui.ctx(), sketch);
+        }
+        if open_repair {
+            self.open_sketch_repair();
         }
     }
     pub(super) fn sketch_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) {

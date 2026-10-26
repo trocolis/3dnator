@@ -18,7 +18,7 @@ Pendências conhecidas, por etapa:
 
 Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais com sombreamento direcional e apoio suave no plano de base implementadas. Edição do histórico no padrão dos CADs de mercado (linha do tempo com marcador, supressão, reordenação, exclusão com dependentes e decisão sobre falhas de recálculo) e painéis de comando com prévia ao vivo implementados.
 
-Seleção por janela, lista de sobrepostos, pré-seleção e realce na área 3D implementados. Corte de visualização por plano implementado. Escopo do README ainda não atendido pela interface: ferramenta Reparar rascunho, miniatura no `.3dnator`, casas decimais configuráveis e importação de peças entre abas. Montagem e posicionamento usam painéis de comando (Mover/Copiar com manipulador 3D, Alinhar, padrões e espelhamento de componentes) e menus de contexto na árvore.
+Seleção por janela, lista de sobrepostos, pré-seleção e realce na área 3D implementados. Corte de visualização por plano e ferramenta Reparar rascunho implementados. Escopo do README ainda não atendido pela interface: miniatura no `.3dnator`, casas decimais configuráveis e importação de peças entre abas. Montagem e posicionamento usam painéis de comando (Mover/Copiar com manipulador 3D, Alinhar, padrões e espelhamento de componentes) e menus de contexto na árvore.
 
 ## 1. Base técnica
 
