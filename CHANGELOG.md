@@ -14,6 +14,12 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Precisão de exibição e miniatura
+
+- Casas decimais de exibição (0 a 6) como configuração do documento, escolhidas pela barra de status e aplicadas a medidas, dimensões, coordenadas e parâmetros. Comando `SetSettings` com desfazer; a precisão interna não muda.
+- Miniatura isométrica sombreada (`thumbnail.png`) gerada na CPU a cada gravação e exibida na janela de recuperação.
+- Formato `.3dnator` versão 13, com `settings` e miniatura opcionais; projetos anteriores abrem com as configurações padrão.
+
 ### Reparar rascunho
 
 - Ferramenta **Reparar rascunho** no editor de rascunho: sugere remover entidades duplicadas, remover trechos colineares contidos em outra linha e unir pontas abertas mais próximas que a folga escolhida (por restrição de coincidência resolvida pelo solver).

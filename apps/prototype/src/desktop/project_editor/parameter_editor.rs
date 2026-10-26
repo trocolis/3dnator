@@ -100,11 +100,11 @@ impl Editor {
                             {
                                 Ok(value) => {
                                     ui.monospace(match parameter.dimension {
-                                        Dimension::Length => format!("{value:.4} mm"),
+                                        Dimension::Length => format!("{} mm", self.mm(value)),
                                         Dimension::Angle => {
-                                            format!("{:.4} graus", value.to_degrees())
+                                            format!("{} graus", self.mm(value.to_degrees()))
                                         }
-                                        Dimension::Scalar => format!("{value:.4}"),
+                                        Dimension::Scalar => self.mm(value),
                                     });
                                 }
                                 Err(error) => {

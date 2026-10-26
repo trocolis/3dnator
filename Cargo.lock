@@ -1342,6 +1342,7 @@ dependencies = [
  "nator-document",
  "nator-geometry",
  "nator-sketch",
+ "png",
  "serde",
  "serde_json",
  "tempfile",

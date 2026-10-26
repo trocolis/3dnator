@@ -38,11 +38,11 @@ pub(crate) fn render_ui_scenario(
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
-        | "assembly-ribbon" | "section" | "repair" => {}
+        | "assembly-ribbon" | "section" | "repair" | "recovery" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery."
                     .into(),
             );
         }
@@ -53,7 +53,15 @@ pub(crate) fn render_ui_scenario(
         project,
         output,
         size,
-        |editor| scenario_setup(editor, scenario),
+        |editor| {
+            scenario_setup(editor, scenario)?;
+            // A janela de recuperação lista o próprio projeto, com sua miniatura.
+            if scenario == "recovery" {
+                editor.recoveries = vec![project.to_path_buf()];
+                editor.show_recovery = true;
+            }
+            Ok(())
+        },
         move |editor, frame| {
             let canvas = editor.canvas_rect;
             let target = canvas.center() + egui::vec2(-60., 40.);

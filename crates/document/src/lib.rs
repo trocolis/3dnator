@@ -32,6 +32,23 @@ pub struct SheetRecord {
     pub annotations: Vec<drawing::DrawingAnnotation>,
 }
 
+/// Configurações do documento, salvas no projeto. Só afetam a apresentação: a precisão
+/// interna continua sendo a de `f64` em milímetros.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Settings {
+    /// Casas decimais exibidas em medidas, propriedades e cotas da interface (0 a 6).
+    pub display_decimals: u8,
+}
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            display_decimals: 2,
+        }
+    }
+}
+/// Limite de casas decimais exibidas.
+pub const MAX_DISPLAY_DECIMALS: u8 = 6;
+
 #[derive(Debug, Clone)]
 pub struct SketchRecord {
     pub id: SketchId,
@@ -187,6 +204,7 @@ pub struct Document {
     instances: Vec<Instance>,
     groups: Vec<assembly::Group>,
     sheets: Vec<SheetRecord>,
+    settings: Settings,
 }
 
 pub fn validate_name(name: &str) -> Result<(), DocumentError> {
@@ -211,6 +229,7 @@ impl Document {
             instances: Vec::new(),
             groups: Vec::new(),
             sheets: Vec::new(),
+            settings: Settings::default(),
         })
     }
     /// Toda entrada de persistência passa pelas mesmas invariantes das edições.
@@ -229,12 +248,25 @@ impl Document {
             instances,
             groups: Vec::new(),
             sheets: Vec::new(),
+            settings: Settings::default(),
         };
         document.validate()?;
         Ok(document)
     }
     pub fn sheets(&self) -> &[SheetRecord] {
         &self.sheets
+    }
+    pub fn settings(&self) -> Settings {
+        self.settings
+    }
+    pub fn set_settings(&mut self, settings: Settings) -> Result<(), DocumentError> {
+        if settings.display_decimals > MAX_DISPLAY_DECIMALS {
+            return Err(DocumentError(
+                "As casas decimais exibidas devem ficar entre 0 e 6.".into(),
+            ));
+        }
+        self.settings = settings;
+        Ok(())
     }
     pub fn restore_sheets(&mut self, sheets: Vec<SheetRecord>) -> Result<(), DocumentError> {
         let mut next = self.clone();

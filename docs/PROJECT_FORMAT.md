@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 12
+# Formato de projeto — versão interna 13
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 12; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 13; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -81,6 +81,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 12 → 13: o manifesto acrescenta `settings` (configurações do documento, hoje `display_decimals`, de 0 a 6; ausente vale 2) e o pacote pode conter `thumbnail.png`, uma miniatura isométrica de até 4 MiB conferida apenas pela assinatura PNG. Projetos anteriores abrem com as configurações padrão e sem miniatura.
 - 11 → 12: operações acrescentam `suppressed` (ausente vale `false`) e peças acrescentam `history_marker` (ausente vale `None`). Projetos anteriores abrem com todo o histórico ativo. Resultados de operações inativas (suprimidas, dependentes de uma suprimida ou posteriores ao marcador) precisam estar ocultos; o leitor rejeita o contrário.
 - 10 → 11: folhas técnicas acrescentam cotas associativas (`annotations`) com referências estáveis de faces e arestas (`DrawingTopologyRef`) e caminhos de ocorrência em montagens. Projetos anteriores desserializam com lista de cotas vazia.
 - 9 → 10: folhas acrescentam `orientation` (padrão `Landscape`), `png_dpi` (150) e `additional_sections` (vazio). O campo `section` continua representando A–A; cortes adicionais guardam identificadores de 1 a 25 e o plano (origem em mm, normal), sem renumeração após remoções. São aceitos até sete cortes adicionais, com identificadores únicos, normais válidas e PNG de 72 a 300 DPI.
@@ -112,4 +113,4 @@ A descoberta e a limpeza verificam o marcador `recovery = true` no manifesto. Ar
 
 ## Escopo ainda pendente
 
-Miniaturas e configurações persistentes de câmera ainda não fazem parte do esquema. A sequência de desfazer/refazer é somente da sessão e começa vazia ao reabrir um projeto.
+A miniatura (`thumbnail.png`, 256 × 192, vista isométrica sombreada da cena visível) é gerada a cada gravação na CPU, sem GPU; projetos sem corpos visíveis não têm miniatura. Configurações persistentes de câmera ainda não fazem parte do esquema. A sequência de desfazer/refazer é somente da sessão e começa vazia ao reabrir um projeto.

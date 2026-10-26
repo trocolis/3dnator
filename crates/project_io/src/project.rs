@@ -16,12 +16,14 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
+/// Versão 13: configurações do documento (casas decimais exibidas) e miniatura PNG opcional
+/// (`thumbnail.png`). Versões anteriores usam as configurações padrão e não têm miniatura.
 /// Versão 12: operações suprimidas e marcador do histórico por peça. Versões anteriores
 /// abrem com todas as operações ativas e sem marcador (campos ausentes).
 /// Versão 11: cotas associativas das folhas, com caminhos e referências topológicas estáveis.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 12;
+pub const FORMAT_VERSION: u32 = 13;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -47,6 +49,8 @@ struct Manifest {
     groups: Vec<GroupRecord>,
     #[serde(default)]
     sheets: Vec<nator_document::SheetRecord>,
+    #[serde(default)]
+    settings: nator_document::Settings,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -353,6 +357,18 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             history_marker: part.history_marker,
         });
     }
+    // A miniatura é opcional e só é conferida quanto ao tamanho e à assinatura PNG.
+    if archive.index_for_name(super::thumbnail::PATH).is_some() {
+        let bytes = read_entry(
+            &mut archive,
+            super::thumbnail::PATH,
+            super::thumbnail::MAX_BYTES,
+        )?;
+        if !super::thumbnail::is_png(&bytes) {
+            return Err(ImportError("Miniatura do projeto inválida.".into()));
+        }
+        expected_names.insert(super::thumbnail::PATH.to_owned());
+    }
     if archive.len() != expected_names.len()
         || archive.file_names().any(|name| match name {
             Ok(name) => !expected_names.contains(name.as_ref()),
@@ -400,7 +416,26 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         )
         .map_err(error)?;
     document.restore_sheets(manifest.sheets).map_err(error)?;
+    document.set_settings(manifest.settings).map_err(error)?;
     Ok(document)
+}
+
+/// Miniatura PNG gravada no projeto, se houver. Não lê a geometria.
+pub fn read_thumbnail(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
+    let file = File::open(path)?;
+    if file.metadata()?.len() > MAX_ARCHIVE_BYTES {
+        return Err(ImportError("Projeto excede 256 MiB.".into()));
+    }
+    let mut archive = ZipArchive::new(file).map_err(error)?;
+    if archive.index_for_name(super::thumbnail::PATH).is_none() {
+        return Ok(None);
+    }
+    let bytes = read_entry(
+        &mut archive,
+        super::thumbnail::PATH,
+        super::thumbnail::MAX_BYTES,
+    )?;
+    Ok(super::thumbnail::is_png(&bytes).then_some(bytes))
 }
 
 /// Migração 6 → 7 sobre o JSON do manifesto, antes da desserialização tipada.
@@ -523,6 +558,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             })
             .collect(),
         sheets: document.sheets().to_vec(),
+        settings: document.settings(),
         groups: document
             .groups()
             .iter()
@@ -559,6 +595,16 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .start_file("manifest.json", options)
             .map_err(error)?;
         archive.write_all(&bytes)?;
+        if let Some(png) = super::thumbnail::render(document)? {
+            // PNG já é comprimido: armazenar sem nova compressão.
+            archive
+                .start_file(
+                    super::thumbnail::PATH,
+                    SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
+                )
+                .map_err(error)?;
+            archive.write_all(&png)?;
+        }
         for body in document.parts().iter().flat_map(|p| &p.bodies) {
             if let Some(bytes) = &body.brep {
                 archive
@@ -854,6 +900,43 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn settings_and_thumbnail_round_trip() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("miniatura.3dnator");
+        let mut doc = document()?;
+        doc.set_settings(nator_document::Settings {
+            display_decimals: 4,
+        })?;
+        write_project(&path, &doc)?;
+        assert_eq!(read_project(&path)?.settings().display_decimals, 4);
+        let png = read_thumbnail(&path)?.ok_or("Miniatura ausente")?;
+        assert!(png.starts_with(b"\x89PNG"));
+        // A miniatura não é preta nem vazia: há pixels do fundo e do modelo.
+        let decoder = png::Decoder::new(std::io::Cursor::new(&png));
+        let mut reader = decoder.read_info()?;
+        let mut pixels = vec![0; reader.output_buffer_size().ok_or("Tamanho ausente")?];
+        reader.next_frame(&mut pixels)?;
+        let distinct = pixels
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert!(distinct > 10);
+        // Um documento vazio é salvo sem miniatura.
+        let empty = directory.path().join("vazio.3dnator");
+        write_project(&empty, &Document::new("Vazio")?)?;
+        assert!(read_thumbnail(&empty)?.is_none());
+        assert!(
+            doc.set_settings(nator_document::Settings {
+                display_decimals: 9
+            })
+            .is_err()
+        );
+        Ok(())
+    }
+
     #[test]
     fn invalid_document_does_not_destroy_previous_file() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;

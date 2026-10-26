@@ -2,6 +2,53 @@
 use super::*;
 
 impl Editor {
+    /// Miniatura de um projeto em disco, decodificada uma vez por caminho.
+    fn thumbnail(
+        &mut self,
+        context: &egui::Context,
+        path: &std::path::Path,
+    ) -> Option<egui::TextureHandle> {
+        if let Some(cached) = self.thumbnails.get(path) {
+            return cached.clone();
+        }
+        let texture = nator_project_io::read_thumbnail(path)
+            .ok()
+            .flatten()
+            .and_then(|bytes| {
+                let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+                let mut reader = decoder.read_info().ok()?;
+                let mut pixels = vec![0; reader.output_buffer_size()?];
+                let info = reader.next_frame(&mut pixels).ok()?;
+                (info.color_type == png::ColorType::Rgb).then(|| {
+                    egui::ColorImage::from_rgb(
+                        [info.width as usize, info.height as usize],
+                        &pixels[..info.buffer_size()],
+                    )
+                })
+            })
+            .map(|image| {
+                context.load_texture(
+                    format!("thumbnail:{}", path.display()),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                )
+            });
+        self.thumbnails.insert(path.to_path_buf(), texture.clone());
+        texture
+    }
+    /// Valor com as casas decimais configuradas no documento ativo.
+    pub(super) fn mm(&self, value: f64) -> String {
+        nator_drawing::format_fixed(
+            value,
+            usize::from(
+                self.current()
+                    .session
+                    .document()
+                    .settings()
+                    .display_decimals,
+            ),
+        )
+    }
     pub(super) fn shortcuts(&mut self, context: &egui::Context) {
         if self.shell.search_open {
             if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -495,7 +542,7 @@ impl Editor {
                                     .into_iter()
                                     .zip(body.geometry.mesh().bounds().size())
                                 {
-                                    ui.monospace(format!("{axis}  {value:.3}"));
+                                    ui.monospace(format!("{axis}  {}", self.mm(value)));
                                 }
                                 ui.label(format!(
                                     "{}: {}",
@@ -795,20 +842,30 @@ impl Editor {
                     egui::ScrollArea::vertical()
                         .max_height(250.)
                         .show(ui, |ui| {
-                            for path in &self.recoveries {
+                            for path in self.recoveries.clone() {
+                                let thumbnail = self.thumbnail(ui.ctx(), &path);
                                 ui.horizontal(|ui| {
-                                    if ui
-                                        .add_enabled(
-                                            !self.busy(),
-                                            egui::Button::new(text(T::Recover)),
-                                        )
-                                        .clicked()
-                                    {
-                                        recover = Some(path.clone());
+                                    // Miniatura gravada no projeto, para reconhecer a cópia.
+                                    if let Some(texture) = thumbnail {
+                                        ui.add(
+                                            egui::Image::new((texture.id(), egui::vec2(96., 72.)))
+                                                .corner_radius(4),
+                                        );
                                     }
-                                    ui.small(
-                                        path.file_name().unwrap_or_default().to_string_lossy(),
-                                    );
+                                    ui.vertical(|ui| {
+                                        ui.small(
+                                            path.file_name().unwrap_or_default().to_string_lossy(),
+                                        );
+                                        if ui
+                                            .add_enabled(
+                                                !self.busy(),
+                                                egui::Button::new(text(T::Recover)),
+                                            )
+                                            .clicked()
+                                        {
+                                            recover = Some(path.clone());
+                                        }
+                                    });
                                 });
                             }
                         });

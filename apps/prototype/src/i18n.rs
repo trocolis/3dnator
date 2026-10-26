@@ -458,6 +458,8 @@ pub enum Text {
     RepairCrossingHint,
     RepairNothing,
     RepairHint,
+    DisplayDecimals,
+    DisplayDecimalsHint,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -954,6 +956,10 @@ pub fn text(key: Text) -> &'static str {
         Text::RepairNothing => "Nenhum problema corrigível encontrado.",
         Text::RepairHint => {
             "As correções marcadas aparecem em laranja no rascunho e só são aplicadas com OK. Unir pontas acrescenta uma coincidência resolvida pelo solver."
+        }
+        Text::DisplayDecimals => "Casas decimais exibidas",
+        Text::DisplayDecimalsHint => {
+            "Afeta medidas, propriedades e parâmetros na interface; a precisão interna não muda."
         }
     }
 }

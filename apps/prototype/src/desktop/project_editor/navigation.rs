@@ -52,7 +52,9 @@ fn measure_lines(
     reference: Option<&Pick>,
 ) -> Vec<String> {
     use nator_commands::measure::{self, Topology};
-    use nator_drawing::format_mm as mm;
+    // Casas decimais configuradas no documento; a precisão interna não muda.
+    let decimals = usize::from(doc.settings().display_decimals);
+    let mm = |value: f64| nator_drawing::format_fixed(value, decimals);
     let mut lines = Vec::new();
     match measure::body_properties(doc, pick.body) {
         Ok(p) => {
@@ -379,8 +381,10 @@ impl Editor {
         if let Some(pick) = self.current().picked.clone() {
             ui.small(text(T::MeshSelectionNotice));
             ui.monospace(format!(
-                "X {:.3}  Y {:.3}  Z {:.3}",
-                pick.point[0], pick.point[1], pick.point[2]
+                "X {}  Y {}  Z {}",
+                self.mm(pick.point[0]),
+                self.mm(pick.point[1]),
+                self.mm(pick.point[2])
             ));
             if ui.button(text(T::Measure)).clicked() {
                 let points = &mut self.current_mut().measurements;
@@ -539,8 +543,13 @@ impl Editor {
                 self.current().measurements[1],
                 self.current().measurements[0],
             );
-            ui.monospace(format!("{:.4} mm", norm(d)));
-            ui.small(format!("ΔX {:.3}  ΔY {:.3}  ΔZ {:.3}", d[0], d[1], d[2]));
+            ui.monospace(format!("{} mm", self.mm(norm(d))));
+            ui.small(format!(
+                "ΔX {}  ΔY {}  ΔZ {}",
+                self.mm(d[0]),
+                self.mm(d[1]),
+                self.mm(d[2])
+            ));
         }
     }
     pub(super) fn measure_overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
@@ -578,7 +587,7 @@ impl Editor {
             ui.painter().text(
                 p[0].lerp(p[1], 0.5),
                 egui::Align2::CENTER_BOTTOM,
-                format!("{:.3} mm", norm(sub(*b, *a))),
+                format!("{} mm", self.mm(norm(sub(*b, *a)))),
                 egui::FontId::proportional(14.),
                 theme::INK,
             );

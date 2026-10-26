@@ -966,11 +966,41 @@ impl Editor {
                         self.show_recovery = true;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(text(T::UnitsMm))
-                                .small()
-                                .color(theme::MUTED),
+                        // Unidade e precisão de exibição do documento.
+                        let settings = self.current().session.document().settings();
+                        let label = format!(
+                            "{} · {}",
+                            text(T::UnitsMm),
+                            nator_drawing::format_fixed(0., usize::from(settings.display_decimals))
                         );
+                        let mut decimals = settings.display_decimals;
+                        let mut changed = false;
+                        ui.menu_button(
+                            egui::RichText::new(label).small().color(theme::MUTED),
+                            |ui| {
+                                ui.label(text(T::DisplayDecimals));
+                                changed = ui
+                                    .add(
+                                        egui::DragValue::new(&mut decimals)
+                                            .range(0..=nator_document::MAX_DISPLAY_DECIMALS),
+                                    )
+                                    .changed();
+                                ui.label(
+                                    egui::RichText::new(text(T::DisplayDecimalsHint))
+                                        .small()
+                                        .color(theme::MUTED),
+                                );
+                            },
+                        )
+                        .response
+                        .on_hover_text(text(T::DisplayDecimals));
+                        if changed && !self.busy() {
+                            self.execute(Command::SetSettings {
+                                settings: nator_document::Settings {
+                                    display_decimals: decimals,
+                                },
+                            });
+                        }
                     });
                 });
             });

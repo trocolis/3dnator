@@ -11,9 +11,10 @@ use std::{
 };
 
 mod project;
+mod thumbnail;
 pub use project::{
-    FORMAT_VERSION, read_project, recovery_directory, recovery_files, remove_recovery,
-    write_project, write_recovery,
+    FORMAT_VERSION, read_project, read_thumbnail, recovery_directory, recovery_files,
+    remove_recovery, write_project, write_recovery,
 };
 
 pub const MAX_STL_BYTES: u64 = 128 * 1024 * 1024;

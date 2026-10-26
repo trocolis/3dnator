@@ -477,6 +477,8 @@ pub struct Editor {
     section_edit: Option<section::SectionDraft>,
     /// Reparo do rascunho em edição.
     sketch_repair: Option<sketch_repair::RepairDraft>,
+    /// Miniaturas de projetos em disco (recuperação), por caminho.
+    thumbnails: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -583,6 +585,7 @@ impl Editor {
             pending_menu: None,
             section_edit: None,
             sketch_repair: None,
+            thumbnails: std::collections::HashMap::new(),
         })
     }
     fn busy(&self) -> bool {

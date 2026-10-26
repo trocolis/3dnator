@@ -186,6 +186,10 @@ pub enum Command {
         id: nator_document::GroupId,
         name: String,
     },
+    /// Configurações do documento (apresentação).
+    SetSettings {
+        settings: nator_document::Settings,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -301,6 +305,7 @@ impl Command {
             Self::CopyBody { .. } => "Copiar corpo",
             Self::RenameInstance { .. } => "Renomear instância",
             Self::RenameGroup { .. } => "Renomear grupo",
+            Self::SetSettings { .. } => "Alterar configurações do documento",
         }
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
@@ -624,6 +629,7 @@ impl Command {
                 doc.instance_mut(id)?.name = name;
             }
             Self::RenameGroup { id, name } => doc.rename_group(id, name)?,
+            Self::SetSettings { settings } => doc.set_settings(settings)?,
         }
         Ok(Effect::Changed)
     }

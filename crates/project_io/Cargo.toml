@@ -12,6 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 tempfile = "3.27"
+png = "0.18"
 
 [lints]
 workspace = true

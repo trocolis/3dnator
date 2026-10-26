@@ -125,6 +125,21 @@ impl Default for Specification {
 }
 
 /// Medida em mm com vírgula decimal e até três casas, sem zeros à direita (`60`, `12,5`).
+/// Número com quantidade fixa de casas decimais e vírgula, para medidas da interface.
+pub fn format_fixed(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    // Evita "-0,00" para valores que arredondam a zero.
+    let text = if text
+        .trim_start_matches('-')
+        .chars()
+        .all(|c| c == '0' || c == '.')
+    {
+        text.trim_start_matches('-').to_owned()
+    } else {
+        text
+    };
+    text.replace('.', ",")
+}
 pub fn format_mm(value: f64) -> String {
     let text = format!("{:.3}", (value * 1000.).round() / 1000.);
     let text = text.trim_end_matches('0').trim_end_matches('.');
@@ -1122,6 +1137,14 @@ mod tests {
         assert_eq!(format_mm(12.5), "12,5");
         assert_eq!(format_mm(0.1234), "0,123");
         assert_eq!(format_mm(-0.0001), "0");
+    }
+
+    #[test]
+    fn fixed_decimals_use_comma_and_no_negative_zero() {
+        assert_eq!(format_fixed(12.3456, 2), "12,35");
+        assert_eq!(format_fixed(-0.001, 2), "0,00");
+        assert_eq!(format_fixed(7., 0), "7");
+        assert_eq!(format_fixed(-3.5, 1), "-3,5");
     }
 
     #[test]
