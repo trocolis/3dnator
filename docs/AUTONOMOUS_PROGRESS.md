@@ -2,6 +2,14 @@
 
 Autorização do usuário: continuar todas as etapas sem solicitar acompanhamento.
 
+## Navegador de orientação e giro da tela — 26/10/2026
+
+- Usuário relatou desenho/controle imprecisos do cubo, indicador XYZ sobreposto e linhas que atravessavam a área de visualização; pediu arraste e setas de giro para planos em pé.
+- Substituída a geometria sobreposta por poliedro fechado com seis faces, doze chanfros e oito cantos. Seleção pelos polígonos reais, pintura por triângulos e segmentos limitados ao recorte do controle, com descarte de degenerações. Removidas as linhas XYZ; nomes das vistas acompanham a face.
+- Arraste esquerdo orbita sem selecionar ou mover corpos. Câmera com inclinação da tela, órbita contínua pelos polos e base compartilhada por projeção, seleção, pan e zoom. Setas avançam ao próximo múltiplo de 90° e clicar no ângulo retorna a 0°; vistas superior/inferior coerentes entre cubo e atalhos. Estado acompanha a câmera da aba, sem alterar o documento ou formato de projeto.
+- 105 testes sem OCCT e 137 com OCCT 7.9.3 aprovados; formatação e Clippy aprovados nas duas configurações. Regressões verificam as 26 direções, eventos de clique/arraste/setas, consistência com seleção/GPU e tesselação limitada em 832 orientações. Capturas reais em dois tamanhos e ensaios ortográfico/perspectiva aprovados em `target/codex-validation/view-cube-20261026/`.
+- Documentação de uso em [INTERFACE.md](INTERFACE.md). Windows permanece adiado; sem publicação remota ou release.
+
 ## Janela sem barra de título nativa — 26/10/2026
 
 - Usuário confirmou que os controles devem ficar na barra escura superior, imediatamente abaixo da antiga barra de título. Decoração nativa removida; minimizar, maximizar/restaurar e fechar integrados à direita dessa barra.

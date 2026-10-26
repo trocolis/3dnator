@@ -152,6 +152,8 @@ pub enum Projection {
 pub struct Camera {
     pub yaw: f64,
     pub pitch: f64,
+    /// Inclinação da tela ao redor da direção de observação, em radianos.
+    roll: f64,
     pub span: f64,
     pub projection: Projection,
     target: Point3,
@@ -162,6 +164,7 @@ impl Default for Camera {
         Self {
             yaw: -0.9,
             pitch: 0.6,
+            roll: 0.,
             span: 1.5,
             projection: Projection::Orthographic,
             target: [0.; 3],
@@ -215,13 +218,69 @@ impl Camera {
             self.yaw.sin() * self.pitch.cos(),
             self.pitch.sin(),
         ];
-        let right = [-self.yaw.sin(), self.yaw.cos(), 0.];
-        (right, cross(direction, right), direction)
+        let horizontal = [-self.yaw.sin(), self.yaw.cos(), 0.];
+        let vertical = cross(direction, horizontal);
+        let (sin, cos) = self.roll.sin_cos();
+        let right = std::array::from_fn(|i| horizontal[i] * cos + vertical[i] * sin);
+        let up = std::array::from_fn(|i| vertical[i] * cos - horizontal[i] * sin);
+        (right, up, direction)
     }
 
+    /// Órbita nos eixos da tela. Rotacionar o referencial completo permite cruzar
+    /// os polos sem bloquear em ±90° ou inverter a vista ao arrastar o cubo.
+    /// Alvo, escala e projeção permanecem iguais; seleção e GPU usam a mesma base.
     pub fn orbit(&mut self, delta: [f64; 2]) {
-        self.yaw -= delta[0] * 0.008;
-        self.pitch = (self.pitch + delta[1] * 0.008).clamp(-1.55, 1.55);
+        if delta.iter().any(|v| !v.is_finite()) {
+            return;
+        }
+        let (right, up, direction) = self.basis();
+        let horizontal = -delta[0] * 0.008;
+        let vertical = -delta[1] * 0.008;
+        let right = rotate_vector(right, up, horizontal);
+        let direction = rotate_vector(rotate_vector(direction, up, horizontal), right, vertical);
+        self.set_orientation(direction, right);
+    }
+
+    /// Reconstitui os ângulos a partir de uma base ortonormal. Nos polos, manter
+    /// o azimute anterior e recuperar o roll evita a singularidade dos ângulos.
+    fn set_orientation(&mut self, direction: Point3, right: Point3) {
+        let length = norm(direction);
+        if !length.is_finite() || length <= 1e-12 {
+            return;
+        }
+        let direction = direction.map(|v| v / length);
+        let horizontal = direction[0].hypot(direction[1]);
+        if horizontal > 1e-10 {
+            self.yaw = direction[1].atan2(direction[0]);
+        }
+        self.pitch = direction[2].atan2(horizontal);
+        let base_right = [-self.yaw.sin(), self.yaw.cos(), 0.];
+        let base_up = cross(direction, base_right);
+        self.roll = dot(right, base_up).atan2(dot(right, base_right));
+    }
+
+    /// Próximo múltiplo de 90° em torno da direção de observação. Uma vista
+    /// inclinada pelo arraste volta a uma orientação ortogonal da tela, em vez
+    /// de conservar indefinidamente um desvio de alguns graus.
+    pub fn rotate_quarter_turn(&mut self, clockwise: bool) {
+        let turns = self.roll / std::f64::consts::FRAC_PI_2;
+        let rounded = turns.round();
+        let base = if (turns - rounded).abs() < 1e-10 {
+            rounded
+        } else if clockwise {
+            turns.floor()
+        } else {
+            turns.ceil()
+        };
+        let next = base + if clockwise { 1. } else { -1. };
+        self.roll = (next * std::f64::consts::FRAC_PI_2).rem_euclid(std::f64::consts::TAU);
+    }
+
+    pub fn roll_angle(&self) -> f64 {
+        self.roll
+    }
+    pub fn reset_roll(&mut self) {
+        self.roll = 0.;
     }
 
     pub fn pan(&mut self, delta: [f64; 2], height: f64) {
@@ -249,9 +308,16 @@ impl Camera {
     }
     pub fn set_direction(&mut self, direction: Point3) {
         let length = norm(direction);
-        if length > 1e-9 {
-            self.yaw = direction[1].atan2(direction[0]);
-            self.pitch = (direction[2] / length).clamp(-1., 1.).asin();
+        if length.is_finite() && length > 1e-9 {
+            // Vistas superior/inferior usam X para a direita. Isso mantém o clique
+            // no cubo coerente com o botão Superior, inclusive exatamente no polo.
+            self.yaw = if direction[0].hypot(direction[1]) < length * 1e-12 {
+                -std::f64::consts::FRAC_PI_2
+            } else {
+                direction[1].atan2(direction[0])
+            };
+            self.pitch = direction[2].atan2(direction[0].hypot(direction[1]));
+            self.roll = 0.;
         }
     }
     /// Coordenadas normalizadas da tela (Y para cima); pontos recortados em profundidade
@@ -379,6 +445,15 @@ impl Camera {
         matrix[15] = 1.;
         matrix
     }
+}
+
+/// Fórmula de Rodrigues para girar um vetor por um eixo unitário. A aplicação
+/// sucessiva de rotações rígidas conserva a orientação sem acumular cisalhamento.
+fn rotate_vector(vector: Point3, axis: Point3, angle: f64) -> Point3 {
+    let (sin, cos) = angle.sin_cos();
+    let perpendicular = cross(axis, vector);
+    let parallel = dot(axis, vector) * (1. - cos);
+    std::array::from_fn(|i| vector[i] * cos + perpendicular[i] * sin + axis[i] * parallel)
 }
 
 pub struct Viewport {
@@ -945,6 +1020,108 @@ mod tests {
                 center
             )) > 0.
         );
+    }
+
+    #[test]
+    fn quarter_turns_rotate_the_screen_without_changing_target_or_projection() {
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Camera::default()
+            };
+            camera.pan([70., -35.], 600.);
+            let direction = camera.direction();
+            let target = camera.target;
+            let span = camera.span;
+            let before = camera.axis_projection([1., 0., 0.]);
+            camera.rotate_quarter_turn(true);
+            let after = camera.axis_projection([1., 0., 0.]);
+            assert!((after[0] + before[1]).abs() < 1e-12);
+            assert!((after[1] - before[0]).abs() < 1e-12);
+            assert_eq!(camera.direction(), direction);
+            assert_eq!(camera.target, target);
+            assert_eq!(camera.span, span);
+            assert_eq!(camera.projection, projection);
+            for _ in 0..3 {
+                camera.rotate_quarter_turn(true);
+            }
+            assert!(camera.roll.abs() < 1e-12);
+            let restored = camera.axis_projection([1., 0., 0.]);
+            assert!((restored[0] - before[0]).abs() < 1e-12);
+            camera.roll = 0.31;
+            camera.rotate_quarter_turn(false);
+            assert!(camera.roll.abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn free_orbit_crosses_poles_with_a_continuous_orthonormal_frame() {
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let mut previous = camera.basis();
+        for _ in 0..1600 {
+            camera.orbit([1.3, 2.]);
+            let (right, up, direction) = camera.basis();
+            for axis in [right, up, direction] {
+                assert!(axis.iter().all(|v| v.is_finite()));
+                assert!((norm(axis) - 1.).abs() < 1e-12);
+            }
+            assert!(dot(right, up).abs() < 1e-12);
+            assert!(dot(right, direction).abs() < 1e-12);
+            assert!(dot(up, direction).abs() < 1e-12);
+            assert!(dot(right, previous.0) > 0.999);
+            assert!(dot(up, previous.1) > 0.999);
+            assert!(dot(cross(right, up), direction) > 0.999999);
+            previous = (right, up, direction);
+        }
+    }
+
+    #[test]
+    fn top_bottom_and_face_presets_have_consistent_upright_axes() {
+        let mut camera = Camera::default();
+        camera.rotate_quarter_turn(true);
+        camera.set_direction([0., 0., 1.]);
+        assert!(camera.roll.abs() < 1e-12);
+        assert!((camera.axis_projection([1., 0., 0.])[0] - 1.).abs() < 1e-12);
+        assert!((camera.axis_projection([0., 1., 0.])[1] + 1.).abs() < 1e-12);
+        camera.set_direction([0., 0., -1.]);
+        assert!((camera.axis_projection([0., 1., 0.])[1] - 1.).abs() < 1e-12);
+        camera.set_direction([0., -1., 0.]);
+        assert!((camera.axis_projection([0., 0., 1.])[1] + 1.).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rolled_views_keep_gpu_picking_pan_and_cursor_zoom_in_agreement() -> Result<(), String> {
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Camera::default()
+            };
+            camera.rotate_quarter_turn(true);
+            camera.orbit([17., -11.]);
+            camera.pan([23., 37.], 600.);
+            for cursor in [[0., 0.], [-0.4, 0.2], [0.6, -0.5]] {
+                let point = camera.world_on_target_plane(cursor, BOUNDS, 1.6);
+                let ray = camera.world_ray(cursor, BOUNDS, 1.6);
+                let projected = gpu_projection(&camera, BOUNDS, point, 1.6);
+                for i in 0..2 {
+                    assert!((projected[i] - cursor[i]).abs() < 2e-6);
+                }
+                let ray_point = std::array::from_fn(|i| ray.origin[i] + ray.direction[i] * 5.);
+                let projected = camera
+                    .project_world(ray_point, BOUNDS, 1.6)
+                    .ok_or("Raio recortado")?;
+                for i in 0..2 {
+                    assert!((projected[i] - cursor[i]).abs() < 1e-12);
+                }
+                camera.zoom_at(120., cursor, 1.6);
+                let after = gpu_projection(&camera, BOUNDS, point, 1.6);
+                for i in 0..2 {
+                    assert!((after[i] - cursor[i]).abs() < 2e-6);
+                }
+            }
+        }
+        Ok(())
     }
 
     #[test]

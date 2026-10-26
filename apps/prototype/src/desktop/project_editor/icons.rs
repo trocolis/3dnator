@@ -40,6 +40,8 @@ pub(super) enum Icon {
     Minimize,
     Maximize,
     Restore,
+    RotateClockwise,
+    RotateCounterclockwise,
     Search,
     Check,
     Select,
@@ -346,6 +348,23 @@ pub(super) fn paint_with_ink(
             p.circle(12., 12., 3., p.accent);
             if icon == Icon::EyeOff {
                 p.line(&[[3., 3.], [21., 21.]], p.ink);
+            }
+        }
+        Icon::RotateClockwise | Icon::RotateCounterclockwise => {
+            let mirror = if icon == Icon::RotateClockwise {
+                1.
+            } else {
+                -1.
+            };
+            let points: Vec<_> = (0..=24)
+                .map(|i| {
+                    let angle = (-0.8 + i as f32 / 24. * 1.6) * std::f32::consts::PI;
+                    [12. + mirror * 8. * angle.cos(), 12. + 8. * angle.sin()]
+                })
+                .collect();
+            p.line(&points, p.ink);
+            if let [.., a, b] = points.as_slice() {
+                p.arrow(*a, *b);
             }
         }
         Icon::Minimize => p.line(&[[5., 17.], [19., 17.]], p.ink),

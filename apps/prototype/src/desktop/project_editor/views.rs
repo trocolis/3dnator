@@ -505,7 +505,11 @@ impl Editor {
                 );
                 response.clone().on_hover_text(text(T::Navigation));
                 self.viewport_actions(ui, &response);
-                if response.dragged_by(egui::PointerButton::Middle) {
+                let cube_rect = view_cube::rect(response.rect);
+                let starts_on_cube = ui
+                    .input(|i| i.pointer.press_origin())
+                    .is_some_and(|p| cube_rect.contains(p));
+                if response.dragged_by(egui::PointerButton::Middle) && !starts_on_cube {
                     let (delta, shift) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
                     if shift {
                         self.viewport
@@ -517,7 +521,9 @@ impl Editor {
                             .pan([f64::from(delta.x), f64::from(delta.y)], f64::from(size.y));
                     }
                 }
-                if response.hovered() {
+                if response.hovered()
+                    && !response.hover_pos().is_some_and(|p| cube_rect.contains(p))
+                {
                     let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                     if let Some(position) = response.hover_pos().filter(|_| scroll != 0.) {
                         self.viewport.camera.zoom_at(
@@ -530,6 +536,7 @@ impl Editor {
                         );
                     }
                 }
+                view_cube::show(ui, &mut self.viewport.camera, response.rect);
                 self.viewport.render(&self.gpu.device, &self.gpu.queue);
                 if self.scene.is_none() && !self.busy() {
                     ui.painter().text(
@@ -540,7 +547,6 @@ impl Editor {
                         theme::MUTED,
                     );
                 }
-                self.navigation_cube(ui, response.rect);
                 self.measure_overlay(ui, response.rect);
                 self.current_mut().camera = self.viewport.camera.clone();
             });

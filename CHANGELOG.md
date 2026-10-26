@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Navegação e área 3D
+
+- Reconstruído o cubo chanfrado como poliedro fechado, com seis faces, doze arestas chanfradas e oito cantos selecionáveis. A seleção usa os polígonos desenhados, com nomes das vistas que acompanham a orientação da face.
+- Removido o indicador XYZ sobreposto. O cubo usa preenchimento por triângulos, contornos sem junções extensas, descarte de faces degeneradas e recorte local para impedir linhas que escapem para o viewport em ângulos rasantes.
+- Arraste esquerdo sobre o cubo orbita a câmera sem selecionar ou mover peças. Órbita contínua nos eixos da tela, incluindo passagem pelos polos, compartilhada com Shift + botão do meio.
+- Setas horária/anti-horária avançam para a próxima orientação de 90°, alternando 0°/90°/180°/270°; clicar no ângulo restaura 0°. Alvo, zoom e projeção são preservados; a inclinação acompanha a câmera da aba durante a sessão.
+- Vistas superior/inferior do cubo e atalhos de câmera passam a usar a mesma orientação, com X para a direita. Raios de seleção, pan, zoom no cursor e matriz da GPU consideram a inclinação da câmera.
+
 ### Interface desktop
 
 - Removida a barra de título nativa. Minimizar, maximizar/restaurar e fechar ficam à direita da barra escura do aplicativo; o fundo da barra permite mover a janela e o duplo clique alterna a maximização. Bordas e cantos preservam o redimensionamento, e fechar continua oferecendo a confirmação de alterações não salvas.

@@ -28,12 +28,23 @@ Os ícones são vetoriais, desenhados em uma grade de 24 unidades pelo egui, sem
 
 O fundo claro do renderizador e do rascunho usa a mesma paleta dos painéis. Cores de seleção, erro, aviso, restrição e medição foram ajustadas para esse contraste. O esmaecimento das peças de referência usa a cor efetiva do fundo, preservando a transparência.
 
+## Cubo de orientação
+
+No canto superior direito da área 3D, clique em uma face, aresta chanfrada ou canto para escolher uma das 26 direções. A área selecionável acompanha o polígono visível, e as faces têm nomes em português que giram junto da orientação. O indicador separado de linhas XYZ foi removido.
+
+Arraste com o botão esquerdo sobre o cubo para orbitar livremente. O movimento continua ao passar pelas vistas superior e inferior; não seleciona nem desloca corpos. A órbita com Shift + botão do meio usa o mesmo referencial da tela.
+
+As duas setas acima do cubo giram a vista no sentido horário ou anti-horário até o próximo múltiplo de 90°. Cliques sucessivos percorrem 0°, 90°, 180° e 270°. Se a vista estiver inclinada pelo arraste, a primeira seta a alinha ao próximo desses ângulos; clicar no número restaura 0°. A direção observada, o alvo, o zoom e a projeção são preservados durante esse giro. Clicar em uma face restaura a orientação convencional dessa vista.
+
+O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visualização; não acrescenta operações ao histórico paramétrico ou ao desfazer/refazer do documento.
+
 ## Código e validação visual
 
 - `apps/prototype/src/desktop/project_editor/theme.rs`: paleta, tipografia e medidas.
 - `icons.rs`: desenhos originais e widgets de ícone/linha de árvore.
 - `shell.rs`: barra superior, faixa por tarefa, busca e histórico visual.
 - `window_frame.rs`: controles da janela, arraste e redimensionamento sem decoração nativa.
+- `view_cube.rs`: geometria de apresentação, seleção e interação do navegador de orientação, com pintura recortada.
 - `views.rs`, `sketch_editor.rs` e `navigation.rs`: painéis, canvas e integração com o editor existente.
 - `crates/renderer/src/lib.rs` e `view.wgsl`: cor de apresentação do fundo, incluindo o esmaecimento.
 

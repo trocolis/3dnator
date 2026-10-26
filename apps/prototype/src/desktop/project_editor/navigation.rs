@@ -196,14 +196,15 @@ impl Editor {
         }
     }
     pub(super) fn viewport_actions(&mut self, ui: &egui::Ui, response: &egui::Response) {
-        if response.drag_started_by(egui::PointerButton::Primary) {
+        let cube_rect = view_cube::rect(response.rect);
+        let starts_on_cube = ui
+            .input(|i| i.pointer.press_origin())
+            .is_some_and(|p| cube_rect.contains(p));
+        if response.drag_started_by(egui::PointerButton::Primary) && !starts_on_cube {
             self.current_mut().drag_start = ui.input(|i| i.pointer.press_origin());
         }
-        let cube_rect = egui::Rect::from_min_size(
-            response.rect.right_top() + egui::vec2(-112., 10.),
-            egui::vec2(105., 110.),
-        );
         if response.clicked()
+            && !starts_on_cube
             && !response
                 .interact_pointer_pos()
                 .is_some_and(|p| cube_rect.contains(p))
@@ -252,6 +253,7 @@ impl Editor {
             });
         }
         if self.move_freely
+            && !starts_on_cube
             && !self.busy()
             && response.drag_stopped_by(egui::PointerButton::Primary)
             && let Some(bounds) = self.current().scene_bounds
@@ -566,161 +568,4 @@ impl Editor {
             );
         }
     }
-    pub(super) fn navigation_cube(&mut self, ui: &egui::Ui, rect: egui::Rect) {
-        let center = rect.right_top() + egui::vec2(-65., 65.);
-        let camera = &self.viewport.camera;
-        let direction = camera.direction();
-        let projection = |p: Point3| {
-            let v = camera.axis_projection(p);
-            center + egui::vec2(v[0] as f32, v[1] as f32) * 29.
-        };
-        let mut faces = Vec::new();
-        // Cubo truncado: seis octógonos, doze faixas de arestas e oito cantos clicáveis.
-        for axis in 0..3 {
-            for sign in [-1., 1.] {
-                let a = (axis + 1) % 3;
-                let b = (axis + 2) % 3;
-                let polygon = [
-                    [-0.65, -1.],
-                    [0.65, -1.],
-                    [1., -0.65],
-                    [1., 0.65],
-                    [0.65, 1.],
-                    [-0.65, 1.],
-                    [-1., 0.65],
-                    [-1., -0.65],
-                ]
-                .map(|v| {
-                    let mut p = [0.; 3];
-                    p[axis] = sign;
-                    p[a] = v[0];
-                    p[b] = v[1];
-                    p
-                });
-                let mut normal = [0.; 3];
-                normal[axis] = sign;
-                faces.push((normal, polygon.to_vec()));
-            }
-        }
-        for axis in 0..3 {
-            for a in [-1., 1.] {
-                for b in [-1., 1.] {
-                    let i = (axis + 1) % 3;
-                    let j = (axis + 2) % 3;
-                    let polygon = [
-                        [-0.65, 1., 0.65],
-                        [0.65, 1., 0.65],
-                        [0.65, 0.65, 1.],
-                        [-0.65, 0.65, 1.],
-                    ]
-                    .map(|v| {
-                        let mut p = [0.; 3];
-                        p[axis] = v[0];
-                        p[i] = a * v[1];
-                        p[j] = b * v[2];
-                        p
-                    });
-                    let mut n = [0.; 3];
-                    n[i] = a;
-                    n[j] = b;
-                    faces.push((n, polygon.to_vec()));
-                }
-            }
-        }
-        for x in [-1., 1.] {
-            for y in [-1., 1.] {
-                for z in [-1., 1.] {
-                    faces.push((
-                        [x, y, z],
-                        vec![
-                            [x, y * 0.65, z * 0.65],
-                            [x * 0.65, y, z * 0.65],
-                            [x * 0.65, y * 0.65, z],
-                        ],
-                    ));
-                }
-            }
-        }
-        faces.retain(|(n, _)| dot(*n, direction) > 0.);
-        faces.sort_by(|a, b| dot(a.0, direction).total_cmp(&dot(b.0, direction)));
-        let mut chosen = None;
-        for (index, (normal, points)) in faces.into_iter().enumerate() {
-            let polygon = points.into_iter().map(projection).collect::<Vec<_>>();
-            let bounds = egui::Rect::from_points(&polygon);
-            let hover = ui
-                .input(|i| i.pointer.hover_pos())
-                .is_some_and(|p| inside_polygon(p, &polygon));
-            let response =
-                ui.interact(bounds, egui::Id::new(("cube", index)), egui::Sense::click());
-            ui.painter().add(egui::Shape::convex_polygon(
-                polygon.clone(),
-                if hover {
-                    theme::BLUE_FILL
-                } else {
-                    egui::Color32::from_rgb(218, 228, 239)
-                },
-                egui::Stroke::new(1., theme::MUTED),
-            ));
-            if normal.iter().filter(|v| v.abs() > 0.5).count() == 1 {
-                let label = if normal[0] != 0. {
-                    "X"
-                } else if normal[1] != 0. {
-                    "Y"
-                } else {
-                    "Z"
-                };
-                let sum = polygon
-                    .iter()
-                    .fold(egui::Vec2::ZERO, |sum, p| sum + p.to_vec2());
-                let center = (sum / polygon.len() as f32).to_pos2();
-                ui.painter().text(
-                    center,
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::FontId::proportional(10.),
-                    theme::INK,
-                );
-            }
-            if hover && response.clicked() {
-                chosen = Some(normal);
-            }
-        }
-        if let Some(direction) = chosen {
-            self.viewport.camera.set_direction(direction);
-        }
-        let axis_origin = center + egui::vec2(0., 48.);
-        for (axis, label, color) in [
-            ([1., 0., 0.], "X", theme::DANGER),
-            ([0., 1., 0.], "Y", theme::GREEN),
-            ([0., 0., 1.], "Z", theme::ACCENT),
-        ] {
-            let v = self.viewport.camera.axis_projection(axis);
-            let end = axis_origin + egui::vec2(v[0] as f32, v[1] as f32) * 19.;
-            ui.painter()
-                .line_segment([axis_origin, end], egui::Stroke::new(1.5, color));
-            ui.painter().text(
-                end,
-                egui::Align2::CENTER_CENTER,
-                label,
-                egui::FontId::proportional(11.),
-                color,
-            );
-        }
-    }
-}
-fn inside_polygon(p: egui::Pos2, vertices: &[egui::Pos2]) -> bool {
-    let mut sign = 0.;
-    for i in 0..vertices.len() {
-        let a = vertices[i];
-        let b = vertices[(i + 1) % vertices.len()];
-        let c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-        if c.abs() > 0.1 {
-            if sign == 0. {
-                sign = c.signum();
-            } else if sign * c < 0. {
-                return false;
-            }
-        }
-    }
-    true
 }

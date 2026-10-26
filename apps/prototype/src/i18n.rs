@@ -1,6 +1,15 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    ViewRight,
+    ViewLeft,
+    ViewBack,
+    ViewBottom,
+    ViewRotateLeft,
+    ViewRotateRight,
+    ViewUpright,
+    ViewCubeHint,
+
     MinimizeWindow,
     MaximizeWindow,
     RestoreWindow,
@@ -354,6 +363,17 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::ViewRight => "Direita",
+        Text::ViewLeft => "Esquerda",
+        Text::ViewBack => "Traseira",
+        Text::ViewBottom => "Inferior",
+        Text::ViewRotateLeft => "Girar até a próxima orientação de 90° no sentido anti-horário",
+        Text::ViewRotateRight => "Girar até a próxima orientação de 90° no sentido horário",
+        Text::ViewUpright => "Retornar à orientação de 0°",
+        Text::ViewCubeHint => {
+            "Cubo de orientação: clique em faces, arestas ou cantos; arraste para orbitar."
+        }
+
         Text::MinimizeWindow => "Minimizar janela",
         Text::MaximizeWindow => "Maximizar janela",
         Text::RestoreWindow => "Restaurar janela",

@@ -9,6 +9,7 @@ mod parameter_editor;
 mod shell;
 mod sketch_editor;
 mod theme;
+mod view_cube;
 mod views;
 mod window_frame;
 use crate::i18n::{Text as T, text};

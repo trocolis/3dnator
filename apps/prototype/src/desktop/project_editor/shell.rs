@@ -393,16 +393,13 @@ impl Editor {
                 .camera
                 .set_direction(Camera::default().direction()),
             Action::Front => {
-                self.viewport.camera.yaw = -std::f64::consts::FRAC_PI_2;
-                self.viewport.camera.pitch = 0.;
+                self.viewport.camera.set_direction([0., -1., 0.]);
             }
             Action::Top => {
-                self.viewport.camera.yaw = -std::f64::consts::FRAC_PI_2;
-                self.viewport.camera.pitch = std::f64::consts::FRAC_PI_2;
+                self.viewport.camera.set_direction([0., 0., 1.]);
             }
             Action::Side => {
-                self.viewport.camera.yaw = 0.;
-                self.viewport.camera.pitch = 0.;
+                self.viewport.camera.set_direction([1., 0., 0.]);
             }
             Action::Perspective => {
                 self.viewport.camera.projection = match self.viewport.camera.projection {

@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Cubo de orientação e giros da vista — 26/10/2026
+
+- Reconstruído o cubo como poliedro fechado: 26 regiões, 48 arestas compartilhadas exatamente por duas faces e sem invasão dos semiespaços vizinhos. Os cliques escolhem polígonos visíveis, incluindo arestas/cantos, em vez de retângulos sobrepostos. Removido o indicador separado de linhas XYZ.
+- Tesselação exercitada em **832 combinações** de azimute, elevação e giros de 90°, incluindo polos e orientações quase coplanares. Todos os vértices permaneceram finitos e dentro dos limites do navegador. O preenchimento usa triângulos, os contornos são segmentos independentes e o controle tem recorte próprio; faces degeneradas são descartadas.
+- Eventos egui verificam clique nas faces em ambas as projeções, arraste sem selecionar/mover o modelo e sem encaixe indevido ao soltar, setas percorrendo 0°/90°/180°/270° e retorno a 0° pelo indicador. A câmera cruza os polos com base contínua e ortonormal; seleção, matriz da GPU, pan e zoom no cursor permanecem coerentes após inclinar a tela.
+- **105 testes sem OCCT e 137 com OCCT 7.9.3 aprovados** no workspace, com formatação e Clippy sem avisos nas duas configurações. Os 27 testes da aplicação/renderizador foram repetidos após o acabamento dos rótulos e da pintura.
+- Compilação desktop Linux e capturas reais egui/wgpu aprovadas em 1280 × 820 e 900 × 600, com imagens inspecionadas: `target/codex-validation/view-cube-20261026/navigator.png` e `navigator-compact.png`. Prévias ortográfica/perspectiva também aprovadas, incluindo cores, arestas, triangulação e transparência, sem erros de validação wgpu/GL llvmpipe. Não foi declarada execução Windows ou interação com janela nativa.
+
 ## Controles integrados da janela — 26/10/2026
 
 - Configurada janela sem decoração nativa, com minimizar/maximizar/restaurar/fechar na barra escura superior, conforme esclarecimento do usuário. Capturas reais em 1280 × 820 e 900 × 600 inspecionadas: `target/codex-validation/window-frame-20261026/model-aligned.png` e `compact-aligned.png`, sem erros de validação wgpu/GL llvmpipe.
