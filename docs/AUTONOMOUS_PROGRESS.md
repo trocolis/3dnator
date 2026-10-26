@@ -35,4 +35,12 @@ Ao fim: 90 testes aprovados com OCCT e 68 sem, clippy sem avisos nas duas config
 
 ## Pendências
 
-Ver a seção Situação atual de [ROADMAP.md](../ROADMAP.md): Windows e Ubuntu (CI não executada), máquina de referência, interação real com a janela, perspectiva e sombras, importação STEP com cores e montagem, espelhamento de peças com subpeças e folhas com HLR exato.
+Ver a seção Situação atual de [ROADMAP.md](../ROADMAP.md): Windows e Ubuntu (CI não executada), máquina de referência, interação real com a janela, sombras, importação STEP com cores e montagem, espelhamento de peças com subpeças e folhas com HLR exato.
+
+## Continuação Codex (26/10/2026)
+
+- Revisados código, histórico e roadmap; estado inicial limpo, com os 68 testes sem OCCT aprovados.
+- Implementada a projeção em perspectiva por aba, mantendo a ortográfica como padrão, com raios de seleção, medições, movimento livre e navegação coerentes com a matriz da GPU. A vista isométrica conserva escala, alvo e projeção; a orientação escolhida no cubo é guardada na câmera da aba.
+- Acrescentados cinco testes de câmera e ampliados os dois existentes para ambas as projeções: recálculo dos limites da cena, zoom no cursor, seleção, redução aparente com a distância, planos de recorte, enquadramento e movimento no plano do alvo.
+- Capturas reais ortográfica, perspectiva e da interface em `target/codex-validation/`, pelo wgpu/llvmpipe, sem erros de validação. Triangulação e transparência verificadas nas duas projeções.
+- Formatação e Clippy sem avisos aprovados; 73 testes sem OCCT e 95 com OCCT aprovados. Guia do protótipo atualizado para remover descrições obsoletas da versão 0.2.0.

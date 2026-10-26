@@ -1,18 +1,18 @@
-# Protótipo 0.2.0 — projetos com corpos de malha
+# Protótipo 0.3.0 — CAD paramétrico
 
-Este incremento entrega a base de documento e persistência da etapa 2. Rascunhos, restrições e operações paramétricas ainda não estão implementados. O histórico mostrado na interface corresponde às edições da sessão, não à construção paramétrica de um sólido.
+Este incremento oferece rascunhos com restrições e parâmetros, histórico paramétrico, montagem, folhas técnicas e exportação STEP/STL. Operações de sólidos exigem a feature `occt` e o SDK externo. O histórico paramétrico é salvo no projeto; desfazer/refazer registra as edições da sessão. Pendências conhecidas estão em [ROADMAP.md](../ROADMAP.md).
 
 ## Abrir a aplicação
 
 Requer Rust 1.95 ou superior, compilador C/C++ para dependências e bibliotecas de janela/driver gráfico. A validação local usa Rust 1.99.1 em Linux x86_64.
 
 ```sh
-cargo run -p nator-prototype --locked
+cargo run -p nator-prototype --features occt --locked
 ```
 
 A janela começa com um projeto vazio. Use **Inserir suporte em L** ou **Importar STL** para criar uma peça com um corpo. Na árvore, selecione a peça/corpo e use **Construir nesta peça**: importações seguintes acrescentam corpos à definição ativa. **Voltar à montagem** faz a próxima importação criar outra peça.
 
-A árvore permite selecionar, mostrar/ocultar peças e corpos. As propriedades oferecem renomeação, posicionamento X/Y/Z em milímetros, rotação em graus e exclusão de corpos. Posições de corpos são locais à peça; posições de instâncias são relativas à montagem. Corpos só podem ser editados na peça ativa em construção; instâncias são posicionadas na montagem. A seleção gráfica diretamente na área 3D ainda não existe.
+A árvore permite selecionar, mostrar/ocultar peças e corpos. As propriedades oferecem renomeação, posicionamento X/Y/Z em milímetros, rotação em graus e exclusão de corpos. Posições de corpos são locais à peça; posições de instâncias são relativas à montagem. Corpos só podem ser editados na peça ativa em construção; instâncias são posicionadas na montagem. A área 3D permite selecionar geometria, medir e capturar referências de faces e arestas para operações.
 
 Projetos abrem em abas. Cada aba mantém documento, seleção, câmera, contexto e sequência de desfazer/refazer próprios. Há um único conjunto de buffers GPU para a aba ativa. A representação da cena ainda combina malhas das instâncias, sem instanciamento gráfico otimizado.
 
@@ -21,7 +21,8 @@ Projetos abrem em abas. Cada aba mantém documento, seleção, câmera, contexto
 - Scroll aproxima/afasta em direção ao cursor.
 - Botão do meio arrasta a vista; Shift com botão do meio orbita.
 - Botões oferecem vistas frontal, superior, lateral e isométrica, além de enquadramento.
-- X/Y/Z acompanham a câmera; o cubo de navegação completo ainda está pendente.
+- O seletor **Ortográfica / Perspectiva** muda a projeção da aba. A perspectiva tem campo vertical de 45°; o zoom e o movimento livre usam o plano do alvo. **Enquadrar** recentraliza o modelo. A vista ortográfica é o padrão.
+- O cubo de navegação possui faces, arestas e cantos clicáveis; X/Y/Z acompanham a câmera.
 - Ctrl+S salva; Ctrl+Z desfaz; Ctrl+Shift+Z ou Ctrl+Y refazem. Campos de texto conservam seu próprio desfazer.
 - As operações concluídas são atômicas e a sequência guarda até 100 ações, compartilhando as malhas entre snapshots.
 - Ao fechar uma aba modificada ou encerrar a aplicação, o editor oferece Salvar, Descartar ou Cancelar.
@@ -30,19 +31,19 @@ A composição da cena e a preparação CPU dos buffers ocorrem em segundo plano
 
 ## Salvar e recuperar
 
-**Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém as definições, corpos de malha, instâncias, nomes, visibilidade e transformações. O STL de origem pode ser movido ou apagado após o salvamento. A versão interna inicial é 1, independente da versão do aplicativo.
+**Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 7, independente da versão do aplicativo, com migração de projetos anteriores.
 
 A gravação temporária é validada antes de substituir o projeto anterior. A recuperação é gravada separadamente, após dois segundos de inatividade e disponibilidade da thread de trabalho, e é oferecida ao iniciar a aplicação. Uma cópia recuperada precisa ser salva explicitamente. `NATOR_RECOVERY_DIR` permite escolher o diretório das cópias.
 
-Detalhes e limites estão em [PROJECT_FORMAT.md](PROJECT_FORMAT.md). Miniaturas, câmera persistida, sólidos CAD, rascunhos e histórico paramétrico ainda não fazem parte do arquivo. Desfazer/refazer começa vazio ao reabrir.
+Detalhes e limites estão em [PROJECT_FORMAT.md](PROJECT_FORMAT.md). Miniaturas e câmera persistida ainda não fazem parte do arquivo. A câmera, incluindo a projeção, é mantida por aba durante a sessão. Desfazer/refazer começa vazio ao reabrir.
 
 ## Importar e exportar STL
 
 A importação aceita STL ASCII e binário, com até 128 MiB e dois milhões de triângulos; a escala para milímetros é escolhida antes de importar. Malhas abertas são aceitas como referência. Vértices não finitos, triângulos degenerados e arquivos incompletos são rejeitados, sem reparo automático.
 
-Selecione um corpo na árvore e use **Exportar corpo STL**. O arquivo usa coordenadas locais à peça, incluindo a transformação do corpo e excluindo a posição da montagem. O nome sugerido combina peça e corpo. O destino deve ser novo; exportações ainda não substituem arquivos existentes.
+O diálogo **Exportar STL** oferece corpo, corpos da peça, cada definição uma vez, montagem em um arquivo ou todas as ocorrências. Mostra dimensões, triângulos, arquivos e tamanho antes de gravar, com qualidade rascunho/padrão/alta ou tolerâncias personalizadas. Arquivos separados usam coordenadas locais da peça; exportações conjuntas e de ocorrências usam posições de montagem. Os nomes combinam peça e corpo, com sufixos para evitar sobrescrita.
 
-O STL binário verifica a quantização f32, fechamento local de arestas, orientação e volume positivo. Não detecta todos os defeitos de impressão, como auto-interseções ou cascas sobrepostas. Exportação em lote e presets de tesselação CAD ainda estão pendentes. O projeto atual armazena as malhas importadas, sem convertê-las em sólidos.
+O STL binário verifica a quantização f32, fechamento local de arestas, orientação e volume positivo. Não detecta todos os defeitos de impressão, como auto-interseções ou cascas sobrepostas. Sólidos são tessellados a partir do B-rep para exportação, independentemente da malha de exibição. Malhas importadas continuam sendo malhas, sem conversão automática para sólidos.
 
 ## Ensaios sem janela
 
@@ -64,10 +65,11 @@ Capturas reais usando o mesmo renderizador/composição da aplicação, sem serv
 
 ```sh
 cargo run -p nator-prototype --locked -- --render-preview target/project-check/solid.png
+cargo run -p nator-prototype --locked -- --render-perspective-preview target/project-check/perspective.png
 cargo run -p nator-prototype --locked -- --render-project-preview target/project-check/run-001/support.3dnator target/project-check/editor.png
 ```
 
-Os PNGs devem ter destinos novos. A captura da interface carrega o projeto, seleciona seu primeiro corpo e acrescenta uma aba auxiliar vazia apenas para a visualização. Não modifica o projeto de origem nem grava recuperação. Essas capturas não substituem o teste interativo de teclado, mouse ou diálogos do sistema.
+Os PNGs devem ter destinos novos. As capturas do renderizador verificam superfície, triangulação e transparência na projeção escolhida. A captura da interface carrega o projeto, seleciona seu primeiro corpo e acrescenta uma aba auxiliar vazia apenas para a visualização; se houver rascunho, abre seu editor. Não modifica o projeto de origem nem grava recuperação. Essas capturas não substituem o teste interativo de teclado, mouse ou diálogos do sistema.
 
 ## Medições de leveza
 

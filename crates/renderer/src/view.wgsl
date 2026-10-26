@@ -19,7 +19,9 @@ struct VertexOutput {
     // Coordenadas baricêntricas: o canto i do triângulo recebe o eixo i. A distância às
     // arestas permite desenhar linhas no próprio passe de superfície, sem buffers de linhas
     // (que custariam 144 bytes por triângulo na memória da GPU).
-    @location(1) barycentric: vec3<f32>,
+    // Distâncias às arestas são medidas na tela, sem correção de perspectiva:
+    // a espessura do traço deve permanecer constante em pixels ao longo do triângulo.
+    @location(1) @interpolate(linear) barycentric: vec3<f32>,
     @location(2) @interpolate(flat) edges: u32,
 }
 

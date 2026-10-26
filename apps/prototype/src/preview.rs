@@ -1,6 +1,6 @@
 //! Capturas reais do renderizador, com leitura de pixels pelo wgpu.
 use nator_geometry::reference_bracket;
-use nator_renderer::{Viewport, wgpu};
+use nator_renderer::{Projection, Viewport, wgpu};
 use std::{
     error::Error,
     fs::OpenOptions,
@@ -113,7 +113,7 @@ pub(crate) fn read_texture(
     })
 }
 
-pub fn render(path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn render(path: &Path, projection: Projection) -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
@@ -124,6 +124,8 @@ pub fn render(path: &Path) -> Result<(), Box<dyn Error>> {
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let mut viewport = Viewport::new(&device, &reference_bracket()?)?;
     viewport.resize(&device, [960, 640]);
+    viewport.camera.projection = projection;
+    viewport.camera.fit(960. / 640.);
     // A triangulação é desenhada no shader: ativá-la precisa escurecer pixels da superfície.
     viewport.show_triangles = true;
     viewport.render(&device, &queue);
@@ -162,7 +164,7 @@ pub fn render(path: &Path) -> Result<(), Box<dyn Error>> {
     println!(
         "{}",
         serde_json::to_string_pretty(
-            &serde_json::json!({"preview":path,"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"transparency_brightness_ratio":transparency_ratio,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
+            &serde_json::json!({"preview":path,"projection":format!("{projection:?}"),"adapter":info.name,"backend":format!("{:?}",info.backend),"surface_pixels":surface_pixels,"triangulation_pixels":triangulation_pixels,"transparency_brightness_ratio":transparency_ratio,"elapsed_ms":start.elapsed().as_secs_f64()*1000.})
         )?
     );
     Ok(())

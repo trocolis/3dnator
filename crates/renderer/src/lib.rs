@@ -1,4 +1,4 @@
-//! Visualização ortográfica leve. Nenhuma operação CAD é realizada pela GPU.
+//! Visualização ortográfica e em perspectiva. Nenhuma operação CAD é realizada pela GPU.
 
 use nator_geometry::{Bounds, Mesh, Point3, cross, dot, norm, sub};
 use wgpu::util::DeviceExt;
@@ -87,11 +87,20 @@ impl PreparedMesh {
     }
 }
 
+/// A projeção pertence à câmera da aba, sem alterar o documento ou seu histórico.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Projection {
+    #[default]
+    Orthographic,
+    Perspective,
+}
+
 #[derive(Debug, Clone)]
 pub struct Camera {
     pub yaw: f64,
     pub pitch: f64,
     pub span: f64,
+    pub projection: Projection,
     target: Point3,
 }
 
@@ -101,6 +110,7 @@ impl Default for Camera {
             yaw: -0.9,
             pitch: 0.6,
             span: 1.5,
+            projection: Projection::Orthographic,
             target: [0.; 3],
         }
     }
@@ -124,7 +134,26 @@ impl Camera {
     }
     pub fn fit(&mut self, aspect: f64) {
         self.target = [0.; 3];
-        self.span = 1.9 * (1. / aspect.max(0.01)).max(1.);
+        // A perspectiva precisa de margem para os cantos mais próximos do observador.
+        let margin = match self.projection {
+            Projection::Orthographic => 1.9,
+            Projection::Perspective => 2.1,
+        };
+        self.span = margin * (1. / aspect.max(0.01)).max(1.);
+    }
+
+    /// Campo vertical fixo de 45°; `span` mede a altura no plano do alvo em ambas as
+    /// projeções. Alternar a projeção conserva o enquadramento nesse plano. O zoom em
+    /// perspectiva desloca o observador, mantendo as mesmas regras de pan e zoom no cursor.
+    fn eye_distance(&self) -> f64 {
+        self.span * 0.5 / (std::f64::consts::FRAC_PI_4 * 0.5).tan()
+    }
+
+    fn depth_range(&self) -> (f64, f64) {
+        let distance = self.eye_distance();
+        // A cena normalizada cabe numa esfera de raio √3/2. Incluir o deslocamento
+        // do alvo no plano distante evita recortar a cena ao deslocar a câmera.
+        (distance * 0.001, distance + norm(self.target) + 4.)
     }
 
     fn basis(&self) -> (Point3, Point3, Point3) {
@@ -172,14 +201,47 @@ impl Camera {
             self.pitch = (direction[2] / length).clamp(-1., 1.).asin();
         }
     }
-    pub fn project_world(&self, point: Point3, bounds: Bounds, aspect: f64) -> [f64; 2] {
+    /// Coordenadas normalizadas da tela (Y para cima); pontos recortados em profundidade
+    /// não geram anotações. A divisão por W deve coincidir com a matriz enviada à GPU.
+    pub fn project_world(&self, point: Point3, bounds: Bounds, aspect: f64) -> Option<[f64; 2]> {
         let scale = bounds.size().into_iter().fold(0_f64, f64::max);
         let p = std::array::from_fn(|i| (point[i] - bounds.center()[i]) / scale - self.target[i]);
+        let (right, up, direction) = self.basis();
+        let factor = match self.projection {
+            Projection::Orthographic => {
+                if dot(p, direction).abs() > 4. {
+                    return None;
+                }
+                1.
+            }
+            Projection::Perspective => {
+                let depth = self.eye_distance() - dot(p, direction);
+                let (near, far) = self.depth_range();
+                if depth < near || depth > far {
+                    return None;
+                }
+                self.eye_distance() / depth
+            }
+        };
+        let screen = [
+            dot(p, right) * 2. * factor / (self.span * aspect),
+            dot(p, up) * 2. * factor / self.span,
+        ];
+        screen.iter().all(|v| v.is_finite()).then_some(screen)
+    }
+
+    /// Interseção com o plano do alvo, em coordenadas de montagem (mm). Movimentação
+    /// livre usa esse plano, pois raios em perspectiva partem do mesmo observador.
+    pub fn world_on_target_plane(&self, cursor: [f64; 2], bounds: Bounds, aspect: f64) -> Point3 {
+        let scale = bounds.size().into_iter().fold(0_f64, f64::max);
         let (right, up, _) = self.basis();
-        [
-            dot(p, right) * 2. / (self.span * aspect),
-            dot(p, up) * 2. / self.span,
-        ]
+        std::array::from_fn(|i| {
+            bounds.center()[i]
+                + scale
+                    * (self.target[i]
+                        + right[i] * cursor[0] * self.span * aspect * 0.5
+                        + up[i] * cursor[1] * self.span * 0.5)
+        })
     }
     pub fn world_ray(
         &self,
@@ -189,17 +251,36 @@ impl Camera {
     ) -> nator_geometry::query::Ray {
         let scale = bounds.size().into_iter().fold(0_f64, f64::max);
         let (right, up, direction) = self.basis();
-        let origin = std::array::from_fn(|i| {
-            bounds.center()[i]
-                + scale
-                    * (self.target[i]
-                        + right[i] * cursor[0] * self.span * aspect * 0.5
+        match self.projection {
+            Projection::Orthographic => {
+                let plane = self.world_on_target_plane(cursor, bounds, aspect);
+                nator_geometry::query::Ray {
+                    origin: std::array::from_fn(|i| plane[i] + scale * direction[i] * 4.),
+                    direction: direction.map(|v| -v),
+                }
+            }
+            Projection::Perspective => {
+                let distance = self.eye_distance();
+                let (near, _) = self.depth_range();
+                let toward: Point3 = std::array::from_fn(|i| {
+                    right[i] * cursor[0] * self.span * aspect * 0.5
                         + up[i] * cursor[1] * self.span * 0.5
-                        + direction[i] * 4.)
-        });
-        nator_geometry::query::Ray {
-            origin,
-            direction: direction.map(|v| -v),
+                        - direction[i] * distance
+                });
+                let length = norm(toward);
+                // Origem no plano próximo, para não selecionar superfícies que a GPU
+                // recortou. A direção unitária mantém as distâncias dos testes de raio em mm.
+                nator_geometry::query::Ray {
+                    origin: std::array::from_fn(|i| {
+                        bounds.center()[i]
+                            + scale
+                                * (self.target[i]
+                                    + direction[i] * distance
+                                    + toward[i] * near / distance)
+                    }),
+                    direction: toward.map(|v| v / length),
+                }
+            }
         }
     }
     pub fn axis_projection(&self, axis: Point3) -> [f64; 2] {
@@ -209,6 +290,28 @@ impl Camera {
 
     fn matrix(&self, aspect: f64) -> [f32; 16] {
         let (right, up, direction) = self.basis();
+        if self.projection == Projection::Perspective {
+            let distance = self.eye_distance();
+            let (near, far) = self.depth_range();
+            let focal = distance * 2. / self.span;
+            // W = distância ao observador ao longo da direção de vista. O intervalo
+            // de profundidade do wgpu é [0, 1], diferente do OpenGL clássico [-1, 1].
+            let a = far / (far - near);
+            let b = a * near;
+            let mut matrix = [0_f32; 16];
+            for i in 0..3 {
+                matrix[i * 4] = (right[i] * focal / aspect) as f32;
+                matrix[i * 4 + 1] = (up[i] * focal) as f32;
+                matrix[i * 4 + 2] = (-direction[i] * a) as f32;
+                matrix[i * 4 + 3] = -direction[i] as f32;
+            }
+            let offset = distance + dot(direction, self.target);
+            matrix[12] = (-dot(right, self.target) * focal / aspect) as f32;
+            matrix[13] = (-dot(up, self.target) * focal) as f32;
+            matrix[14] = (a * offset - b) as f32;
+            matrix[15] = offset as f32;
+            return matrix;
+        }
         let sx = 2. / (self.span * aspect);
         let sy = 2. / self.span;
         let mut matrix = [0_f32; 16];
@@ -514,6 +617,23 @@ impl Viewport {
 mod tests {
     use super::*;
 
+    const PROJECTIONS: [Projection; 2] = [Projection::Orthographic, Projection::Perspective];
+    const BOUNDS: Bounds = Bounds {
+        min: [-5.; 3],
+        max: [5.; 3],
+    };
+
+    /// Reproduz o produto coluna-major e a divisão homogênea feitos pelo pipeline.
+    fn gpu_projection(camera: &Camera, bounds: Bounds, point: Point3, aspect: f64) -> Point3 {
+        let matrix = camera.matrix(aspect);
+        let scale = bounds.size().into_iter().fold(0_f64, f64::max);
+        let p = sub(point, bounds.center()).map(|v| (v / scale) as f32);
+        let clip: [f32; 4] = std::array::from_fn(|i| {
+            matrix[i] * p[0] + matrix[4 + i] * p[1] + matrix[8 + i] * p[2] + matrix[12 + i]
+        });
+        std::array::from_fn(|i| f64::from(clip[i] / clip[3]))
+    }
+
     #[test]
     fn changing_scene_bounds_preserves_world_projection() {
         let previous = Bounds {
@@ -524,48 +644,173 @@ mod tests {
             min: [0.; 3],
             max: [20.; 3],
         };
-        let mut camera = Camera::default();
-        let before = camera.matrix(1.);
-        camera.reframe(previous, next);
-        let after = camera.matrix(1.);
         let point = [2., 3., 4.];
-        let project = |matrix: [f32; 16], bounds: Bounds| {
-            let scale = bounds.size().into_iter().fold(0_f64, f64::max);
-            let p = sub(point, bounds.center()).map(|v| (v / scale) as f32);
-            [
-                matrix[0] * p[0] + matrix[4] * p[1] + matrix[8] * p[2] + matrix[12],
-                matrix[1] * p[0] + matrix[5] * p[1] + matrix[9] * p[2] + matrix[13],
-            ]
-        };
-        for (a, b) in project(before, previous)
-            .into_iter()
-            .zip(project(after, next))
-        {
-            assert!((a - b).abs() < 1e-6);
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Camera::default()
+            };
+            camera.pan([70., -30.], 600.);
+            let before = gpu_projection(&camera, previous, point, 1.);
+            camera.reframe(previous, next);
+            let after = gpu_projection(&camera, next, point, 1.);
+            for i in 0..2 {
+                assert!((before[i] - after[i]).abs() < 1e-6);
+            }
         }
     }
 
     #[test]
     fn zoom_preserves_point_beneath_cursor() {
-        let mut camera = Camera::default();
         let cursor = [0.4, -0.3];
         let aspect = 1.6;
-        let (right, up, _) = camera.basis();
-        let point: Point3 = std::array::from_fn(|i| {
-            camera.target[i]
-                + (right[i] * cursor[0] * aspect + up[i] * cursor[1]) * camera.span * 0.5
-        });
-        camera.zoom_at(120., cursor, aspect);
-        let matrix = camera.matrix(aspect);
-        let projected_x = matrix[0] * point[0] as f32
-            + matrix[4] * point[1] as f32
-            + matrix[8] * point[2] as f32
-            + matrix[12];
-        let projected_y = matrix[1] * point[0] as f32
-            + matrix[5] * point[1] as f32
-            + matrix[9] * point[2] as f32
-            + matrix[13];
-        assert!((f64::from(projected_x) - cursor[0]).abs() < 1e-6);
-        assert!((f64::from(projected_y) - cursor[1]).abs() < 1e-6);
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Camera::default()
+            };
+            let point = camera.world_on_target_plane(cursor, BOUNDS, aspect);
+            camera.zoom_at(120., cursor, aspect);
+            let projected = gpu_projection(&camera, BOUNDS, point, aspect);
+            assert!((projected[0] - cursor[0]).abs() < 1e-6);
+            assert!((projected[1] - cursor[1]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn picking_rays_and_overlays_match_the_gpu() -> Result<(), String> {
+        // A caixa longe da origem exercita também a normalização mundo/cena.
+        let bounds = Bounds {
+            min: [120., -80., 30.],
+            max: [180., -60., 60.],
+        };
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Camera::default()
+            };
+            camera.pan([80., -25.], 600.);
+            camera.orbit([20., -10.]);
+            for aspect in [0.6, 1., 1.8] {
+                for cursor in [[0.; 2], [-0.7, 0.3], [0.4, -0.8]] {
+                    let ray = camera.world_ray(cursor, bounds, aspect);
+                    assert!((norm(ray.direction) - 1.).abs() < 1e-12);
+                    for distance in [5., 35., 100.] {
+                        let point =
+                            std::array::from_fn(|i| ray.origin[i] + ray.direction[i] * distance);
+                        let gpu = gpu_projection(&camera, bounds, point, aspect);
+                        let overlay = camera
+                            .project_world(point, bounds, aspect)
+                            .ok_or("Ponto do raio foi recortado")?;
+                        for i in 0..2 {
+                            assert!((gpu[i] - cursor[i]).abs() < 2e-5, "{projection:?}: {gpu:?}");
+                            assert!((overlay[i] - cursor[i]).abs() < 1e-12);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn perspective_makes_nearby_geometry_larger() -> Result<(), String> {
+        let camera = Camera {
+            projection: Projection::Perspective,
+            ..Camera::default()
+        };
+        let (right, _, direction) = camera.basis();
+        let near = std::array::from_fn(|i| 10. * (right[i] * 0.2 + direction[i] * 0.4));
+        let far = std::array::from_fn(|i| 10. * (right[i] * 0.2 - direction[i] * 0.4));
+        let a = camera
+            .project_world(near, BOUNDS, 1.)
+            .ok_or("Ponto próximo recortado")?;
+        let b = camera
+            .project_world(far, BOUNDS, 1.)
+            .ok_or("Ponto distante recortado")?;
+        assert!(a[0] > b[0] * 1.5);
+        Ok(())
+    }
+
+    #[test]
+    fn perspective_clipping_uses_wgpu_depth_and_hides_annotations() {
+        let camera = Camera {
+            projection: Projection::Perspective,
+            ..Camera::default()
+        };
+        let direction = camera.direction();
+        let point_at_depth =
+            |depth: f64| direction.map(|v| 10. * v * (camera.eye_distance() - depth));
+        let (near, far) = camera.depth_range();
+        let a = gpu_projection(&camera, BOUNDS, point_at_depth(near), 1.);
+        let b = gpu_projection(&camera, BOUNDS, point_at_depth(far), 1.);
+        assert!(a[2].abs() < 2e-4);
+        assert!((b[2] - 1.).abs() < 1e-6);
+        for depth in [-1., 0., near * 0.5, far + 1.] {
+            assert!(
+                camera
+                    .project_world(point_at_depth(depth), BOUNDS, 1.)
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn fit_contains_the_scene_in_both_projections() {
+        for projection in PROJECTIONS {
+            for aspect in [0.4, 1., 2.5] {
+                for direction in [[1., 1., 1.], [1., 0., 0.], [0., 0., 1.]] {
+                    let mut camera = Camera {
+                        projection,
+                        ..Camera::default()
+                    };
+                    camera.set_direction(direction);
+                    camera.fit(aspect);
+                    for x in [-5., 5.] {
+                        for y in [-5., 5.] {
+                            for z in [-5., 5.] {
+                                let p = gpu_projection(&camera, BOUNDS, [x, y, z], aspect);
+                                assert!(
+                                    p[0].abs() < 1.
+                                        && p[1].abs() < 1.
+                                        && (0. ..=1.).contains(&p[2]),
+                                    "{projection:?}: {p:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn projection_switch_preserves_target_plane_and_drag_distance() {
+        let mut camera = Camera::default();
+        let cursor = [0.4, -0.3];
+        let point = camera.world_on_target_plane(cursor, BOUNDS, 1.6);
+        let before = gpu_projection(&camera, BOUNDS, point, 1.6);
+        camera.projection = Projection::Perspective;
+        let after = gpu_projection(&camera, BOUNDS, point, 1.6);
+        for i in 0..2 {
+            assert!((before[i] - after[i]).abs() < 1e-6);
+        }
+        let center = camera.world_on_target_plane([0.; 2], BOUNDS, 1.6);
+        let dragged = camera.world_on_target_plane(cursor, BOUNDS, 1.6);
+        // O movimento permanece não nulo: usar a origem dos raios daria praticamente
+        // zero em perspectiva, pois ela está muito próxima do observador comum.
+        assert!(
+            (norm(sub(dragged, center))
+                - 10. * camera.span * 0.5 * (0.64_f64.powi(2) + 0.3_f64.powi(2)).sqrt())
+            .abs()
+                < 1e-12
+        );
+        camera.pan([40., -30.], 600.);
+        assert!(
+            norm(sub(
+                camera.world_on_target_plane([0.; 2], BOUNDS, 1.6),
+                center
+            )) > 0.
+        );
     }
 }

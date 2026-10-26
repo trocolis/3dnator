@@ -50,6 +50,7 @@
 
 ### Visualização e desempenho
 
+- Projeção em perspectiva opcional, com seletor na área 3D e câmera independente por aba; seleção, medições, movimento livre, zoom no cursor e enquadramento acompanham a projeção. A vista ortográfica continua sendo o padrão. Captura reproduzível por `--render-perspective-preview`.
 - Isolamento da seleção, transparência e bloqueio de seleção por instância, e esmaecimento das outras peças durante a construção: controles visuais da aba, sem alterar geometria, histórico ou visibilidade gravada. Corpos translúcidos são desenhados depois dos opacos, com mistura de cores.
 - Arestas vivas (dobras acima de 30°, bordas abertas) exibidas por padrão, calculadas uma vez por geometria.
 - Triangulação e arestas desenhadas no shader por coordenadas baricêntricas, sem buffer de linhas: a memória da GPU por triângulo caiu de 216 para 84 bytes.

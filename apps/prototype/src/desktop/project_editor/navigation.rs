@@ -265,20 +265,15 @@ impl Editor {
             let a = self
                 .viewport
                 .camera
-                .world_ray([0.; 2], bounds, aspect)
-                .origin;
-            let b = self
-                .viewport
-                .camera
-                .world_ray(
-                    [
-                        f64::from(d.x / response.rect.width() * 2.),
-                        f64::from(-d.y / response.rect.height() * 2.),
-                    ],
-                    bounds,
-                    aspect,
-                )
-                .origin;
+                .world_on_target_plane([0.; 2], bounds, aspect);
+            let b = self.viewport.camera.world_on_target_plane(
+                [
+                    f64::from(d.x / response.rect.width() * 2.),
+                    f64::from(-d.y / response.rect.height() * 2.),
+                ],
+                bounds,
+                aspect,
+            );
             let delta = sub(b, a);
             let result = match self.current().selection {
                 Some(Selection::Instance(id)) if self.current().active_part.is_none() => {
@@ -528,25 +523,28 @@ impl Editor {
             return;
         };
         let screen = |p| {
-            let p = self
-                .viewport
-                .camera
-                .project_world(p, bounds, f64::from(rect.aspect_ratio()));
-            rect.center()
-                + egui::vec2(
-                    p[0] as f32 * rect.width() / 2.,
-                    -p[1] as f32 * rect.height() / 2.,
-                )
+            let p =
+                self.viewport
+                    .camera
+                    .project_world(p, bounds, f64::from(rect.aspect_ratio()))?;
+            Some(
+                rect.center()
+                    + egui::vec2(
+                        p[0] as f32 * rect.width() / 2.,
+                        -p[1] as f32 * rect.height() / 2.,
+                    ),
+            )
         };
-        if let Some(p) = &self.current().picked {
-            ui.painter().circle_stroke(
-                screen(p.point),
-                6.,
-                egui::Stroke::new(2., egui::Color32::YELLOW),
-            );
+        if let Some(p) = &self.current().picked
+            && let Some(position) = screen(p.point)
+        {
+            ui.painter()
+                .circle_stroke(position, 6., egui::Stroke::new(2., egui::Color32::YELLOW));
         }
-        if let [a, b] = self.current().measurements.as_slice() {
-            let p = [screen(*a), screen(*b)];
+        if let [a, b] = self.current().measurements.as_slice()
+            && let (Some(start), Some(end)) = (screen(*a), screen(*b))
+        {
+            let p = [start, end];
             ui.painter()
                 .line_segment(p, egui::Stroke::new(1.5, egui::Color32::LIGHT_GREEN));
             ui.painter().text(

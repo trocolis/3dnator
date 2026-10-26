@@ -17,6 +17,8 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 | `ui` | Painéis, ferramentas interativas, atalhos e traduções |
 | `app` | Inicialização e integração com Linux e Windows |
 
+A câmera de apresentação oferece projeção ortográfica (padrão) e perspectiva com campo vertical de 45°. A escala é definida no plano do alvo para manter pan, zoom e movimento livre consistentes entre projeções. Matriz da GPU, raios de seleção e projeção das medições usam a mesma câmera, mantida por aba durante a sessão; pontos recortados em profundidade não recebem anotações.
+
 ## Limites e dependências
 
 - A interface solicita alterações por comandos, em vez de modificar diretamente o documento.

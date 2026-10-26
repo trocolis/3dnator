@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — perspectiva (26/10/2026)
+
+- `cargo fmt --all -- --check` e Clippy do workspace com avisos negados, com e sem OCCT: aprovados.
+- Testes do workspace: 73 aprovados sem OCCT e 95 com OCCT 7.9.3. A câmera é verificada nas duas projeções quanto a zoom no cursor, alteração dos limites da cena, correspondência entre seleção/anotações e matriz da GPU, profundidade wgpu [0, 1], enquadramento e movimento livre.
+- Capturas reais pelo wgpu, backend GL/llvmpipe: perspectiva com 31.763 pixels de superfície e 1.564 pixels alterados pela triangulação; ortográfica com 39.690 e 1.644, respectivamente. O estilo transparente reduziu o brilho para aproximadamente 69,8% nas duas projeções, sem erro de validação wgpu.
+- Evidências locais: `target/codex-validation/perspective-001.png`, `orthographic-001.png` e `editor-001.png`. As capturas não validam interação manual ou desempenho de GPU física.
+
 ## Incremento 0.3.0 com OCCT — 26/10/2026
 
 Validação em Linux x86_64 (Arch, Rust 1.99.1, GCC 16.2.1) com OCCT 7.9.3 extraído do pacote oficial do Arch, checksum conferido com o banco de dados assinado do pacman. Primeira execução da ponte C++ com um SDK real.

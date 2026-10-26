@@ -537,7 +537,9 @@ impl Editor {
                     self.viewport.camera.fit(f64::from(w) / f64::from(h));
                 }
                 if ui.button(text(T::Iso)).clicked() {
-                    self.viewport.camera = Camera::default();
+                    self.viewport
+                        .camera
+                        .set_direction(Camera::default().direction());
                 }
                 if ui.button(text(T::Front)).clicked() {
                     self.viewport.camera.yaw = -std::f64::consts::FRAC_PI_2;
@@ -551,6 +553,25 @@ impl Editor {
                     self.viewport.camera.yaw = 0.;
                     self.viewport.camera.pitch = 0.;
                 }
+                egui::ComboBox::from_id_salt("camera_projection")
+                    .selected_text(text(match self.viewport.camera.projection {
+                        nator_renderer::Projection::Orthographic => T::Orthographic,
+                        nator_renderer::Projection::Perspective => T::Perspective,
+                    }))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.viewport.camera.projection,
+                            nator_renderer::Projection::Orthographic,
+                            text(T::Orthographic),
+                        );
+                        ui.selectable_value(
+                            &mut self.viewport.camera.projection,
+                            nator_renderer::Projection::Perspective,
+                            text(T::Perspective),
+                        );
+                    })
+                    .response
+                    .on_hover_text(text(T::Projection));
             });
             let size = ui.available_size().max(egui::vec2(1., 1.));
             let pixels = ui.ctx().pixels_per_point();
@@ -598,7 +619,6 @@ impl Editor {
                     );
                 }
             }
-            self.current_mut().camera = self.viewport.camera.clone();
             self.viewport.render(&self.gpu.device, &self.gpu.queue);
             if self.scene.is_none() && !self.busy() {
                 ui.painter().text(
@@ -611,6 +631,7 @@ impl Editor {
             }
             self.navigation_cube(ui, response.rect);
             self.measure_overlay(ui, response.rect);
+            self.current_mut().camera = self.viewport.camera.clone();
         });
     }
     pub(super) fn dialogs(&mut self, context: &egui::Context) {
