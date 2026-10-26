@@ -17,7 +17,7 @@ O protótipo oferece, em resumo:
 - projetos em abas, desfazer/refazer, salvamento autocontido e recuperação automática;
 - rascunhos com restrições, cotas ligadas a parâmetros, aparar, estender, offset, espelhamento, padrões e refinamento de cantos;
 - histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca, furos (rebaixo, escareado, passantes, rosca registrada), padrões, espelhamento e divisão, com referências estáveis a regiões, faces e arestas;
-- seleção de arestas e faces na área 3D, medição exata no B-rep e montagem com subpeças, clones, grupos, padrões e espelhamento de instâncias;
+- seleção de arestas e faces na área 3D, medição exata no B-rep e montagem com subpeças, clones, grupos, padrões e espelhamento de instâncias e conjuntos aninhados;
 - folhas técnicas com vistas, cotas, corte A–A hachurado e exportação PNG/PDF;
 - exportação STL por corpo, por definição ou da montagem, com qualidade escolhida, e STEP de sólidos.
 

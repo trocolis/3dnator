@@ -115,14 +115,35 @@ impl Document {
         validate_name(&name)?;
         self.validate_assembly()?;
         let mut map = HashMap::new();
-        let id = self.clone_definition(source, &mut map)?;
+        let mut instances = HashMap::new();
+        let id = self.clone_definition(source, &mut map, &mut instances)?;
         self.part_mut(id)?.name = name;
+        // Grupos internos pertencem à organização do conjunto clonado. Só copiamos
+        // grupos inteiramente contidos nele; grupos do nível externo não ganham membros
+        // inesperados nem continuam apontando para instâncias da peça original.
+        let groups = self
+            .groups
+            .iter()
+            .filter(|g| !g.members.is_empty())
+            .filter_map(|g| {
+                let members = g
+                    .members
+                    .iter()
+                    .map(|id| instances.get(id).copied())
+                    .collect::<Option<Vec<_>>>()?;
+                Some((g.name.clone(), members))
+            })
+            .collect::<Vec<_>>();
+        for (name, members) in groups {
+            self.add_group(name, members)?;
+        }
         Ok(id)
     }
     fn clone_definition(
         &mut self,
         source: PartId,
         map: &mut HashMap<PartId, PartId>,
+        instances: &mut HashMap<InstanceId, InstanceId>,
     ) -> Result<PartId, DocumentError> {
         if let Some(id) = map.get(&source) {
             return Ok(*id);
@@ -168,9 +189,11 @@ impl Document {
             .cloned()
             .collect::<Vec<_>>();
         for mut child in children {
-            child.id = InstanceId(self.allocate_id()?);
+            let instance = InstanceId(self.allocate_id()?);
+            instances.insert(child.id, instance);
+            child.id = instance;
             child.parent = Some(id);
-            child.part = self.clone_definition(child.part, map)?;
+            child.part = self.clone_definition(child.part, map, instances)?;
             self.instances.push(child);
         }
         Ok(id)

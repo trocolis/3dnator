@@ -52,9 +52,38 @@ impl Placement {
         });
         Self::from_matrix(self.apply(child.translation), matrix)
     }
+
+    /// Espelha o referencial no plano do pai, mantendo uma posição rígida destra.
+    ///
+    /// Uma reflexão isolada tem determinante -1 e não cabe em `Placement`. A imagem
+    /// da geometria deve ser refletida também no plano local X = 0: se M é a reflexão
+    /// no pai e S a reflexão local, esta posição representa M · self · S. As duas
+    /// inversões se cancelam, preservando rotações próprias e o compartilhamento de
+    /// uma mesma definição espelhada entre componentes com orientações diferentes.
+    pub fn mirrored_frame(self, origin: Point3, normal: Point3) -> Result<Self, GeometryError> {
+        let length = crate::norm(normal);
+        if !length.is_finite() || length < 1e-12 || origin.iter().any(|v| !v.is_finite()) {
+            return Err(GeometryError("Plano de espelhamento inválido.".into()));
+        }
+        let n = normal.map(|v| v / length);
+        let distance = crate::dot(crate::sub(self.translation, origin), n);
+        let translation = std::array::from_fn(|i| self.translation[i] - 2. * distance * n[i]);
+        let matrix = std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                let projection: f64 = (0..3).map(|k| n[k] * self.matrix[k][j]).sum();
+                let reflected = self.matrix[i][j] - 2. * n[i] * projection;
+                if j == 0 { -reflected } else { reflected }
+            })
+        });
+        Self::from_matrix(translation, matrix)
+    }
     fn from_matrix(translation: Point3, matrix: [[f64; 3]; 3]) -> Result<Self, GeometryError> {
-        let y = (-matrix[2][0]).clamp(-1., 1.).asin();
-        let (x, z) = if y.cos().abs() > 1e-10 {
+        // atan2 conserva a distância à singularidade usando também a projeção do eixo X.
+        // asin perde essa informação perto de ±90°: arredondamentos em R[2][0] podem
+        // fazer uma rotação singular entrar no ramo regular com ângulos inconsistentes.
+        let horizontal = matrix[0][0].hypot(matrix[1][0]);
+        let y = (-matrix[2][0]).atan2(horizontal);
+        let (x, z) = if horizontal > 1e-10 {
             (
                 matrix[2][1].atan2(matrix[2][2]),
                 matrix[1][0].atan2(matrix[0][0]),
@@ -124,6 +153,55 @@ mod tests {
             assert!((actual - expected).abs() < 1e-10);
         }
         assert!(Placement::new([f64::NAN, 0., 0.], [0.; 3]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn mirrored_frames_compensate_local_reflection_with_a_proper_rotation()
+    -> Result<(), GeometryError> {
+        let origin = [12., -5., 7.];
+        let normal = [2., -3., 4.];
+        let length = crate::norm(normal);
+        let n = normal.map(|v| v / length);
+        for angles in [
+            [0.2, -0.7, 1.1],
+            [0.3, std::f64::consts::FRAC_PI_2, -0.5],
+            [0.3, -std::f64::consts::FRAC_PI_2, -0.5],
+        ] {
+            let source = Placement::new([80., -30., 45.], angles)?;
+            let mirrored = source.mirrored_frame(origin, normal)?;
+            for point in [[0.; 3], [2., 7., -4.], [-20., 3., 40.]] {
+                let world = source.apply(point);
+                let distance = crate::dot(crate::sub(world, origin), n);
+                let expected: Point3 = std::array::from_fn(|i| world[i] - 2. * distance * n[i]);
+                let actual = mirrored.apply([-point[0], point[1], point[2]]);
+                assert!(crate::norm(crate::sub(expected, actual)) < 1e-8);
+            }
+            let x = crate::sub(mirrored.apply([1., 0., 0.]), mirrored.translation_mm());
+            let y = crate::sub(mirrored.apply([0., 1., 0.]), mirrored.translation_mm());
+            let z = crate::sub(mirrored.apply([0., 0., 1.]), mirrored.translation_mm());
+            assert!((crate::dot(crate::cross(x, y), z) - 1.).abs() < 1e-12);
+            // Espelhar novamente pelo mesmo plano desfaz a troca do referencial.
+            let restored = mirrored.mirrored_frame(origin, normal)?;
+            assert!(
+                crate::norm(crate::sub(
+                    source.apply([3., 4., 5.]),
+                    restored.apply([3., 4., 5.])
+                )) < 1e-8
+            );
+        }
+        for invalid in [[0.; 3], [f64::NAN, 0., 0.], [f64::MAX; 3]] {
+            assert!(
+                Placement::default()
+                    .mirrored_frame(origin, invalid)
+                    .is_err()
+            );
+        }
+        assert!(
+            Placement::default()
+                .mirrored_frame([f64::INFINITY; 3], normal)
+                .is_err()
+        );
         Ok(())
     }
 }

@@ -30,6 +30,9 @@
 
 - Padrão linear ou circular de instâncias, que compartilham a definição e ficam reunidas em um grupo; desagrupar libera cada posição.
 - Espelhamento de instância como peça nova e independente: sólidos recebem uma operação final de espelhamento no histórico do clone, que continua paramétrico; corpos de malha são refletidos com a orientação das faces corrigida.
+- Espelhamento de conjuntos com subpeças aninhadas e rotacionadas, preservando o compartilhamento entre componentes repetidos dentro da cópia independente, os grupos internos e a visibilidade de corpos finais e ocorrências ocultos. Desfazer/refazer inclui a hierarquia inteira em uma ação.
+- Clones independentes também preservam os grupos internos do conjunto; grupos externos mantêm seus membros originais.
+- Corrigida a conversão de matrizes para ângulos perto de ±90°, evitando erros de orientação ao compor ou espelhar posições.
 - Novo rascunho na face selecionada, de qualquer peça visível, com o plano capturado em coordenadas da peça de destino.
 
 ### Documentação técnica

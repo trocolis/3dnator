@@ -292,6 +292,173 @@ fn mirrored_solid_instance_keeps_its_own_parametric_history() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn mirrored_subassembly_keeps_shared_parametric_solids_independent() -> Result<()> {
+    use nator_commands::measure;
+    use nator_document::{InstanceId, MeshAsset};
+    use nator_geometry::{Placement, Point3, dot, norm, sub};
+    use std::sync::Arc;
+
+    let mut session = Session::new(Document::new("Conjunto misto")?)?;
+    let (root, root_body) = plate(&mut session)?;
+    let (child, child_body) = plate(&mut session)?;
+    let child_sketch = session
+        .document()
+        .part(child)
+        .ok_or("Subpeça ausente")?
+        .sketches[0]
+        .id;
+    let hidden = feature(
+        &mut session,
+        child,
+        "Placa oculta",
+        Operation::Extrude {
+            sketch: child_sketch,
+            region: RegionRef::Index(0),
+            from: "0 mm".into(),
+            to: "espessura / 2".into(),
+            combine: None,
+            until: None,
+        },
+    )?;
+    let mut doc = session.document().clone();
+    let selected = doc.instances()[0].id;
+    let nested = doc.instances()[1].id;
+    doc.instance_mut(selected)?.placement = Placement::new([75., -20., 10.], [0.4, -0.2, 0.6])?;
+    doc.reparent(nested, Some(root))?;
+    doc.instance_mut(nested)?.placement = Placement::new([90., 30., 20.], [0.2, 0.7, -0.5])?;
+    doc.add_instance(
+        child,
+        Some(root),
+        Placement::new([-50., 60., 5.], [-0.3, 0.4, 0.9])?,
+    )?;
+    doc.body_mut(root_body)?.placement = Placement::new([5., -3., 10.], [0.2, 0.3, -0.1])?;
+    doc.body_mut(child_body)?.placement = Placement::new([-5., 4., 3.], [-0.1, 0.2, 0.5])?;
+    doc.body_mut(hidden)?.visible = false;
+    // O conjunto combina um corpo de malha com sólidos paramétricos na mesma definição.
+    doc.add_mesh(
+        Some(root),
+        "Referência STL".into(),
+        Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+    )?;
+    let mut session = Session::new(doc)?;
+    let before = session.document().clone();
+    let origin = [10., -5., 8.];
+    let normal: Point3 = [2., -3., 4.];
+    session.execute(Command::MirrorInstance {
+        id: selected,
+        origin,
+        normal,
+        name: "Conjunto esquerdo".into(),
+    })?;
+    let image_instance = session
+        .document()
+        .instances()
+        .last()
+        .ok_or("Imagem ausente")?
+        .id;
+    let image_root = session
+        .document()
+        .instance(image_instance)
+        .ok_or("Instância ausente")?
+        .part;
+    let children = session
+        .document()
+        .instances()
+        .iter()
+        .filter(|i| i.parent == Some(image_root))
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].part, children[1].part);
+    let image_child = children[0].part;
+    assert_ne!(image_child, child);
+    assert_eq!(session.document().parts().len(), before.parts().len() + 2);
+
+    // Compara volume, área e centro de massa exatos de cada ocorrência; as rotações
+    // próprias do conjunto, dos componentes e dos corpos entram no mesmo cálculo.
+    let properties = |doc: &Document, root: InstanceId| -> Result<Vec<(Point3, f64, f64)>> {
+        let mut result = Vec::new();
+        for occurrence in doc.occurrences()?.iter().filter(|o| o.path.contains(&root)) {
+            let part = doc
+                .instance(occurrence.instance)
+                .and_then(|i| doc.part(i.part))
+                .ok_or("Peça ausente")?;
+            for body in part.bodies.iter().filter(|b| b.visible && b.brep.is_some()) {
+                let p = measure::body_properties(doc, body.id)?;
+                assert!(p.exact);
+                assert!(body.geometry.topology().has_closed_oriented_edges());
+                assert!(body.face_names.iter().all(|n| !n.is_empty()));
+                result.push((
+                    occurrence.placement.apply(p.center_mm),
+                    p.volume_mm3,
+                    p.area_mm2,
+                ));
+            }
+        }
+        Ok(result)
+    };
+    let original = properties(&before, selected)?;
+    let image = properties(session.document(), image_instance)?;
+    assert_eq!(original.len(), 3);
+    assert_eq!(original.len(), image.len());
+    let n = normal.map(|v| v / norm(normal));
+    for ((center, volume, area), (actual, image_volume, image_area)) in original.iter().zip(&image)
+    {
+        let distance = dot(sub(*center, origin), n);
+        let expected = std::array::from_fn(|i| center[i] - 2. * distance * n[i]);
+        assert!(norm(sub(expected, *actual)) < 1e-7);
+        assert!((volume - image_volume).abs() < 1e-6);
+        assert!((area - image_area).abs() < 1e-6);
+    }
+    let piece = session
+        .document()
+        .part(image_child)
+        .ok_or("Clone ausente")?;
+    assert_eq!(piece.features.len(), 4);
+    let reflected_outputs = piece
+        .features
+        .iter()
+        .filter(|f| matches!(f.operation, Operation::Mirror { .. }))
+        .map(|f| f.output)
+        .collect::<Vec<_>>();
+    assert_eq!(reflected_outputs.len(), 2);
+    assert!(
+        !session
+            .document()
+            .body(reflected_outputs[1])
+            .ok_or("Corpo oculto ausente")?
+            .visible
+    );
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("mirrored-solids.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let mut reopened = Session::new(nator_project_io::read_project(&path)?)?;
+    // Editar a subpeça espelhada depois de reabrir mantém os dois componentes ligados
+    // à definição nova; a peça original e o histórico da raiz permanecem independentes.
+    reopened.execute(Command::SetParameter {
+        part: image_child,
+        name: "espessura".into(),
+        expression: Some("15 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    assert!((volume(&reopened, reflected_outputs[0])? - 60. * 40. * 15.).abs() < 1e-6);
+    assert!((volume(&reopened, reflected_outputs[1])? - 60. * 40. * 7.5).abs() < 1e-6);
+    assert!((volume(&reopened, child_body)? - 60. * 40. * 8.).abs() < 1e-6);
+    assert!((volume(&reopened, root_body)? - 60. * 40. * 8.).abs() < 1e-6);
+    assert!(
+        !reopened
+            .document()
+            .body(reflected_outputs[1])
+            .ok_or("Corpo oculto ausente")?
+            .visible
+    );
+    assert_eq!(
+        properties(&before, selected)?,
+        properties(reopened.document(), selected)?
+    );
+    Ok(())
+}
+
 /// Medidas exatas no B-rep: propriedades de massa, raio de um furo e distância entre peças.
 #[test]
 fn exact_measurements_on_solids() -> Result<()> {

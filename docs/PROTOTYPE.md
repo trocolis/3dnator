@@ -29,6 +29,12 @@ Projetos abrem em abas. Cada aba mantém documento, seleção, câmera, contexto
 
 A composição da cena e a preparação CPU dos buffers ocorrem em segundo plano. A interface só faz o upload para a GPU. Enquanto uma tarefa estiver ativa, as edições ficam desabilitadas; navegação e troca de abas continuam disponíveis. Resultados de importação e cena identificam a aba e a revisão que os originaram.
 
+## Espelhamento de conjuntos
+
+Selecione uma instância na árvore e abra **Organizar montagem**. Escolha o plano principal e seu deslocamento, em coordenadas do pai da instância, e use **Espelhar como nova peça**. O comando cria uma cópia independente de todo o conjunto, incluindo subpeças aninhadas, corpos ocultos e grupos internos. Componentes que compartilhavam uma definição continuam compartilhando a definição nova dentro da cópia. Os grupos do nível externo conservam seus membros originais.
+
+Sólidos recebem uma operação final de espelhamento no histórico de cada definição clonada e continuam editáveis por parâmetros; malhas são refletidas diretamente. A visibilidade dos resultados é preservada. Uma falha em qualquer subpeça cancela a operação inteira. Desfazer/refazer trata a criação do conjunto espelhado como uma única ação.
+
 ## Salvar e recuperar
 
 **Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 7, independente da versão do aplicativo, com migração de projetos anteriores.

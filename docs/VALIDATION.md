@@ -1,5 +1,14 @@
 # Validação local do protótipo
 
+## Continuação 0.3.0 — espelhamento de conjuntos (26/10/2026)
+
+- Testes do workspace: 78 aprovados sem OCCT e 101 com OCCT 7.9.3. Formatação e Clippy com avisos negados aprovados nas duas configurações.
+- Novas regressões cobrem planos oblíquos nas coordenadas de um pai rotacionado, corpos posicionados localmente, definições compartilhadas por vários caminhos, grupos internos, ocorrências e corpos finais ocultos, salvamento/reabertura, duplo espelhamento, desfazer/refazer e preservação do documento e do refazer após falhas.
+- A rotação da imagem mantém determinante +1. Casos em ±90° verificam também a correção da conversão de matrizes para ângulos, que perdia precisão perto da singularidade.
+- Com o núcleo real, verificados volume, área e centro de massa de três ocorrências sólidas em um conjunto com corpo de malha. Alterar a espessura da subpeça espelhada de 8 para 15 mm depois de reabrir recalcula seus corpos visível e oculto, mantendo as definições originais independentes.
+- Ensaios `--validate-editor` e `--validate-part` aprovados; relatórios e arquivos em `target/codex-validation/assembly-editor-001/` e `assembly-part-001/`, respectivamente. O ciclo da peça conserva volume analítico, referências, persistência e intercâmbio STEP/STL.
+- Validação Windows e interação manual com o diálogo de montagem continuam pendentes. O formato do projeto permanece na versão interna 7.
+
 ## Continuação 0.3.0 — perspectiva (26/10/2026)
 
 - `cargo fmt --all -- --check` e Clippy do workspace com avisos negados, com e sem OCCT: aprovados.

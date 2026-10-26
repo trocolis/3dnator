@@ -1,4 +1,5 @@
-//! Transações de documento, separadas do futuro histórico de operações paramétricas.
+//! Transações do documento e coordenação do histórico paramétrico, com desfazer/refazer.
+mod assembly;
 pub mod export;
 mod features;
 pub mod measure;
@@ -228,7 +229,7 @@ impl Command {
                 origin,
                 normal,
                 name,
-            } => mirror_instance(doc, id, origin, normal, name)?,
+            } => assembly::mirror_instance(doc, id, origin, normal, name)?,
             Self::EditFeature {
                 part,
                 output,
@@ -421,80 +422,6 @@ fn add_feature(
             operation,
         });
     Ok(output)
-}
-
-/// Espelhamento de montagem: uma reflexão não é uma posição rígida, então a imagem vira uma
-/// peça nova (clone independente) na mesma posição, com a geometria refletida em
-/// coordenadas locais. Sólidos recebem uma operação final de espelhamento no histórico do
-/// clone, que continua paramétrico; corpos de malha são refletidos diretamente.
-fn mirror_instance(
-    doc: &mut Document,
-    id: InstanceId,
-    origin: [f64; 3],
-    normal: [f64; 3],
-    name: String,
-) -> Result<(), DocumentError> {
-    use nator_geometry::sub;
-    let source = doc
-        .instance(id)
-        .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
-        .clone();
-    if doc
-        .instances()
-        .iter()
-        .any(|i| i.parent == Some(source.part))
-    {
-        return Err(DocumentError(
-            "Espelhar uma peça com subpeças ainda não é suportado; espelhe as subpeças individualmente."
-                .into(),
-        ));
-    }
-    if nator_geometry::norm(normal) < 1e-9 || normal.iter().chain(&origin).any(|v| !v.is_finite()) {
-        return Err(DocumentError("Plano de espelhamento inválido.".into()));
-    }
-    let part = doc.clone_part(source.part, name)?;
-    // Plano nas coordenadas da peça: a instância conserva a posição da original.
-    let to_local = |p: Placement, point: [f64; 3], vector: [f64; 3]| {
-        (
-            p.inverse_apply(point),
-            sub(p.inverse_apply(vector), p.inverse_apply([0.; 3])),
-        )
-    };
-    let (local_origin, local_normal) = to_local(source.placement, origin, normal);
-    let visible = doc
-        .part(part)
-        .ok_or_else(|| DocumentError("Peça espelhada ausente.".into()))?
-        .bodies
-        .iter()
-        .filter(|b| b.visible)
-        .map(|b| (b.id, b.brep.is_some(), b.placement))
-        .collect::<Vec<_>>();
-    for (body, solid, placement) in visible {
-        if solid {
-            add_feature(
-                doc,
-                part,
-                "Espelhamento da montagem".into(),
-                nator_document::features::Operation::Mirror {
-                    base: body,
-                    origin: local_origin,
-                    normal: local_normal,
-                    keep_original: false,
-                },
-            )?;
-        } else {
-            let (o, n) = to_local(placement, local_origin, local_normal);
-            let target = doc.body_mut(body)?;
-            let mesh = target
-                .geometry
-                .mesh()
-                .reflected(o, n)
-                .map_err(|e| DocumentError(e.to_string()))?;
-            target.geometry = Arc::new(MeshAsset::new(mesh));
-        }
-    }
-    doc.add_instance(part, source.parent, source.placement)?;
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
