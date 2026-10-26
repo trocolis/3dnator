@@ -468,6 +468,13 @@ pub enum Text {
     InsertIntoPart,
     InsertAtRoot,
     SketchFaceShort,
+    PivotPicked,
+    InsertMesh,
+    FileUnit,
+    CustomScale,
+    FileSize,
+    ResultSize,
+    MeshImportHint,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -979,5 +986,14 @@ pub fn text(key: Text) -> &'static str {
             "A cópia entra na raiz da montagem, independente do arquivo de origem."
         }
         Text::SketchFaceShort => "Na face",
+        Text::PivotPicked => "Ponto escolhido na área 3D (vértice, aresta ou face)",
+        Text::InsertMesh => "Inserir malha STL",
+        Text::FileUnit => "Unidade do arquivo",
+        Text::CustomScale => "Fator",
+        Text::FileSize => "Dimensões lidas",
+        Text::ResultSize => "Dimensões em mm",
+        Text::MeshImportHint => {
+            "O STL não informa a unidade. Confira as dimensões antes de inserir; a malha entra como corpo de referência, sem conversão para sólido."
+        }
     }
 }

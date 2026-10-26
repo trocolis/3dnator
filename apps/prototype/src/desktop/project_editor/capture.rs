@@ -38,11 +38,11 @@ pub(crate) fn render_ui_scenario(
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
-        | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" => {}
+        | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import."
                     .into(),
             );
         }
@@ -239,6 +239,25 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(Some(Selection::Body { part, id: body }));
+        }
+        "mesh-import" => {
+            // STL em polegadas: o suporte de referência dividido por 25,4.
+            let mesh = reference_bracket()?;
+            let inches = Mesh::new(
+                mesh.vertices()
+                    .iter()
+                    .map(|p| p.map(|v| v / 25.4))
+                    .collect(),
+                mesh.triangles().to_vec(),
+            )?;
+            editor.mesh_import = Some(mesh_import::MeshImportDraft::new(
+                tab,
+                editor.current().session.revision(),
+                None,
+                "suporte-polegadas".into(),
+                inches,
+                1.,
+            ));
         }
         "insert" => {
             // Do projeto auxiliar, inserir uma peça do projeto capturado.

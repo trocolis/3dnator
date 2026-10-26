@@ -41,6 +41,9 @@ enum Pivot {
     Center,
     /// Origem do primeiro elemento.
     Origin,
+    /// Ponto escolhido na área 3D (vértice, aresta ou face, conforme o modo de seleção),
+    /// capturado ao escolher a opção.
+    Point(Point3),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -168,8 +171,10 @@ fn bodies_center<'a>(bodies: impl Iterator<Item = &'a nator_document::Body>) -> 
 /// Ponto do pivô no mundo.
 fn pivot_point(tab: &Tab, frames: &[Frame], pivot: Pivot) -> Option<Point3> {
     let document = tab.session.document();
-    if pivot == Pivot::Origin {
-        return frames.first().map(|f| f.world.apply([0.; 3]));
+    match pivot {
+        Pivot::Origin => return frames.first().map(|f| f.world.apply([0.; 3])),
+        Pivot::Point(point) => return Some(point),
+        Pivot::Center => {}
     }
     let mut sum = [0.; 3];
     let mut count = 0.;
@@ -476,7 +481,8 @@ impl Editor {
     /// o consumiu. A consulta é síncrona: só o raio contra as malhas visíveis.
     pub(super) fn assembly_pick(&mut self, response: &egui::Response) -> bool {
         let waiting = match &self.assembly_panel {
-            Some(Panel::Move(d)) => d.picking && d.drag.is_none(),
+            // Fora do campo Objetos, o clique escolhe um ponto (para o pivô).
+            Some(Panel::Move(d)) => d.drag.is_none(),
             Some(Panel::Align(d)) => d.field.is_some(),
             Some(Panel::Pattern(d)) => d.picking,
             Some(Panel::Mirror(d)) => d.picking,
@@ -523,7 +529,12 @@ impl Editor {
         } else {
             Selection::Instance(pick.instance)
         };
+        let mode = self.pick_mode;
         match &mut self.assembly_panel {
+            Some(Panel::Move(d)) if !d.picking => {
+                navigation::snap_pick(&mut pick, mode);
+                self.current_mut().picked = Some(pick);
+            }
             Some(Panel::Move(d)) => {
                 // Alterna o elemento; na construção, só corpos da peça ativa se movem.
                 if active.is_some_and(|p| p != pick.part) {
@@ -598,6 +609,7 @@ impl Editor {
             Panel::Mirror(_) => (Icon::Mirror, T::MirrorComponent),
         };
         let document = self.current().session.document().clone();
+        let picked = self.current().picked.as_ref().map(|p| p.point);
         let outcome = panel::show(
             context,
             panel::Header {
@@ -609,7 +621,7 @@ impl Editor {
             footer,
             command.is_some() && !self.busy(),
             |ui| match &mut panel {
-                Panel::Move(d) => move_panel(ui, d, &document),
+                Panel::Move(d) => move_panel(ui, d, &document, picked),
                 Panel::Align(d) => align_panel(ui, d, &document),
                 Panel::Pattern(d) => pattern_panel(ui, d, &document),
                 Panel::Mirror(d) => mirror_panel(ui, d, &document),
@@ -979,7 +991,7 @@ fn number_row(ui: &mut egui::Ui, label: &str, values: &mut Point3, suffix: &str,
     });
 }
 
-fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document) {
+fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked: Option<Point3>) {
     let description = d.targets.first().map(|t| item_name(document, *t));
     let s = panel::selection(
         ui,
@@ -1012,6 +1024,17 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document) {
                 (Pivot::Origin, Icon::Fit, T::PivotOrigin),
             ],
         );
+        let chosen = matches!(d.pivot, Pivot::Point(_));
+        if ui
+            .add_enabled_ui(picked.is_some() || chosen, |ui| {
+                icons::button(ui, Icon::Select, text(T::PivotPicked), false, chosen)
+            })
+            .inner
+            .clicked()
+            && let Some(point) = picked
+        {
+            d.pivot = Pivot::Point(point);
+        }
     });
     ui.checkbox(&mut d.copy, text(T::CreateCopy));
     ui.horizontal(|ui| {

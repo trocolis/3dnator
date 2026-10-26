@@ -35,7 +35,7 @@ Na base fica a linha do tempo das operações da peça ativa, como nos CADs de m
 - **Reordenar:** arraste uma operação para outra posição. A ordem só muda se tudo o que ela usa continuar antes dela e tudo o que usa seu resultado continuar depois; caso contrário, uma mensagem nomeia a dependência.
 - **Menu de contexto (botão direito):** editar operação, editar o rascunho do perfil, renomear, suprimir/reativar, mover o marcador para depois da operação e excluir. Duplo clique edita; Delete exclui a operação destacada.
 - **Estados:** operações suprimidas aparecem riscadas em vermelho; as que dependem de uma suprimida ficam acinzentadas, sem construir; as posteriores ao marcador ficam veladas. Suprimir não recalcula o restante; reativar reconstrói o que volta ao histórico.
-- **Excluir com dependentes:** se outras operações usam o resultado, um diálogo lista todas e oferece excluí-las juntas ou cancelar. Sem dependentes, a exclusão é imediata (e reversível por desfazer).
+- **Excluir com dependentes:** se outras operações usam o resultado, um diálogo lista todas e oferece excluí-las juntas ou cancelar, com a prévia do resultado na área 3D. Sem dependentes, a exclusão é imediata (e reversível por desfazer).
 
 ### Falha no recálculo
 
@@ -54,6 +54,10 @@ Nenhuma referência perdida é substituída por outra face ou aresta: a decisão
 - **Ctrl+clique** acrescenta ou retira um elemento, na área 3D e na árvore. Clicar no vazio limpa a seleção.
 - **Janela:** arraste com o botão esquerdo a partir de um ponto livre. Da esquerda para a direita (contorno azul), entram só os elementos inteiramente contidos; da direita para a esquerda (tracejado verde), os tocados. Com Ctrl, a janela acrescenta à seleção. Na montagem, a unidade é a instância; na construção, o corpo da peça ativa.
 - **Sobrepostos:** segure o botão esquerdo parado sobre o modelo para listar todos os elementos sob o cursor, do mais próximo ao mais distante. Percorrer a lista realça cada um; o clique seleciona (com Ctrl, alterna). Esc ou um clique fora fecha a lista.
+
+## Importação de STL
+
+O STL não informa a unidade. Depois da leitura, o painel **Inserir malha STL** mostra o nome, a quantidade de triângulos, as dimensões lidas e as dimensões resultantes em milímetros para a unidade escolhida (mm, cm, m, in ou um fator personalizado). OK insere o corpo de malha com a escala aplicada; Cancelar descarta a leitura. A malha continua sendo referência, sem conversão para sólido.
 
 ## Peças de outro projeto
 
@@ -84,7 +88,7 @@ O corte é um controle visual da aba, como isolamento e transparência: não alt
 ## Montagem e posicionamento
 
 - **Árvore:** cada componente mostra o olho de visibilidade, o botão de ativação (círculo preenchido na peça em construção; clicar ativa ou volta à montagem) e o nome da ocorrência, com a definição na dica. O botão direito abre o menu do componente: ativar, Mover/Copiar, nova instância, clone independente, padrões, espelhar, inserir dentro de outra peça, agrupar a seleção, isolar, transparente, selecionável, ocultar/mostrar, renomear a ocorrência ou a definição e excluir. Corpos têm Mover/Copiar, ocultar/mostrar, exportar STL, renomear e excluir. A seção **Grupos** lista os grupos: o clique seleciona os membros; o menu move, renomeia ou desagrupa.
-- **Mover/Copiar:** o campo Objetos recebe instâncias (montagem) ou corpos da peça ativa (construção), a partir da seleção ou de cliques. O manipulador aparece no pivô: setas transladam por eixo, anéis giram (passos de 1°) e o centro move livremente no plano da tela; durante o arraste, o contorno dos elementos acompanha o cursor e a prévia completa é calculada ao soltar. Os campos de translação e rotação (eixos do mundo, rotação X→Y→Z pelo pivô) podem ser digitados. O pivô é o centro de massa ou a origem do primeiro elemento. **Criar cópia** gera novas instâncias da mesma definição ou corpos independentes, sem histórico. Vários elementos (por exemplo, todos os membros de um grupo) movem-se em uma só ação de desfazer.
+- **Mover/Copiar:** o campo Objetos recebe instâncias (montagem) ou corpos da peça ativa (construção), a partir da seleção ou de cliques. Com o campo inativo, o clique escolhe um ponto (vértice, aresta ou face, pelo modo de seleção) que pode virar o pivô. O manipulador aparece no pivô: setas transladam por eixo, anéis giram (passos de 1°) e o centro move livremente no plano da tela; durante o arraste, o contorno dos elementos acompanha o cursor e a prévia completa é calculada ao soltar. Os campos de translação e rotação (eixos do mundo, rotação X→Y→Z pelo pivô) podem ser digitados. O pivô é o centro de massa, a origem do primeiro elemento ou o ponto escolhido. **Criar cópia** gera novas instâncias da mesma definição ou corpos independentes, sem histórico. Vários elementos (por exemplo, todos os membros de um grupo) movem-se em uma só ação de desfazer.
 - **Alinhar:** escolha o tipo (face, aresta ou vértice), clique na geometria do elemento que se move e depois na de destino. Faces ficam opostas e coplanares no ponto clicado; arestas, paralelas; vértices, coincidentes. **Inverter direção** troca o sentido. Não cria restrição permanente.
 - **Padrões e espelhamento de componentes:** painéis com o componente, tipo, direção ou eixo, quantidade e espaçamento ou ângulo; o padrão compartilha a definição e reúne as instâncias num grupo. O espelhamento cria uma peça nova e independente.
 
@@ -131,7 +135,7 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
-Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `repair`, `recovery`, `insert`), que não alteram o projeto de origem:
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `repair`, `recovery`, `insert`, `mesh-import`), que não alteram o projeto de origem:
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude

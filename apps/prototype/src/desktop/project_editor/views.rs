@@ -622,12 +622,6 @@ impl Editor {
                         ui.separator();
                         ui.checkbox(&mut self.viewport.show_triangles, text(T::Triangulation));
                         ui.checkbox(&mut self.viewport.show_shadows, text(T::Shadows));
-                        ui.label(text(T::Scale));
-                        ui.add(
-                            egui::DragValue::new(&mut self.import_scale)
-                                .range(0.000_001..=1_000_000.)
-                                .speed(0.01),
-                        );
                         ui.separator();
                         ui.label(text(T::History));
                         ui.small(

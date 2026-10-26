@@ -228,10 +228,29 @@ impl Editor {
                     if let Some((part, output)) = rollback {
                         roll_back_after(&mut display, part, output);
                     }
-                    if let Some(id) = highlight
-                        && let Ok(body) = display.body_mut(id)
-                    {
-                        body.color = Some(nator_geometry::RgbColor::new(PREVIEW_COLOR));
+                    if let Some(id) = highlight {
+                        // A cor de ocorrência prevalece sobre a do corpo: retirá-la na cópia
+                        // exibida deixa a tinta da prévia visível também em componentes
+                        // importados com cor própria.
+                        let part = display
+                            .parts()
+                            .iter()
+                            .find(|p| p.bodies.iter().any(|b| b.id == id))
+                            .map(|p| p.id);
+                        let colored = display
+                            .instances()
+                            .iter()
+                            .filter(|i| Some(i.part) == part && i.color.is_some())
+                            .map(|i| i.id)
+                            .collect::<Vec<_>>();
+                        for instance in colored {
+                            if let Ok(i) = display.instance_mut(instance) {
+                                i.color = None;
+                            }
+                        }
+                        if let Ok(body) = display.body_mut(id) {
+                            body.color = Some(nator_geometry::RgbColor::new(PREVIEW_COLOR));
+                        }
                     }
                     let scene = prepare_scene(&display, &view, active).ok().flatten();
                     (prepared, scene)

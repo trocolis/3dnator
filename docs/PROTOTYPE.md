@@ -50,7 +50,7 @@ Detalhes e limites estão em [PROJECT_FORMAT.md](PROJECT_FORMAT.md). O arquivo i
 
 ## Importar e exportar STL
 
-A importação aceita STL ASCII e binário, com até 128 MiB e dois milhões de triângulos; a escala para milímetros é escolhida antes de importar. Malhas abertas são aceitas como referência. Vértices não finitos, triângulos degenerados e arquivos incompletos são rejeitados, sem reparo automático.
+A importação aceita STL ASCII e binário, com até 128 MiB e dois milhões de triângulos; depois da leitura, o painel **Inserir malha STL** mostra as dimensões lidas e pede a unidade do arquivo (mm, cm, m, in ou fator personalizado) antes de inserir o corpo. Malhas abertas são aceitas como referência. Vértices não finitos, triângulos degenerados e arquivos incompletos são rejeitados, sem reparo automático.
 
 O diálogo **Exportar STL** oferece corpo, corpos da peça, cada definição uma vez, montagem em um arquivo ou todas as ocorrências. Mostra dimensões, triângulos, arquivos e tamanho antes de gravar, com qualidade rascunho/padrão/alta ou tolerâncias personalizadas. Arquivos separados usam coordenadas locais da peça; exportações conjuntas e de ocorrências usam posições de montagem. Os nomes combinam peça e corpo, com sufixos para evitar sobrescrita.
 

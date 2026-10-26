@@ -10,6 +10,7 @@ mod highlight;
 mod icons;
 mod insert_part;
 mod live_preview;
+mod mesh_import;
 mod navigation;
 mod parameter_editor;
 mod profile_pick;
@@ -387,6 +388,14 @@ enum Outcome {
         name: String,
         geometry: Arc<MeshAsset>,
     },
+    /// STL lido sem escala, aguardando a confirmação da unidade.
+    MeshRead {
+        tab: u64,
+        revision: u64,
+        destination: Option<PartId>,
+        name: String,
+        mesh: Mesh,
+    },
     Opened {
         document: Document,
         path: Option<PathBuf>,
@@ -482,6 +491,8 @@ pub struct Editor {
     thumbnails: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
     /// Inserção de peça de outra aba.
     insert_part: Option<insert_part::InsertDraft>,
+    /// Confirmação de unidade e escala de um STL lido.
+    mesh_import: Option<mesh_import::MeshImportDraft>,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -590,6 +601,7 @@ impl Editor {
             sketch_repair: None,
             thumbnails: std::collections::HashMap::new(),
             insert_part: None,
+            mesh_import: None,
         })
     }
     fn busy(&self) -> bool {
@@ -882,6 +894,22 @@ impl Editor {
                     Err(error) => self.status = error,
                 }
             }
+            Ok(Outcome::MeshRead {
+                tab,
+                revision,
+                destination,
+                name,
+                mesh,
+            }) => {
+                self.mesh_import = Some(mesh_import::MeshImportDraft::new(
+                    tab,
+                    revision,
+                    destination,
+                    name,
+                    mesh,
+                    self.import_scale,
+                ));
+            }
             Ok(Outcome::Opened {
                 document,
                 path,
@@ -1115,7 +1143,6 @@ impl Editor {
         let tab = self.current().id;
         let revision = self.current().session.revision();
         let destination = self.current().active_part;
-        let scale = self.import_scale;
         let document = self.current().session.document().clone();
         self.start(context, None, move || {
             let (mesh, name) = if reference {
@@ -1158,10 +1185,14 @@ impl Editor {
                         return Err(text(T::KernelUnavailable).into());
                     }
                 }
-                (
-                    nator_project_io::read_stl(&path, scale).map_err(|e| e.to_string())?,
+                // Sem escala: o painel de confirmação escolhe a unidade do arquivo.
+                return Ok(Outcome::MeshRead {
+                    tab,
+                    revision,
+                    destination,
                     name,
-                )
+                    mesh: nator_project_io::read_stl(&path, 1.).map_err(|e| e.to_string())?,
+                });
             };
             Ok(Outcome::Imported {
                 tab,
@@ -1422,6 +1453,7 @@ impl Editor {
         self.section_panel(ui.ctx());
         self.sketch_repair_panel(ui.ctx());
         self.insert_part_panel(ui.ctx());
+        self.mesh_import_panel(ui.ctx());
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());

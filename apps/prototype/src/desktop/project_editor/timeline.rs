@@ -520,6 +520,17 @@ impl Editor {
             return;
         };
         let dependents = nator_document::features::dependents(&piece, output);
+        // Prévia do resultado da exclusão atrás do diálogo, como pede o escopo.
+        self.preview_command(
+            tab,
+            Some(Command::RemoveFeature {
+                part,
+                output,
+                dependents: true,
+            }),
+            None,
+            None,
+        );
         let name = |id: BodyId| {
             piece
                 .features

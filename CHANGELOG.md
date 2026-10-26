@@ -14,6 +14,11 @@
 - Prévia ao vivo calculada em segundo plano, sem entrar no desfazer, com o resultado em azul. Ao editar, a prévia e as seleções usam o histórico recuado até a operação. O OK publica o cálculo já feito.
 - Cenários de captura da interface (`--render-ui-scenario`) para revisão visual de linha do tempo, painéis e falhas.
 
+### Importação de STL e ajustes de edição
+
+- Painel **Inserir malha STL**: depois da leitura, mostra dimensões lidas e resultantes e pede a unidade do arquivo (mm, cm, m, in ou fator) antes de inserir o corpo de malha. Substitui o campo de escala das propriedades.
+- Exclusão com dependentes mostra a prévia do resultado atrás do diálogo; Mover/Copiar aceita pivô no ponto escolhido na área 3D; a prévia tinge também componentes com cor de ocorrência.
+
 ### Peças de outro projeto
 
 - **Peça de outro projeto** (aba Inserir): escolhe um projeto aberto em outra aba e uma de suas definições, copiada para o projeto ativo como peças novas e independentes, com subpeças, compartilhamento interno e grupos do conjunto. Na construção, a cópia entra como subpeça da peça ativa; na montagem, na raiz. O arquivo de origem não é vinculado nem alterado.
