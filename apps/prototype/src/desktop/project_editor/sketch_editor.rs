@@ -138,6 +138,13 @@ fn point_segment_distance(p: Point2, a: Point2, b: Point2) -> f64 {
 }
 impl Editor {
     pub(super) fn begin_sketch(&mut self, part: PartId, id: SketchId) {
+        self.begin_sketch_in(Some(part), id);
+    }
+    /// Edição de um rascunho de referência da montagem, em coordenadas da montagem.
+    pub(super) fn begin_reference_sketch(&mut self, id: SketchId) {
+        self.begin_sketch_in(None, id);
+    }
+    fn begin_sketch_in(&mut self, owner: Option<PartId>, id: SketchId) {
         if self.busy() {
             return;
         }
@@ -153,14 +160,17 @@ impl Editor {
         let Some(record) = self.current().session.document().sketch(id).cloned() else {
             return;
         };
-        let target = match self
-            .current()
-            .plane_pick
-            .as_ref()
-            .filter(|p| p.destination == Some(part))
-            .map(|p| Ok(p.placement))
-            .unwrap_or_else(|| sketch_scene::part_placement(self.current(), part))
-        {
+        let target = match owner {
+            None => Ok(Placement::default()),
+            Some(part) => self
+                .current()
+                .plane_pick
+                .as_ref()
+                .filter(|p| p.destination == Some(part))
+                .map(|p| Ok(p.placement))
+                .unwrap_or_else(|| sketch_scene::part_placement(self.current(), part)),
+        };
+        let target = match target {
             Ok(p) => p,
             Err(e) => {
                 self.status = e;
@@ -200,7 +210,8 @@ impl Editor {
                 }
             }
         }
-        self.current_mut().active_part = Some(part);
+        // Rascunhos de referência pertencem à montagem: nenhuma peça entra em construção.
+        self.current_mut().active_part = owner;
         self.current_mut().plane_pick = None;
         self.current_mut().sketch_edit = Some(work);
         self.align_sketch_camera(!record.sketch.points.is_empty(), true);

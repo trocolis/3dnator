@@ -205,6 +205,10 @@ pub struct Document {
     groups: Vec<assembly::Group>,
     sheets: Vec<SheetRecord>,
     settings: Settings,
+    /// Rascunhos de referência da montagem, em coordenadas da montagem. Não pertencem a
+    /// nenhuma peça, então nenhuma operação pode usá-los como perfil: servem apenas de
+    /// referência para posicionar componentes.
+    reference_sketches: Vec<SketchRecord>,
 }
 
 pub fn validate_name(name: &str) -> Result<(), DocumentError> {
@@ -230,6 +234,7 @@ impl Document {
             groups: Vec::new(),
             sheets: Vec::new(),
             settings: Settings::default(),
+            reference_sketches: Vec::new(),
         })
     }
     /// Toda entrada de persistência passa pelas mesmas invariantes das edições.
@@ -249,6 +254,7 @@ impl Document {
             groups: Vec::new(),
             sheets: Vec::new(),
             settings: Settings::default(),
+            reference_sketches: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -380,10 +386,12 @@ impl Document {
     pub fn instance(&self, id: InstanceId) -> Option<&Instance> {
         self.instances.iter().find(|i| i.id == id)
     }
+    /// Rascunho de peça ou de referência da montagem.
     pub fn sketch(&self, id: SketchId) -> Option<&SketchRecord> {
         self.parts
             .iter()
             .flat_map(|p| &p.sketches)
+            .chain(&self.reference_sketches)
             .find(|s| s.id == id)
     }
     /// Visibilidade do rascunho é estado do documento, persistido e reversível.
@@ -391,8 +399,72 @@ impl Document {
         self.parts
             .iter_mut()
             .flat_map(|p| &mut p.sketches)
+            .chain(&mut self.reference_sketches)
             .find(|s| s.id == id)
             .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))
+    }
+    /// Peça dona do rascunho; `None` para rascunhos de referência da montagem.
+    pub fn sketch_part(&self, id: SketchId) -> Option<PartId> {
+        self.parts
+            .iter()
+            .find(|p| p.sketches.iter().any(|s| s.id == id))
+            .map(|p| p.id)
+    }
+    pub fn reference_sketches(&self) -> &[SketchRecord] {
+        &self.reference_sketches
+    }
+    pub fn is_reference_sketch(&self, id: SketchId) -> bool {
+        self.reference_sketches.iter().any(|s| s.id == id)
+    }
+    /// Rascunho de referência novo, no plano dado em coordenadas da montagem.
+    pub fn add_reference_sketch(
+        &mut self,
+        sketch: nator_sketch::Sketch,
+    ) -> Result<SketchId, DocumentError> {
+        sketch
+            .validate()
+            .map_err(|e| DocumentError(e.to_string()))?;
+        let id = SketchId(self.allocate_id()?);
+        self.reference_sketches.push(SketchRecord {
+            id,
+            sketch,
+            visible: true,
+        });
+        Ok(id)
+    }
+    pub fn restore_reference_sketches(
+        &mut self,
+        sketches: Vec<SketchRecord>,
+    ) -> Result<(), DocumentError> {
+        let mut next = self.clone();
+        next.reference_sketches = sketches;
+        next.validate()?;
+        *self = next;
+        Ok(())
+    }
+    /// Exclui um rascunho de referência, ou de peça quando nenhuma operação o usa: o
+    /// histórico nunca fica apontando para um perfil ausente.
+    pub fn remove_sketch(&mut self, id: SketchId) -> Result<(), DocumentError> {
+        if self.is_reference_sketch(id) {
+            self.reference_sketches.retain(|s| s.id != id);
+            return Ok(());
+        }
+        let part = self
+            .parts
+            .iter_mut()
+            .find(|p| p.sketches.iter().any(|s| s.id == id))
+            .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))?;
+        if part
+            .features
+            .iter()
+            .any(|f| f.operation.sketch() == Some(id))
+        {
+            return Err(DocumentError(
+                "O rascunho é perfil de operações do histórico; exclua-as antes.".into(),
+            ));
+        }
+        part.sketches.retain(|s| s.id != id);
+        Ok(())
     }
     pub fn create_part(&mut self, name: String) -> Result<PartId, DocumentError> {
         validate_name(&name)?;
@@ -448,13 +520,7 @@ impl Document {
         sketch
             .validate()
             .map_err(|e| DocumentError(e.to_string()))?;
-        let record = self
-            .parts
-            .iter_mut()
-            .flat_map(|p| &mut p.sketches)
-            .find(|s| s.id == id)
-            .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))?;
-        record.sketch = sketch;
+        self.sketch_mut(id)?.sketch = sketch;
         Ok(())
     }
     pub fn part_mut(&mut self, id: PartId) -> Result<&mut Part, DocumentError> {
@@ -590,6 +656,13 @@ impl Document {
                             })
                             .sum::<usize>()
                 })
+                .sum::<usize>()
+            + self
+                .reference_sketches
+                .iter()
+                .map(|s| {
+                    1 + s.sketch.points.len() + s.sketch.entities.len() + s.sketch.constraints.len()
+                })
                 .sum::<usize>();
         if count > MAX_ELEMENTS {
             return Err(DocumentError(
@@ -608,6 +681,16 @@ impl Document {
         };
         let mut total_triangles = 0_usize;
         let mut total_vertices = 0_usize;
+        // Rascunhos de referência não têm parâmetros de peça: cotas só com valores diretos.
+        for record in &self.reference_sketches {
+            register(record.id.0)?;
+            record
+                .sketch
+                .validate()
+                .map_err(|e| DocumentError(e.to_string()))?;
+            let mut resolved = record.sketch.clone();
+            parameters::resolve_sketch(&mut resolved, &parameters::Parameters::default())?;
+        }
         for part in &self.parts {
             register(part.id.0)?;
             validate_name(&part.name)?;
@@ -911,6 +994,23 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn reference_sketches_live_outside_parts() -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Referências")?;
+        let mut layout = nator_sketch::Sketch::new("Layout", nator_sketch::Plane::xy());
+        layout.add_line([0., 0.], [100., 0.], false)?;
+        let id = doc.add_reference_sketch(layout)?;
+        assert!(doc.is_reference_sketch(id));
+        assert_eq!(doc.sketch_part(id), None);
+        assert!(doc.parts().is_empty());
+        doc.sketch_mut(id)?.visible = false;
+        assert!(!doc.sketch(id).ok_or("Rascunho ausente")?.visible);
+        doc.validate()?;
+        doc.remove_sketch(id)?;
+        assert!(doc.sketch(id).is_none());
+        Ok(())
+    }
+
     #[test]
     fn rejects_dangling_and_duplicate_identifiers() -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Ensaio")?;

@@ -9,9 +9,10 @@ use feature_editor::Tool as SolidTool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(super) enum RibbonTab {
+    /// Aba principal: o projeto começa pela montagem.
     #[default]
-    Model,
     Assembly,
+    Model,
     Insert,
     Inspect,
     View,
@@ -42,6 +43,10 @@ pub(super) struct ShellState {
     /// A aba contextual muda ao entrar/sair do rascunho, sem impedir que o usuário
     /// consulte as demais ferramentas enquanto a edição 2D estiver aberta.
     sketch_context: Option<(u64, SketchId)>,
+    /// Aba ativa antes do rascunho, restaurada ao concluí-lo.
+    before_sketch: Option<RibbonTab>,
+    /// Botões de menu da faixa no último quadro (capturas e ensaios de eventos).
+    pub menu_rects: Vec<egui::Rect>,
 }
 impl ShellState {
     pub fn new() -> Self {
@@ -79,6 +84,13 @@ enum Action {
     Ungroup,
     Section,
     InsertPart,
+    ReferenceSketch,
+    NewEmptyPart,
+    NewPartStep,
+    NewPartStl,
+    MoveFace,
+    MoveEdge,
+    MovePoint,
     Parameters,
     Measure,
     Drawing,
@@ -125,6 +137,13 @@ impl Action {
             Self::Ungroup => T::UngroupTool,
             Self::Section => T::SectionAnalysis,
             Self::InsertPart => T::InsertFromProject,
+            Self::ReferenceSketch => T::ReferenceSketch,
+            Self::NewEmptyPart => T::NewEmptyPart,
+            Self::NewPartStep => T::NewPartFromStep,
+            Self::NewPartStl => T::NewPartFromStl,
+            Self::MoveFace => T::MoveFaceToFace,
+            Self::MoveEdge => T::MoveEdgeToEdge,
+            Self::MovePoint => T::MovePointToPoint,
             Self::Parameters => T::Parameters,
             Self::Measure => T::MeasureSelection,
             Self::Drawing => T::Drawing,
@@ -193,6 +212,13 @@ impl Action {
             Self::Group | Self::Ungroup => Icon::Group,
             Self::Section => Icon::Section,
             Self::InsertPart => Icon::Import,
+            Self::ReferenceSketch => Icon::ReferenceSketch,
+            Self::NewEmptyPart => Icon::NewBody,
+            Self::NewPartStep => Icon::StepFile,
+            Self::NewPartStl => Icon::StlFile,
+            Self::MoveFace => Icon::FaceToFace,
+            Self::MoveEdge => Icon::EdgeToEdge,
+            Self::MovePoint => Icon::PointToPoint,
             Self::Parameters => Icon::Parameters,
             Self::Measure => Icon::Measure,
             Self::Drawing => Icon::Drawing,
@@ -219,6 +245,14 @@ impl Action {
             _ => None,
         }
     }
+}
+
+/// Botão de menu da faixa: ícone e nome principais e as subopções (ação, nome no menu e
+/// explicação).
+struct Menu<'a> {
+    icon: Icon,
+    label: T,
+    items: &'a [(Action, T, T)],
 }
 
 /// Também alimenta a busca: nenhuma entrada anuncia uma ferramenta sem implementação.
@@ -260,6 +294,13 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Ungroup,
     Action::Section,
     Action::InsertPart,
+    Action::ReferenceSketch,
+    Action::NewEmptyPart,
+    Action::NewPartStep,
+    Action::NewPartStl,
+    Action::MoveFace,
+    Action::MoveEdge,
+    Action::MovePoint,
     Action::Parameters,
     Action::Drawing,
     Action::Measure,
@@ -335,6 +376,15 @@ impl Editor {
             Action::MoveCopy | Action::Align => editable && self.current().sketch_edit.is_none(),
             Action::InsertPart => {
                 editable && self.current().sketch_edit.is_none() && self.tabs.len() > 1
+            }
+            Action::ReferenceSketch
+            | Action::NewEmptyPart
+            | Action::NewPartStl
+            | Action::MoveFace
+            | Action::MoveEdge
+            | Action::MovePoint => editable && self.current().sketch_edit.is_none(),
+            Action::NewPartStep => {
+                editable && self.current().sketch_edit.is_none() && nator_kernel::is_available()
             }
             Action::NewSketch | Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 editable && self.current().sketch_edit.is_none()
@@ -450,7 +500,22 @@ impl Editor {
                     self.invalidate_scene();
                 }
             }
-            Action::Import | Action::Reference => self.import(context, action == Action::Reference),
+            Action::Import => self.import(context, ImportSource::Any, self.current().active_part),
+            Action::Reference => {
+                self.import(context, ImportSource::Reference, self.current().active_part)
+            }
+            Action::ReferenceSketch => self.start_reference_sketch_plane(),
+            Action::NewEmptyPart => {
+                let count = self.current().session.document().parts().len() + 1;
+                self.execute(Command::CreatePart {
+                    name: format!("{} {count}", text(T::NewPartName)),
+                });
+            }
+            Action::NewPartStep => self.import(context, ImportSource::Step, None),
+            Action::NewPartStl => self.import(context, ImportSource::Stl, None),
+            Action::MoveFace => self.open_align(navigation::PickMode::Face),
+            Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
+            Action::MovePoint => self.open_align(navigation::PickMode::Vertex),
             Action::NewSketch => self.start_sketch_plane(),
             Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 let plane = match action {
@@ -466,7 +531,7 @@ impl Editor {
             Action::SketchFace => self.sketch_on_selected_face(context),
             Action::Solid(tool) => self.open_feature_tool(tool),
             Action::MoveCopy => self.open_move(),
-            Action::Align => self.open_align(),
+            Action::Align => self.open_align(navigation::PickMode::Face),
             Action::NewInstance => self.duplicate_selection(context),
             Action::CloneInstance => self.clone_selection(context),
             Action::InstancePattern(circular) => self.open_instance_pattern(circular),
@@ -548,11 +613,15 @@ impl Editor {
             .as_ref()
             .map(|w| (self.current().id, w.id));
         if sketch != self.shell.sketch_context {
-            self.shell.tab = if sketch.is_some() {
-                RibbonTab::Sketch
+            if sketch.is_some() {
+                if self.shell.tab != RibbonTab::Sketch {
+                    self.shell.before_sketch = Some(self.shell.tab);
+                }
+                self.shell.tab = RibbonTab::Sketch;
             } else {
-                RibbonTab::Model
-            };
+                // Volta à aba de origem (Montagem para rascunhos de referência).
+                self.shell.tab = self.shell.before_sketch.take().unwrap_or_default();
+            }
             self.shell.sketch_context = sketch;
         }
         egui::Panel::top("application_bar")
@@ -642,8 +711,8 @@ impl Editor {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for tab in [
-                        RibbonTab::Model,
                         RibbonTab::Assembly,
+                        RibbonTab::Model,
                         RibbonTab::Insert,
                         RibbonTab::Inspect,
                         RibbonTab::View,
@@ -807,7 +876,93 @@ impl Editor {
         });
         ui.separator();
     }
+    /// Grupo com um botão de menu: o clique abre as subopções, cada uma com ícone, nome e
+    /// uma linha de explicação, habilitadas conforme o contexto.
+    fn ribbon_menu_group(&mut self, ui: &mut egui::Ui, label: T, menu: Menu<'_>) {
+        ui.vertical(|ui| {
+            ui.set_min_width(76.);
+            ui.set_max_width(86.);
+            let enabled = menu.items.iter().any(|(a, _, _)| self.action_enabled(*a));
+            let response = ui
+                .add_enabled_ui(enabled, |ui| {
+                    icons::button(ui, menu.icon, text(menu.label), true, false)
+                })
+                .inner;
+            self.shell.menu_rects.push(response.rect);
+            // Seta de menu centrada sob o rótulo, sem cobrir rótulos longos.
+            let corner = response.rect.center_bottom() + egui::vec2(0., -6.);
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![
+                    corner + egui::vec2(-4., -2.),
+                    corner + egui::vec2(4., -2.),
+                    corner + egui::vec2(0., 3.),
+                ],
+                if enabled { theme::INK } else { theme::MUTED },
+                egui::Stroke::NONE,
+            ));
+            let mut chosen = None;
+            egui::Popup::menu(&response).show(|ui| {
+                // Largura fixa: a descrição quebra em até duas linhas em vez de alargar o menu.
+                ui.set_width(300.);
+                for (action, name, hint) in menu.items {
+                    let enabled = self.action_enabled(*action);
+                    let row = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            let (rect, row) =
+                                ui.allocate_exact_size(egui::vec2(300., 54.), egui::Sense::click());
+                            if row.hovered() && enabled {
+                                ui.painter().rect_filled(rect, 4, theme::BLUE_FILL);
+                            }
+                            let icon = egui::Rect::from_center_size(
+                                egui::pos2(rect.left() + 20., rect.center().y),
+                                egui::Vec2::splat(24.),
+                            );
+                            icons::paint(ui.painter(), icon, action.icon(), enabled);
+                            let ink = if enabled { theme::INK } else { theme::MUTED };
+                            ui.painter().text(
+                                egui::pos2(rect.left() + 42., rect.top() + 7.),
+                                egui::Align2::LEFT_TOP,
+                                text(*name),
+                                egui::FontId::proportional(13.),
+                                ink,
+                            );
+                            let mut job = egui::text::LayoutJob::simple(
+                                text(*hint).to_owned(),
+                                egui::FontId::proportional(10.5),
+                                theme::MUTED,
+                                rect.width() - 48.,
+                            );
+                            job.wrap.max_rows = 2;
+                            let galley = ui.painter().layout_job(job);
+                            ui.painter().galley(
+                                egui::pos2(rect.left() + 42., rect.top() + 24.),
+                                galley,
+                                theme::MUTED,
+                            );
+                            row.on_hover_text(text(*hint))
+                        })
+                        .inner;
+                    if row.clicked() && enabled {
+                        chosen = Some(*action);
+                        ui.close();
+                    }
+                }
+            });
+            if let Some(action) = chosen {
+                self.activate_action(ui.ctx(), action);
+            }
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(text(label))
+                        .size(10.)
+                        .color(theme::MUTED),
+                );
+            });
+        });
+        ui.separator();
+    }
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
+        self.shell.menu_rects.clear();
         match self.shell.tab {
             RibbonTab::Model => {
                 self.ribbon_group(ui, T::Sketch, &[Action::NewSketch]);
@@ -843,24 +998,59 @@ impl Editor {
                 );
                 self.ribbon_group(ui, T::ManageGroup, &[Action::Parameters]);
             }
+            // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
+            // posicionamento, cópias e organização.
             RibbonTab::Assembly => {
-                self.ribbon_group(
+                self.ribbon_group(ui, T::ReferenceGroup, &[Action::ReferenceSketch]);
+                self.ribbon_menu_group(
                     ui,
-                    T::ComponentField,
-                    &[Action::NewInstance, Action::CloneInstance],
+                    T::PartsGroup,
+                    Menu {
+                        icon: Icon::NewBody,
+                        label: T::NewPartMenu,
+                        items: &[
+                            (Action::NewEmptyPart, T::NewEmptyPart, T::EmptyPartHint),
+                            (Action::NewPartStep, T::NewPartFromStep, T::StepPartHint),
+                            (Action::NewPartStl, T::NewPartFromStl, T::StlPartHint),
+                        ],
+                    },
                 );
-                self.ribbon_group(ui, T::PositionGroup, &[Action::MoveCopy, Action::Align]);
-                self.ribbon_group(
+                self.ribbon_menu_group(
                     ui,
-                    T::PatternsGroup,
-                    &[
-                        Action::InstancePattern(false),
-                        Action::InstancePattern(true),
-                        Action::InstanceMirror,
-                    ],
+                    T::PositionGroup,
+                    Menu {
+                        icon: Icon::Move,
+                        label: T::MoveMenu,
+                        items: &[
+                            (Action::MoveCopy, T::MoveFree, T::MoveFreeHint),
+                            (Action::MoveFace, T::MoveFaceToFace, T::MoveFaceHint),
+                            (Action::MoveEdge, T::MoveEdgeToEdge, T::MoveEdgeHint),
+                            (Action::MovePoint, T::MovePointToPoint, T::MovePointHint),
+                        ],
+                    },
+                );
+                self.ribbon_menu_group(
+                    ui,
+                    T::CopyMenu,
+                    Menu {
+                        icon: Icon::Copy,
+                        label: T::CopyMenu,
+                        items: &[
+                            (Action::NewInstance, T::CopyNewInstance, T::CopyInstanceHint),
+                            (
+                                Action::CloneInstance,
+                                T::CopyIndependent,
+                                T::CopyIndependentHint,
+                            ),
+                            (
+                                Action::InstancePattern(false),
+                                T::CopyPattern,
+                                T::CopyPatternHint,
+                            ),
+                        ],
+                    },
                 );
                 self.ribbon_group(ui, T::ArrangeGroup, &[Action::Group, Action::Ungroup]);
-                self.ribbon_group(ui, T::DocumentGroup, &[Action::Drawing, Action::ExportStep]);
             }
             RibbonTab::Insert => {
                 self.ribbon_group(

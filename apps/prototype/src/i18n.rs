@@ -436,7 +436,6 @@ pub enum Text {
     GroupTool,
     UngroupTool,
     PositionGroup,
-    PatternsGroup,
     Selectable,
     Hide,
     Show,
@@ -475,6 +474,35 @@ pub enum Text {
     FileSize,
     ResultSize,
     MeshImportHint,
+    ReferenceSketch,
+    ReferenceSketches,
+    NewPartMenu,
+    NewEmptyPart,
+    NewPartFromStep,
+    NewPartFromStl,
+    MoveMenu,
+    MoveFree,
+    MoveFaceToFace,
+    MoveEdgeToEdge,
+    MovePointToPoint,
+    CopyMenu,
+    CopyNewInstance,
+    CopyIndependent,
+    CopyPattern,
+    ReferenceGroup,
+    PartsGroup,
+    NewPartName,
+    EmptyPartHint,
+    StepPartHint,
+    StlPartHint,
+    MoveFreeHint,
+    MoveFaceHint,
+    MoveEdgeHint,
+    MovePointHint,
+    CopyInstanceHint,
+    CopyIndependentHint,
+    CopyPatternHint,
+    ReferenceSketchHint,
 }
 pub fn text(key: Text) -> &'static str {
     match key {
@@ -935,7 +963,7 @@ pub fn text(key: Text) -> &'static str {
         Text::AlignFrom => "Origem",
         Text::AlignTo => "Destino",
         Text::AlignHint => {
-            "Clique na geometria do elemento que se move e depois na de destino; faces ficam opostas e coplanares no ponto clicado."
+            "Clique na geometria do elemento que se move e depois na de destino, em outro componente ou num rascunho de referência."
         }
         Text::ComponentField => "Componente",
         Text::MirrorHint => {
@@ -946,7 +974,6 @@ pub fn text(key: Text) -> &'static str {
         Text::GroupTool => "Agrupar",
         Text::UngroupTool => "Desagrupar",
         Text::PositionGroup => "Posicionar",
-        Text::PatternsGroup => "Padrões",
         Text::Selectable => "Selecionável",
         Text::Hide => "Ocultar",
         Text::Show => "Mostrar",
@@ -995,5 +1022,46 @@ pub fn text(key: Text) -> &'static str {
         Text::MeshImportHint => {
             "O STL não informa a unidade. Confira as dimensões antes de inserir; a malha entra como corpo de referência, sem conversão para sólido."
         }
+        Text::ReferenceSketch => "Rascunho de referência",
+        Text::ReferenceSketches => "Rascunhos de referência",
+        Text::NewPartMenu => "Nova peça",
+        Text::NewEmptyPart => "Criar nova peça",
+        Text::NewPartFromStep => "Criar a partir de STEP",
+        Text::NewPartFromStl => "Criar a partir de STL",
+        Text::MoveMenu => "Mover",
+        Text::MoveFree => "Movimento livre",
+        Text::MoveFaceToFace => "Face a face",
+        Text::MoveEdgeToEdge => "Aresta a aresta",
+        Text::MovePointToPoint => "Ponto a ponto",
+        Text::CopyMenu => "Copiar",
+        Text::CopyNewInstance => "Nova instância",
+        Text::CopyIndependent => "Cópia independente",
+        Text::CopyPattern => "Padrão de repetição",
+        Text::ReferenceGroup => "Referência",
+        Text::PartsGroup => "Peças",
+        Text::NewPartName => "Peça",
+        Text::EmptyPartHint => "Peça vazia na raiz da montagem, já ativa para construção.",
+        Text::StepPartHint => {
+            "Cada definição do arquivo vira uma peça independente, com cores e hierarquia."
+        }
+        Text::StlPartHint => {
+            "A malha entra como peça nova; a unidade é confirmada antes de inserir."
+        }
+        Text::MoveFreeHint => "Manipulador 3D e valores de translação e rotação.",
+        Text::MoveFaceHint => {
+            "Faces opostas e coplanares; aceita o plano de um rascunho de referência como destino."
+        }
+        Text::MoveEdgeHint => {
+            "Arestas paralelas; aceita linhas de rascunhos de referência como destino."
+        }
+        Text::MovePointHint => {
+            "Pontos coincidentes; aceita pontos de rascunhos de referência como destino."
+        }
+        Text::CopyInstanceHint => "Mesma definição, na mesma posição: editar uma altera todas.",
+        Text::CopyIndependentHint => "Peça nova com histórico próprio, sem vínculo com a original.",
+        Text::CopyPatternHint => {
+            "Instâncias repetidas em padrão retangular ou circular, reunidas num grupo."
+        }
+        Text::ReferenceSketchHint => "Rascunho da montagem para posicionar peças; não gera corpos.",
     }
 }

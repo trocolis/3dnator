@@ -186,6 +186,18 @@ pub enum Command {
         id: nator_document::GroupId,
         name: String,
     },
+    /// Rascunho de referência da montagem, no plano dado em coordenadas da montagem.
+    AddReferenceSketch {
+        sketch: nator_sketch::Sketch,
+    },
+    /// Exclui um rascunho de referência, ou de peça que nenhuma operação usa.
+    RemoveSketch {
+        id: SketchId,
+    },
+    /// Peça nova e vazia, com uma instância na raiz da montagem.
+    CreatePart {
+        name: String,
+    },
     /// Configurações do documento (apresentação).
     SetSettings {
         settings: nator_document::Settings,
@@ -205,6 +217,8 @@ pub enum Effect {
     Changed,
     Imported { part: PartId, body: BodyId },
     SketchCreated { part: PartId, sketch: SketchId },
+    ReferenceSketchCreated { sketch: SketchId },
+    PartCreated { part: PartId },
     SheetSaved { id: nator_document::SheetId },
 }
 
@@ -314,6 +328,9 @@ impl Command {
             Self::RenameInstance { .. } => "Renomear instância",
             Self::RenameGroup { .. } => "Renomear grupo",
             Self::SetSettings { .. } => "Alterar configurações do documento",
+            Self::AddReferenceSketch { .. } => "Criar rascunho de referência",
+            Self::RemoveSketch { .. } => "Excluir rascunho",
+            Self::CreatePart { .. } => "Criar peça",
             Self::InsertPart { .. } => "Inserir peça de outro projeto",
         }
     }
@@ -560,13 +577,10 @@ impl Command {
                     .into());
                 }
                 doc.update_sketch(id, sketch)?;
-                let part = doc
-                    .parts()
-                    .iter()
-                    .find(|p| p.sketches.iter().any(|s| s.id == id))
-                    .map(|p| p.id)
-                    .ok_or_else(|| DocumentError("Peça do rascunho ausente.".into()))?;
-                rebuilds.request(doc, part)?;
+                // Rascunhos de referência não alimentam operações: nada a recalcular.
+                if let Some(part) = doc.sketch_part(id) {
+                    rebuilds.request(doc, part)?;
+                }
             }
             Self::ImportMesh {
                 destination,
@@ -639,6 +653,24 @@ impl Command {
             }
             Self::RenameGroup { id, name } => doc.rename_group(id, name)?,
             Self::SetSettings { settings } => doc.set_settings(settings)?,
+            Self::AddReferenceSketch { sketch } => {
+                if nator_sketch::solver::max_error(&sketch)
+                    .map_err(|e| DocumentError(e.to_string()))?
+                    > 1e-6
+                {
+                    return Err(DocumentError(
+                        "Resolva as restrições antes de criar o rascunho.".into(),
+                    )
+                    .into());
+                }
+                let sketch = doc.add_reference_sketch(sketch)?;
+                return Ok(Effect::ReferenceSketchCreated { sketch });
+            }
+            Self::RemoveSketch { id } => doc.remove_sketch(id)?,
+            Self::CreatePart { name } => {
+                let part = doc.create_part(name)?;
+                return Ok(Effect::PartCreated { part });
+            }
             Self::InsertPart {
                 source,
                 part,
@@ -1317,6 +1349,41 @@ mod tests {
         );
         assert!(target.undo());
         assert_eq!(target.document().parts().len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn reference_sketches_and_new_parts_are_undoable_assembly_edits() -> Result<(), Box<dyn Error>>
+    {
+        use nator_sketch::{Plane, Sketch};
+        let mut session = Session::new(Document::new("Montagem")?)?;
+        let mut layout = Sketch::new("Layout", Plane::xy());
+        layout.add_line([0., 0.], [50., 0.], false)?;
+        let Effect::ReferenceSketchCreated { sketch } =
+            session.execute(Command::AddReferenceSketch {
+                sketch: layout.clone(),
+            })?
+        else {
+            return Err("Rascunho de referência ausente".into());
+        };
+        // Nenhuma peça é criada para o rascunho de referência.
+        assert!(session.document().parts().is_empty());
+        layout.add_point([10., 10.])?;
+        session.execute(Command::UpdateSketch {
+            id: sketch,
+            sketch: layout,
+        })?;
+        let Effect::PartCreated { part } = session.execute(Command::CreatePart {
+            name: "Base".into(),
+        })?
+        else {
+            return Err("Peça ausente".into());
+        };
+        assert_eq!(session.document().instances()[0].part, part);
+        session.execute(Command::RemoveSketch { id: sketch })?;
+        assert!(session.document().sketch(sketch).is_none());
+        assert!(session.undo());
+        assert!(session.document().is_reference_sketch(sketch));
         Ok(())
     }
 

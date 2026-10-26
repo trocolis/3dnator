@@ -66,6 +66,13 @@ pub(super) enum Icon {
     Align,
     Group,
     Section,
+    Copy,
+    FaceToFace,
+    EdgeToEdge,
+    PointToPoint,
+    ReferenceSketch,
+    StepFile,
+    StlFile,
     Join,
     CutBody,
     IntersectBody,
@@ -571,6 +578,72 @@ pub(super) fn paint_with_ink(
                 &[[1., 13.], [14., 6.], [23., 11.], [10., 18.], [1., 13.]],
                 egui::Color32::from_rgb(160, 60, 48),
             );
+        }
+        Icon::Copy => {
+            p.face(&[[8., 3.], [20., 3.], [20., 16.], [8., 16.]], p.fill);
+            p.face(
+                &[[4., 8.], [16., 8.], [16., 21.], [4., 21.]],
+                egui::Color32::WHITE,
+            );
+            p.line(&[[7., 12.], [13., 12.]], p.accent);
+            p.line(&[[7., 16.], [13., 16.]], p.accent);
+        }
+        // Mover por alinhamento: o elemento móvel (preenchido) encontra o destino.
+        Icon::FaceToFace => {
+            p.face(&[[2., 6.], [10., 6.], [10., 18.], [2., 18.]], p.fill);
+            p.face(
+                &[[14., 6.], [22., 6.], [22., 18.], [14., 18.]],
+                egui::Color32::WHITE,
+            );
+            p.line(&[[10., 12.], [14., 12.]], p.accent);
+            p.line(&[[12., 3.], [12., 21.]], p.accent);
+        }
+        Icon::EdgeToEdge => {
+            p.line(&[[3., 20.], [11., 4.]], p.ink);
+            p.line(&[[13., 20.], [21., 4.]], p.accent);
+            p.arrow([7., 12.], [15., 12.]);
+        }
+        Icon::PointToPoint => {
+            p.circle(5., 17., 2.5, p.ink);
+            p.circle(19., 7., 2.5, p.accent);
+            p.arrow([7., 15.], [16., 9.]);
+        }
+        // Rascunho de referência: lápis com plano tracejado na cor das referências.
+        Icon::ReferenceSketch => {
+            let violet = if enabled {
+                theme::REFERENCE
+            } else {
+                egui::Color32::from_gray(165)
+            };
+            p.line(&[[3., 21.], [21., 21.]], violet);
+            p.line(&[[3., 21.], [3., 5.]], violet);
+            p.face(
+                &[[7., 16.], [9., 10.], [18., 1.], [22., 5.], [13., 14.]],
+                p.fill,
+            );
+            p.line(&[[9., 10.], [13., 14.]], violet);
+        }
+        Icon::StepFile | Icon::StlFile => {
+            p.line(
+                &[
+                    [15., 3.],
+                    [5., 3.],
+                    [5., 21.],
+                    [19., 21.],
+                    [19., 7.],
+                    [15., 3.],
+                    [15., 7.],
+                    [19., 7.],
+                ],
+                p.ink,
+            );
+            if icon == Icon::StepFile {
+                p.face(&[[8., 11.], [12., 9.], [16., 11.], [12., 13.]], p.fill);
+                p.face(&[[8., 11.], [12., 13.], [12., 18.], [8., 16.]], p.accent);
+            } else {
+                p.face(&[[8., 17.], [12., 9.], [16., 17.]], p.fill);
+                p.line(&[[12., 9.], [12., 17.]], p.accent);
+            }
         }
         Icon::NewBody => {
             p.cube();

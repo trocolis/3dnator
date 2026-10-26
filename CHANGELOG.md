@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Fluxo próprio da aba Montagem
+
+- **Montagem** passa a ser a primeira aba da faixa e a aberta por padrão, com o fluxo na ordem de trabalho: Rascunho de referência; Nova peça ▾ (criar nova peça, a partir de STEP, a partir de STL); Mover ▾ (movimento livre, face a face, aresta a aresta, ponto a ponto); Copiar ▾ (nova instância, cópia independente, padrão de repetição); Agrupar e Desagrupar. Os menus mostram ícone e explicação de cada subopção.
+- **Rascunho de referência**: rascunho da montagem, fora de qualquer peça, desenhado em violeta e listado no topo da árvore. Não pode virar perfil de operação; serve de destino ao mover face a face (plano), aresta a aresta (linhas) e ponto a ponto (pontos). Comandos `AddReferenceSketch` e `RemoveSketch`, com desfazer.
+- **Criar nova peça** (`CreatePart`) acrescenta uma peça vazia na raiz, ativa para construção. STEP e STL criam peças novas na raiz, independentemente da peça ativa.
+- O painel de alinhamento abre com o tipo escolhido no menu e destaca a origem em azul e o destino em violeta. Ao concluir um rascunho, a faixa volta à aba de origem.
+- Formato `.3dnator` versão 14, com `reference_sketches` opcional; projetos anteriores abrem sem rascunhos de referência.
+
 ### Edição do histórico e painéis de comando
 
 - Linha do tempo no estilo dos CADs de mercado: reprodução (início, anterior, próxima, fim), marcador arrastável para voltar a uma etapa, reordenação por arraste com verificação de dependências e menu de contexto com editar, editar perfil, renomear, suprimir/reativar, mover marcador e excluir.

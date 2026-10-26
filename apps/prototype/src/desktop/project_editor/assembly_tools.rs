@@ -84,9 +84,141 @@ pub(super) struct AlignDraft {
     tab: u64,
     kind: navigation::PickMode,
     from: Option<Pick>,
-    to: Option<Pick>,
+    to: Option<Anchor>,
     field: Option<AlignField>,
     flip: bool,
+}
+
+/// Destino de um alinhamento: geometria do modelo ou de um rascunho de referência da
+/// montagem (ponto, linha ou plano). Só a posição é usada; nenhum vínculo é guardado.
+#[derive(Debug, Clone)]
+pub(super) struct Anchor {
+    point: Point3,
+    normal: Point3,
+    edge: [Point3; 2],
+    label: String,
+    /// Veio de um rascunho de referência (desenhado na cor das referências).
+    reference: bool,
+}
+impl Anchor {
+    fn from_pick(pick: &Pick, label: String) -> Self {
+        Self {
+            point: pick.point,
+            normal: pick.normal,
+            edge: [pick.vertices[0], pick.vertices[1]],
+            label,
+            reference: false,
+        }
+    }
+}
+
+/// Distância de `p` ao segmento `a`–`b` na tela e o parâmetro do ponto mais próximo.
+fn segment_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> (f32, f32) {
+    let d = b - a;
+    let t = ((p - a).dot(d) / d.length_sq().max(1e-6)).clamp(0., 1.);
+    (p.distance(a + d * t), t)
+}
+
+/// Geometria de rascunhos de referência sob o cursor, conforme o tipo de alinhamento:
+/// ponto mais próximo (12 pt), linha mais próxima (8 pt) ou o plano dentro da extensão do
+/// rascunho.
+fn reference_anchor(
+    document: &Document,
+    camera: &Camera,
+    bounds: nator_geometry::Bounds,
+    rect: egui::Rect,
+    position: egui::Pos2,
+    kind: navigation::PickMode,
+) -> Option<Anchor> {
+    let mut best: Option<(f32, Anchor)> = None;
+    let mut offer = |distance: f32, anchor: Anchor| {
+        if best.as_ref().is_none_or(|(d, _)| distance < *d) {
+            best = Some((distance, anchor));
+        }
+    };
+    for record in document.reference_sketches().iter().filter(|s| s.visible) {
+        let sketch = &record.sketch;
+        let frame = sketch_scene::Frame {
+            camera: camera.clone(),
+            bounds,
+            rect,
+            placement: Placement::default(),
+            plane: sketch.plane,
+        };
+        let normal = sketch.plane.normal();
+        match kind {
+            navigation::PickMode::Vertex => {
+                for point in &sketch.points {
+                    if let Some(screen) = frame.screen(point.position) {
+                        let distance = screen.distance(position);
+                        if distance < 12. {
+                            let world = frame.world(point.position);
+                            offer(
+                                distance,
+                                Anchor {
+                                    point: world,
+                                    normal,
+                                    edge: [world; 2],
+                                    label: sketch.name.clone(),
+                                    reference: true,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            navigation::PickMode::Edge => {
+                for entity in &sketch.entities {
+                    let Ok((a, b)) = sketch.line(entity.id) else {
+                        continue;
+                    };
+                    let (Some(sa), Some(sb)) = (frame.screen(a), frame.screen(b)) else {
+                        continue;
+                    };
+                    let (distance, t) = segment_distance(position, sa, sb);
+                    if distance < 8. {
+                        let (wa, wb) = (frame.world(a), frame.world(b));
+                        let t = f64::from(t);
+                        offer(
+                            distance,
+                            Anchor {
+                                point: std::array::from_fn(|i| wa[i] + (wb[i] - wa[i]) * t),
+                                normal,
+                                edge: [wa, wb],
+                                label: sketch.name.clone(),
+                                reference: true,
+                            },
+                        );
+                    }
+                }
+            }
+            navigation::PickMode::Face => {
+                let (Some(hit), Some((min, max))) =
+                    (frame.cursor(position), sketch_scene::sketch_limits(sketch))
+                else {
+                    continue;
+                };
+                // A região útil do plano é a extensão do rascunho, com folga de 20 %.
+                let margin = (0..2)
+                    .map(|k| (max[k] - min[k]) * 0.2)
+                    .fold(10_f64, f64::max);
+                if (0..2).all(|k| hit[k] >= min[k] - margin && hit[k] <= max[k] + margin) {
+                    let world = frame.world(hit);
+                    offer(
+                        f32::MAX / 2.,
+                        Anchor {
+                            point: world,
+                            normal,
+                            edge: [world; 2],
+                            label: sketch.name.clone(),
+                            reference: true,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    best.map(|(_, anchor)| anchor)
 }
 
 pub(super) struct PatternDraft {
@@ -294,7 +426,7 @@ impl AlignDraft {
             }
             navigation::PickMode::Edge => {
                 let a = sub(from.vertices[1], from.vertices[0]);
-                let mut b = sub(to.vertices[1], to.vertices[0]);
+                let mut b = sub(to.edge[1], to.edge[0]);
                 if self.flip {
                     b = b.map(|v| -v);
                 }
@@ -354,11 +486,28 @@ impl Editor {
             draft.rotation = rotation;
         }
     }
-    pub(super) fn open_align(&mut self) {
+    /// Origem e destino de um alinhamento ponto a ponto, para capturas de ensaio.
+    pub(super) fn set_align_for_capture(&mut self, from: Pick, to: Point3) {
+        if let Some(Panel::Align(d)) = &mut self.assembly_panel {
+            d.from = Some(from);
+            d.to = Some(Anchor {
+                point: to,
+                normal: [0., 0., 1.],
+                edge: [to; 2],
+                label: text(T::ReferenceSketch).into(),
+                reference: true,
+            });
+            d.field = None;
+        }
+    }
+    /// Mover por alinhamento (face a face, aresta a aresta ou ponto a ponto). O modo de
+    /// seleção acompanha o tipo, para a pré-seleção realçar o elemento certo.
+    pub(super) fn open_align(&mut self, kind: navigation::PickMode) {
         self.feature_edit = None;
+        self.pick_mode = kind;
         self.assembly_panel = Some(Panel::Align(Box::new(AlignDraft {
             tab: self.current().id,
-            kind: navigation::PickMode::Face,
+            kind,
             from: None,
             to: None,
             field: Some(AlignField::From),
@@ -510,14 +659,51 @@ impl Editor {
             f64::from(rect.aspect_ratio()),
         );
         let view = self.current().view.clone();
-        let Some(mut pick) = self
+        let model = self
             .current()
             .session
             .document()
             .pick_all_with(ray, |o| view.pickable(o))
             .ok()
-            .and_then(|picks| section::first_visible(picks, self.current().section))
-        else {
+            .and_then(|picks| section::first_visible(picks, self.current().section));
+        // Destino do alinhamento: pontos e linhas de rascunhos de referência têm prioridade
+        // (são encaixes precisos); para faces, o plano do rascunho vale quando o clique não
+        // atinge o modelo.
+        if let Some(Panel::Align(d)) = &self.assembly_panel
+            && d.field == Some(AlignField::To)
+        {
+            let kind = d.kind;
+            let reference = reference_anchor(
+                self.current().session.document(),
+                &self.viewport.camera,
+                bounds,
+                rect,
+                position,
+                kind,
+            );
+            let anchor = match (kind, reference, model) {
+                (navigation::PickMode::Face, _, Some(pick)) | (_, None, Some(pick)) => {
+                    let mut pick = pick;
+                    navigation::snap_pick(&mut pick, kind);
+                    let label = self
+                        .current()
+                        .session
+                        .document()
+                        .instance(pick.instance)
+                        .map(|i| i.name.clone())
+                        .unwrap_or_default();
+                    Some(Anchor::from_pick(&pick, label))
+                }
+                (_, Some(reference), _) => Some(reference),
+                (_, None, None) => None,
+            };
+            if let (Some(anchor), Some(Panel::Align(d))) = (anchor, &mut self.assembly_panel) {
+                d.to = Some(anchor);
+                d.field = None;
+            }
+            return true;
+        }
+        let Some(mut pick) = model else {
             return true;
         };
         let active = self.current().active_part;
@@ -547,16 +733,10 @@ impl Editor {
             }
             Some(Panel::Align(d)) => {
                 navigation::snap_pick(&mut pick, d.kind);
-                match d.field {
-                    Some(AlignField::From) => {
-                        d.from = Some(pick);
-                        d.field = d.to.is_none().then_some(AlignField::To);
-                    }
-                    Some(AlignField::To) => {
-                        d.to = Some(pick);
-                        d.field = None;
-                    }
-                    None => {}
+                // A origem é sempre geometria do elemento que se move.
+                if d.field == Some(AlignField::From) {
+                    d.from = Some(pick);
+                    d.field = d.to.is_none().then_some(AlignField::To);
                 }
             }
             Some(Panel::Pattern(d)) => {
@@ -603,7 +783,11 @@ impl Editor {
         };
         let (icon, title) = match &panel {
             Panel::Move(_) => (Icon::Move, T::MoveCopyTool),
-            Panel::Align(_) => (Icon::Align, T::AlignTool),
+            Panel::Align(d) => match d.kind {
+                navigation::PickMode::Face => (Icon::FaceToFace, T::MoveFaceToFace),
+                navigation::PickMode::Edge => (Icon::EdgeToEdge, T::MoveEdgeToEdge),
+                navigation::PickMode::Vertex => (Icon::PointToPoint, T::MovePointToPoint),
+            },
             Panel::Pattern(d) if d.circular => (Icon::Pattern, T::CircularInstancePattern),
             Panel::Pattern(_) => (Icon::Pattern, T::RectangularInstancePattern),
             Panel::Mirror(_) => (Icon::Mirror, T::MirrorComponent),
@@ -962,6 +1146,51 @@ impl Editor {
     }
 }
 
+impl Editor {
+    /// Origem e destino do alinhamento escolhidos, desenhados sobre o modelo: origem em
+    /// azul, destino na cor das referências quando vem de um rascunho de referência.
+    pub(super) fn align_overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
+        let Some(Panel::Align(d)) = &self.assembly_panel else {
+            return;
+        };
+        let Some(bounds) = self.current().scene_bounds else {
+            return;
+        };
+        let camera = &self.viewport.camera;
+        let project = |p: Point3| sketch_scene::project(camera, bounds, rect, p);
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        let mark = |point: Point3, edge: Option<[Point3; 2]>, color: egui::Color32| {
+            if let Some([a, b]) = edge
+                && let (Some(a), Some(b)) = (project(a), project(b))
+            {
+                painter.line_segment([a, b], egui::Stroke::new(3.5, color));
+            }
+            if let Some(p) = project(point) {
+                painter.circle(p, 6., egui::Color32::WHITE, egui::Stroke::new(2.5, color));
+            }
+        };
+        let edge = d.kind == navigation::PickMode::Edge;
+        if let Some(from) = &d.from {
+            mark(
+                from.point,
+                edge.then_some([from.vertices[0], from.vertices[1]]),
+                theme::ACCENT,
+            );
+        }
+        if let Some(to) = &d.to {
+            mark(
+                to.point,
+                edge.then_some(to.edge),
+                if to.reference {
+                    theme::REFERENCE
+                } else {
+                    egui::Color32::from_rgb(232, 128, 22)
+                },
+            );
+        }
+    }
+}
+
 /// Rótulo de um elemento para os campos de seleção.
 fn item_name(document: &Document, item: Selection) -> String {
     match item {
@@ -1036,7 +1265,15 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
             d.pivot = Pivot::Point(point);
         }
     });
-    ui.checkbox(&mut d.copy, text(T::CreateCopy));
+    // Cópias de componentes ficam no menu Copiar; aqui, só corpos da peça em construção.
+    if d.targets
+        .iter()
+        .any(|t| matches!(t, Selection::Body { .. }))
+    {
+        ui.checkbox(&mut d.copy, text(T::CreateCopy));
+    } else {
+        d.copy = false;
+    }
     ui.horizontal(|ui| {
         if ui.small_button(text(T::ResetTransform)).clicked() {
             d.translation = [0.; 3];
@@ -1056,9 +1293,13 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
             ui,
             &mut d.kind,
             &[
-                (navigation::PickMode::Face, Icon::Shell, T::PickFace),
-                (navigation::PickMode::Edge, Icon::Line, T::PickEdge),
-                (navigation::PickMode::Vertex, Icon::Select, T::PickVertex),
+                (navigation::PickMode::Face, Icon::FaceToFace, T::PickFace),
+                (navigation::PickMode::Edge, Icon::EdgeToEdge, T::PickEdge),
+                (
+                    navigation::PickMode::Vertex,
+                    Icon::PointToPoint,
+                    T::PickVertex,
+                ),
             ],
         ) {
             d.from = None;
@@ -1070,20 +1311,23 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
         (AlignField::From, T::AlignFrom),
         (AlignField::To, T::AlignTo),
     ] {
-        let pick = match field {
-            AlignField::From => &d.from,
-            AlignField::To => &d.to,
+        let description = match field {
+            AlignField::From => d.from.as_ref().map(|p| {
+                document
+                    .instance(p.instance)
+                    .map(|i| i.name.clone())
+                    .unwrap_or_default()
+            }),
+            AlignField::To => d.to.as_ref().map(|a| a.label.clone()),
         };
-        let description = pick.as_ref().map(|p| {
-            document
-                .instance(p.instance)
-                .map(|i| i.name.clone())
-                .unwrap_or_default()
-        });
+        let chosen = match field {
+            AlignField::From => d.from.is_some(),
+            AlignField::To => d.to.is_some(),
+        };
         let s = panel::selection(
             ui,
             text(label),
-            usize::from(pick.is_some()),
+            usize::from(chosen),
             description.as_deref(),
             d.field == Some(field),
         );
@@ -1105,6 +1349,15 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
             }
         });
     }
+    ui.label(
+        egui::RichText::new(text(match d.kind {
+            navigation::PickMode::Face => T::MoveFaceHint,
+            navigation::PickMode::Edge => T::MoveEdgeHint,
+            navigation::PickMode::Vertex => T::MovePointHint,
+        }))
+        .small()
+        .color(theme::MUTED),
+    );
     ui.label(
         egui::RichText::new(text(T::AlignHint))
             .small()
@@ -1251,7 +1504,10 @@ mod tests {
             tab: 1,
             kind: navigation::PickMode::Face,
             from: Some(pick([0., 0., 5.], [0., 0., 1.])),
-            to: Some(pick([20., 0., 0.], [1., 0., 0.])),
+            to: Some(Anchor::from_pick(
+                &pick([20., 0., 0.], [1., 0., 0.]),
+                String::new(),
+            )),
             field: None,
             flip: false,
         };

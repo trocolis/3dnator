@@ -14,6 +14,23 @@ pub(super) const EMPTY_BOUNDS: Bounds = Bounds {
 pub(super) struct PlanePicker {
     pub destination: Option<PartId>,
     pub placement: Placement,
+    /// Rascunho de referência da montagem: plano em coordenadas da montagem e nenhuma peça
+    /// dona, para que não possa virar perfil de corpo.
+    pub reference: bool,
+}
+
+/// Comando que cria o rascunho escolhido pelo seletor de plano.
+fn new_sketch(destination: Option<PartId>, reference: bool, plane: Plane) -> Command {
+    if reference {
+        Command::AddReferenceSketch {
+            sketch: Sketch::new(text(T::ReferenceSketch), plane),
+        }
+    } else {
+        Command::AddSketch {
+            destination,
+            sketch: Sketch::new(text(T::Sketch), plane),
+        }
+    }
 }
 pub(super) struct CameraTransition {
     pub from: Camera,
@@ -223,6 +240,21 @@ impl Editor {
         self.current_mut().plane_pick = Some(PlanePicker {
             destination,
             placement,
+            reference: false,
+        });
+        self.status = text(T::ChooseSketchPlane).into();
+    }
+    /// Seletor de plano para um rascunho de referência da montagem.
+    pub(super) fn start_reference_sketch_plane(&mut self) {
+        if self.busy() || self.current().sketch_edit.is_some() {
+            return;
+        }
+        // Referências pertencem à montagem: sair da construção deixa o contexto claro.
+        self.current_mut().active_part = None;
+        self.current_mut().plane_pick = Some(PlanePicker {
+            destination: None,
+            placement: Placement::default(),
+            reference: true,
         });
         self.status = text(T::ChooseSketchPlane).into();
     }
@@ -233,11 +265,8 @@ impl Editor {
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
-        let destination = picker.destination;
-        self.execute(Command::AddSketch {
-            destination,
-            sketch: Sketch::new(text(T::Sketch), plane),
-        });
+        let command = new_sketch(picker.destination, picker.reference, plane);
+        self.execute(command);
     }
     pub(super) fn choose_face_plane(
         &mut self,
@@ -250,7 +279,8 @@ impl Editor {
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
-        let (destination, placement) = (picker.destination, picker.placement);
+        let (destination, placement, reference) =
+            (picker.destination, picker.placement, picker.reference);
         let document = self.current().session.document().clone();
         let (tab, revision) = (self.current().id, self.current().session.revision());
         let view = self.current().view.clone();
@@ -265,10 +295,7 @@ impl Editor {
             let command = PreparedCommand::new(
                 document,
                 revision,
-                Command::AddSketch {
-                    destination,
-                    sketch: Sketch::new(text(T::Sketch), plane),
-                },
+                new_sketch(destination, reference, plane),
             )
             .map_err(|e| e.to_string())?;
             Ok(Outcome::Prepared { tab, command })
@@ -281,7 +308,8 @@ impl Editor {
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
-        let (destination, placement) = (picker.destination, picker.placement);
+        let (destination, placement, reference) =
+            (picker.destination, picker.placement, picker.reference);
         let document = self.current().session.document().clone();
         let (tab, revision) = (self.current().id, self.current().session.revision());
         self.start(context, None, move || {
@@ -291,10 +319,7 @@ impl Editor {
             let command = PreparedCommand::new(
                 document,
                 revision,
-                Command::AddSketch {
-                    destination,
-                    sketch: Sketch::new(text(T::Sketch), plane),
-                },
+                new_sketch(destination, reference, plane),
             )
             .map_err(|e| e.to_string())?;
             Ok(Outcome::Prepared { tab, command })
@@ -419,6 +444,36 @@ impl Editor {
                             entity.construction,
                         );
                     }
+                }
+            }
+        }
+        // Rascunhos de referência: coordenadas da montagem, cor própria e traço mais fino.
+        for record in doc
+            .reference_sketches()
+            .iter()
+            .filter(|s| s.visible && Some((s.id, Placement::default())) != active)
+        {
+            visible |= !record.sketch.points.is_empty();
+            let frame = Frame {
+                camera: self.viewport.camera.clone(),
+                bounds: self.display_bounds(),
+                rect,
+                placement: Placement::default(),
+                plane: record.sketch.plane,
+            };
+            for point in &record.sketch.points {
+                if let Some(p) = frame.screen(point.position) {
+                    painter.circle_filled(p, 2.5, theme::REFERENCE);
+                }
+            }
+            for entity in &record.sketch.entities {
+                if let Ok(curve) = profiles::segment(&record.sketch, entity) {
+                    frame.path(
+                        &painter,
+                        curve.sample(96),
+                        egui::Stroke::new(1.5, theme::REFERENCE),
+                        entity.construction,
+                    );
                 }
             }
         }
@@ -582,6 +637,20 @@ pub(super) fn document_bounds(document: &Document, view: &ViewState) -> Bounds {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    // Rascunhos de referência já estão em coordenadas da montagem.
+    for record in document.reference_sketches().iter().filter(|s| s.visible) {
+        let sketch = &record.sketch;
+        for point in &sketch.points {
+            include(sketch.plane.world(point.position));
+        }
+        for entity in &sketch.entities {
+            if let Ok(curve) = profiles::segment(sketch, entity) {
+                for point in curve.sample(96) {
+                    include(sketch.plane.world(point));
                 }
             }
         }

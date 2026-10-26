@@ -38,11 +38,12 @@ pub(crate) fn render_ui_scenario(
     match scenario {
         "timeline" | "timeline-menu" | "extrude" | "edit-last" | "failure" | "hover-face"
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
-        | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import" => {}
+        | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import"
+        | "menu-new-part" | "menu-move" | "menu-copy" | "reference-align" | "reference-sketch" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch."
                     .into(),
             );
         }
@@ -65,6 +66,28 @@ pub(crate) fn render_ui_scenario(
         move |editor, frame| {
             let canvas = editor.canvas_rect;
             let target = canvas.center() + egui::vec2(-60., 40.);
+            // Menus da faixa: clique no botão (Nova peça, Mover, Copiar) e cursor sobre a
+            // primeira subopção.
+            let ribbon_menu = match pointer.as_str() {
+                "menu-new-part" => Some(0),
+                "menu-move" => Some(1),
+                "menu-copy" => Some(2),
+                _ => None,
+            };
+            if let Some(index) = ribbon_menu
+                && let Some(rect) = editor.shell.menu_rects.get(index)
+                && (frame == 2 || frame == 3)
+            {
+                return vec![
+                    egui::Event::PointerMoved(rect.center()),
+                    egui::Event::PointerButton {
+                        pos: rect.center(),
+                        button: egui::PointerButton::Primary,
+                        pressed: frame == 2,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ];
+            }
             match pointer.as_str() {
                 "hover-face" | "hover-edge" if frame >= 2 => {
                     return vec![egui::Event::PointerMoved(target)];
@@ -313,6 +336,87 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 section.flip = true;
             }
         }
+        "menu-new-part" | "menu-move" | "menu-copy" => {
+            editor.current_mut().active_part = None;
+            let instance = editor
+                .current()
+                .session
+                .document()
+                .instances()
+                .iter()
+                .find(|i| i.parent.is_none())
+                .map(|i| i.id);
+            editor
+                .current_mut()
+                .select(instance.map(Selection::Instance));
+        }
+        "reference-sketch" => {
+            // Rascunho de referência aberto para edição, sobre a montagem.
+            editor.current_mut().active_part = None;
+            let mut layout =
+                nator_sketch::Sketch::new(text(T::ReferenceSketch), nator_sketch::Plane::xy());
+            layout.add_rectangle([-40., -30.], [120., 60.], false)?;
+            layout.add_point([0., 0.])?;
+            let Effect::ReferenceSketchCreated { sketch } = editor
+                .current_mut()
+                .session
+                .execute(Command::AddReferenceSketch { sketch: layout })?
+            else {
+                return Err("Rascunho de referência ausente.".into());
+            };
+            let state = editor.current().session.state();
+            editor.current_mut().session.mark_saved(state);
+            editor.current_mut().changed();
+            editor.begin_reference_sketch(sketch);
+        }
+        "reference-align" => {
+            // Rascunho de referência com uma linha e pontos de destino no plano XY.
+            editor.current_mut().active_part = None;
+            let mut layout =
+                nator_sketch::Sketch::new(text(T::ReferenceSketch), nator_sketch::Plane::xy());
+            layout.add_line([-60., -40.], [60., -40.], false)?;
+            layout.add_point([-60., 30.])?;
+            editor
+                .current_mut()
+                .session
+                .execute(Command::AddReferenceSketch { sketch: layout })?;
+            let state = editor.current().session.state();
+            editor.current_mut().session.mark_saved(state);
+            editor.current_mut().changed();
+            editor.open_align(navigation::PickMode::Vertex);
+            let document = editor.current().session.document().clone();
+            let occurrences = document.occurrences()?;
+            let occurrence = occurrences
+                .iter()
+                .find(|o| {
+                    document
+                        .instance(o.instance)
+                        .and_then(|i| document.part(i.part))
+                        .is_some_and(|p| !p.bodies.is_empty())
+                })
+                .ok_or("Sem componentes com corpos.")?;
+            let part = document
+                .instance(occurrence.instance)
+                .and_then(|i| document.part(i.part))
+                .ok_or("Peça ausente")?;
+            let body = &part.bodies[0];
+            let corner = occurrence
+                .placement
+                .apply(body.placement.apply(body.geometry.mesh().bounds().min));
+            editor.set_align_for_capture(
+                nator_document::assembly::Pick {
+                    instance: occurrence.instance,
+                    part: part.id,
+                    body: body.id,
+                    triangle: 0,
+                    point: corner,
+                    normal: [0., 0., 1.],
+                    vertices: [corner; 3],
+                    placement: occurrence.placement,
+                },
+                [-60., 30., 0.],
+            );
+        }
         "move" | "align" | "assembly-ribbon" => {
             editor.current_mut().active_part = None;
             let document = editor.current().session.document();
@@ -333,7 +437,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                     editor.open_move();
                     editor.set_move_for_capture([25., 0., 10.], [0., 0., 30.]);
                 }
-                "align" => editor.open_align(),
+                "align" => editor.open_align(navigation::PickMode::Vertex),
                 _ => {}
             }
         }

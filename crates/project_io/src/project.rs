@@ -16,6 +16,7 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
+/// Versão 14: rascunhos de referência da montagem (`reference_sketches`), fora das peças.
 /// Versão 13: configurações do documento (casas decimais exibidas) e miniatura PNG opcional
 /// (`thumbnail.png`). Versões anteriores usam as configurações padrão e não têm miniatura.
 /// Versão 12: operações suprimidas e marcador do histórico por peça. Versões anteriores
@@ -23,7 +24,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 11: cotas associativas das folhas, com caminhos e referências topológicas estáveis.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 13;
+pub const FORMAT_VERSION: u32 = 14;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -51,6 +52,8 @@ struct Manifest {
     sheets: Vec<nator_document::SheetRecord>,
     #[serde(default)]
     settings: nator_document::Settings,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    reference_sketches: Vec<SketchRecordData>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -417,6 +420,19 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         .map_err(error)?;
     document.restore_sheets(manifest.sheets).map_err(error)?;
     document.set_settings(manifest.settings).map_err(error)?;
+    document
+        .restore_reference_sketches(
+            manifest
+                .reference_sketches
+                .into_iter()
+                .map(|s| SketchRecord {
+                    id: SketchId(s.id),
+                    sketch: s.sketch,
+                    visible: s.visible,
+                })
+                .collect(),
+        )
+        .map_err(error)?;
     Ok(document)
 }
 
@@ -559,6 +575,15 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .collect(),
         sheets: document.sheets().to_vec(),
         settings: document.settings(),
+        reference_sketches: document
+            .reference_sketches()
+            .iter()
+            .map(|s| SketchRecordData {
+                id: s.id.0,
+                sketch: s.sketch.clone(),
+                visible: s.visible,
+            })
+            .collect(),
         groups: document
             .groups()
             .iter()
@@ -900,6 +925,29 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn reference_sketches_round_trip() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("referencias.3dnator");
+        let mut doc = document()?;
+        let mut layout = nator_sketch::Sketch::new("Layout", nator_sketch::Plane::xz());
+        layout.add_point([10., 20.])?;
+        let id = doc.add_reference_sketch(layout)?;
+        write_project(&path, &doc)?;
+        let reopened = read_project(&path)?;
+        assert!(reopened.is_reference_sketch(id));
+        assert_eq!(
+            reopened
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .points
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
     #[test]
     fn settings_and_thumbnail_round_trip() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;

@@ -200,3 +200,28 @@ fn curved_face_does_not_define_a_sketch_plane() -> Result<()> {
     assert_eq!(session.revision(), revision);
     Ok(())
 }
+
+#[test]
+fn reference_sketch_is_never_a_feature_profile() -> Result<()> {
+    let (mut session, part, _) = profile(false)?;
+    let mut layout = Sketch::new("Referência", Plane::xy());
+    layout.add_rectangle([0., 0.], [20., 15.], false)?;
+    let Effect::ReferenceSketchCreated { sketch } =
+        session.execute(Command::AddReferenceSketch { sketch: layout })?
+    else {
+        return Err("Rascunho de referência ausente".into());
+    };
+    // A região é válida, mas o rascunho pertence à montagem: a operação é recusada.
+    let revision = session.revision();
+    assert!(session.execute(extrusion(part, sketch, "8 mm")).is_err());
+    assert_eq!(session.revision(), revision);
+    assert!(
+        session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?
+            .features
+            .is_empty()
+    );
+    Ok(())
+}

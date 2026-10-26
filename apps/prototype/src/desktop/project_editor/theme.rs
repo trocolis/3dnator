@@ -13,6 +13,8 @@ pub(super) const HEADER: egui::Color32 = egui::Color32::from_rgb(40, 49, 64);
 pub(super) const GREEN: egui::Color32 = egui::Color32::from_rgb(30, 126, 88);
 pub(super) const WARNING: egui::Color32 = egui::Color32::from_rgb(157, 93, 15);
 pub(super) const DANGER: egui::Color32 = egui::Color32::from_rgb(189, 63, 68);
+/// Rascunhos de referência da montagem, distintos dos rascunhos de peça.
+pub(super) const REFERENCE: egui::Color32 = egui::Color32::from_rgb(124, 82, 196);
 
 pub(super) fn apply(context: &egui::Context) {
     let mut style = egui::Style {

@@ -495,6 +495,15 @@ pub struct Editor {
     mesh_import: Option<mesh_import::MeshImportDraft>,
 }
 
+/// Origem de uma importação pelo diálogo de arquivos (ou o suporte de referência embutido).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ImportSource {
+    Reference,
+    Any,
+    Step,
+    Stl,
+}
+
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
 fn prepare_scene(
     document: &Document,
@@ -681,8 +690,33 @@ impl Editor {
                 if let Effect::SketchCreated { part, sketch } = effect {
                     self.begin_sketch(part, sketch);
                 }
+                self.follow_assembly_effect(effect);
             }
             Err(error) => self.status = error.to_string(),
+        }
+    }
+    /// Efeitos dos comandos de montagem na aba ativa: o rascunho de referência novo abre
+    /// para edição; a peça nova entra em construção, pronta para o primeiro rascunho.
+    fn follow_assembly_effect(&mut self, effect: Effect) {
+        match effect {
+            Effect::ReferenceSketchCreated { sketch } => self.begin_reference_sketch(sketch),
+            Effect::PartCreated { part } => {
+                let instance = self
+                    .current()
+                    .session
+                    .document()
+                    .instances()
+                    .iter()
+                    .find(|i| i.part == part)
+                    .map(|i| i.id);
+                if let Some(instance) = instance {
+                    self.current_mut()
+                        .select(Some(Selection::Instance(instance)));
+                }
+                self.current_mut().active_part = Some(part);
+                self.shell.tab = shell::RibbonTab::Model;
+            }
+            _ => {}
         }
     }
     fn start(
@@ -979,6 +1013,7 @@ impl Editor {
     /// rascunho, folhas e falhas pendentes.
     fn commit_prepared(&mut self, tab: u64, command: PreparedCommand) {
         let mut saved = None;
+        let mut assembly_effect = None;
         let mut created = None;
         let mut consumed = false;
         let active_tab = self.current().id;
@@ -1020,6 +1055,12 @@ impl Editor {
                     if let Effect::SheetSaved { id } = effect {
                         saved = Some(id);
                     }
+                    if matches!(
+                        effect,
+                        Effect::ReferenceSketchCreated { .. } | Effect::PartCreated { .. }
+                    ) {
+                        assembly_effect = Some(effect);
+                    }
                     target.changed();
                     self.requested = None;
                     self.resolve_pending_failure(tab);
@@ -1033,6 +1074,9 @@ impl Editor {
             }
             if consumed {
                 self.finish_sketch();
+            }
+            if let Some(effect) = assembly_effect {
+                self.follow_assembly_effect(effect);
             }
         }
         if let Some(id) = saved
@@ -1139,20 +1183,31 @@ impl Editor {
             })
         });
     }
-    fn import(&mut self, context: &egui::Context, reference: bool) {
+    /// Importa um modelo para `destination` (peça em construção) ou, sem destino, como
+    /// peça nova. O filtro do diálogo segue a origem escolhida.
+    fn import(
+        &mut self,
+        context: &egui::Context,
+        source: ImportSource,
+        destination: Option<PartId>,
+    ) {
         let tab = self.current().id;
         let revision = self.current().session.revision();
-        let destination = self.current().active_part;
         let document = self.current().session.document().clone();
         self.start(context, None, move || {
-            let (mesh, name) = if reference {
+            let (mesh, name) = if source == ImportSource::Reference {
                 (
                     reference_bracket().map_err(|e| e.to_string())?,
                     text(T::Reference).into(),
                 )
             } else {
+                let (label, extensions): (_, &[&str]) = match source {
+                    ImportSource::Step => (text(T::StepFilter), &["step", "stp"]),
+                    ImportSource::Stl => (text(T::StlFilter), &["stl"]),
+                    _ => (text(T::ModelFilter), &["stl", "step", "stp"]),
+                };
                 let Some(path) = rfd::FileDialog::new()
-                    .add_filter(text(T::ModelFilter), &["stl", "step", "stp"])
+                    .add_filter(label, extensions)
                     .pick_file()
                 else {
                     return Ok(Outcome::Cancelled);

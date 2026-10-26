@@ -115,6 +115,7 @@ impl Editor {
         let mut command = None;
         let mut activate = None;
         let mut action = None;
+        let mut edit_reference = None;
         let menu = self.menu_context();
         let busy = self.busy();
         egui::Panel::left("tree")
@@ -175,6 +176,70 @@ impl Editor {
                 egui::ScrollArea::vertical()
                     .id_salt("project_browser")
                     .show(ui, |ui| {
+                        // Rascunhos de referência da montagem, antes das peças.
+                        if !document.reference_sketches().is_empty() {
+                            theme::section(
+                                ui,
+                                &format!(
+                                    "{} ({})",
+                                    text(T::ReferenceSketches),
+                                    document.reference_sketches().len()
+                                ),
+                            );
+                        }
+                        for record in document.reference_sketches() {
+                            let editing = self
+                                .current()
+                                .sketch_edit
+                                .as_ref()
+                                .is_some_and(|w| w.id == record.id);
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add_enabled_ui(!busy && !editing, |ui| {
+                                        icons::button(
+                                            ui,
+                                            if record.visible {
+                                                icons::Icon::Eye
+                                            } else {
+                                                icons::Icon::EyeOff
+                                            },
+                                            text(T::Visibility),
+                                            false,
+                                            false,
+                                        )
+                                    })
+                                    .inner
+                                    .clicked()
+                                {
+                                    command = Some(Command::SetSketchVisibility {
+                                        id: record.id,
+                                        visible: !record.visible,
+                                    });
+                                }
+                                let response = icons::entry(
+                                    ui,
+                                    icons::Icon::ReferenceSketch,
+                                    &record.sketch.name,
+                                    editing,
+                                )
+                                .on_hover_text(text(T::ReferenceSketchHint));
+                                if response.clicked() && !busy {
+                                    edit_reference = Some(record.id);
+                                }
+                                response.context_menu(|ui| {
+                                    ui.add_enabled_ui(!busy, |ui| {
+                                        if ui.button(text(T::EditFeatureShort)).clicked() {
+                                            edit_reference = Some(record.id);
+                                            ui.close();
+                                        }
+                                        if ui.button(text(T::DeleteFeature)).clicked() {
+                                            command = Some(Command::RemoveSketch { id: record.id });
+                                            ui.close();
+                                        }
+                                    });
+                                });
+                            });
+                        }
                         for instance in document.instances().iter().filter(|i| i.parent.is_none()) {
                             let Some(part) = document.part(instance.part) else {
                                 continue;
@@ -429,6 +494,11 @@ impl Editor {
         }
         if let Some(action) = action.or(self.pending_menu.take()) {
             self.apply_menu_action(ui.ctx(), action);
+        }
+        if let Some(id) = edit_reference {
+            self.finish_sketch();
+            self.current_mut().active_part = None;
+            self.begin_reference_sketch(id);
         }
     }
     pub(super) fn properties(&mut self, ui: &mut egui::Ui) {
@@ -793,6 +863,7 @@ impl Editor {
                 }
                 self.update_hover(ui, &response);
                 self.draw_highlights(ui, response.rect);
+                self.align_overlay(ui, response.rect);
                 self.measure_overlay(ui, response.rect);
                 self.current_mut().camera = self.viewport.camera.clone();
             });
