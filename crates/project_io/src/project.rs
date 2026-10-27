@@ -26,7 +26,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 11: cotas associativas das folhas, com caminhos e referências topológicas estáveis.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 15;
+pub const FORMAT_VERSION: u32 = 16;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -959,6 +959,46 @@ mod tests {
                 .len(),
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn angular_sketch_dimensions_round_trip_with_their_expressions() -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, Curve, Plane, Sketch};
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("angular.3dnator");
+        let mut doc = Document::new("Cota angular")?;
+        let mut sketch = Sketch::new("Linha", Plane::xy());
+        let line = sketch.add_line([0., 0.], [10., 10.], false)?;
+        let Curve::Line { start, end } = sketch.entity(line)?.curve else {
+            return Err("Linha ausente".into());
+        };
+        let constraint = sketch.add_constraint(
+            ConstraintKind::Angle {
+                a: start,
+                b: end,
+                value: std::f64::consts::FRAC_PI_4,
+            },
+            false,
+        )?;
+        sketch
+            .dimension_expressions
+            .insert(constraint, "45 deg".into());
+        let (_, id) = doc.add_sketch(None, sketch)?;
+        write_project(&path, &doc)?;
+        let reopened = read_project(&path)?;
+        let sketch = &reopened.sketch(id).ok_or("Rascunho ausente")?.sketch;
+        assert!(
+            matches!(sketch.constraints[0].kind,ConstraintKind::Angle {value,..} if (value-std::f64::consts::FRAC_PI_4).abs() < 1e-12)
+        );
+        assert_eq!(
+            sketch
+                .dimension_expressions
+                .get(&constraint)
+                .map(String::as_str),
+            Some("45 deg")
+        );
+        sketch.validate()?;
         Ok(())
     }
 

@@ -7,16 +7,22 @@ type Result<T> = std::result::Result<T, DocumentError>;
 pub fn resolve_sketch(sketch: &mut nator_sketch::Sketch, parameters: &Parameters) -> Result<()> {
     use nator_sketch::ConstraintKind;
     for (id, expression) in &sketch.dimension_expressions {
-        let value = parameters.evaluate(expression, Dimension::Length)?;
         let constraint = sketch
             .constraints
             .iter_mut()
             .find(|c| c.id == *id)
             .ok_or_else(|| DocumentError("Expressão sem cota correspondente.".into()))?;
+        let dimension = if matches!(constraint.kind, ConstraintKind::Angle { .. }) {
+            Dimension::Angle
+        } else {
+            Dimension::Length
+        };
+        let value = parameters.evaluate(expression, dimension)?;
         match &mut constraint.kind {
             ConstraintKind::Distance { value: target, .. }
             | ConstraintKind::DeltaX { value: target, .. }
             | ConstraintKind::DeltaY { value: target, .. }
+            | ConstraintKind::Angle { value: target, .. }
             | ConstraintKind::Radius { value: target, .. } => *target = value,
             _ => {
                 return Err(DocumentError(
@@ -474,6 +480,55 @@ fn function(name: &str, first: Quantity, second: Option<Quantity>) -> Result<Qua
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn angular_sketch_expressions_resolve_as_angles_and_recalculate()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        use nator_sketch::{ConstraintKind, Curve, Plane, Sketch, solver};
+        let mut s = Sketch::new("Linha cotada", Plane::xy());
+        let line = s.add_line([0., 0.], [10., 0.], false)?;
+        let Curve::Line { start, end } = s.entity(line)?.curve else {
+            return Err("Linha ausente".into());
+        };
+        s.add_constraint(
+            ConstraintKind::Fixed {
+                point: start,
+                position: [0., 0.],
+            },
+            false,
+        )?;
+        let length = s.add_constraint(
+            ConstraintKind::Distance {
+                a: start,
+                b: end,
+                value: 10.,
+            },
+            false,
+        )?;
+        let angle = s.add_constraint(
+            ConstraintKind::Angle {
+                a: start,
+                b: end,
+                value: 0.,
+            },
+            false,
+        )?;
+        s.dimension_expressions.insert(length, "20 mm".into());
+        s.dimension_expressions.insert(angle, "inclinacao".into());
+        let mut p = Parameters::default();
+        for value in ["30 deg", "90", "-0.5 rad"] {
+            p.set("inclinacao".into(), value.into(), Dimension::Angle)?;
+            resolve_sketch(&mut s, &p)?;
+            let report = solver::solve(&s)?;
+            assert_ne!(report.status, solver::Status::Conflict);
+            let (a, b) = report.sketch.line(line)?;
+            let expected = p.evaluate("inclinacao", Dimension::Angle)?;
+            assert!(((b[1] - a[1]).atan2(b[0] - a[0]) - expected).abs() < 1e-6);
+            assert!((nator_sketch::distance(a, b) - 20.).abs() < 1e-6);
+        }
+        s.dimension_expressions.insert(angle, "5 mm".into());
+        assert!(resolve_sketch(&mut s, &p).is_err());
+        Ok(())
+    }
     #[test]
     fn expressions_preserve_units_and_support_portuguese_decimals() -> Result<()> {
         let mut p = Parameters::default();

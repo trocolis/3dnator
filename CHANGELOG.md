@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Cotas durante o desenho
+
+- Linha, retângulo, círculo e arco mostram medidas junto ao desenho, atualizadas pelo cursor: comprimento/ângulo em relação ao eixo horizontal, largura/altura, raio e raio/abertura, respectivamente. Digitar trava a medida, Tab/Shift+Tab alterna os campos, Enter confirma a etapa e Esc cancela sem alterar o documento. Apagar um campo libera a medida para acompanhar o mouse.
+- Medidas digitadas viram cotas dirigentes com expressões e unidades; os valores não digitados continuam livres. A prévia usa as mesmas medidas da criação, preserva o quadrante do retângulo e evita capturas que contrariem a ponta dimensionada.
+- Cotas angulares em radianos no solver, com apresentação em graus, edição, referência, recálculo paramétrico e persistência. Formato de projeto 16; leitura das versões anteriores preservada.
+
 ### Faixa Rascunho
 
 - Reorganizada conforme a referência visual do SolidCraft, sem as seções Reference e Configure: Criar (Linha, Retângulo, Círculo, Arco), Modificar (Aparar, Deslocamento, Arredondar), Padrão (Espelhar, Circular, Retangular) e Restringir (Cota e grade de seis restrições). Concluir rascunho fica fixo à direita, acessível também em janelas menores.

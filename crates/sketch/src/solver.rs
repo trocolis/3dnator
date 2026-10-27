@@ -81,6 +81,18 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
             }
             vec![s.radial(circle)?.1 - value]
         }
+        ConstraintKind::Angle { a, b, value } => {
+            let d = sub(s.point(b)?, s.point(a)?);
+            if distance(s.point(a)?, s.point(b)?) < 1e-12 {
+                return Err(SketchError("Ângulo exige dois pontos distintos.".into()));
+            }
+            // O resíduo circular mantém a direção (inclusive 180°), sem aceitar
+            // a solução invertida de uma simples tangente. O jacobiano desembrulha ±π.
+            let target = checked(value)?;
+            let target = target.sin().atan2(target.cos());
+            let delta = d[1].atan2(d[0]) - target;
+            vec![delta.sin().atan2(delta.cos())]
+        }
         ConstraintKind::Parallel { a, b } => vec![cross(direction(a)?, direction(b)?)],
         ConstraintKind::Perpendicular { a, b } => vec![dot(direction(a)?, direction(b)?)],
         ConstraintKind::EqualLength { a, b } => {
@@ -159,6 +171,14 @@ fn assign(s: &mut Sketch, x: &[f64]) {
     }
 }
 fn jacobian(s: &Sketch, x: &[f64], r: &[f64]) -> Result<Vec<Vec<f64>>> {
+    let mut angular = vec![false; r.len()];
+    let mut offset = 0;
+    for constraint in s.constraints.iter().filter(|c| !c.reference) {
+        if matches!(constraint.kind, ConstraintKind::Angle { .. }) {
+            angular[offset] = true;
+        }
+        offset += constraint_residuals(s, &constraint.kind)?.len();
+    }
     let mut j = vec![vec![0.; x.len()]; r.len()];
     let mut candidate = s.clone();
     for column in 0..x.len() {
@@ -168,7 +188,14 @@ fn jacobian(s: &Sketch, x: &[f64], r: &[f64]) -> Result<Vec<Vec<f64>>> {
         assign(&mut candidate, &shifted);
         let next = residuals(&candidate)?;
         for (row, value) in next.into_iter().enumerate() {
-            j[row][column] = (value - r[row]) / h;
+            let difference = value - r[row];
+            // Uma perturbação infinitesimal pode atravessar o corte de atan2.
+            // Derivar a volta de 2π produziria um pivô artificial e travaria 0°→180°.
+            j[row][column] = if angular[row] {
+                difference.sin().atan2(difference.cos()) / h
+            } else {
+                difference / h
+            };
         }
     }
     Ok(j)
@@ -321,6 +348,72 @@ pub fn solve(source: &Sketch) -> Result<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn angular_dimensions_keep_direction_across_the_pi_boundary() -> Result<()> {
+        for (initial, target) in [(179_f64, -179_f64), (0., 180.), (45., -30.)] {
+            let mut s = Sketch::new("Ângulo", Plane::xy());
+            let line = s.add_line(
+                [0., 0.],
+                [
+                    20. * initial.to_radians().cos(),
+                    20. * initial.to_radians().sin(),
+                ],
+                false,
+            )?;
+            let Curve::Line { start, end } = s.entity(line)?.curve else {
+                return Err(SketchError("Linha ausente".into()));
+            };
+            s.add_constraint(
+                ConstraintKind::Fixed {
+                    point: start,
+                    position: [0., 0.],
+                },
+                false,
+            )?;
+            s.add_constraint(
+                ConstraintKind::Distance {
+                    a: start,
+                    b: end,
+                    value: 20.,
+                },
+                false,
+            )?;
+            s.add_constraint(
+                ConstraintKind::Angle {
+                    a: start,
+                    b: end,
+                    value: target.to_radians(),
+                },
+                false,
+            )?;
+            let report = solve(&s)?;
+            assert_ne!(report.status, Status::Conflict, "{initial} → {target}");
+            let (a, b) = report.sketch.line(line)?;
+            let d = sub(b, a);
+            assert!(
+                distance(
+                    d,
+                    [
+                        20. * target.to_radians().cos(),
+                        20. * target.to_radians().sin()
+                    ]
+                ) < 1e-5
+            );
+            let reference = s.add_constraint(
+                ConstraintKind::Angle {
+                    a: start,
+                    b: end,
+                    value: 0.,
+                },
+                true,
+            )?;
+            s.refresh_reference_dimensions()?;
+            assert!(
+                matches!(s.constraints.iter().find(|c| c.id == reference).map(|c| &c.kind), Some(ConstraintKind::Angle {value,..}) if (*value-initial.to_radians()).abs() < 1e-10)
+            );
+        }
+        Ok(())
+    }
     #[test]
     fn dimensional_rectangle_is_solved_and_fully_constrained() -> Result<()> {
         let mut s = Sketch::new("Base", Plane::xy());

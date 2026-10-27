@@ -65,11 +65,19 @@ fn candidate(
     action: Action,
     parameters: &nator_document::parameters::Parameters,
 ) -> Result<Sketch, String> {
+    let angular = action == Action::Dimension
+        && source.constraints.iter().any(|c| {
+            Some(c.id) == work.constraint && matches!(c.kind, ConstraintKind::Angle { .. })
+        });
     let value = if action.needs_value() {
         parameters
             .evaluate(
                 &work.dimension_expression,
-                nator_document::parameters::Dimension::Length,
+                if angular {
+                    nator_document::parameters::Dimension::Angle
+                } else {
+                    nator_document::parameters::Dimension::Length
+                },
             )
             .map_err(sketch_error)?
     } else {
@@ -177,9 +185,22 @@ impl Editor {
                     work.constraint = None;
                 }
                 if action.needs_value() {
-                    panel::row(ui, text(T::SketchValue), |ui| {
-                        panel::expression(ui, &mut work.dimension_expression);
-                    });
+                    let angular = action == Action::Dimension
+                        && source.constraints.iter().any(|c| {
+                            Some(c.id) == work.constraint
+                                && matches!(c.kind, ConstraintKind::Angle { .. })
+                        });
+                    panel::row(
+                        ui,
+                        text(if angular {
+                            T::SketchAngleValue
+                        } else {
+                            T::SketchValue
+                        }),
+                        |ui| {
+                            panel::expression(ui, &mut work.dimension_expression);
+                        },
+                    );
                 }
                 if action.is_pattern() {
                     panel::row(ui, text(T::PatternCount), |ui| {

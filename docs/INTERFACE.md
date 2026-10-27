@@ -22,6 +22,19 @@ Horizontal/vertical escolhe a orientação predominante da linha; Coincidente us
 
 A edição acontece no mesmo viewport do modelo. A câmera se desloca e alinha ao plano, conservando a projeção; os sólidos continuam desenhados. Grade, entidades, cotas, encaixes e cursor usam o plano local da peça e sua posição na montagem. O cubo, pan, zoom e órbita continuam disponíveis durante a edição. Ao concluir, a câmera retorna à orientação anterior, mantendo o alvo e a escala de trabalho.
 
+Depois do primeiro clique de desenho, os campos de medida aparecem junto ao ponto inicial e acompanham a prévia em tempo real:
+
+| Forma | Campos |
+| --- | --- |
+| Linha | Comprimento e ângulo em relação ao eixo horizontal local; sentido positivo anti-horário |
+| Retângulo | Largura e altura positivas; o cursor escolhe o quadrante |
+| Círculo | Raio |
+| Arco | Raio e orientação inicial; após confirmar o início, raio e abertura anti-horária |
+
+O primeiro campo recebe foco automaticamente. Digite a medida diretamente; **Tab** ou **Shift+Tab** alterna os campos, mantendo os valores já digitados. Um ponto azul identifica cada medida travada. Os outros campos continuam seguindo o cursor; apagar completamente um campo libera sua medida. São aceitas vírgula decimal, expressões, unidades e parâmetros da peça. Sem unidade explícita, comprimentos usam mm e ângulos usam graus; `0,5 rad` também é aceito. Comprimentos devem ser positivos e não exceder 1.000.000.000 mm; abertura de arco fica estritamente entre 0° e 360°.
+
+**Enter** confirma a etapa com uma só tecla, inclusive durante a digitação. Um clique na área CAD também confirma, usando os valores travados. No arco, a primeira confirmação escolhe a ponta inicial e a segunda cria o arco; uma abertura digitada também fixa a orientação inicial para preservar o setor ao recalcular. **Esc** descarta todo o desenho em andamento e seus campos; a ferramenta continua pronta para uma nova forma. Valores inválidos aparecem no próprio formulário e bloqueiam Enter/clique até serem corrigidos ou cancelados. Confirmar publica uma edição com desfazer/refazer; medidas digitadas recebem cotas dirigentes e expressões no documento. A captura automática de uma ponta é descartada quando ela não coincide com a ponta definida pelas medidas.
+
 A origem do projeto (global) aparece na área 3D por padrão; a origem de cada peça aparece quando o olho de **Origem** dentro da peça está aberto (fechado por padrão), em todas as ocorrências dela. Os planos coloridos só aparecem durante a seleção de suporte. Em uma face, a origem do rascunho é a projeção da origem da peça no plano, com eixos definidos pela normal local; clicar em outro ponto da mesma face não desloca essa referência. O suporte é capturado como plano fixo: ainda não há vínculo paramétrico com alterações posteriores da face.
 
 O rascunho permanece visível ao concluir. Criar uma extrusão, revolução ou furo oculta o rascunho usado, apenas depois de uma operação bem-sucedida. Cada rascunho tem um olho na árvore, inclusive em subpeças, para mostrar/ocultar sem abrir a edição. Clicar no nome abre a edição e mostra o perfil. A visibilidade é salva e participa de desfazer/refazer; recálculos não anulam uma reexibição manual. Projetos anteriores preservam a visibilidade já armazenada.
@@ -159,7 +172,7 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
-Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `repair`, `recovery`, `insert`, `mesh-import`, `menu-new-part`, `menu-move`, `menu-copy`, `reference-align`, `reference-sketch`, `copy-beside`, `tree-folders`, `part-menu-move`, `measure`), que não alteram o projeto de origem:
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `repair`, `recovery`, `insert`, `mesh-import`, `menu-new-part`, `menu-move`, `menu-copy`, `reference-align`, `reference-sketch`, `copy-beside`, `tree-folders`, `part-menu-move`, `measure`, `sketch-line-input`, `sketch-circle-input`, `sketch-rectangle-input`), que não alteram o projeto de origem:
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude

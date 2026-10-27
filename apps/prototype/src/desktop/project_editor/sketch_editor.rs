@@ -6,6 +6,7 @@ use nator_sketch::{
     solver::{self, Status},
 };
 mod actions;
+mod dynamic_input;
 pub(super) use actions::{edit_icon, edit_label};
 use nator_sketch::edit::Action as EditAction;
 
@@ -62,8 +63,16 @@ pub(super) struct Workspace {
     pattern_count: usize,
     /// Intenção aberta pela faixa; os cliques alternam a seleção até OK/Cancelar.
     active_action: Option<EditAction>,
+    drawing: dynamic_input::Input,
 }
 impl Workspace {
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn drawing_fields(&self) -> [(String, bool); 2] {
+        std::array::from_fn(|i| (self.drawing.fields[i].clone(), self.drawing.locked[i]))
+    }
+    pub(super) fn is_drawing(&self) -> bool {
+        !self.anchors.is_empty() && dynamic_input::primitive(self.tool).is_some()
+    }
     pub(super) fn active_action(&self) -> Option<EditAction> {
         self.active_action
     }
@@ -75,6 +84,7 @@ impl Workspace {
         self.tool = tool;
         self.anchors.clear();
         self.anchor_kinds.clear();
+        self.drawing = dynamic_input::Input::default();
     }
     pub fn new(id: SketchId) -> Self {
         Self {
@@ -99,6 +109,7 @@ impl Workspace {
             pattern_count: 3,
             reference: false,
             active_action: None,
+            drawing: dynamic_input::Input::default(),
         }
     }
 }
@@ -378,7 +389,9 @@ impl Editor {
                                             .dimension_expressions
                                             .get(&constraint.id)
                                             .cloned()
-                                            .unwrap_or_else(|| format!("{value} mm"));
+                                            .unwrap_or_else(|| {
+                                                dimension_expression(&constraint.kind, value)
+                                            });
                                         work.reference = constraint.reference;
                                     }
                                 }
@@ -448,6 +461,14 @@ impl Editor {
         };
         let pixels_per_mm = frame.pixels_per_mm(hover.unwrap_or([0., 0.]));
         let busy = self.busy();
+        let parameters = self
+            .current()
+            .session
+            .document()
+            .sketch_part(work.id)
+            .and_then(|id| self.current().session.document().part(id))
+            .map(|p| p.parameters.clone())
+            .unwrap_or_default();
         let mut submit = false;
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
@@ -530,6 +551,16 @@ impl Editor {
                     .radial(circle)
                     .ok()
                     .map(|(center, _)| (center, format!("R {}", nator_drawing::format_mm(value)))),
+                ConstraintKind::Angle { a, b, value } => sketch
+                    .point(a)
+                    .ok()
+                    .zip(sketch.point(b).ok())
+                    .map(|(a, b)| {
+                        (
+                            nator_sketch::scale(nator_sketch::add(a, b), 0.5),
+                            format!("{}°", nator_drawing::format_mm(value.to_degrees())),
+                        )
+                    }),
                 _ => None,
             };
             if let Some((point, label)) = annotation
@@ -580,37 +611,58 @@ impl Editor {
                 );
             }
         }
-        let cursor = snap.as_ref().map(|s| s.point).or(hover);
-        if let Some(first) = work.anchors.first().copied()
-            && let Some(cursor) = cursor
+        let raw_cursor = snap.as_ref().map(|s| s.point).or(hover);
+        let mut cursor = raw_cursor;
+        let mut confirm = false;
+        let mut valid = true;
+        let mut adjusted = false;
+        let escape;
+        if !work.anchors.is_empty()
+            && let Some(primitive) = dynamic_input::primitive(work.tool)
         {
-            let points = match work.tool {
-                Tool::Rectangle => vec![
-                    first,
-                    [cursor[0], first[1]],
-                    cursor,
-                    [first[0], cursor[1]],
-                    first,
-                ],
-                Tool::Circle => profiles::Segment::Circle {
-                    center: first,
-                    radius: nator_sketch::distance(first, cursor),
+            if let Some(point) = raw_cursor {
+                work.drawing.cursor = Some(point);
+            }
+            let output = work.drawing.show(
+                ui.ctx(),
+                &frame,
+                primitive,
+                &work.anchors,
+                &parameters,
+                !busy && !animating,
+            );
+            confirm = output.confirm;
+            escape = output.cancel;
+            valid = output.preview.is_some();
+            if let Some(preview) = output.preview {
+                cursor = Some(preview.point);
+                adjusted =
+                    raw_cursor.is_none_or(|p| nator_sketch::distance(p, preview.point) > 1e-7);
+                if let Some(start) = preview.arc_start {
+                    work.anchors[1] = start;
                 }
-                .sample(64),
-                _ => vec![first, cursor],
-            };
-            frame.path(&painter, points, egui::Stroke::new(1., theme::INK), false);
+                frame.path(
+                    &painter,
+                    preview.path,
+                    egui::Stroke::new(1., theme::INK),
+                    false,
+                );
+            }
+        } else {
+            escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         }
-        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         if escape {
             work.anchors.clear();
             work.anchor_kinds.clear();
             work.pending = None;
             work.tracker.clear();
+            work.drawing.clear(ui.ctx());
         }
         if !busy
             && !animating
-            && response.clicked_by(egui::PointerButton::Primary)
+            && !escape
+            && valid
+            && (response.clicked_by(egui::PointerButton::Primary) || confirm)
             && let Some(cursor) = cursor
         {
             if matches!(work.tool, Tool::Select | Tool::Trim) {
@@ -676,13 +728,31 @@ impl Editor {
                 }
             } else {
                 work.anchors.push(cursor);
-                work.anchor_kinds.push(snap.as_ref().map(|s| s.kind));
+                // Uma medida digitada pode afastar a ponta da captura. Não gravar
+                // nesse caso uma coincidência que contradiria a cota escolhida.
+                work.anchor_kinds.push(if adjusted {
+                    None
+                } else {
+                    snap.as_ref().map(|s| s.kind)
+                });
                 work.tracker.capture(cursor);
                 let needed = if work.tool == Tool::Arc { 3 } else { 2 };
+                if work.anchors.len() == 1 {
+                    work.drawing.start(cursor);
+                    ui.ctx().request_repaint();
+                }
+                if work.tool == Tool::Arc && work.anchors.len() == 2 {
+                    work.drawing.arc_next();
+                }
                 if work.anchors.len() == needed {
-                    let result = draw_entity(&mut sketch, work);
+                    let result = draw_entity(&mut sketch, work, &parameters);
                     match result {
-                        Ok(()) => submit = true,
+                        Ok(()) => {
+                            submit = true;
+                            work.anchors.clear();
+                            work.anchor_kinds.clear();
+                            work.drawing.clear(ui.ctx());
+                        }
                         Err(error) => {
                             painter.text(
                                 response.rect.left_top(),
@@ -691,10 +761,10 @@ impl Editor {
                                 egui::FontId::proportional(13.),
                                 theme::DANGER,
                             );
+                            work.anchors.pop();
+                            work.anchor_kinds.pop();
                         }
                     }
-                    work.anchors.clear();
-                    work.anchor_kinds.clear();
                 }
             }
         }
@@ -704,7 +774,11 @@ impl Editor {
     }
 }
 
-fn draw_entity(sketch: &mut Sketch, work: &Workspace) -> Result<(), String> {
+fn draw_entity(
+    sketch: &mut Sketch,
+    work: &Workspace,
+    parameters: &nator_document::parameters::Parameters,
+) -> Result<(), String> {
     let a = work.anchors[0];
     let b = work.anchors[1];
     match work.tool {
@@ -713,15 +787,38 @@ fn draw_entity(sketch: &mut Sketch, work: &Workspace) -> Result<(), String> {
             if let Curve::Line { start, end } = sketch.entity(id).map_err(sketch_error)?.curve {
                 attach(sketch, start, work.anchor_kinds[0], a)?;
                 attach(sketch, end, work.anchor_kinds[1], b)?;
-                if (a[1] - b[1]).abs() < 1e-6 {
+                if !work.drawing.locked[1] && (a[1] - b[1]).abs() < 1e-6 {
                     sketch
                         .add_constraint(ConstraintKind::Horizontal { line: id }, false)
                         .map_err(sketch_error)?;
                 }
-                if (a[0] - b[0]).abs() < 1e-6 {
+                if !work.drawing.locked[1] && (a[0] - b[0]).abs() < 1e-6 {
                     sketch
                         .add_constraint(ConstraintKind::Vertical { line: id }, false)
                         .map_err(sketch_error)?;
+                }
+                if work.drawing.locked[0] {
+                    drive(
+                        sketch,
+                        ConstraintKind::Distance {
+                            a: start,
+                            b: end,
+                            value: nator_sketch::distance(a, b),
+                        },
+                        work.drawing.fields[0].clone(),
+                    )?;
+                }
+                if work.drawing.locked[1] {
+                    let d = nator_sketch::sub(b, a);
+                    drive(
+                        sketch,
+                        ConstraintKind::Angle {
+                            a: start,
+                            b: end,
+                            value: d[1].atan2(d[0]),
+                        },
+                        work.drawing.fields[1].clone(),
+                    )?;
                 }
             }
         }
@@ -735,6 +832,31 @@ fn draw_entity(sketch: &mut Sketch, work: &Workspace) -> Result<(), String> {
                 work.anchor_kinds[1],
                 b,
             )?;
+            for (index, end) in [(0, offset + 1), (1, offset + 3)] {
+                if work.drawing.locked[index] {
+                    let value = b[index] - a[index];
+                    let expression = if value < 0. {
+                        format!("-({})", work.drawing.fields[index])
+                    } else {
+                        work.drawing.fields[index].clone()
+                    };
+                    let (start, end) = (sketch.points[offset].id, sketch.points[end].id);
+                    let kind = if index == 0 {
+                        ConstraintKind::DeltaX {
+                            a: start,
+                            b: end,
+                            value,
+                        }
+                    } else {
+                        ConstraintKind::DeltaY {
+                            a: start,
+                            b: end,
+                            value,
+                        }
+                    };
+                    drive(sketch, kind, expression)?;
+                }
+            }
         }
         Tool::Circle => {
             let id = sketch
@@ -742,6 +864,16 @@ fn draw_entity(sketch: &mut Sketch, work: &Workspace) -> Result<(), String> {
                 .map_err(sketch_error)?;
             if let Curve::Circle { center, .. } = sketch.entity(id).map_err(sketch_error)?.curve {
                 attach(sketch, center, work.anchor_kinds[0], a)?;
+            }
+            if work.drawing.locked[0] {
+                drive(
+                    sketch,
+                    ConstraintKind::Radius {
+                        circle: id,
+                        value: nator_sketch::distance(a, b),
+                    },
+                    work.drawing.fields[0].clone(),
+                )?;
             }
         }
         Tool::Arc => {
@@ -758,7 +890,7 @@ fn draw_entity(sketch: &mut Sketch, work: &Workspace) -> Result<(), String> {
             let center = sketch.add_point(a).map_err(sketch_error)?;
             let start = sketch.add_point(b).map_err(sketch_error)?;
             let end = sketch.add_point(end).map_err(sketch_error)?;
-            sketch
+            let id = sketch
                 .add_curve(
                     Curve::Arc {
                         center,
@@ -769,18 +901,100 @@ fn draw_entity(sketch: &mut Sketch, work: &Workspace) -> Result<(), String> {
                     false,
                 )
                 .map_err(sketch_error)?;
+            attach(sketch, center, work.anchor_kinds[0], a)?;
+            // A ponta inicial só mantém a captura se ainda estiver no raio original.
+            attach(
+                sketch,
+                start,
+                work.anchor_kinds[1].filter(|_| !work.drawing.locked[0]),
+                b,
+            )?;
+            if work.drawing.locked[0] {
+                drive(
+                    sketch,
+                    ConstraintKind::Radius {
+                        circle: id,
+                        value: radius,
+                    },
+                    work.drawing.fields[0].clone(),
+                )?;
+            }
+            let d = nator_sketch::sub(b, a);
+            let angle = d[1].atan2(d[0]);
+            let start_expression = work
+                .drawing
+                .arc_angle
+                .as_ref()
+                .map(|expression| angle_expression(expression, parameters))
+                .unwrap_or_else(|| format!("{} deg", angle.to_degrees()));
+            if work.drawing.arc_angle.is_some() || work.drawing.locked[1] {
+                drive(
+                    sketch,
+                    ConstraintKind::Angle {
+                        a: center,
+                        b: start,
+                        value: angle,
+                    },
+                    start_expression.clone(),
+                )?;
+            }
+            if work.drawing.locked[1] {
+                let delta = nator_sketch::sub(sketch.point(end).map_err(sketch_error)?, a);
+                // Abertura é uma expressão angular; somar à orientação inicial
+                // mantém o raio e o início ao recalcular os parâmetros da peça.
+                drive(
+                    sketch,
+                    ConstraintKind::Angle {
+                        a: center,
+                        b: end,
+                        value: delta[1].atan2(delta[0]),
+                    },
+                    format!(
+                        "({start_expression}) + ({})",
+                        angle_expression(&work.drawing.fields[1], parameters)
+                    ),
+                )?;
+            }
         }
         _ => {}
     }
     Ok(())
 }
 
+fn drive(sketch: &mut Sketch, kind: ConstraintKind, expression: String) -> Result<(), String> {
+    let id = sketch.add_constraint(kind, false).map_err(sketch_error)?;
+    sketch.dimension_expressions.insert(id, expression);
+    Ok(())
+}
+fn angle_expression(
+    expression: &str,
+    parameters: &nator_document::parameters::Parameters,
+) -> String {
+    // Sem unidade explícita, a entrada angular usa graus. Ao compor a abertura
+    // com a orientação inicial precisamos materializar essa unidade antes da soma.
+    if parameters
+        .evaluate(expression, nator_document::parameters::Dimension::Scalar)
+        .is_ok()
+    {
+        format!("({expression}) * 1 deg")
+    } else {
+        expression.to_owned()
+    }
+}
+fn dimension_expression(kind: &ConstraintKind, value: f64) -> String {
+    if matches!(kind, ConstraintKind::Angle { .. }) {
+        format!("{} deg", value.to_degrees())
+    } else {
+        format!("{value} mm")
+    }
+}
 fn dimension_value(kind: &ConstraintKind) -> Option<f64> {
     match *kind {
         ConstraintKind::Distance { value, .. }
         | ConstraintKind::DeltaX { value, .. }
         | ConstraintKind::DeltaY { value, .. }
-        | ConstraintKind::Radius { value, .. } => Some(value),
+        | ConstraintKind::Radius { value, .. }
+        | ConstraintKind::Angle { value, .. } => Some(value),
         _ => None,
     }
 }
@@ -789,7 +1003,8 @@ fn set_dimension_value(kind: &mut ConstraintKind, next: f64) {
         ConstraintKind::Distance { value, .. }
         | ConstraintKind::DeltaX { value, .. }
         | ConstraintKind::DeltaY { value, .. }
-        | ConstraintKind::Radius { value, .. } => *value = next,
+        | ConstraintKind::Radius { value, .. }
+        | ConstraintKind::Angle { value, .. } => *value = next,
         _ => {}
     }
 }
@@ -803,6 +1018,7 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::DeltaX { .. } => T::HorizontalDimension,
         ConstraintKind::DeltaY { .. } => T::VerticalDimension,
         ConstraintKind::Radius { .. } => T::Radius,
+        ConstraintKind::Angle { .. } => T::AngleLabel,
         ConstraintKind::Parallel { .. } => T::Parallel,
         ConstraintKind::Perpendicular { .. } => T::Perpendicular,
         ConstraintKind::EqualLength { .. } => T::EqualLength,
@@ -812,6 +1028,11 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::Tangent { .. } => T::Tangent,
     };
     match dimension_value(kind) {
+        Some(value) if matches!(kind, ConstraintKind::Angle { .. }) => format!(
+            "{}: {}°",
+            text(key),
+            nator_drawing::format_mm(value.to_degrees())
+        ),
         Some(value) => format!("{}: {value:.3}", text(key)),
         None => text(key).into(),
     }

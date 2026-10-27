@@ -74,7 +74,13 @@ impl Editor {
             self.current_mut().plane_pick = None;
             return;
         }
-        if context.egui_wants_keyboard_input() {
+        if context.egui_wants_keyboard_input()
+            || self
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|w| w.is_drawing())
+        {
             return;
         }
         if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S)) {

@@ -324,6 +324,13 @@ pub enum Text {
     FileAlreadyOpen,
     StaleResult,
     Sketch,
+    SketchSweep,
+    SketchDynamicWidth,
+    SketchDynamicHeight,
+    SketchValueLocked,
+    SketchDynamicHint,
+    SketchAngleValue,
+    SketchHorizontalAngleHint,
     SketchPatternGroup,
     ConstrainGroup,
     SketchExitGroup,
@@ -661,6 +668,17 @@ pub fn text(key: Text) -> &'static str {
         Text::EditDimension => "Alterar cota selecionada",
 
         Text::Sketch => "Rascunho",
+        Text::SketchSweep => "Abertura",
+        Text::SketchDynamicWidth => "Largura",
+        Text::SketchDynamicHeight => "Altura",
+        Text::SketchValueLocked => {
+            "Medida travada pela digitação. Apague o campo para voltar a seguir o cursor."
+        }
+        Text::SketchDynamicHint => "Tab: alternar · Enter: confirmar · Esc: cancelar",
+        Text::SketchAngleValue => "Ângulo (°)",
+        Text::SketchHorizontalAngleHint => {
+            "Ângulo em relação ao eixo horizontal do rascunho; positivo no sentido anti-horário."
+        }
         Text::SketchPatternGroup => "Padrão",
         Text::ConstrainGroup => "Restringir",
         Text::SketchExitGroup => "Sair",

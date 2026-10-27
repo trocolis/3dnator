@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt};
 
+pub mod drafting;
 pub mod edit;
 pub mod profiles;
 pub mod repair;
@@ -156,6 +157,8 @@ impl Entity {
     }
 }
 
+/// Restrições no plano local. `Angle` orienta a→b em relação ao eixo X,
+/// em radianos, no sentido anti-horário; comprimentos continuam em mm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConstraintKind {
     Tangent { line: u64, arc: u64, point: u64 },
@@ -167,6 +170,7 @@ pub enum ConstraintKind {
     DeltaX { a: u64, b: u64, value: f64 },
     DeltaY { a: u64, b: u64, value: f64 },
     Radius { circle: u64, value: f64 },
+    Angle { a: u64, b: u64, value: f64 },
     Parallel { a: u64, b: u64 },
     Perpendicular { a: u64, b: u64 },
     EqualLength { a: u64, b: u64 },
@@ -262,6 +266,10 @@ impl Sketch {
                     *value = source.point(*b)?[1] - source.point(*a)?[1]
                 }
                 ConstraintKind::Radius { circle, value } => *value = source.radial(*circle)?.1,
+                ConstraintKind::Angle { a, b, value } => {
+                    let d = sub(source.point(*b)?, source.point(*a)?);
+                    *value = d[1].atan2(d[0]);
+                }
                 _ => {}
             }
         }
@@ -424,6 +432,7 @@ impl Sketch {
                                 | ConstraintKind::DeltaX { .. }
                                 | ConstraintKind::DeltaY { .. }
                                 | ConstraintKind::Radius { .. }
+                                | ConstraintKind::Angle { .. }
                         )
                 })
             {

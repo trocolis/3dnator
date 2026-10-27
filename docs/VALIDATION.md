@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Entrada de cotas durante o desenho — 26/10/2026
+
+- Medidas livres/travadas em tempo real para linha, retângulo, círculo e arco; confirmação por Enter/clique, Tab/Shift+Tab entre campos e Esc para descartar a prévia. Campos aceitam expressões/unidades da peça; erro mantém a etapa aberta e não modifica a revisão. Cotas angulares em radianos, exibidas em graus, com recálculo e salvamento no formato 16; versões anteriores continuam legíveis.
+- **150 testes sem OCCT e 192 com OCCT aprovados.** Regressões cobrem prévia com medidas travadas/quadrantes/raio, solução angular em ±π e 180°, expressões angulares com graus/radianos e ida/volta de projeto. Os **seis ensaios gráficos optativos passaram em série**; o novo digita medidas nas quatro formas, alterna por Tab/Shift+Tab, libera o comprimento apagando o campo, verifica atualização pelo cursor, confirma com um Enter, bloqueia raio negativo, cancela por Esc e verifica desfazer/refazer.
+- Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Capturas finais de linha, círculo e retângulo (`*-final.png`) em `target/codex-validation/dynamic-sketch-20261026/`, produzidas pelos cenários `sketch-line-input`, `sketch-circle-input` e `sketch-rectangle-input`, sem alterar o projeto de origem. A verificação final da interface está em `app-occt-final.log`: 36 testes, incluindo os seis gráficos, aprovados. Renderização egui/wgpu/GL llvmpipe; aplicativo 0.3.0. Windows e janela nativa não exercitados.
+
 ## Faixa Rascunho conforme referência visual — 26/10/2026
 
 - Layout do SolidCraft consultado localmente, com Reference e Configure omitidos. Grupos Criar, Modificar, Padrão e Restringir, grade de seis restrições e Concluir fixo à direita. Capturas 1440 × 900 e 900 × 600 inspecionadas; paleta compacta e recolhida inicialmente em altura menor.

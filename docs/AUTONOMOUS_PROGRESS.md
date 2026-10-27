@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Cotas durante o desenho — 26/10/2026
+
+- Entradas junto à prévia para linha (comprimento/ângulo horizontal), retângulo (largura/altura), círculo (raio) e arco (raio/orientação inicial, depois raio/abertura). Digitar trava a medida, apagar libera, Tab/Shift+Tab alterna, Enter confirma e Esc descarta. Valores inválidos bloqueiam a criação; capturas incompatíveis com a ponta dimensionada são descartadas.
+- Cálculo de prévia em `sketch::drafting`, independente de egui. Cotas digitadas são publicadas por `UpdateSketch` após resolução no trabalhador. Acrescentada restrição angular, com derivada circular na passagem por ±π, resolução de expressões de ângulo, edição/referência e persistência no formato 16, mantendo leitura de 1 a 15.
+- Aprovados 150 testes sem OCCT, 192 com OCCT e seis ensaios gráficos em série. Regressão gráfica verifica medidas, digitação direta, Tab/Shift+Tab, liberação do campo, atualização pelo cursor, Enter único, erros, Esc e desfazer/refazer. Formatação, Clippy nas duas configurações e compilação desktop com OCCT aprovados. Evidências em `target/codex-validation/dynamic-sketch-20261026/`; versão do aplicativo 0.3.0 preservada, sem release/publicação remota. Windows e janela nativa não exercitados.
+
 ## Faixa contextual Rascunho — 26/10/2026
 
 - Consultados o layout e o estudo visual de rascunho do SolidCraft local. Aplicados Criar, Modificar, Padrão e Restringir, com Cota/grade 3 × 2, menus nos rótulos e Concluir fixo à direita; Reference e Configure omitidos. Código e ícones próprios, sem copiar recursos externos.
