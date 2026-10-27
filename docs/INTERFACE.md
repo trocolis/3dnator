@@ -18,7 +18,7 @@ Ferramentas de modificação, padrão e restrição abrem um painel com seleçã
 
 Horizontal/vertical escolhe a orientação predominante da linha; Coincidente usa as pontas mais próximas (ou centros de círculos); Tangente usa uma linha e um arco com extremidade compartilhada. Esses são os recursos atuais do solver do 3dnator. A referência visual não implica paridade com todas as variantes de comandos do SolidCraft.
 
-**Novo rascunho** entra na seleção de suporte sem modificar o documento. Clique num plano colorido da origem (XY/XZ/YZ), num dos atalhos da faixa sobre a área 3D ou numa face plana do sólido. Cancelar/Esc sai da seleção. Faces curvas e malhas não definem planos de rascunho; a seleção de faces exige OCCT. Os atalhos explícitos de XY/XZ/YZ continuam disponíveis na busca de ferramentas por S.
+**Novo rascunho** entra na seleção de suporte sem modificar o documento. Clique num plano colorido da origem (XY/XZ/YZ), num dos atalhos da faixa sobre a área 3D ou numa face plana do sólido, inclusive os triângulos nas quinas de um cubo chanfrado. Como o suporte captura um plano fixo, a face não precisa ter nome estável; projetos já salvos também são aceitos. Cancelar/Esc sai da seleção. Faces curvas e malhas não definem planos de rascunho; a seleção de faces exige OCCT. Os atalhos explícitos de XY/XZ/YZ continuam disponíveis na busca de ferramentas por S.
 
 A edição acontece no mesmo viewport do modelo. A câmera se desloca e alinha ao plano, conservando a projeção; os sólidos continuam desenhados. Grade, entidades, cotas, encaixes e cursor usam o plano local da peça e sua posição na montagem. O cubo, pan, zoom e órbita continuam disponíveis durante a edição. Ao concluir, a câmera retorna à orientação anterior, mantendo o alvo e a escala de trabalho.
 

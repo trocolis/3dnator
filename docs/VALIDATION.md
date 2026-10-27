@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Rascunhos nas quinas de cubos chanfrados — 27/10/2026
+
+- Reproduzido um cubo de 20 mm com as doze arestas chanfradas em 2 mm: seis faces originais, doze faces com o nome repetido de chanfro e oito triângulos de transição sem nome. A seleção de suporte exigia uma referência estável apesar de capturar somente um plano fixo.
+- A consulta usa o índice transitório da face na tesselação/B-rep da revisão selecionada e mede o plano antes de compor as posições do corpo e da ocorrência. Nenhum índice é persistido; as regras de nomes estáveis para operações associativas permanecem intactas. Não exige migração nem recálculo de arquivos existentes.
+- Nova regressão com OCCT grava/reabre o cubo, seleciona por raios todas as 26 faces com posições e rotações não triviais, verifica planos exatos e cria rascunhos nas oito quinas com desfazer/refazer. Alterar o chanfro para 3 mm, salvar e reabrir preserva os suportes fixos. Regressões existentes continuam recusando faces curvas; testes do documento cobrem consultas sem nome, triângulo inválido e corpo sem B-rep.
+- **162 testes sem OCCT e 220 com OCCT aprovados**, além dos dez ensaios gráficos em série (54 testes da aplicação com os ignorados habilitados). Formatação, Clippy do workspace com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Windows não exercitado localmente. Versão 0.3.0 em desenvolvimento e formato 17 preservados.
+
 ## Informações no status e diálogo somente para erros — 27/10/2026
 
 - Informações e avisos exibem o texto na barra, com indicador verde/laranja, sem abrir janela ou bloquear atalhos. Pronto/Processando não apagam essas mensagens ao preparar a cena; erros permanecem na fila exclusiva de diálogos.

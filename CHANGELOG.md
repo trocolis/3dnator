@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Rascunhos nas quinas chanfradas
+
+- Corrigida a criação de rascunhos nas faces triangulares das quinas de cubos chanfrados e nas faces planas com nomes repetidos. A seleção consulta a superfície exata sob o clique e captura um plano fixo, sem exigir uma referência topológica persistente.
+- Funciona também em projetos já salvos, preservando posição e orientação do corpo e da ocorrência. Faces curvas continuam recusadas; operações que mantêm referências paramétricas continuam exigindo nomes estáveis.
+
 ### Árvore compacta, rodapé único e navegação da vista
 
 - Removido o cabeçalho “Árvore do projeto” e reduzida a altura das linhas. A raiz usa o ícone do aplicativo e permanece sempre visível; projetos antigos com a raiz oculta são normalizados ao abrir, preservando as opções dos descendentes.

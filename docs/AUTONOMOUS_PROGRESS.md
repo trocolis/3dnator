@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Rascunhos nas faces triangulares do chanfro — 27/10/2026
+
+- Reproduzida a falha nas oito quinas sem nome do cubo chanfrado. Como o suporte do rascunho é um plano fixo, a consulta passa a usar a face exata da geometria selecionada, sem exigir nome estável e sem persistir índices topológicos.
+- Compatível com projetos existentes e com posições compostas do corpo/ocorrência. Regressão percorre as 26 faces, cria os oito rascunhos, desfaz/refaz, recalcula o chanfro e verifica persistência dos planos. Seleções para referências associativas conservam a validação por nome; faces curvas continuam recusadas.
+- Aprovados 162 testes sem OCCT, 220 com OCCT, dez ensaios gráficos, formatação, Clippy nas duas configurações e compilação desktop com OCCT no Linux. Sem release, migração ou publicação remota.
+
 ## Política de mensagens e erros — 27/10/2026
 
 - Informações e avisos agora permanecem na barra de status. Apenas erros abrem diálogos e entram na fila de confirmação; o diagnóstico paramétrico conserva seu diálogo próprio.

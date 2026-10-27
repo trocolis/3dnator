@@ -4,6 +4,8 @@
 //! sobre uma face identifica essa face pelo nome; para arestas, a fronteira mais próxima
 //! entre a face clicada e uma face vizinha define o par de nomes. Assim a seleção já nasce
 //! como referência por origem, sem índices topológicos.
+//! Consultas que não criam vínculos podem obter um índice transitório desta geometria,
+//! sem exigir um nome; esse índice nunca deve entrar no histórico paramétrico.
 use super::*;
 use assembly::Pick;
 use features::{EdgeRef, FaceRef};
@@ -56,6 +58,14 @@ fn segment_distance(p: Point3, a: Point3, b: Point3) -> f64 {
 }
 
 impl Document {
+    /// Índice transitório da face do B-rep sob o clique, válido só para esta geometria.
+    /// Serve para consultas que capturam valores (como um plano fixo de rascunho).
+    /// Referências persistentes devem continuar usando `face_at`, por nome estável.
+    pub fn face_index_at(&self, pick: &Pick) -> Result<usize, DocumentError> {
+        let (_, faces) = solid(self, pick)?;
+        Ok(faces[pick.triangle] as usize)
+    }
+
     /// Face do sólido sob o clique.
     pub fn face_at(&self, pick: &Pick) -> Result<FaceRef, DocumentError> {
         let (body, faces) = solid(self, pick)?;
@@ -183,16 +193,23 @@ mod tests {
     }
 
     #[test]
-    fn mesh_bodies_and_unnamed_faces_are_not_selectable() -> Result<(), Box<dyn Error>> {
+    fn transient_queries_allow_unnamed_faces_but_persistent_references_do_not()
+    -> Result<(), Box<dyn Error>> {
         let (mut doc, body) = cube()?;
         let mut names = (*doc.body(body).ok_or("Corpo ausente")?.face_names).clone();
         names[1].clear();
         doc.body_mut(body)?.face_names = Arc::new(names);
         let pick = pick_at(&doc, body, 2, [0.5, 0.05, 1.]);
+        // Consultas transitórias continuam possíveis; vínculos persistentes exigem nome.
+        assert_eq!(doc.face_index_at(&pick)?, 1);
         assert!(doc.face_at(&pick).is_err());
         assert!(doc.edge_at(&pick).is_err());
+        let mut invalid = pick.clone();
+        invalid.triangle = usize::MAX;
+        assert!(doc.face_index_at(&invalid).is_err());
         doc.body_mut(body)?.brep = None;
         doc.body_mut(body)?.face_names = Arc::default();
+        assert!(doc.face_index_at(&pick).is_err());
         assert!(doc.face_at(&pick).is_err());
         Ok(())
     }

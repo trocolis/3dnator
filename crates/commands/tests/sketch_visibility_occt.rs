@@ -4,10 +4,11 @@
 use nator_commands::{Command, Effect, Session, measure};
 use nator_document::{
     Document, PartId, SketchId,
-    features::{Operation, RegionRef},
+    features::{EdgeRef, Operation, RegionRef},
     parameters::Dimension,
 };
-use nator_geometry::{Placement, dot, norm, query::Ray, sub};
+use nator_geometry::{Placement, cross, dot, norm, query::Ray, sub};
+use nator_kernel::Solid;
 use nator_sketch::{Plane, Sketch};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -198,6 +199,143 @@ fn curved_face_does_not_define_a_sketch_plane() -> Result<()> {
         .ok_or("Face curva foi aceita")?;
     assert!(error.to_string().contains("curva"));
     assert_eq!(session.revision(), revision);
+    Ok(())
+}
+
+/// Regressão: as faces triangulares das quinas ficam sem nome no histórico OCCT;
+/// as doze faces dos chanfros compartilham o mesmo papel. Nenhum desses casos pode
+/// impedir uma captura fixa de plano, inclusive ao abrir um projeto já gravado.
+#[test]
+fn sketches_on_chamfer_corners_work_without_stable_names() -> Result<()> {
+    let mut session = Session::new(Document::new("Cubo chanfrado")?)?;
+    let mut outline = Sketch::new("Cubo", Plane::xy());
+    outline.add_rectangle([0.; 2], [20.; 2], false)?;
+    let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+        destination: None,
+        sketch: outline,
+    })?
+    else {
+        return Err("Perfil ausente".into());
+    };
+    let Effect::Imported { body: base, .. } = session.execute(extrusion(part, sketch, "20 mm"))?
+    else {
+        return Err("Cubo ausente".into());
+    };
+    let record = session.document().body(base).ok_or("Cubo ausente")?;
+    let solid = Solid::from_brep(
+        record.brep.as_ref().ok_or("B-rep ausente")?,
+        Some(&record.face_names),
+    )?;
+    let mut edges = (0..solid.edge_count()?)
+        .map(|i| solid.edge_face_names(i).map(EdgeRef::Between))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    session.execute(Command::SetParameter {
+        part,
+        name: "chanfro".into(),
+        expression: Some("2 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+        part,
+        name: "Chanfro".into(),
+        operation: Operation::Chamfer {
+            base,
+            edge: edges.remove(0),
+            distance: "chanfro".into(),
+            angle: None,
+            additional_edges: edges,
+        },
+    })?
+    else {
+        return Err("Chanfro ausente".into());
+    };
+    // Composição não trivial também nas quinas, em vez de depender dos eixos do cubo.
+    let body_pose = Placement::new([4., -3., 9.], [0.3, 0.2, -0.4])?;
+    let occurrence = Placement::new([100., -50., 30.], [-0.5, 0.6, 0.8])?;
+    let instance = session.document().instances()[0].id;
+    session.execute(Command::MoveBody {
+        id: body,
+        placement: body_pose,
+    })?;
+    session.execute(Command::MoveInstance {
+        id: instance,
+        placement: occurrence,
+    })?;
+    let world = occurrence.compose(body_pose)?;
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("cubo.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    session = Session::new(nator_project_io::read_project(&path)?)?;
+    let record = session.document().body(body).ok_or("Chanfro ausente")?;
+    let mesh = record.geometry.clone();
+    let names = record.face_names.clone();
+    assert_eq!(names.len(), 26);
+    assert_eq!(names.iter().filter(|n| n.is_empty()).count(), 8);
+    let mut sketches = Vec::new();
+    for (face, name) in names.iter().enumerate() {
+        let triangle = mesh
+            .triangle_faces()
+            .ok_or("Faces ausentes")?
+            .iter()
+            .position(|f| *f as usize == face)
+            .ok_or("Face sem triângulo")?;
+        let [a, b, c] = mesh
+            .mesh()
+            .triangle_points(mesh.mesh().triangles()[triangle]);
+        let center = world.apply(std::array::from_fn(|i| (a[i] + b[i] + c[i]) / 3.));
+        let normal = cross(sub(b, a), sub(c, a));
+        let normal = world.apply_vector(normal.map(|v| v / norm(normal)));
+        let pick = session
+            .document()
+            .pick(Ray {
+                origin: std::array::from_fn(|i| center[i] + normal[i] * 40.),
+                direction: normal.map(|v| -v),
+            })?
+            .ok_or("Face do chanfro não selecionada")?;
+        assert_eq!(pick.body, body);
+        assert_eq!(session.document().face_index_at(&pick)?, face);
+        let revision = session.revision();
+        let plane = measure::sketch_plane(session.document(), &pick)?;
+        assert_eq!(session.revision(), revision);
+        assert!(dot(plane.normal(), normal) > 1. - 1e-9);
+        assert!(norm(sub(plane.origin, center)) < 1e-8);
+        if !name.is_empty() {
+            continue;
+        }
+        // A regra de referências estáveis permanece: só o plano fixo é permitido.
+        assert!(session.document().face_at(&pick).is_err());
+        let local = Plane::from_normal(
+            occurrence.inverse_apply(plane.origin),
+            occurrence.inverse_vector(plane.normal()),
+        )?;
+        let Effect::SketchCreated { sketch, .. } = session.execute(Command::AddSketch {
+            destination: Some(part),
+            sketch: Sketch::new("Quina", local),
+        })?
+        else {
+            return Err("Rascunho na quina ausente".into());
+        };
+        assert!(session.undo());
+        assert!(session.document().sketch(sketch).is_none());
+        assert!(session.redo());
+        sketches.push((sketch, local));
+    }
+    assert_eq!(sketches.len(), 8);
+    // O recálculo não move os suportes: seguem sendo capturas fixas, sem associação.
+    session.execute(Command::SetParameter {
+        part,
+        name: "chanfro".into(),
+        expression: Some("3 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    nator_project_io::write_project(&path, session.document())?;
+    let restored = nator_project_io::read_project(&path)?;
+    for (id, plane) in sketches {
+        let saved = &restored.sketch(id).ok_or("Rascunho perdido")?.sketch.plane;
+        assert!(norm(sub(saved.origin, plane.origin)) < 1e-9);
+        assert!(norm(sub(saved.u, plane.u)) < 1e-9);
+        assert!(norm(sub(saved.v, plane.v)) < 1e-9);
+    }
     Ok(())
 }
 
