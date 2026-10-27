@@ -5,6 +5,7 @@ use super::*;
 use nator_document::assembly::Pick;
 use nator_geometry::{Bounds, dot, sub};
 use nator_sketch::{Plane, Point2, Sketch, profiles};
+mod plane_hover;
 
 pub(super) const EMPTY_BOUNDS: Bounds = Bounds {
     min: [-50.; 3],
@@ -17,6 +18,9 @@ pub(super) struct PlanePicker {
     /// Rascunho de referência da montagem: plano em coordenadas da montagem e nenhuma peça
     /// dona, para que não possa virar perfil de corpo.
     pub reference: bool,
+    /// O plano da origem tem prioridade sobre a face desenhada atrás dele.
+    origin_hovered: bool,
+    hover: plane_hover::Cache,
 }
 
 /// Comando que cria o rascunho escolhido pelo seletor de plano.
@@ -201,6 +205,8 @@ impl Editor {
             destination,
             placement,
             reference: false,
+            origin_hovered: false,
+            hover: plane_hover::Cache::default(),
         });
         self.status.set(text(T::ChooseSketchPlane));
     }
@@ -215,6 +221,8 @@ impl Editor {
             destination: None,
             placement: Placement::default(),
             reference: true,
+            origin_hovered: false,
+            hover: plane_hover::Cache::default(),
         });
         self.status.set(text(T::ChooseSketchPlane));
     }
@@ -244,10 +252,12 @@ impl Editor {
         let document = self.current().session.document().clone();
         let (tab, revision) = (self.current().id, self.current().session.revision());
         let view = self.current().view.clone();
+        let section = self.current().section;
         self.start(context, None, move || {
-            let pick = document
-                .pick_with(ray, |o| view.pickable(o))
-                .map_err(|e| e.to_string())?
+            let picks = document
+                .pick_all_with(ray, |o| view.pickable(o))
+                .map_err(|e| e.to_string())?;
+            let pick = section::first_visible(picks, section)
                 .ok_or_else(|| text(T::ChooseSketchPlane).to_owned())?;
             let world = nator_commands::measure::sketch_plane(&document, &pick)
                 .map_err(|e| e.to_string())?;
@@ -503,8 +513,15 @@ impl Editor {
                 }
             }
             planes.sort_by(|a, b| a.0.total_cmp(&b.0));
+            // O último plano desenhado recebe o clique quando há sobreposição;
+            // apenas esse mesmo plano recebe o destaque de pré-seleção.
+            selected = planes.iter().rev().find_map(|(_, _, plane, _, points)| {
+                hover
+                    .is_some_and(|p| polygon_contains(points, p))
+                    .then_some(*plane)
+            });
             for (_, name, plane, color, points) in planes {
-                let hit = hover.is_some_and(|p| polygon_contains(&points, p));
+                let hit = selected == Some(plane);
                 // Triângulos e arestas independentes evitam junções de traço
                 // instáveis quando um plano fica quase de perfil para a câmera.
                 if !polygon_contains(
@@ -537,9 +554,6 @@ impl Editor {
                         color,
                     );
                 }
-                if hit {
-                    selected = Some(plane);
-                }
             }
         }
         for frame in origins {
@@ -565,6 +579,12 @@ impl Editor {
             }
             painter.circle_filled(origin, 3., theme::INK);
             painter.circle_stroke(origin, 6., egui::Stroke::new(1., theme::INK));
+        }
+        if let Some(picker) = self.current_mut().plane_pick.as_mut() {
+            picker.origin_hovered = selected.is_some();
+        }
+        if selected.is_some() && !self.busy() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         if picking
             && !self.busy()

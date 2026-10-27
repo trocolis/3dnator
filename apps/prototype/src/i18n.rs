@@ -357,6 +357,7 @@ pub enum Text {
     SketchDynamicHeight,
     SketchValueLocked,
     SketchDynamicHint,
+    SketchToolSettingsPending,
     SketchAngleValue,
     SketchHorizontalAngleHint,
     SketchPatternGroup,
@@ -726,6 +727,7 @@ pub fn text(key: Text) -> &'static str {
             "Medida travada pela digitação. Apague o campo para voltar a seguir o cursor."
         }
         Text::SketchDynamicHint => "Tab: alternar · Enter: confirmar · Esc: cancelar",
+        Text::SketchToolSettingsPending => "Configurações desta ferramenta a definir.",
         Text::SketchAngleValue => "Ângulo (°)",
         Text::SketchHorizontalAngleHint => {
             "Ângulo em relação ao eixo horizontal do rascunho; positivo no sentido anti-horário."

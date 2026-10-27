@@ -335,6 +335,10 @@ impl Editor {
 
     /// Recalcula a pré-seleção quando o cursor se move sobre a área 3D.
     pub(super) fn update_hover(&mut self, ui: &egui::Ui, response: &egui::Response) {
+        if self.current().plane_pick.is_some() {
+            self.update_plane_hover(ui, response);
+            return;
+        }
         // A lista de sobrepostos controla o realce enquanto está aberta.
         if self.gestures.other.is_some() {
             return;
@@ -606,6 +610,7 @@ impl Editor {
         }
         // Face ou aresta escolhida com o modo de seleção, na peça em construção.
         if self.feature_edit.is_none()
+            && self.current().plane_pick.is_none()
             && let Some(pick) = self.current().picked.clone()
             && self.current().active_part == Some(pick.part)
             && self.pick_mode != navigation::PickMode::Vertex

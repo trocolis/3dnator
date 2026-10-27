@@ -12,7 +12,7 @@ mod references;
 pub(super) use actions::{edit_icon, edit_label};
 use nator_sketch::edit::Action as EditAction;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Tool {
     Select,
     Line,
@@ -49,6 +49,8 @@ pub(super) struct Workspace {
     pub status: Status,
     pub redundant: bool,
     tool: Tool,
+    /// Entrar no rascunho não abre painel; somente uma escolha explícita na faixa.
+    tool_panel_open: bool,
     anchors: Vec<Point2>,
     anchor_kinds: Vec<Option<Kind>>,
     selected: Vec<u64>,
@@ -95,6 +97,7 @@ impl Workspace {
     pub(super) fn select_tool(&mut self, tool: Tool) {
         self.active_action = None;
         self.tool = tool;
+        self.tool_panel_open = true;
         self.anchors.clear();
         self.anchor_kinds.clear();
         self.drawing = dynamic_input::Input::default();
@@ -108,6 +111,7 @@ impl Workspace {
             },
             redundant: false,
             tool: Tool::Select,
+            tool_panel_open: false,
             anchors: Vec::new(),
             anchor_kinds: Vec::new(),
             selected: Vec::new(),
@@ -281,39 +285,45 @@ impl Editor {
                 .map(|r| r.sketch.clone())
         })
     }
-    /// Paleta compacta de estado e restrições. As operações ficam na faixa; a paleta
-    /// pode ser movida/recolhida e cede espaço ao painel de uma intenção em edição.
+    /// Painel da ferramenta escolhida. O rascunho nasce sem janela: cada escolha
+    /// explícita abre seu painel, e operações com formulário usam `sketch_action_panel`.
     pub(super) fn sketch_tools_window(&mut self, context: &egui::Context) {
+        let Some(work) = self.current().sketch_edit.as_ref() else {
+            return;
+        };
+        if !work.tool_panel_open || work.active_action.is_some() {
+            return;
+        }
+        let tool = work.tool;
         let Some(mut sketch) = self.working_sketch() else {
             return;
         };
-        if self
-            .current()
-            .sketch_edit
-            .as_ref()
-            .is_some_and(|w| w.active_action.is_some())
-        {
-            return;
-        }
+        let mut open = true;
         let busy = self.busy();
         let mut submit = false;
         let mut open_repair = false;
         let mut edit_dimension = false;
-        // A paleta começa abaixo do navegador, sem cobrir cantos/setas.
-        // Em janelas curtas nasce recolhida; posições arrastadas pelo usuário
-        // continuam sendo conservadas pelo estado da janela do egui.
+        // O painel começa abaixo do navegador, sem cobrir cantos/setas.
+        // Cada ferramenta conserva sua posição; nunca nasce recolhida, para que
+        // a escolha explícita sempre apresente seu conteúdo ao usuário.
         let tools_top =
             (view_cube::rect(self.canvas_rect).bottom() + 12.).max(self.canvas_rect.top() + 170.);
-        egui::Window::new(text(T::Sketch))
-            .id(egui::Id::new("sketch_tools"))
+        egui::Window::new(text(tool.label()))
+            .id(egui::Id::new(("sketch_tool_settings", tool)))
+            .open(&mut open)
             .default_width(245.)
-            .default_height(200.)
-            .default_open(self.canvas_rect.height() > 440.)
+            .collapsible(false)
             .default_pos(egui::pos2(self.canvas_rect.right() - 265., tools_top))
             .show(context, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height((self.canvas_rect.height() - 230.).max(120.))
                     .show(ui, |ui| {
+                        // Os parâmetros novos serão definidos por ferramenta. Não
+                        // antecipar campos nem alterar as regras geométricas atuais.
+                        if tool != Tool::Select {
+                            ui.label(text(T::SketchToolSettingsPending));
+                            return;
+                        }
                         ui.label(&sketch.name);
                         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
                             return;
@@ -342,21 +352,13 @@ impl Editor {
                                 degrees_of_freedom: 0,
                             };
                         }
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled(!busy, egui::Button::new(text(T::Select)))
-                                .clicked()
-                            {
-                                work.select_tool(Tool::Select);
-                            }
-                            if ui
-                                .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
-                                .on_hover_text(text(T::RepairHint))
-                                .clicked()
-                            {
-                                open_repair = true;
-                            }
-                        });
+                        if ui
+                            .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
+                            .on_hover_text(text(T::RepairHint))
+                            .clicked()
+                        {
+                            open_repair = true;
+                        }
                         ui.separator();
                         ui.label(text(T::Constraints));
                         let mut remove = None;
@@ -409,6 +411,12 @@ impl Editor {
                         }
                     });
             });
+        if !open && let Some(work) = self.current_mut().sketch_edit.as_mut() {
+            work.drawing.clear(context);
+            work.tracker.clear();
+            work.select_tool(Tool::Select);
+            work.tool_panel_open = false;
+        }
         if submit {
             self.solve_sketch(context, sketch);
         }

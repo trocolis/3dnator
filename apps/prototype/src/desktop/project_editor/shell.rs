@@ -794,6 +794,8 @@ impl Editor {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.;
+                    let mut previous_selected = None;
                     for tab in [
                         RibbonTab::Assembly,
                         RibbonTab::Model,
@@ -804,6 +806,12 @@ impl Editor {
                             continue;
                         }
                         let selected = self.shell.tab == tab;
+                        // A aba ativa já tem seu próprio contorno. O divisor aparece
+                        // apenas entre duas abas inativas, sem duplicar essa borda.
+                        if previous_selected == Some(false) && !selected {
+                            ui.label(egui::RichText::new("|").color(theme::MUTED));
+                        }
+                        previous_selected = Some(selected);
                         let response = ui.add(
                             egui::Button::new(
                                 egui::RichText::new(text(tab.label())).strong().color(
@@ -814,6 +822,7 @@ impl Editor {
                                     },
                                 ),
                             )
+                            .min_size(egui::vec2(104., 30.))
                             .selected(selected)
                             .frame(selected),
                         );
@@ -854,8 +863,12 @@ impl Editor {
             .id_salt("document_tabs")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.;
                     for (index, tab) in self.tabs.iter().enumerate() {
                         let active = index == self.active;
+                        if index > 0 && !active && index - 1 != self.active {
+                            ui.label(egui::RichText::new("|").color(theme::MUTED));
+                        }
                         let name = tab
                             .path
                             .as_ref()
@@ -870,7 +883,7 @@ impl Editor {
                                 theme::HEADER
                             })
                             .corner_radius(5)
-                            .inner_margin(egui::Margin::symmetric(7, 1))
+                            .inner_margin(egui::Margin::symmetric(12, 1))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     if ui

@@ -43,6 +43,7 @@ pub(crate) fn render_ui_scenario(
         | "failure"
         | "hover-face"
         | "hover-edge"
+        | "sketch-plane-hover"
         | "select-body"
         | "window"
         | "assembly-select"
@@ -72,7 +73,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -152,7 +153,7 @@ pub(crate) fn render_ui_scenario(
                 ];
             }
             match pointer.as_str() {
-                "hover-face" | "hover-edge" if frame >= 2 => {
+                "hover-face" | "hover-edge" | "sketch-plane-hover" if frame >= 2 => {
                     return vec![egui::Event::PointerMoved(target)];
                 }
                 // Janela da direita para a esquerda, mantida aberta para a captura.
@@ -193,6 +194,9 @@ pub(crate) fn render_ui_scenario(
             }
         },
         |editor| {
+            if scenario == "sketch-plane-hover" {
+                return editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty());
+            }
             (editor.feature_edit.is_none() && editor.assembly_panel.is_none())
                 || editor.preview.shown != 0
                 || (editor.assembly_panel.is_some() && editor.preview_idle())
@@ -402,13 +406,17 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             let feature = features.last().ok_or("Peça sem operações.")?.clone();
             editor.feature_edit = Some(feature_editor::Draft::edit(tab, part, feature));
         }
-        "hover-face" | "hover-edge" | "window" => {
+        "hover-face" | "hover-edge" | "sketch-plane-hover" | "window" => {
             editor.current_mut().select(None);
             editor.pick_mode = if scenario == "hover-edge" {
                 navigation::PickMode::Edge
             } else {
                 navigation::PickMode::Face
             };
+            if scenario == "sketch-plane-hover" {
+                editor.shell.tab = shell::RibbonTab::Model;
+                editor.start_sketch_plane();
+            }
         }
         "select-body" => {
             let body = editor
@@ -1483,6 +1491,151 @@ mod tests {
 
     /// Ensaio optativo porque precisa de adaptador wgpu. Usa eventos reais egui
     /// sobre o canvas completo; não exige compositor nem janela nativa.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_support_hover_and_tool_panels_follow_explicit_choices() -> Result<(), Box<dyn Error>>
+    {
+        use sketch_editor::Tool;
+        let context = egui::Context::default();
+        let mut profile = Sketch::new("Base", Plane::xy());
+        profile.add_rectangle([-50., -50.], [50., 50.], false)?;
+        let mut session = Session::new(Document::new("Painéis do rascunho")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: profile,
+        })?
+        else {
+            return Err("Rascunho base ausente".into());
+        };
+        session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        frame(&mut editor, &context, Vec::new())?;
+        settle(&mut editor, &context)?;
+        let revision = editor.current().session.revision();
+        let button = label_position(&mut editor, &context, text(T::NewSketch))?;
+        click(&mut editor, &context, button)?;
+        assert!(editor.current().plane_pick.is_some());
+        let target = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [-25., -20., 10.],
+        )
+        .ok_or("Face sem projeção")?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(target)],
+            )?;
+            if editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty()) {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err("Face apta não foi realçada".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(editor.current().session.revision(), revision);
+        let hover = editor.hover.as_ref().ok_or("Realce ausente")?;
+        assert_eq!(hover.overlay.triangles.len(), 2);
+        assert!(
+            hover
+                .overlay
+                .triangles
+                .iter()
+                .flatten()
+                .all(|p| (p[2] - 10.).abs() < 1e-8)
+        );
+        let cube = view_cube::rect(editor.canvas_rect).center();
+        frame(&mut editor, &context, vec![egui::Event::PointerMoved(cube)])?;
+        assert!(editor.hover.is_none());
+        click(&mut editor, &context, target)?;
+        settle(&mut editor, &context)?;
+        editor.align_sketch_camera(false, false);
+        frame(&mut editor, &context, Vec::new())?;
+        assert!(editor.current().sketch_edit.is_some());
+        assert!(editor.current().plane_pick.is_none());
+        assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
+        assert!(label_position(&mut editor, &context, text(T::SketchToolSettingsPending)).is_err());
+        let revision = editor.current().session.revision();
+        for tool in [
+            Tool::Line,
+            Tool::Rectangle,
+            Tool::Circle,
+            Tool::Arc,
+            Tool::Trim,
+        ] {
+            let button = label_position(
+                &mut editor,
+                &context,
+                text(if tool == Tool::Arc {
+                    T::ArcShort
+                } else {
+                    tool.label()
+                }),
+            )?;
+            click(&mut editor, &context, button)?;
+            assert_eq!(
+                editor.current().sketch_edit.as_ref().map(|w| w.tool()),
+                Some(tool)
+            );
+            label_position(&mut editor, &context, text(T::SketchToolSettingsPending))?;
+            assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
+        }
+        // Selecionar conserva os diagnósticos e a lista de restrições que antes
+        // abriam automaticamente; trocar de ferramenta não edita o documento.
+        editor
+            .current_mut()
+            .sketch_edit
+            .as_mut()
+            .ok_or("Editor ausente")?
+            .select_tool(Tool::Select);
+        frame(&mut editor, &context, Vec::new())?;
+        label_position(&mut editor, &context, text(T::Constraints))?;
+        let button = label_position(&mut editor, &context, text(T::OffsetField))?;
+        click(&mut editor, &context, button)?;
+        assert!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|w| w.active_action().is_some())
+        );
+        assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        assert!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|w| w.active_action().is_none())
+        );
+        assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
+        assert_eq!(editor.current().session.revision(), revision);
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn sketch_workflow_keeps_the_model_and_the_same_viewport() -> Result<(), Box<dyn Error>> {

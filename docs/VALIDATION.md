@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Abas espaçadas, pré-seleção de suporte e painéis por ferramenta — 27/10/2026
+
+- Novo rascunho consulta o suporte exato em um trabalhador exclusivo, sem bloquear a interface nem alterar documento ou seleção. A chave inclui aba, revisão, estado visual, seção e raio da câmera; entregas antigas não recebem destaque no alvo atual. O clique respeita a mesma seção e a mesma visibilidade. Planos da origem têm prioridade e apenas um recebe realce quando há sobreposição.
+- Duas regressões verificam faces inteiras nas posições compostas de corpo/ocorrência, faces sem nome, bloqueio, tampa plana versus lateral curva de cilindro, malha obstruindo um suporte e entrega já enfileirada de outro cursor/revisão.
+- Novo ensaio gráfico escolhe Novo rascunho pela faixa, espera o destaque da face, verifica ausência de alteração do documento e supressão do destaque sobre o cubo, cria o rascunho por clique e confirma que nenhum painel abre automaticamente. Escolhe Linha, Retângulo, Círculo, Arco e Aparar pela faixa, verifica seus painéis e preserva diagnóstico/restrições em Selecionar. Abrir e cancelar Deslocamento não reabre a antiga paleta nem edita o documento.
+- Formatação, Clippy de todo o workspace com todos os alvos/avisos negados e testes do workspace aprovados com e sem OCCT. **64 testes da aplicação com OCCT aprovados em série, incluindo os 13 ensaios gráficos**; entrada dinâmica de medidas, aparador, desfazer/refazer e rascunho no mesmo viewport continuam aprovados. Compilação desktop com OCCT aprovada no Linux; Windows e janela nativa não exercitados nesta entrega.
+- Capturas egui/wgpu/GL llvmpipe inspecionadas em `target/codex-validation/sketch-tabs-20261027/`: `sketch-idle.png` sem janela automática, `line-settings.png` com painel da ferramenta e medidas dinâmicas e `plane-hover.png` com a face plana destacada durante Novo rascunho. O cenário `sketch-plane-hover` espera uma pré-seleção válida antes de capturar. Versão 0.3.0 em desenvolvimento e formato 17 preservados.
+
 ## Cubo azul em 80%, rótulos, Enquadrar e giros pela normal — 27/10/2026
 
 - Controle reduzido de 208 × 200 para 166,4 × 160 pontos lógicos, incluindo geometria, posições, setas e áreas de clique. Restaurados azuis claros, textos orientados nas seis faces e Home de contorno. Enquadrar ocupa o espaço abaixo de Home; o retângulo de interação do cubo não intercepta o botão nos vazios da silhueta.

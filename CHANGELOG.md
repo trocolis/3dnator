@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Abas espaçadas e painéis por ferramenta de rascunho
+
+- Abas de ferramentas com títulos mais espaçados e área de clique maior; abas de projetos com mais margem. Um `|` separa abas consecutivas não selecionadas.
+- Novo rascunho realça o plano da origem ou a face plana sob o mouse. A consulta exata roda em segundo plano, respeita visibilidade, bloqueio e corte de seção e descarta respostas antigas; faces curvas e malhas não recebem destaque de suporte.
+- Entrar no modo rascunho não abre mais a janela genérica Rascunho. Linha, Retângulo, Círculo, Arco, Aparar e Selecionar abrem seus painéis somente quando escolhidos; as novas configurações permanecem a definir. Selecionar mantém diagnóstico, reparo e lista de restrições; operações e restrições conservam seus formulários existentes.
+
 ### Repositório público
 
 - Código publicado em <https://github.com/trocolis/3dnator>, sob licença MIT. A CI do GitHub Actions passa a rodar a cada push e pull request.

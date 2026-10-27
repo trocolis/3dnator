@@ -127,6 +127,7 @@ impl Editor {
             return;
         };
         work.select_tool(Tool::Select);
+        work.tool_panel_open = false;
         work.active_action = Some(action);
         // O Enter que ativou um botão por teclado não confirma o painel recém-aberto.
         context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
