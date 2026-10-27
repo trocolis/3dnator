@@ -24,6 +24,8 @@ mod naming;
 #[cfg(feature = "occt")]
 #[allow(unsafe_code)]
 mod native;
+#[cfg(any(feature = "occt", test))]
+mod tessellation;
 #[cfg(feature = "occt")]
 pub use native::{
     Solid, StepAssembly, StepBody, StepOccurrence, StepPart, projected_edges, version,

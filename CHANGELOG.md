@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Importação STEP com triângulos colapsados
+
+- Corrigida a importação de sólidos válidos cuja tesselação OCCT produz triângulos de área zero em costuras/singularidades, como o modelo ESP32 Wroom de 30 pinos. Esses elementos são descartados somente na malha de exibição, preservando o B-rep e a correspondência entre triângulos e faces.
+- Detalhes pequenos com área positiva continuam presentes; coordenadas não finitas, falhas numéricas e malhas totalmente degeneradas permanecem erros. Acrescentadas regressões da conversão e ensaio optativo de arquivo externo com salvamento/reabertura e desfazer/refazer.
+
 ### Pontos médios, quadrantes e centros de arcos
 
 - Movimentação ponto a ponto oferece a metade do comprimento das arestas, incluindo a metade sobre a curva dos arcos. Malhas oferecem pontos médios nas arestas vivas, sem incluir diagonais internas da triangulação.

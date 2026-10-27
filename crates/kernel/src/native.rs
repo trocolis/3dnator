@@ -986,27 +986,7 @@ impl Solid {
         {
             return Err(last_error());
         }
-        let faces = faces
-            .into_iter()
-            .map(|f| {
-                u32::try_from(f).map_err(|_| KernelError("Face de triângulo inválida.".into()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let vertices = positions
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|p| [p[0], p[1], p[2]])
-            .collect();
-        let triangles = (0..(length / 9) as u32)
-            .map(|i| [i * 3, i * 3 + 1, i * 3 + 2])
-            .collect();
-        // Os nós das arestas são idênticos nas faces vizinhas; fundi-los fecha a malha
-        // sem alterar coordenadas. A ordem dos triângulos (e `faces`) é preservada.
-        let mesh = Mesh::new(vertices, triangles)
-            .map_err(|e| KernelError(e.to_string()))?
-            .welded();
-        Ok((mesh, faces))
+        crate::tessellation::display_mesh(&positions, faces)
     }
 }
 

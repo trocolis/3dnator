@@ -68,6 +68,8 @@ A ponte XCAF isola documentos, definições e ocorrências do OCCT atrás de `St
 
 ## Interface e apresentação
 
+A adaptação da tesselação nativa fica em `kernel::tessellation`, sem dependência da interface. Triângulos de área exatamente zero produzidos pelo OCCT são descartados em conjunto com seus índices de face; triângulos de área positiva, mesmo pequenos, são preservados. A malha continua sujeita à validação estrita de coordenadas e índices do crate `geometry`, e o B-rep não é alterado por essa limpeza de apresentação.
+
 O shell desktop mantém tema, ícones vetoriais e organização de ferramentas em módulos próprios de `apps/prototype/src/desktop/project_editor/` (`theme`, `icons` e `shell`). Menu, faixa e busca encaminham as mesmas ações aos editores e comandos existentes; o estado dos painéis pertence à interface. Nenhuma regra geométrica depende desses módulos. A cor de fundo é configurável no renderizador e participa do esmaecimento visual das referências, sem modificar a geometria ou a cor dos corpos no documento. Uso e responsabilidades em [docs/INTERFACE.md](docs/INTERFACE.md).
 
 O navegador `view_cube` é um widget próprio: projeta um poliedro fechado, seleciona seus polígonos e limita o desenho à sua área. A câmera em `renderer` mantém a direção e a inclinação da tela em radianos; órbita, projeção, seleção, pan e zoom usam a mesma base ortonormal. Botões de vistas e faces do cubo escolhem a mesma orientação convencional. O estado é da câmera de cada aba, sem alteração do documento ou do formato de projeto.

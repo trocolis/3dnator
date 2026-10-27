@@ -14,6 +14,93 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const BLUE: RgbColor = RgbColor::new([20, 180, 230]);
 const RED: RgbColor = RgbColor::new([230, 30, 40]);
 
+/// Arquivos de terceiros ficam fora do repositório. O ensaio optativo permite
+/// repetir uma falha real, incluindo persistência autocontida e histórico.
+#[test]
+#[ignore = "Requer um STEP externo indicado por NATOR_STEP_PATH."]
+fn external_step_preserves_all_solids_after_import_save_and_reopen() -> Result<()> {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("NATOR_STEP_PATH")
+            .ok_or("Informe NATOR_STEP_PATH para o ensaio externo.")?,
+    );
+    let start = std::time::Instant::now();
+    let raw = StepAssembly::read(&path)?;
+    let expected_parts = raw.parts.len();
+    let expected_instances = raw.instances.len();
+    let expected_bodies = raw.parts.iter().map(|p| p.bodies.len()).sum::<usize>();
+    let expected_volumes = raw
+        .parts
+        .iter()
+        .flat_map(|p| &p.bodies)
+        .map(|b| b.solid.volume())
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(raw);
+    let mut session = import(&path)?;
+    let document = session.document();
+    assert_eq!(document.parts().len(), expected_parts);
+    assert_eq!(document.instances().len(), expected_instances);
+    let bodies = document
+        .parts()
+        .iter()
+        .flat_map(|p| &p.bodies)
+        .collect::<Vec<_>>();
+    assert_eq!(bodies.len(), expected_bodies);
+    for (body, expected_volume) in bodies.iter().zip(expected_volumes) {
+        assert!(body.brep.is_some());
+        let measured = measure::body_properties(document, body.id)?;
+        assert!(measured.exact);
+        assert!((measured.volume_mm3 - expected_volume).abs() <= 1e-8 * expected_volume.max(1.));
+        let faces = body
+            .geometry
+            .triangle_faces()
+            .ok_or("Mapeamento de faces ausente")?;
+        assert_eq!(faces.len(), body.geometry.mesh().triangles().len());
+        assert!(faces.iter().all(|f| (*f as usize) < body.face_names.len()));
+    }
+    let mesh = document.scene_mesh()?.ok_or("Cena importada ausente")?;
+    let before = properties(document)?;
+    let temp = tempfile::tempdir()?;
+    // Saída opcional permite conservar o projeto de diagnóstico sem incorporar
+    // o modelo externo aos testes versionados. Um arquivo existente é preservado.
+    let project = std::env::var_os("NATOR_STEP_PROJECT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| temp.path().join("importado.3dnator"));
+    if project.exists() {
+        return Err("O projeto de diagnóstico já existe; escolha outra saída.".into());
+    }
+    nator_project_io::write_project(&project, document)?;
+    let reopened = nator_project_io::read_project(&project)?;
+    reopened.validate()?;
+    let after = properties(&reopened)?;
+    assert_eq!(before.len(), after.len());
+    for ((point, volume, color), (restored, restored_volume, restored_color)) in
+        before.iter().zip(after)
+    {
+        assert!(norm(sub(*point, restored)) < 1e-8);
+        assert!((volume - restored_volume).abs() <= 1e-8 * volume.max(1.));
+        assert_eq!(*color, restored_color);
+    }
+    assert!(session.undo());
+    assert!(session.document().parts().is_empty());
+    assert!(session.redo());
+    assert_eq!(
+        session
+            .document()
+            .parts()
+            .iter()
+            .map(|p| p.bodies.len())
+            .sum::<usize>(),
+        expected_bodies
+    );
+    eprintln!(
+        "STEP externo aprovado: {expected_parts} definições, {expected_instances} instâncias, {expected_bodies} corpos, {} triângulos, limites {:?}, {:?}.",
+        mesh.triangles().len(),
+        mesh.bounds(),
+        start.elapsed()
+    );
+    Ok(())
+}
+
 fn fixture() -> Result<StepAssembly> {
     Ok(StepAssembly {
         parts: vec![

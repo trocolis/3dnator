@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## STEP ESP32 com triângulos colapsados — 27/10/2026
+
+- Reproduzida a falha ao importar `esp32_Wroom_30pins_C-Type.STEP` (AP214/SolidWorks, cerca de 14 MiB): a leitura XCAF aceita uma definição com 142 sólidos válidos, mas a malha do corpo de índice 12 contém triângulos com primeiro e terceiro vértices idênticos. A construção estrita de `Mesh` rejeitava a importação inteira com “Triângulo degenerado ou fora do intervalo numérico”.
+- `kernel::tessellation` descarta somente triângulos de área exatamente zero da apresentação e compacta seus índices de face junto deles. O B-rep permanece intacto. Três regressões Rust verificam a remoção de elementos repetidos/colineares, a ordem e orientação dos triângulos/índices de face, a preservação de áreas positivas minúsculas e a rejeição de números inválidos e resultados vazios.
+- O arquivo real importou **142 corpos e 69.904 triângulos**, com dimensões **28,5 × 53,7 × 13,65 mm**. O ensaio optativo `external_step_preserves_all_solids_after_import_save_and_reopen` passou, comparando quantidade e volume de todos os sólidos, B-reps, mapeamento de faces, salvamento/reabertura, centros, cores e desfazer/refazer. Usa `NATOR_STEP_PATH` para o modelo externo; `NATOR_STEP_PROJECT` opcional conserva o projeto de diagnóstico numa saída ainda inexistente. O arquivo de terceiros não integra o repositório.
+- **160 testes sem OCCT e 217 com OCCT aprovados**, além do ensaio externo. Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Projeto e captura 1440 × 900 inspecionada em `target/codex-validation/step-esp32-20261027/` (`esp32.3dnator`, `preview.png`), com egui/wgpu/GL llvmpipe, sem erros de validação gráfica. O STEP original foi apenas lido. Versão 0.3.0 e formato 17 preservados; Windows e janela nativa não exercitados.
+
 ## Pontos médios, bordas circulares e centros de arcos — 27/10/2026
 
 - Apoios exatos na metade do comprimento das arestas; em arcos, o ponto médio permanece sobre a curva. Centros virtuais de arcos são descobertos no setor correspondente, no plano da curva, inclusive fora do material. Círculos completos oferecem quatro quadrantes na borda. Todos os apoios usam a captura existente na origem e no destino.

@@ -1,5 +1,12 @@
 # Execução autônoma
 
+## Importação do STEP ESP32 Wroom — 27/10/2026
+
+- Reproduzido o erro no modelo real: os 142 sólidos são válidos, mas a tesselação contém triângulos colapsados com vértices repetidos. A adaptação Rust da malha agora descarta apenas elementos de área exatamente zero, preservando o B-rep, os detalhes com área positiva e os índices de face dos demais triângulos.
+- Três regressões puras e ensaio optativo de STEP externo verificam conversão, validação, preservação de todos os sólidos/volumes, persistência e desfazer/refazer. O modelo passou com 142 corpos e 69.904 triângulos; projeto salvo/reaberto e captura real do editor inspecionada em `target/codex-validation/step-esp32-20261027/`.
+- Aprovados 160 testes sem OCCT, 217 com OCCT e o ensaio externo, além de formatação, Clippy nas duas configurações e compilação desktop com OCCT.
+- Sem alteração do arquivo externo, release, migração ou publicação remota. Validação local em Linux.
+
 ## Apoios nas arestas, círculos e arcos — 27/10/2026
 
 - Acrescentados pontos médios das arestas, quatro quadrantes das bordas circulares e descoberta dos centros virtuais dos arcos no plano da curva. A metade do arco permanece sobre a curva, distinta do centro virtual. Malhas oferecem pontos médios nas arestas vivas e excluem diagonais internas da triangulação.
