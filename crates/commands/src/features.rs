@@ -67,7 +67,7 @@ fn error(e: impl std::fmt::Display) -> DocumentError {
 
 /// Corpo de entrada já posicionado na peça, com os nomes de faces gravados.
 #[cfg(feature = "occt")]
-fn source(
+pub(super) fn source(
     doc: &Document,
     part: PartId,
     id: BodyId,
@@ -99,15 +99,21 @@ fn sketch_of(
 }
 
 #[cfg(feature = "occt")]
-fn region(
+pub(super) fn region(
     sketch: &nator_sketch::Sketch,
     reference: &RegionRef,
 ) -> Result<nator_sketch::profiles::Region, DocumentError> {
+    if let RegionRef::Area(signature) = reference {
+        let mut regions = nator_sketch::areas::regions(sketch).map_err(error)?;
+        let index = nator_sketch::areas::find(sketch, &regions, signature).map_err(error)?;
+        return Ok(regions.swap_remove(index));
+    }
     use nator_sketch::profiles;
     let mut regions = profiles::regions(sketch).map_err(error)?;
     let index = match reference {
         RegionRef::Boundary(ids) => profiles::find_region(&regions, ids).map_err(error)?,
         RegionRef::Index(index) => *index,
+        RegionRef::Area(_) => return Err(DocumentError("Referência de área inválida.".into())),
     };
     if index >= regions.len() {
         return Err(DocumentError("Região do rascunho inexistente.".into()));
@@ -122,34 +128,6 @@ fn boolean_mode(mode: BooleanMode) -> u32 {
         BooleanMode::Cut => 1,
         BooleanMode::Intersect => 2,
     }
-}
-
-/// Distância ao longo da normal do rascunho, a partir do plano do rascunho, até o plano da
-/// face limite. Só faces planas e não paralelas à direção da extrusão servem de limite.
-#[cfg(feature = "occt")]
-fn until_distance(
-    doc: &Document,
-    part: PartId,
-    sketch: &nator_sketch::Sketch,
-    limit: &UntilFace,
-) -> Result<f64, DocumentError> {
-    let (solid, bytes) = source(doc, part, limit.body)?;
-    let index = face_index(&solid, &bytes, &limit.face)?;
-    let nator_kernel::FaceKind::Plane { normal, offset } =
-        solid.face_measure(index).map_err(error)?.kind
-    else {
-        return Err(DocumentError(
-            "A face limite da extrusão deve ser plana.".into(),
-        ));
-    };
-    let direction = sketch.plane.normal();
-    let denominator = nator_geometry::dot(normal, direction);
-    if denominator.abs() < 1e-9 {
-        return Err(DocumentError(
-            "A face limite é paralela à direção da extrusão.".into(),
-        ));
-    }
-    Ok((offset - nator_geometry::dot(normal, sketch.plane.origin)) / denominator)
 }
 
 /// Eixo de revolução a partir de uma linha do rascunho, em coordenadas da peça.
@@ -231,7 +209,11 @@ fn edge_index(solid: &Solid, bytes: &[u8], edge: &EdgeRef) -> Result<usize, Docu
 }
 
 #[cfg(feature = "occt")]
-fn face_index(solid: &Solid, bytes: &[u8], face: &FaceRef) -> Result<usize, DocumentError> {
+pub(super) fn face_index(
+    solid: &Solid,
+    bytes: &[u8],
+    face: &FaceRef,
+) -> Result<usize, DocumentError> {
     match face {
         FaceRef::Named(name) => solid.face_named(name).map_err(error),
         FaceRef::Index { index, signature } => {
@@ -260,6 +242,28 @@ pub(super) fn normalize(
         })
     };
     Ok(match operation {
+        Operation::ExtrudeFace {
+            base,
+            face,
+            from,
+            to,
+            combine,
+            until,
+        } => Operation::ExtrudeFace {
+            face: stable_face(doc, part, base, face)?,
+            base,
+            from,
+            to,
+            combine,
+            until: until
+                .map(|limit| {
+                    Ok::<_, DocumentError>(UntilFace {
+                        face: stable_face(doc, part, limit.body, limit.face)?,
+                        body: limit.body,
+                    })
+                })
+                .transpose()?,
+        },
         Operation::Extrude {
             sketch,
             region,
@@ -406,22 +410,9 @@ pub(super) fn construct(
     let value = |expression: &str| piece.parameters.evaluate(expression, Dimension::Length);
     let owner = body_owner(output);
     let mut solid = match operation {
-        Operation::Extrude {
-            sketch,
-            region: reference,
-            from,
-            to,
-            combine,
-            until,
-        } => {
-            let sketch = sketch_of(doc, part, *sketch)?;
-            let start = value(from)?;
-            let end = match until {
-                Some(limit) => until_distance(doc, part, sketch, limit)?,
-                None => value(to)?,
-            };
-            let extrusion = Solid::extrude(sketch, &region(sketch, reference)?, start, end, &owner)
-                .map_err(error)?;
+        operation @ (Operation::Extrude { combine, .. }
+        | Operation::ExtrudeFace { combine, .. }) => {
+            let extrusion = crate::extrusion::tool(doc, part, operation, &owner, None)?;
             match combine {
                 // O corpo existente é a base: o corte remove a extrusão dele.
                 Some(combine) => source(doc, part, combine.target)?

@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Extrusão por mouse, faces e áreas fechadas — 27/10/2026
+
+- Extrusão direta de face plana preserva contornos e furos, sem rascunho auxiliar. Arraste muda distância e sentido; clique em outra face define o limite automaticamente. Modo automático consulta contato no início e direção de entrada no material: Novo corpo, Unir ou Remover; escolha manual permanece disponível. Remoção mostra a interseção efetiva em vermelho translúcido, sem pintar o trecho do prisma no vazio.
+- **153 testes sem OCCT e 200 com OCCT aprovados.** Cinco regressões OCCT novas verificam volumes analíticos de extrusão de faces com/sem furos, modos automáticos e manuais, recálculo por parâmetros, extrusão de células de círculos sobrepostos, limite por plano inclinado, gravação/reabertura e clonagem de referências a faces/laterais/áreas. Regressões Rust cobrem o arranjo de contornos/bordas compartilhadas/ramos abertos, cache assíncrono por revisão e deslocamento inicial/limites dos manipuladores.
+- Os **sete ensaios gráficos optativos passaram em série**. O novo escolhe perfil livre (Novo corpo), cancela sem mudar a revisão, escolhe face do corpo (Unir), arrasta para dentro (Remover), verifica a composição de volumes da prévia, clica numa face limite, confirma e desfaz/refaz. Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados.
+- Capturas reais `face.png` e `cut.png` inspecionadas em `target/codex-validation/smart-extrusion-20261026/`, com egui/wgpu/GL llvmpipe e sem erros de validação. Cenários `extrude-face`/`extrude-cut`. Formato 17, aplicativo 0.3.0; o único target local instalado é Linux, e Windows/janela nativa não foram exercitados.
+
 ## Entrada de cotas durante o desenho — 26/10/2026
 
 - Medidas livres/travadas em tempo real para linha, retângulo, círculo e arco; confirmação por Enter/clique, Tab/Shift+Tab entre campos e Esc para descartar a prévia. Campos aceitam expressões/unidades da peça; erro mantém a etapa aberta e não modifica a revisão. Cotas angulares em radianos, exibidas em graus, com recálculo e salvamento no formato 16; versões anteriores continuam legíveis.

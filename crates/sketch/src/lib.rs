@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt};
 
+pub mod areas;
 pub mod drafting;
 pub mod edit;
 pub mod profiles;

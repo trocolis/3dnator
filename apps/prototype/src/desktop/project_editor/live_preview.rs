@@ -28,6 +28,8 @@ struct Computed {
     tab: u64,
     revision: u64,
     key: String,
+    guide: Option<nator_commands::extrusion::Guide>,
+    choice: Option<nator_document::features::Combine>,
     result: Result<(PreparedCommand, Scene), CommandError>,
 }
 
@@ -225,46 +227,94 @@ impl Editor {
         let spawned = std::thread::Builder::new()
             .name("preview-worker".into())
             .spawn(move || {
-                let result = PreparedCommand::new(document, revision, command).map(|prepared| {
-                    let mut display = prepared.document().clone();
-                    let highlight = highlight.or(match prepared.effect() {
-                        Effect::Imported { body, .. } => Some(body),
-                        _ => None,
-                    });
-                    if let Some((part, output)) = rollback {
-                        roll_back_after(&mut display, part, output);
+                let extrusion = match &command {
+                    Command::AddFeature {
+                        part, operation, ..
                     }
-                    if let Some(id) = highlight {
-                        // A cor de ocorrência prevalece sobre a do corpo: retirá-la na cópia
-                        // exibida deixa a tinta da prévia visível também em componentes
-                        // importados com cor própria.
-                        let part = display
-                            .parts()
-                            .iter()
-                            .find(|p| p.bodies.iter().any(|b| b.id == id))
-                            .map(|p| p.id);
-                        let colored = display
-                            .instances()
-                            .iter()
-                            .filter(|i| Some(i.part) == part && i.color.is_some())
-                            .map(|i| i.id)
-                            .collect::<Vec<_>>();
-                        for instance in colored {
-                            if let Ok(i) = display.instance_mut(instance) {
-                                i.color = None;
+                    | Command::EditFeature {
+                        part, operation, ..
+                    }
+                    | Command::AddSmartExtrusion {
+                        part, operation, ..
+                    } => Some((*part, operation.clone())),
+                    _ => None,
+                };
+                let guide = extrusion.as_ref().and_then(|(part, operation)| {
+                    nator_commands::extrusion::guide(&document, *part, operation).ok()
+                });
+                let original = document.clone();
+                let mut choice = None;
+                let result =
+                    PreparedCommand::new(document, revision, command).and_then(|prepared| {
+                        let mut display = prepared.document().clone();
+                        let highlight = highlight.or(match prepared.effect() {
+                            Effect::Imported { body, .. } => Some(body),
+                            _ => None,
+                        });
+                        let removal = if let Some((part, _)) = &extrusion {
+                            let operation = highlight.and_then(|id| {
+                                display
+                                    .part(*part)?
+                                    .features
+                                    .iter()
+                                    .find(|f| f.output == id)
+                                    .map(|f| &f.operation)
+                            });
+                            choice = operation.and_then(nator_commands::extrusion::combination);
+                            operation
+                                .map(|operation| {
+                                    nator_commands::extrusion::removed(&original, *part, operation)
+                                })
+                                .transpose()
+                                .map_err(|e| CommandError {
+                                    message: e.to_string(),
+                                    failure: None,
+                                })?
+                                .flatten()
+                                .map(|mesh| (*part, mesh))
+                        } else {
+                            None
+                        };
+                        if let Some((part, output)) = rollback {
+                            roll_back_after(&mut display, part, output);
+                        }
+                        if let Some(id) = highlight.filter(|_| removal.is_none()) {
+                            // A cor de ocorrência prevalece sobre a do corpo: retirá-la na cópia
+                            // exibida deixa a tinta da prévia visível também em componentes
+                            // importados com cor própria.
+                            let part = display
+                                .parts()
+                                .iter()
+                                .find(|p| p.bodies.iter().any(|b| b.id == id))
+                                .map(|p| p.id);
+                            let colored = display
+                                .instances()
+                                .iter()
+                                .filter(|i| Some(i.part) == part && i.color.is_some())
+                                .map(|i| i.id)
+                                .collect::<Vec<_>>();
+                            for instance in colored {
+                                if let Ok(i) = display.instance_mut(instance) {
+                                    i.color = None;
+                                }
+                            }
+                            if let Ok(body) = display.body_mut(id) {
+                                body.color = Some(nator_geometry::RgbColor::new(PREVIEW_COLOR));
                             }
                         }
-                        if let Ok(body) = display.body_mut(id) {
-                            body.color = Some(nator_geometry::RgbColor::new(PREVIEW_COLOR));
-                        }
-                    }
-                    let scene = prepare_scene(&display, &view, active).ok().flatten();
-                    (prepared, scene)
-                });
+                        let scene = prepare_scene_with_removal(&display, &view, active, removal)
+                            .map_err(|message| CommandError {
+                                message,
+                                failure: None,
+                            })?;
+                        Ok((prepared, scene))
+                    });
                 let _ = sender.send(Computed {
                     tab,
                     revision,
                     key,
+                    guide,
+                    choice,
                     result,
                 });
                 context.request_repaint();
@@ -283,6 +333,13 @@ impl Editor {
         }
         match computed.result {
             Ok((prepared, scene)) => {
+                if let Some(draft) = self
+                    .feature_edit
+                    .as_mut()
+                    .filter(|d| d.tab() == computed.tab)
+                {
+                    draft.receive_extrusion(computed.guide, computed.choice);
+                }
                 self.preview.failed = None;
                 if computed.tab == self.current().id
                     && let Some((mesh, data)) = scene

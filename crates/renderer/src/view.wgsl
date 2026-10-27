@@ -109,6 +109,10 @@ struct VertexOutput {
     if (style == 2u) {
         return vec4<f32>(color, 0.4);
     }
+    if (style == 4u) {
+        let removal = mix(vec3<f32>(0.92, 0.12, 0.16) * intensity + vec3<f32>(0.06), vec3<f32>(0.48, 0.02, 0.04), crease);
+        return vec4<f32>(removal, 0.35);
+    }
     return vec4<f32>(color, 1.0);
 }
 

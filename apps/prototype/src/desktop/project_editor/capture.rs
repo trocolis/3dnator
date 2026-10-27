@@ -65,11 +65,13 @@ pub(crate) fn render_ui_scenario(
         | "measure"
         | "sketch-line-input"
         | "sketch-circle-input"
-        | "sketch-rectangle-input" => {}
+        | "sketch-rectangle-input"
+        | "extrude-face"
+        | "extrude-cut" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut."
                     .into(),
             );
         }
@@ -254,6 +256,44 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
         .map(|p| p.features.clone())
         .unwrap_or_default();
     match scenario {
+        "extrude-face" | "extrude-cut" => {
+            use nator_document::features::{FaceRef, Operation};
+            let doc = editor.current().session.document();
+            let base = doc
+                .part(part)
+                .and_then(|p| p.shown_bodies().next())
+                .ok_or("Corpo ausente")?;
+            let face = base
+                .face_names
+                .iter()
+                .filter(|name| !name.is_empty())
+                .filter_map(|name| {
+                    let face = FaceRef::Named(name.clone());
+                    let operation = Operation::ExtrudeFace {
+                        base: base.id,
+                        face: face.clone(),
+                        from: "0 mm".into(),
+                        to: "3 mm".into(),
+                        combine: None,
+                        until: None,
+                    };
+                    let guide = nator_commands::extrusion::guide(doc, part, &operation).ok()?;
+                    (guide.normal[2] > 0.5).then_some((face, guide.origin[2]))
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|p| p.0)
+                .ok_or("Corpo sem face superior plana")?;
+            let base = base.id;
+            editor.open_feature_tool(feature_editor::Tool::Extrude);
+            if let Some(d) = editor.feature_edit.as_mut() {
+                d.choose_face_profile(base, face);
+                d.set_size_for_capture(if scenario == "extrude-cut" {
+                    "-3 mm"
+                } else {
+                    "6 mm"
+                });
+            }
+        }
         "sketch-line-input" | "sketch-circle-input" | "sketch-rectangle-input" => {
             open_first_sketch(editor)?;
             let work = editor
@@ -349,7 +389,10 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 .next()
                 .ok_or("Rascunho sem região fechada.")?;
             if let Some(draft) = editor.feature_edit.as_mut() {
-                draft.choose_region(record.id, region.boundary());
+                draft.choose_region(
+                    record.id,
+                    nator_document::features::RegionRef::Boundary(region.boundary()),
+                );
                 draft.set_size_for_capture("6 mm");
             }
         }
@@ -1948,6 +1991,230 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn extrusion_mouse_faces_and_automatic_modes_keep_preview_transactional()
+    -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Extrusão pelo mouse")?)?;
+        let mut base_profile = Sketch::new("Placa", Plane::xy());
+        base_profile.add_rectangle([0., 0.], [40., 30.], false)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: base_profile,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let Effect::Imported { body: base, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Placa ausente".into());
+        };
+        let mut tower = Sketch::new("Limite", Plane::xy());
+        tower.add_rectangle([70., 0.], [80., 10.], false)?;
+        let Effect::SketchCreated { sketch, .. } = session.execute(Command::AddSketch {
+            destination: Some(part),
+            sketch: tower,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let Effect::Imported { body: limit, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Limite".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "20 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Limite ausente".into());
+        };
+        let mut free = Sketch::new("Livre", Plane::xy());
+        free.add_circle([45., 15.], 2., false)?;
+        session.execute(Command::AddSketch {
+            destination: Some(part),
+            sketch: free,
+        })?;
+        let mut editor = Editor::from_gpu(state, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.viewport.camera.span = 2.5;
+        settle(&mut editor, &context)?;
+        let project = |editor: &Editor, point| {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Ponto sem projeção")
+        };
+        let initial_revision = editor.current().session.revision();
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        frame(&mut editor, &context, Vec::new())?;
+        let point = project(&editor, [45., 15., 0.])?;
+        click(&mut editor, &context, point)?;
+        wait_feature_preview(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .feature_edit
+                .as_ref()
+                .and_then(|d| d.extrusion_state())
+                .ok_or("Guia ausente")?
+                .1,
+            0
+        );
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), initial_revision);
+
+        // Uma face do corpo pode iniciar o perfil; não há criação auxiliar de rascunho.
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        frame(&mut editor, &context, Vec::new())?;
+        let point = project(&editor, [5., 5., 10.])?;
+        click(&mut editor, &context, point)?;
+        settle(&mut editor, &context)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let (guide, mode) = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .ok_or("Guia de face ausente")?;
+        assert_eq!(mode, 1);
+        let origin = project(&editor, guide.origin)?;
+        let endpoint = project(
+            &editor,
+            std::array::from_fn(|i| guide.origin[i] + guide.normal[i] * guide.to),
+        )?;
+        let unit = project(
+            &editor,
+            std::array::from_fn(|i| guide.origin[i] + guide.normal[i]),
+        )? - origin;
+        let target = endpoint - unit * (guide.to as f32 + 3.);
+        for (position, pressed) in [
+            (endpoint, Some(true)),
+            (target, None),
+            (target, Some(false)),
+        ] {
+            let mut events = vec![egui::Event::PointerMoved(position)];
+            if let Some(pressed) = pressed {
+                events.push(egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            frame(&mut editor, &context, events)?;
+        }
+        wait_feature_preview(&mut editor, &context)?;
+        let (guide, mode) = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .ok_or("Guia ausente")?;
+        assert_eq!(mode, 2);
+        assert!((guide.to + 3.).abs() < 1e-4, "{}", guide.to);
+        assert_eq!(editor.current().session.revision(), initial_revision);
+        // O resultado restante e a malha do volume removido recompõem o volume original.
+        assert!(
+            (editor
+                .scene
+                .as_ref()
+                .ok_or("Prévia ausente")?
+                .signed_volume()
+                .abs()
+                - 14000.)
+                .abs()
+                < 1e-3
+        );
+
+        // O clique na torre troca o limite automaticamente, sem ativar um campo manual.
+        let point = project(&editor, [75., 5., 20.])?;
+        click(&mut editor, &context, point)?;
+        settle(&mut editor, &context)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let (guide, mode) = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .ok_or("Guia ausente")?;
+        assert_eq!(mode, 1);
+        assert!((guide.to - 10.).abs() < 1e-5);
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.feature_edit.is_none(), "{}", editor.status);
+        let piece = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?;
+        assert!(
+            matches!(piece.features.last().map(|f|&f.operation),Some(Operation::ExtrudeFace {base:source,until:Some(until),combine:Some(combine),..}) if *source==base&&until.body==limit&&combine.mode==nator_document::features::BooleanMode::Join)
+        );
+        assert_eq!(piece.sketches.len(), 3);
+        assert!(editor.current_mut().session.undo());
+        assert!(editor.current_mut().session.redo());
+        Ok(())
+    }
+
+    fn wait_feature_preview(
+        editor: &mut Editor,
+        context: &egui::Context,
+    ) -> Result<(), Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            frame(editor, context, Vec::new())?;
+            let command = editor
+                .feature_edit
+                .as_ref()
+                .and_then(|d| {
+                    editor
+                        .current()
+                        .session
+                        .document()
+                        .part(d.part())
+                        .map(|p| d.preview_key(p))
+                })
+                .ok_or("Painel ausente")?;
+            match editor.preview_status(&command) {
+                live_preview::PreviewStatus::Ready => return Ok(()),
+                live_preview::PreviewStatus::Failed(error) => return Err(error.to_string().into()),
+                _ => {}
+            }
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "Prévia não concluiu: {}; comando: {command:?}",
+                    editor.status
+                )
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     fn label_position(

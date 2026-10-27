@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Extrusão pelo mouse e seleção automática de operação
+
+- Extrusão aceita áreas fechadas de rascunhos e faces planas de sólidos da peça. Áreas internas, bordas compartilhadas e interseções de linhas/círculos/arcos são reconhecidas sem alterar as entidades do rascunho; furos das faces são preservados.
+- Manipulador de distância arrastável no viewport, incluindo inversão ao atravessar o início e preservação do deslocamento inicial. Clicar numa face após escolher o perfil muda automaticamente para Até face; faces inclinadas recortam o prisma inteiro pelo plano exato.
+- Operação automática sugere Novo corpo no espaço livre, Unir ao sair de uma face e Remover ao entrar no material. Escolher uma operação manualmente desliga a sugestão; editar uma operação existente conserva seu modo gravado.
+- Na remoção, somente o volume realmente subtraído aparece em vermelho translúcido, sobre a prévia do corpo restante. Prévia, arraste e cancelamento não modificam o documento; OK confirma uma única ação com desfazer/refazer.
+- Reconhecimento de áreas e cálculos CAD em segundo plano, com cache por revisão. Novas referências de área e extrusão de face são persistidas no formato 17; projetos anteriores continuam legíveis.
+
 ### Cotas durante o desenho
 
 - Linha, retângulo, círculo e arco mostram medidas junto ao desenho, atualizadas pelo cursor: comprimento/ângulo em relação ao eixo horizontal, largura/altura, raio e raio/abertura, respectivamente. Digitar trava a medida, Tab/Shift+Tab alterna os campos, Enter confirma a etapa e Esc cancela sem alterar o documento. Apagar um campo libera a medida para acompanhar o mouse.

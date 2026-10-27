@@ -827,6 +827,59 @@ Shape* nator_extrude(const Shape* face, const double* direction) noexcept {
     });
 }
 
+// Extrusão direta de uma face plana, preservando todos os contornos (inclusive furos).
+// A normal orientada para fora define o sinal da distância; a cópia transitória não
+// altera o sólido de origem e continua pertencendo exclusivamente a esta chamada.
+Shape* nator_extrude_face(const Shape* body, std::size_t index, double from, double to) noexcept {
+    return build([&](Shape& shape) {
+        const auto faces = map_of(body->value, TopAbs_FACE);
+        if (index >= static_cast<std::size_t>(faces.Extent()) || !std::isfinite(from) ||
+            !std::isfinite(to) || std::abs(to - from) < 1e-7) {
+            throw std::runtime_error("Face ou limites de extrusão inválidos.");
+        }
+        const TopoDS_Face face = TopoDS::Face(faces(static_cast<int>(index) + 1));
+        BRepAdaptor_Surface surface(face);
+        if (surface.GetType() != GeomAbs_Plane) {
+            throw std::runtime_error("Extrusão direta exige uma face plana.");
+        }
+        gp_Dir normal = surface.Plane().Axis().Direction();
+        if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+        gp_Trsf translation;
+        translation.SetTranslation(gp_Vec(normal) * from);
+        BRepBuilderAPI_Transform moved(face, translation, true);
+        Shape profile;
+        profile.value = moved.Shape();
+        const auto edges = map_of(face, TopAbs_EDGE);
+        const auto source_edges = map_of(body->value, TopAbs_EDGE);
+        std::vector<int> source_indices;
+        for (int i = 1; i <= edges.Extent(); ++i) {
+            profile.profile_edges.push_back(TopoDS::Edge(moved.ModifiedShape(edges(i))));
+            source_indices.push_back(source_edges.FindIndex(edges(i)) - 1);
+        }
+        BRepPrimAPI_MakePrism prism(profile.value, gp_Vec(normal) * (to - from), false);
+        if (!prism.IsDone()) throw std::runtime_error("Falha na extrusão da face.");
+        shape.value = prism.Shape();
+        shape.origins = sweep_history(prism, &profile);
+        // Laterais apontam para a aresta original do corpo, não para a posição
+        // transitória na face copiada. Rust deriva nomes das faces adjacentes.
+        for (std::size_t i = 0; i + 2 < shape.origins.size(); i += 3) {
+            if (shape.origins[i] == Side) shape.origins[i + 2] = source_indices.at(shape.origins[i + 2]);
+        }
+    });
+}
+
+// Uma interseção vazia é uma consulta válida; não passa pela exigência de sólido
+// com volume positivo usada nas operações que publicam um corpo no documento.
+bool nator_common_volume(const Shape* left, const Shape* right, double* output) noexcept {
+    return guarded([&] {
+        BRepAlgoAPI_Common common(left->value, right->value);
+        if (!common.IsDone()) throw std::runtime_error("Falha ao consultar a interseção dos sólidos.");
+        GProp_GProps properties;
+        BRepGProp::VolumeProperties(common.Shape(), properties);
+        *output = std::abs(properties.Mass());
+    });
+}
+
 Shape* nator_revolve(const Shape* face, const double* origin, const double* direction,
                      double angle) noexcept {
     return build([&](Shape& shape) {

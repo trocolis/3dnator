@@ -17,6 +17,7 @@ use nator_document::features::{
     PatternLayout, RegionRef, ThreadSpec, UntilFace, signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
+mod extrusion;
 
 /// Ferramentas do painel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -339,6 +340,11 @@ pub(super) struct Draft {
     /// Posição na lista atual de regiões do rascunho selecionado.
     region: Option<usize>,
     kept_region: Option<RegionRef>,
+    /// Face plana como alternativa a um perfil de rascunho.
+    face_profile: Option<(BodyId, FaceRef)>,
+    automatic: bool,
+    auto_preferred: Option<BodyId>,
+    interaction: extrusion::Interaction,
     axis: RevolveAxis,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
     kept_axis: Option<([f64; 3], [f64; 3])>,
@@ -377,6 +383,10 @@ impl Draft {
             tool_body: None,
             region: None,
             kept_region: None,
+            face_profile: None,
+            automatic: tool == Tool::Extrude,
+            auto_preferred: None,
+            interaction: extrusion::Interaction::default(),
             axis: RevolveAxis::V,
             kept_axis: None,
             index: 0,
@@ -401,6 +411,7 @@ impl Draft {
     pub fn edit(tab: u64, part: PartId, feature: Feature) -> Self {
         let mut d = Self::new(tab, part, Tool::Extrude);
         d.output = Some(feature.output);
+        d.automatic = false;
         d.field = None;
         let nearest = |direction: [f64; 3], table: &[(&str, [f64; 3])]| {
             table
@@ -409,6 +420,27 @@ impl Draft {
                 .unwrap_or(0)
         };
         match feature.operation {
+            Operation::ExtrudeFace {
+                base,
+                face,
+                from,
+                to,
+                combine,
+                until,
+            } => {
+                d.face_profile = Some((base, face));
+                d.extrude = ExtrudeDraft::from_limits(from, to);
+                if let Some(combine) = combine {
+                    d.combine = match combine.mode {
+                        BooleanMode::Join => 1,
+                        BooleanMode::Cut => 2,
+                        BooleanMode::Intersect => 3,
+                    };
+                    d.combine_target = Some(combine.target);
+                }
+                d.extrude.to_face = until.is_some();
+                d.until = until.map(|l| (l.body, l.face));
+            }
             Operation::Extrude {
                 sketch,
                 region,
@@ -635,6 +667,9 @@ fn hole_points(sketch: &Sketch) -> Vec<u64> {
 impl Draft {
     /// Tipo de elemento que o próximo clique deve selecionar, se o painel estiver esperando.
     pub(super) fn awaiting(&self) -> Option<Awaiting> {
+        if self.tool == Tool::Extrude && matches!(self.field, None | Some(Field::Profile)) {
+            return Some(Awaiting::Face);
+        }
         match self.field? {
             Field::Edges => Some(Awaiting::Edge),
             Field::Faces | Field::UntilFace => Some(Awaiting::Face),
@@ -667,9 +702,11 @@ impl Draft {
         self.kept_topology.iter().chain(&self.extra_topology)
     }
     /// Região do perfil escolhida por clique no rascunho.
-    pub(super) fn choose_region(&mut self, sketch: SketchId, boundary: Vec<u64>) {
+    pub(super) fn choose_region(&mut self, sketch: SketchId, region: RegionRef) {
+        self.face_profile = None;
+        self.interaction = extrusion::Interaction::default();
         self.sketch = Some(sketch);
-        self.kept_region = Some(RegionRef::Boundary(boundary));
+        self.kept_region = Some(region);
         self.region = None;
         // Na revolução, o eixo gravado pertence ao rascunho anterior.
         if self.tool == Tool::Revolve {
@@ -677,18 +714,27 @@ impl Draft {
         }
         self.field = None;
     }
-    pub(super) fn region_boundary(&self) -> Option<&[u64]> {
-        match &self.kept_region {
-            Some(RegionRef::Boundary(ids)) => Some(ids),
-            _ => None,
-        }
+    pub(super) fn region_reference(&self) -> Option<&RegionRef> {
+        self.kept_region.as_ref()
     }
     /// Aplica uma seleção gráfica ao campo ativo. Arestas e faces alternam: clicar de novo
     /// numa já escolhida a retira.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
         match (self.field, kept) {
+            (Some(Field::Profile), Kept::Face(face)) if self.tool == Tool::Extrude => {
+                self.choose_face_profile(body, face);
+            }
+            (None, Kept::Face(face)) if self.tool == Tool::Extrude => {
+                let (from, _) = self.extrude.limits();
+                self.until = Some((body, face));
+                self.extrude.to_face = true;
+                self.extrude.custom = None;
+                self.extrude.direction = Direction::OneSide;
+                self.extrude.offset = from;
+            }
             (Some(Field::UntilFace), Kept::Face(face)) => {
                 self.until = Some((body, face));
+                self.extrude.to_face = true;
                 self.field = None;
             }
             (Some(Field::Base), Kept::Body(id)) => {
@@ -709,6 +755,7 @@ impl Draft {
                 self.field = None;
             }
             (Some(Field::Target), Kept::Body(id)) => {
+                self.automatic = false;
                 self.combine_target = Some(id);
                 self.field = None;
             }
@@ -737,6 +784,15 @@ impl Draft {
     }
     pub(super) fn describe(kept: &Kept) -> String {
         describe_topology(kept)
+    }
+    pub(super) fn choose_face_profile(&mut self, body: BodyId, face: FaceRef) {
+        self.face_profile = Some((body, face));
+        self.auto_preferred = Some(body);
+        self.sketch = None;
+        self.kept_region = None;
+        self.region = None;
+        self.interaction = extrusion::Interaction::default();
+        self.field = None;
     }
 
     fn extra_edges(&self) -> Vec<EdgeRef> {
@@ -793,10 +849,11 @@ impl Draft {
     fn complete(&self) -> bool {
         match self.tool {
             Tool::Extrude => {
-                self.sketch.is_some()
-                    && (self.kept_region.is_some() || self.region.is_some())
+                (self.face_profile.is_some()
+                    || (self.sketch.is_some()
+                        && (self.kept_region.is_some() || self.region.is_some())))
                     && (!self.extrude.to_face || self.until.is_some())
-                    && (self.combine == 0 || self.combine_target.is_some())
+                    && (self.automatic || self.combine == 0 || self.combine_target.is_some())
             }
             Tool::Revolve => {
                 self.sketch.is_some() && (self.kept_region.is_some() || self.region.is_some())
@@ -826,6 +883,9 @@ impl Draft {
         let record = part.sketches.iter().find(|s| s.id == sketch);
         // Nova seleção pela lista: a posição atual vira identidade estável no comando.
         let region = self.kept_region.clone().unwrap_or_else(|| {
+            if self.region.is_none() {
+                return RegionRef::Index(0);
+            }
             let index = self.region.unwrap_or(0);
             match record.map(|r| profiles::regions(&r.sketch)) {
                 Some(Ok(list)) if index < list.len() => RegionRef::Boundary(list[index].boundary()),
@@ -849,27 +909,39 @@ impl Draft {
         match self.tool {
             Tool::Extrude => {
                 let (from, to) = self.extrude.limits();
+                let combine = self
+                    .combine_target
+                    .filter(|_| !self.automatic && self.combine > 0)
+                    .map(|target| Combine {
+                        target,
+                        mode: match self.combine {
+                            1 => BooleanMode::Join,
+                            2 => BooleanMode::Cut,
+                            _ => BooleanMode::Intersect,
+                        },
+                    });
+                let until = self
+                    .until
+                    .clone()
+                    .filter(|_| self.extrude.to_face)
+                    .map(|(body, face)| UntilFace { body, face });
+                if let Some((base, face)) = &self.face_profile {
+                    return Operation::ExtrudeFace {
+                        base: *base,
+                        face: face.clone(),
+                        from,
+                        to,
+                        combine,
+                        until,
+                    };
+                }
                 Operation::Extrude {
                     sketch,
                     region,
                     from,
                     to,
-                    combine: self
-                        .combine_target
-                        .filter(|_| self.combine > 0)
-                        .map(|target| Combine {
-                            target,
-                            mode: match self.combine {
-                                1 => BooleanMode::Join,
-                                2 => BooleanMode::Cut,
-                                _ => BooleanMode::Intersect,
-                            },
-                        }),
-                    until: self
-                        .until
-                        .clone()
-                        .filter(|_| self.extrude.to_face)
-                        .map(|(body, face)| UntilFace { body, face }),
+                    combine,
+                    until,
                 }
             }
             Tool::Revolve => {
@@ -998,6 +1070,14 @@ impl Draft {
     /// Comando que o OK aplicaria.
     fn command(&self, part: &nator_document::Part) -> Command {
         let operation = self.operation(part);
+        if self.tool == Tool::Extrude && self.automatic && self.output.is_none() {
+            return Command::AddSmartExtrusion {
+                part: self.part,
+                name: text(T::Extrude).into(),
+                operation,
+                preferred: self.auto_preferred,
+            };
+        }
         match self.output {
             Some(output) => Command::EditFeature {
                 part: self.part,
@@ -1073,7 +1153,10 @@ impl Editor {
                 .map(|b| b.id),
         };
         match tool {
-            Tool::Extrude | Tool::Revolve => d.combine_target = suggestion,
+            Tool::Extrude | Tool::Revolve => {
+                d.combine_target = suggestion;
+                d.auto_preferred = suggestion;
+            }
             Tool::Hole
             | Tool::LinearPattern
             | Tool::CircularPattern
@@ -1085,6 +1168,14 @@ impl Editor {
             _ => {}
         }
         // Concluir o rascunho aberto mantém o perfil visível para a seleção.
+        if tool == Tool::Extrude
+            && self.current().sketch_edit.is_none()
+            && self.pick_mode == navigation::PickMode::Face
+            && let Some(pick) = self.current().picked.as_ref().filter(|p| p.part == part)
+            && let Ok(face) = self.current().session.document().face_at(pick)
+        {
+            d.apply_pick(pick.body, Kept::Face(face));
+        }
         if self.current().sketch_edit.is_some() {
             self.finish_sketch();
         }
@@ -1108,7 +1199,14 @@ impl Editor {
             .and_then(|id| part.sketches.iter().find(|s| s.id == id));
         let regions = record
             .filter(|_| d.tool.uses_profile())
-            .map(|s| profiles::regions(&s.sketch).map_err(|e| e.to_string()));
+            .and_then(|s| self.profile_areas(s.id, ctx))
+            .map(|result| {
+                result.and_then(|areas| {
+                    areas
+                        .map(|a| a.regions.clone())
+                        .ok_or_else(|| text(T::FindingClosedAreas).to_owned())
+                })
+            });
         let command = d.command(&part);
         let complete = d.complete() && nator_kernel::is_available();
         let footer_error;
@@ -1161,11 +1259,15 @@ impl Editor {
             },
         );
         let tab = d.tab;
+        // Os campos podem mudar neste mesmo quadro (inclusive ao clicar em OK).
+        // Publicar e pedir prévia sempre usa o estado posterior à edição do formulário.
+        let command = d.command(&part);
+        let complete = d.complete() && nator_kernel::is_available();
         if outcome.cancel {
             self.close_feature_panel(&d);
             return;
         }
-        if outcome.ok {
+        if outcome.ok && complete {
             let command = match d.output {
                 Some(output) => self.with_pending_fix(tab, output, command),
                 None => command,
@@ -1217,13 +1319,19 @@ fn profile_rows(
     ui: &mut egui::Ui,
     d: &mut Draft,
     part: &nator_document::Part,
-    regions: &Option<Result<Vec<profiles::Region>, String>>,
+    regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
 ) {
-    let chosen = usize::from(d.kept_region.is_some() || d.region.is_some());
+    let chosen =
+        usize::from(d.face_profile.is_some() || d.kept_region.is_some() || d.region.is_some());
     let sketch_name = d
         .sketch
         .and_then(|id| part.sketches.iter().find(|s| s.id == id))
-        .map(|s| s.sketch.name.clone());
+        .map(|s| s.sketch.name.clone())
+        .or_else(|| {
+            d.face_profile
+                .as_ref()
+                .and_then(|(body, _)| body_name(part, Some(*body)))
+        });
     let selection = panel::selection(
         ui,
         text(T::ProfileField),
@@ -1235,15 +1343,21 @@ fn profile_rows(
         d.field = Some(Field::Profile);
     }
     if selection.clear {
+        d.face_profile = None;
+        d.interaction = extrusion::Interaction::default();
         d.kept_region = None;
         d.region = None;
         d.field = Some(Field::Profile);
     }
     if d.field == Some(Field::Profile) {
         ui.label(
-            egui::RichText::new(text(T::ProfileHint))
-                .small()
-                .color(theme::MUTED),
+            egui::RichText::new(text(if d.tool == Tool::Extrude {
+                T::ExtrusionProfileHint
+            } else {
+                T::ProfileHint
+            }))
+            .small()
+            .color(theme::MUTED),
         );
     }
     match regions {
@@ -1261,9 +1375,14 @@ fn extrude_panel(
     ui: &mut egui::Ui,
     d: &mut Draft,
     part: &nator_document::Part,
-    regions: &Option<Result<Vec<profiles::Region>, String>>,
+    regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
 ) {
     profile_rows(ui, d, part, regions);
+    ui.label(
+        egui::RichText::new(text(T::ExtrusionMouseHint))
+            .small()
+            .color(theme::MUTED),
+    );
     let e = &mut d.extrude;
     if let Some((from, to)) = &mut e.custom {
         panel::row(ui, text(T::FromField), |ui| panel::expression(ui, from));
@@ -1338,18 +1457,28 @@ fn extrude_panel(
 
 /// Resultado: novo corpo, união, corte ou interseção com um corpo alvo.
 fn operation_rows(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    if d.tool == Tool::Extrude && d.output.is_none() {
+        ui.checkbox(&mut d.automatic, text(T::AutomaticExtrusion));
+    }
+    let previous = d.combine;
     panel::row(ui, text(T::OperationField), |ui| {
         panel::choice(
             ui,
             &mut d.combine,
             &[
                 (1, Icon::Join, T::Join),
-                (2, Icon::CutBody, T::Cut),
+                (2, Icon::CutBody, T::RemoveMaterial),
                 (3, Icon::IntersectBody, T::Intersect),
                 (0, Icon::NewBody, T::NewBody),
             ],
         );
     });
+    if previous != d.combine {
+        d.automatic = false;
+        if d.combine > 0 && d.combine_target.is_none() {
+            d.field = Some(Field::Target);
+        }
+    }
     if d.combine > 0 {
         let name = body_name(part, d.combine_target);
         let s = panel::selection(
@@ -1364,6 +1493,7 @@ fn operation_rows(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
         }
         if s.clear {
             d.combine_target = None;
+            d.automatic = false;
             d.field = Some(Field::Target);
         }
     }
@@ -1373,7 +1503,7 @@ fn revolve_panel(
     ui: &mut egui::Ui,
     d: &mut Draft,
     part: &nator_document::Part,
-    regions: &Option<Result<Vec<profiles::Region>, String>>,
+    regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
     record: Option<&nator_document::SketchRecord>,
 ) {
     profile_rows(ui, d, part, regions);

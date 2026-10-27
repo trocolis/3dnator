@@ -53,7 +53,7 @@ pub(super) struct PendingFailure {
 
 pub(super) fn operation_icon(operation: &Operation) -> Icon {
     match operation {
-        Operation::Extrude { .. } => Icon::Extrude,
+        Operation::Extrude { .. } | Operation::ExtrudeFace { .. } => Icon::Extrude,
         Operation::Revolve { .. } => Icon::Revolve,
         Operation::Hole { .. } => Icon::Hole,
         Operation::Fillet { .. } => Icon::Fillet,

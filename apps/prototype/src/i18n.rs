@@ -324,6 +324,12 @@ pub enum Text {
     FileAlreadyOpen,
     StaleResult,
     Sketch,
+    AutomaticExtrusion,
+    ExtrusionProfileHint,
+    ExtrusionMouseHint,
+    RemoveMaterial,
+    FindingClosedAreas,
+    ProfileQueryFailed,
     SketchSweep,
     SketchDynamicWidth,
     SketchDynamicHeight,
@@ -668,6 +674,16 @@ pub fn text(key: Text) -> &'static str {
         Text::EditDimension => "Alterar cota selecionada",
 
         Text::Sketch => "Rascunho",
+        Text::AutomaticExtrusion => "Operação automática",
+        Text::ExtrusionProfileHint => {
+            "Clique em qualquer área fechada de rascunho ou em uma face plana de um sólido da peça."
+        }
+        Text::ExtrusionMouseHint => {
+            "Arraste a seta para definir a distância. Clique em uma face para terminar nela. Escolher uma operação desativa a sugestão automática."
+        }
+        Text::RemoveMaterial => "Remover",
+        Text::FindingClosedAreas => "Identificando áreas fechadas…",
+        Text::ProfileQueryFailed => "Não foi possível identificar as áreas fechadas.",
         Text::SketchSweep => "Abertura",
         Text::SketchDynamicWidth => "Largura",
         Text::SketchDynamicHeight => "Altura",

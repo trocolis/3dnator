@@ -448,6 +448,7 @@ pub struct Editor {
     /// Pré-seleção sob o cursor e dados de realce por geometria.
     hover: Option<highlight::Hover>,
     highlight_cache: highlight::Cache,
+    profile_cache: profile_pick::Cache,
     /// Janela de seleção, pressão longa e lista de sobrepostos.
     gestures: selection_tools::SelectionGestures,
     /// Painel de montagem ou posicionamento aberto.
@@ -481,8 +482,17 @@ fn prepare_scene(
     view: &ViewState,
     active: Option<PartId>,
 ) -> Result<Option<(Mesh, PreparedMesh)>, String> {
+    prepare_scene_with_removal(document, view, active, None)
+}
+
+fn prepare_scene_with_removal(
+    document: &Document,
+    view: &ViewState,
+    active: Option<PartId>,
+    removal: Option<(PartId, Mesh)>,
+) -> Result<Option<(Mesh, PreparedMesh)>, String> {
     use nator_document::Style;
-    let Some(scene) = document
+    let Some(mut scene) = document
         .scene_styled_bodies(|occurrence, part, body| {
             view.style(document, occurrence, part, active)
                 .map(|style| view.highlight(occurrence, body, style))
@@ -491,7 +501,7 @@ fn prepare_scene(
     else {
         return Ok(None);
     };
-    let styles = scene
+    let mut styles = scene
         .styles
         .iter()
         .map(|style| match style {
@@ -501,6 +511,47 @@ fn prepare_scene(
             Style::Selected => nator_renderer::STYLE_SELECTED,
         })
         .collect::<Vec<_>>();
+    if let Some((part_id, removed)) = removal {
+        let mut vertices = scene.mesh.vertices().to_vec();
+        let mut triangles = scene.mesh.triangles().to_vec();
+        let (_, creases) = removed.edge_analysis(Some(std::f64::consts::FRAC_PI_6));
+        for occurrence in document
+            .occurrences()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|o| {
+                document
+                    .instance(o.instance)
+                    .is_some_and(|i| i.part == part_id)
+            })
+        {
+            let Some(part) = document.part(part_id) else {
+                continue;
+            };
+            if view.style(document, &occurrence, part.id, active).is_none() {
+                continue;
+            }
+            let offset =
+                u32::try_from(vertices.len()).map_err(|_| "Prévia excede o limite de vértices.")?;
+            vertices.extend(
+                removed
+                    .vertices()
+                    .iter()
+                    .map(|p| occurrence.placement.apply(*p)),
+            );
+            triangles.extend(removed.triangles().iter().map(|t| t.map(|i| i + offset)));
+            scene.creases.extend_from_slice(&creases);
+            styles.extend(std::iter::repeat_n(
+                nator_renderer::STYLE_REMOVAL,
+                removed.triangles().len(),
+            ));
+            scene.colors.extend(std::iter::repeat_n(
+                nator_geometry::RgbColor::new([224, 50, 58]),
+                removed.triangles().len(),
+            ));
+        }
+        scene.mesh = Mesh::new(vertices, triangles).map_err(|e| e.to_string())?;
+    }
     let prepared = PreparedMesh::with_appearance(
         &scene.mesh,
         &scene.creases,
@@ -573,6 +624,7 @@ impl Editor {
             canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.)),
             hover: None,
             highlight_cache: highlight::Cache::default(),
+            profile_cache: profile_pick::Cache::default(),
             gestures: selection_tools::SelectionGestures::default(),
             assembly_panel: None,
             rename: None,

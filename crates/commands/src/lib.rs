@@ -2,6 +2,7 @@
 mod assembly;
 pub mod drawing;
 pub mod export;
+pub mod extrusion;
 mod features;
 pub mod measure;
 use nator_document::{
@@ -12,6 +13,14 @@ use std::{collections::VecDeque, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// Escolhe o modo pelo contato geométrico antes de publicar uma operação concreta.
+    /// A sugestão não é persistida como regra implícita: editar o histórico mantém o modo.
+    AddSmartExtrusion {
+        part: PartId,
+        name: String,
+        operation: nator_document::features::Operation,
+        preferred: Option<BodyId>,
+    },
     /// A leitura e a tesselação ocorrem na preparação do comando, na thread de trabalho.
     ImportStep {
         path: std::path::PathBuf,
@@ -300,7 +309,9 @@ impl Command {
             Self::ImportStep { .. } => "Importar montagem STEP",
             Self::SetSheet { .. } => "Salvar folha técnica associada",
             Self::ImportSolid { .. } => "Importar sólido CAD",
-            Self::AddFeature { .. } => "Adicionar operação paramétrica",
+            Self::AddFeature { .. } | Self::AddSmartExtrusion { .. } => {
+                "Adicionar operação paramétrica"
+            }
             Self::EditFeature { .. } => "Editar operação paramétrica",
             Self::RemoveFeature { .. } => "Remover operação paramétrica",
             Self::SetFeatureSuppressed {
@@ -397,6 +408,16 @@ impl Command {
                     faces,
                 ));
                 return Ok(Effect::Imported { part, body });
+            }
+            Self::AddSmartExtrusion {
+                part,
+                name,
+                operation,
+                preferred,
+            } => {
+                let operation = extrusion::automatic(doc, part, operation, preferred)?;
+                let output = add_feature(doc, part, name, operation)?;
+                return Ok(Effect::Imported { part, body: output });
             }
             Self::AddFeature {
                 part,

@@ -94,8 +94,32 @@ impl Wire {
         result
     }
     pub fn area(&self) -> f64 {
-        let points = self.sample(128);
-        points.windows(2).map(|p| cross(p[0], p[1]) * 0.5).sum()
+        // Integral de Green por curva: áreas estreitas entre arcos não desaparecem
+        // pela amostragem usada apenas no desenho e na captura do cursor.
+        self.segments
+            .iter()
+            .map(|segment| match *segment {
+                Segment::Line { a, b } => cross(a, b) * 0.5,
+                Segment::Circle { radius, .. } => std::f64::consts::PI * radius * radius,
+                Segment::Arc {
+                    center,
+                    a,
+                    b,
+                    clockwise,
+                } => {
+                    let first = sub(a, center);
+                    let last = sub(b, center);
+                    let start = first[1].atan2(first[0]);
+                    let end = last[1].atan2(last[0]);
+                    let sweep = if clockwise {
+                        -((start - end).rem_euclid(std::f64::consts::TAU))
+                    } else {
+                        (end - start).rem_euclid(std::f64::consts::TAU)
+                    };
+                    (cross(center, sub(b, a)) + dot(first, first) * sweep) * 0.5
+                }
+            })
+            .sum()
     }
     pub fn contains(&self, p: Point2) -> bool {
         let points = self.sample(128);

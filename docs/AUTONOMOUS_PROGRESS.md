@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Extrusão interativa e modos automáticos — 27/10/2026
+
+- Perfil pode ser uma célula fechada do rascunho ou uma face plana do sólido, sem criar rascunhos auxiliares. Arraste da seta define a distância; clicar em face após o perfil define Até face automaticamente, com recorte exato em planos inclinados. Mantidos um/dois lados, simetria, deslocamento inicial, expressões e substituição manual da operação.
+- Classificação no núcleo de comandos: Novo corpo no espaço livre, Unir ao sair de uma superfície e Remover ao entrar no material. A prévia de remoção soma o corpo restante ao volume efetivamente retirado, em vermelho translúcido, e não é publicada até OK. Cache assíncrono de áreas por aba/revisão evita bloquear a interface ou reutilizar geometria obsoleta.
+- Formato 17 registra células orientadas e extrusão de faces; leitura anterior preservada. Regressões incluem furos, círculos sobrepostos, recálculo, limite inclinado, volume subtraído exato, modo manual, salvamento/clonagem e referências a laterais derivadas. Verificações finais: 153 testes sem OCCT, 200 com OCCT e sete ensaios gráficos em série, com formatação, Clippy nas duas configurações e compilação desktop com OCCT aprovados. Evidências em `target/codex-validation/smart-extrusion-20261026/` (trabalho iniciado em 26/10). Aplicativo 0.3.0; sem release/publicação remota, Windows ou janela nativa exercitados.
+
 ## Cotas durante o desenho — 26/10/2026
 
 - Entradas junto à prévia para linha (comprimento/ângulo horizontal), retângulo (largura/altura), círculo (raio) e arco (raio/orientação inicial, depois raio/abertura). Digitar trava a medida, apagar libera, Tab/Shift+Tab alterna, Enter confirma e Esc descarta. Valores inválidos bloqueiam a criação; capturas incompatíveis com a ponta dimensionada são descartadas.

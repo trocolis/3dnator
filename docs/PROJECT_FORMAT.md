@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 16
+# Formato de projeto — versão interna 17
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 16; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 17; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -85,6 +85,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 16 → 17: `Operation::ExtrudeFace` registra corpo/face de origem, limites, combinação opcional e face limite opcional. A origem é referência mesmo quando Novo corpo não a consome. `RegionRef::Area` registra um ciclo canônico de pares (entidade, sentido invertido), distinguindo células que usam as mesmas curvas. Regiões antigas `Boundary`/`Index` preservam sua interpretação anterior; não há conversão implícita que altere sólidos existentes. O modo automático só é resolvido na criação do comando; o arquivo guarda Unir/Remover/Interseção ou Novo corpo concretos. Laterais de extrusão de face recebem nomes derivados dos papéis das faces adjacentes à aresta de origem, sem depender da ordem das arestas.
 - 15 → 16: rascunhos podem conter a restrição `Angle { a, b, value }`, orientação do vetor entre dois pontos em relação ao eixo X local. `value` usa radianos; expressões associadas são avaliadas como ângulo (números sem unidade usam graus). Referências angulares medem a geometria sem dirigi-la. Não há campos obrigatórios novos nos projetos anteriores.
 - 14 → 15: o manifesto e as peças acrescentam `folders` (ausente vale o padrão: tudo visível, exceto a origem das peças). A origem global, antes um controle da sessão sempre visível ao abrir, passa a ser gravada.
 - 13 → 14: o manifesto acrescenta `reference_sketches` (ausente vale lista vazia). A gravação omite o campo quando não há rascunhos de referência.

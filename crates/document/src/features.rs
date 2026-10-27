@@ -128,6 +128,9 @@ pub fn dependents(part: &Part, output: BodyId) -> Vec<BodyId> {
 /// Região de um rascunho escolhida para extrusão ou revolução.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RegionRef {
+    /// Célula do arranjo plano: ciclo canônico de entidades com orientação. Permite
+    /// distinguir lentes/crescentes que usam as mesmas curvas em sentidos diferentes.
+    Area(Vec<(u64, bool)>),
     /// Entidades do contorno externo no momento da seleção (`profiles::find_region`).
     Boundary(Vec<u64>),
     /// Formato até a versão 6: posição na lista de regiões ordenada por área. Mantida só
@@ -154,6 +157,16 @@ pub enum FaceRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Operation {
+    /// Prisma exato de uma face plana, com furos. Distâncias seguem a normal externa;
+    /// a referência à face acompanha o corpo no recálculo paramétrico.
+    ExtrudeFace {
+        base: BodyId,
+        face: FaceRef,
+        from: String,
+        to: String,
+        combine: Option<Combine>,
+        until: Option<UntilFace>,
+    },
     Extrude {
         sketch: SketchId,
         region: RegionRef,
@@ -331,6 +344,10 @@ impl Operation {
             Self::Extrude {
                 combine: Some(combine),
                 ..
+            }
+            | Self::ExtrudeFace {
+                combine: Some(combine),
+                ..
             } => vec![combine.target],
             Self::Boolean { base, tool, .. } => vec![*base, *tool],
             Self::Fillet { base, .. }
@@ -348,12 +365,19 @@ impl Operation {
     /// ordem do histórico e para impedir a exclusão de um corpo ainda referenciado.
     pub fn references(&self) -> Vec<BodyId> {
         let mut bodies = self.inputs();
-        if let Self::Extrude {
-            until: Some(limit), ..
-        } = self
-        {
-            bodies.push(limit.body);
+        match self {
+            Self::Extrude { until, .. } | Self::ExtrudeFace { until, .. } => {
+                if let Some(limit) = until {
+                    bodies.push(limit.body);
+                }
+                if let Self::ExtrudeFace { base, .. } = self {
+                    bodies.push(*base);
+                }
+            }
+            _ => {}
         }
+        bodies.sort_unstable_by_key(|b| b.0);
+        bodies.dedup();
         bodies
     }
     pub fn sketch(&self) -> Option<SketchId> {
@@ -408,6 +432,27 @@ impl Feature {
             Ok(())
         };
         match &mut self.operation {
+            Operation::ExtrudeFace {
+                base,
+                face,
+                combine,
+                until,
+                ..
+            } => {
+                body(base)?;
+                if let FaceRef::Named(name) = face {
+                    *name = remap_face_name(name, bodies);
+                }
+                if let Some(combine) = combine {
+                    body(&mut combine.target)?;
+                }
+                if let Some(limit) = until {
+                    body(&mut limit.body)?;
+                    if let FaceRef::Named(name) = &mut limit.face {
+                        *name = remap_face_name(name, bodies);
+                    }
+                }
+            }
             Operation::Extrude {
                 sketch: id,
                 combine,
@@ -543,6 +588,27 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
         }
         use parameters::Dimension::{Angle, Length};
         match &f.operation {
+            Operation::ExtrudeFace {
+                face,
+                from,
+                to,
+                until,
+                ..
+            } => {
+                if let FaceRef::Named(name) = face {
+                    validate_face_name(name)?;
+                }
+                let a = part.parameters.evaluate(from, Length)?;
+                if let Some(limit) = until {
+                    if let FaceRef::Named(name) = &limit.face {
+                        validate_face_name(name)?;
+                    }
+                } else if (a - part.parameters.evaluate(to, Length)?).abs() < 1e-7 {
+                    return Err(DocumentError(
+                        "Extrusão deve ter comprimento não nulo.".into(),
+                    ));
+                }
+            }
             Operation::Extrude {
                 from,
                 to,
@@ -846,6 +912,13 @@ pub fn pattern_placements(
 }
 
 fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
+    if let RegionRef::Area(edges) = region
+        && (edges.is_empty() || edges.len() > 8192)
+    {
+        return Err(DocumentError(
+            "Referência de área vazia ou excessiva.".into(),
+        ));
+    }
     if let RegionRef::Boundary(ids) = region
         && (ids.is_empty() || ids.len() > nator_sketch::MAX_ENTITIES)
     {

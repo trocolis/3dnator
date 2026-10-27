@@ -45,6 +45,8 @@ unsafe extern "C" {
         plane: *const f64,
     ) -> *mut c_void;
     fn nator_extrude(face: *const c_void, direction: *const f64) -> *mut c_void;
+    fn nator_extrude_face(body: *const c_void, index: usize, from: f64, to: f64) -> *mut c_void;
+    fn nator_common_volume(left: *const c_void, right: *const c_void, output: *mut f64) -> bool;
     fn nator_revolve(
         face: *const c_void,
         origin: *const f64,
@@ -600,6 +602,74 @@ impl Solid {
             nator_extrude(profile.face.pointer.as_ptr(), direction.as_ptr())
         })?;
         solid.faces = naming::sweep_names(owner, &solid.origins()?, &profile.entities);
+        solid.volume()?;
+        Ok(solid)
+    }
+
+    /// Volume comum, incluindo zero para sólidos disjuntos. Não modifica as entradas.
+    pub fn common_volume(&self, other: &Self) -> Result<f64, KernelError> {
+        let mut volume = 0.;
+        // SAFETY: objetos vivos na mesma thread e saída exclusiva de um double.
+        if !unsafe {
+            nator_common_volume(self.pointer.as_ptr(), other.pointer.as_ptr(), &mut volume)
+        } {
+            return Err(last_error());
+        }
+        if !volume.is_finite() {
+            return Err(KernelError("Volume comum inválido.".into()));
+        }
+        Ok(volume)
+    }
+
+    pub fn extrude_face(
+        &self,
+        face: usize,
+        from: f64,
+        to: f64,
+        owner: &str,
+    ) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        if face >= self.face_count()?
+            || !from.is_finite()
+            || !to.is_finite()
+            || (to - from).abs() < 1e-7
+        {
+            return Err(KernelError("Face ou limites de extrusão inválidos.".into()));
+        }
+        // SAFETY: índice validado, sólido vivo e nenhum buffer retido pela ponte.
+        let mut solid = Self::from_pointer(unsafe {
+            nator_extrude_face(self.pointer.as_ptr(), face, from, to)
+        })?;
+        solid.faces = solid
+            .origins()?
+            .iter()
+            .map(|&[kind, _, index]| match kind {
+                naming::SIDE => usize::try_from(index)
+                    .ok()
+                    .and_then(|index| self.edge_face_names(index).ok())
+                    .map(|names| {
+                        // Os papéis das faces adjacentes identificam a aresta sem depender
+                        // da ordem topológica. Retirar os donos mantém o papel ao clonar
+                        // a peça (o dono externo do resultado é remapeado pelo documento).
+                        let mut roles = names
+                            .each_ref()
+                            .map(|name| name.split_once(':').map(|(_, role)| role).unwrap_or(name));
+                        roles.sort_unstable();
+                        let hash = roles[0]
+                            .bytes()
+                            .chain(std::iter::once(0))
+                            .chain(roles[1].bytes())
+                            .fold(0xcbf29ce484222325_u64, |hash, byte| {
+                                (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+                            });
+                        format!("{owner}:face:e{hash:016x}")
+                    })
+                    .unwrap_or_default(),
+                naming::START_CAP => format!("{owner}:start"),
+                naming::END_CAP => format!("{owner}:end"),
+                _ => String::new(),
+            })
+            .collect();
         solid.volume()?;
         Ok(solid)
     }
