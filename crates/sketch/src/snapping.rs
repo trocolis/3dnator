@@ -4,6 +4,8 @@ use crate::*;
 pub enum Kind {
     Endpoint(u64),
     Midpoint(u64),
+    CurveMidpoint(u64),
+    RegionCenter,
     Center(u64),
     OnCurve(u64),
     Intersection,
@@ -45,6 +47,19 @@ pub fn find(
     tracker: &Tracker,
     projected: &[Point2],
 ) -> Result<Option<Snap>> {
+    let references = crate::topology::references(sketch)?;
+    find_with_references(sketch, cursor, tolerance, tracker, projected, &references)
+}
+
+/// Consulta por quadro usando encontros/centros já calculados para esta geometria.
+pub fn find_with_references(
+    sketch: &Sketch,
+    cursor: Point2,
+    tolerance: f64,
+    tracker: &Tracker,
+    projected: &[Point2],
+    references: &crate::topology::References,
+) -> Result<Option<Snap>> {
     if !tolerance.is_finite() || tolerance <= 0. {
         return Err(SketchError("Tolerância de captura inválida.".into()));
     }
@@ -82,34 +97,36 @@ pub fn find(
                     (sketch.point(start)?, Kind::Endpoint(start), 0),
                     (sketch.point(end)?, Kind::Endpoint(end), 0),
                 ]);
-                let points = profiles::segment(sketch, entity)?.sample(128);
-                if let Some(p) = points
-                    .into_iter()
-                    .min_by(|a, b| distance(*a, cursor).total_cmp(&distance(*b, cursor)))
-                {
-                    candidates.push((p, Kind::OnCurve(entity.id), 3));
-                }
+                let curve = profiles::segment(sketch, entity)?;
+                candidates.push((
+                    crate::curve_geometry::point(&curve, 0.5),
+                    Kind::CurveMidpoint(entity.id),
+                    1,
+                ));
+                let t = crate::curve_geometry::closest_parameter(&curve, cursor);
+                candidates.push((
+                    crate::curve_geometry::point(&curve, t),
+                    Kind::OnCurve(entity.id),
+                    3,
+                ));
             }
         }
     }
     for p in projected {
         candidates.push((*p, Kind::Projected, 0));
     }
-    for (i, a) in sketch.entities.iter().enumerate() {
-        let Ok((a0, a1)) = sketch.line(a.id) else {
-            continue;
-        };
-        for b in &sketch.entities[i + 1..] {
-            let Ok((b0, b1)) = sketch.line(b.id) else {
-                continue;
-            };
-            if let Some((p, _, _)) = profiles::line_intersection(a0, a1, b0, b1)
-                .filter(|(_, t, u)| *t >= 0. && *t <= 1. && *u >= 0. && *u <= 1.)
-            {
-                candidates.push((p, Kind::Intersection, 0));
-            }
-        }
-    }
+    candidates.extend(
+        references
+            .vertices
+            .iter()
+            .map(|p| (*p, Kind::Intersection, 0)),
+    );
+    candidates.extend(
+        references
+            .centers
+            .iter()
+            .map(|p| (*p, Kind::RegionCenter, 0)),
+    );
     candidates.retain(|(p, _, _)| distance(*p, cursor) <= tolerance);
     candidates.sort_by(|(a, _, pa), (b, _, pb)| {
         pa.cmp(pb)
@@ -162,6 +179,28 @@ mod tests {
             .ok_or_else(|| SketchError("Guia ausente".into()))?;
         assert_eq!(snap.point, [30., 40.]);
         assert_eq!(snap.guides.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn arc_midpoint_is_on_the_curve_and_has_no_line_midpoint_constraint() -> Result<()> {
+        let mut sketch = Sketch::new("Metade do arco", Plane::xy());
+        let center = sketch.add_point([0., 0.])?;
+        let start = sketch.add_point([0., 10.])?;
+        let end = sketch.add_point([0., -10.])?;
+        let arc = sketch.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: true,
+            },
+            false,
+        )?;
+        let snap = find(&sketch, [10.1, 0.1], 0.5, &Tracker::default(), &[])?
+            .ok_or_else(|| SketchError("Ponto médio ausente".into()))?;
+        assert_eq!(snap.kind, Kind::CurveMidpoint(arc));
+        assert!(distance(snap.point, [10., 0.]) < 1e-9);
         Ok(())
     }
 }

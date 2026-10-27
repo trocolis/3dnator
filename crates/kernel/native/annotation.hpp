@@ -2,6 +2,42 @@
 // estáveis em Rust antes de entrar nesta ponte; nada é associado pela proximidade.
 #pragma once
 extern "C" {
+// Contorno externo retilíneo para o reconhecimento de triângulos/retângulos em Rust.
+// Furos não deslocam o centro geométrico do contorno exterior. A consulta não usa nomes.
+bool nator_face_polygon(const Shape* body,std::size_t index,double* output) noexcept {
+    return guarded([&] {
+        std::fill(output,output+13,0.);
+        const auto faces=map_of(body->value,TopAbs_FACE);
+        if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face de apoio inexistente.");
+        const auto face=TopoDS::Face(faces(int(index)+1));
+        if (BRepAdaptor_Surface(face).GetType()!=GeomAbs_Plane) return;
+        const auto wire=BRepTools::OuterWire(face);
+        if (wire.IsNull()) return;
+        std::vector<gp_Pnt> points;
+        for (BRepTools_WireExplorer explorer(wire,face);explorer.More();explorer.Next()) {
+            if (BRepAdaptor_Curve(explorer.Current()).GetType()!=GeomAbs_Line) return;
+            points.push_back(BRep_Tool::Pnt(explorer.CurrentVertex()));
+        }
+        // O mesmo lado pode ter várias arestas por operações anteriores. Só os cantos
+        // contam na classificação; uma mudança de sentido não é descartada como reta.
+        bool changed=true;
+        while (changed && points.size()>=3) {
+            changed=false;
+            for (std::size_t i=0;i<points.size();++i) {
+                const gp_Vec a(points[(i+points.size()-1)%points.size()],points[i]);
+                const gp_Vec b(points[i],points[(i+1)%points.size()]);
+                if (a.Magnitude()<1e-9 || (a.Dot(b)>=0. && a.Crossed(b).Magnitude()<=1e-9*a.Magnitude()*b.Magnitude())) {
+                    points.erase(points.begin()+i);changed=true;break;
+                }
+            }
+        }
+        if (points.size()!=3 && points.size()!=4) return;
+        output[0]=static_cast<double>(points.size());
+        for (std::size_t i=0;i<points.size();++i) {
+            output[1+i*3]=points[i].X();output[2+i*3]=points[i].Y();output[3+i*3]=points[i].Z();
+        }
+    });
+}
 bool nator_face_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         const auto faces=map_of(body->value,TopAbs_FACE);

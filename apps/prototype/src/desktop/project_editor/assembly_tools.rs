@@ -159,6 +159,7 @@ fn reference_anchor(
     rect: egui::Rect,
     position: egui::Pos2,
     kind: navigation::PickMode,
+    points: Option<&super::point_snap::ReferencePoints>,
 ) -> Option<Anchor> {
     let mut best: Option<(f32, Anchor)> = None;
     let mut offer = |distance: f32, anchor: Anchor| {
@@ -182,10 +183,10 @@ fn reference_anchor(
         let normal = sketch.plane.normal();
         match kind {
             navigation::PickMode::Vertex => {
-                let Ok(points) = nator_commands::point_snap::reference_points(sketch) else {
+                let Some(points) = points.and_then(|points| points.get(&record.id)) else {
                     continue;
                 };
-                for point in points {
+                for &point in points {
                     if let Some(screen) = frame.screen(point) {
                         let distance = screen.distance(position);
                         if distance < 12. {
@@ -542,6 +543,8 @@ impl Editor {
             rect,
             position,
             d.kind,
+            self.point_cache
+                .references((self.current().id, self.current().session.revision())),
         )
         .map(|anchor| (anchor.point, anchor.label))
     }
@@ -784,6 +787,8 @@ impl Editor {
                 rect,
                 position,
                 kind,
+                self.point_cache
+                    .references((self.current().id, self.current().session.revision())),
             );
             let anchor = match (kind, reference, model) {
                 (navigation::PickMode::Face, _, Some(pick)) | (_, None, Some(pick)) => {
@@ -1670,6 +1675,14 @@ mod tests {
         let mut sketch = nator_sketch::Sketch::new("Referência", nator_sketch::Plane::xy());
         sketch.add_line([0., 0.], [20., 0.], false)?;
         sketch.add_circle([50., 0.], 10., false)?;
+        sketch.add_rectangle([-40., -20.], [-20., 0.], true)?;
+        for (a, b) in [
+            ([80., 0.], [110., 0.]),
+            ([110., 0.], [80., 30.]),
+            ([80., 30.], [80., 0.]),
+        ] {
+            sketch.add_line(a, b, true)?;
+        }
         let center = sketch.add_point([25., -10.])?;
         let start = sketch.add_point([30., -10.])?;
         let end = sketch.add_point([25., -15.])?;
@@ -1683,11 +1696,18 @@ mod tests {
             false,
         )?;
         document.add_reference_sketch(sketch)?;
+        let points = document
+            .reference_sketches()
+            .iter()
+            .map(|s| {
+                nator_commands::point_snap::reference_points(&s.sketch).map(|points| (s.id, points))
+            })
+            .collect::<Result<super::super::point_snap::ReferencePoints, _>>()?;
         let mut camera = Camera::default();
         camera.set_direction([0., 0., 1.]);
         let bounds = nator_geometry::Bounds {
             min: [-10., -20., -5.],
-            max: [70., 20., 5.],
+            max: [120., 35., 5.],
         };
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
         for point in [
@@ -1698,6 +1718,8 @@ mod tests {
             [50., -10., 0.],
             [25., -10., 0.],
             [25. + 5. / 2_f64.sqrt(), -10. - 5. / 2_f64.sqrt(), 0.],
+            [-30., -10., 0.],
+            [90., 10., 0.],
         ] {
             let position =
                 sketch_scene::project(&camera, bounds, rect, point).ok_or("Projeção ausente")?;
@@ -1708,6 +1730,7 @@ mod tests {
                 rect,
                 position,
                 navigation::PickMode::Vertex,
+                Some(&points),
             )
             .ok_or("Apoio de referência ausente")?;
             assert!(norm(sub(anchor.point, point)) < 1e-9);

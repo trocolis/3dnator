@@ -9,15 +9,20 @@ use std::collections::HashMap;
 
 const CAPTURE_RADIUS: f32 = 14.;
 type Anchors = HashMap<BodyId, Vec<PointAnchor>>;
-type QueryResult = Result<Anchors, String>;
+pub(super) type ReferencePoints = HashMap<SketchId, Vec<nator_sketch::Point2>>;
+type QueryResult = Result<(Anchors, ReferencePoints), String>;
 
 #[derive(Default)]
 pub(super) struct Cache {
     revision: Option<(u64, u64)>,
     entries: Anchors,
+    references: ReferencePoints,
     running: Option<Receiver<QueryResult>>,
 }
 impl Cache {
+    pub(super) fn references(&self, revision: (u64, u64)) -> Option<&ReferencePoints> {
+        (self.revision == Some(revision)).then_some(&self.references)
+    }
     fn prepare(
         &mut self,
         revision: (u64, u64),
@@ -26,6 +31,7 @@ impl Cache {
     ) -> Result<(), String> {
         if self.revision != Some(revision) {
             self.entries.clear();
+            self.references.clear();
             self.running = None;
             self.revision = Some(revision);
             let bodies = document
@@ -34,18 +40,35 @@ impl Cache {
                 .flat_map(|p| p.shown_bodies().cloned())
                 .collect::<Vec<_>>();
             let (sender, receiver) = mpsc::channel();
+            let references = document
+                .reference_sketches()
+                .iter()
+                .filter(|s| document.shows_reference_sketch(s))
+                .cloned()
+                .collect::<Vec<_>>();
             let context = context.clone();
             std::thread::Builder::new()
                 .name("point-anchors".into())
                 .spawn(move || {
-                    let result = bodies
-                        .iter()
-                        .map(|body| {
-                            body_anchors(body)
-                                .map(|anchors| (body.id, anchors))
-                                .map_err(|e| e.to_string())
-                        })
-                        .collect();
+                    let result = (|| {
+                        let bodies = bodies
+                            .iter()
+                            .map(|body| {
+                                body_anchors(body)
+                                    .map(|anchors| (body.id, anchors))
+                                    .map_err(|e| e.to_string())
+                            })
+                            .collect::<Result<Anchors, String>>()?;
+                        let references = references
+                            .iter()
+                            .map(|record| {
+                                nator_commands::point_snap::reference_points(&record.sketch)
+                                    .map(|points| (record.id, points))
+                                    .map_err(|e| e.to_string())
+                            })
+                            .collect::<Result<ReferencePoints, String>>()?;
+                        Ok((bodies, references))
+                    })();
                     let _ = sender.send(result);
                     context.request_repaint();
                 })
@@ -56,7 +79,7 @@ impl Cache {
             match receiver.try_recv() {
                 Ok(result) => {
                     self.running = None;
-                    self.entries = result?;
+                    (self.entries, self.references) = result?;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.running = None;
@@ -344,8 +367,8 @@ mod mesh_tests {
         }
         .target(&entries)
         .ok_or("Pré-seleção distante ausente")?;
-        assert_eq!(target.pick.point, [5., 0., 0.]);
-        assert_eq!(target.kind, PointKind::EdgeMidpoint);
+        assert_eq!(target.pick.point, [10. / 3., 10. / 3., 0.]);
+        assert_eq!(target.kind, PointKind::FaceCenter);
         assert!(
             !target.captured,
             "No interior da face o apoio aparece antes da captura"
@@ -356,17 +379,21 @@ mod mesh_tests {
     #[test]
     fn cache_discards_pending_results_from_an_older_document_revision() -> Result<()> {
         let (sender, receiver) = mpsc::channel();
-        sender.send(Ok(HashMap::from([(
-            BodyId(99),
-            vec![PointAnchor {
-                point: [99.; 3],
-                kind: PointKind::Vertex,
-                circle: None,
-            }],
-        )])))?;
+        sender.send(Ok((
+            HashMap::from([(
+                BodyId(99),
+                vec![PointAnchor {
+                    point: [99.; 3],
+                    kind: PointKind::Vertex,
+                    circle: None,
+                }],
+            )]),
+            HashMap::new(),
+        )))?;
         let mut cache = Cache {
             revision: Some((1, 1)),
             entries: HashMap::new(),
+            references: HashMap::new(),
             running: Some(receiver),
         };
         let document = Document::new("Nova revisão")?;
@@ -463,6 +490,18 @@ mod tests {
             }
             .target(&self.entries)
         }
+    }
+
+    #[test]
+    fn polygon_centers_capture_on_the_front_surface_instead_of_a_diagonal() -> Result<()> {
+        let f = Fixture::from_solid(Solid::cuboid([0.; 3], [20., 10., 4.])?)?;
+        let target = f
+            .at([10., 5., 4.], egui::vec2(4., 6.), None, None)
+            .ok_or("Centro ausente")?;
+        assert_eq!(target.kind, PointKind::FaceCenter);
+        assert!(target.captured);
+        assert!(norm(sub(target.pick.point, [10., 5., 4.])) < 1e-9);
+        Ok(())
     }
 
     #[test]

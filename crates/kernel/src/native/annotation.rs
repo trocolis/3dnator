@@ -3,10 +3,28 @@ use super::{Solid, last_error};
 use crate::{CircleAnchor, EdgeAnchors, FaceAnchors, KernelError};
 use std::ffi::c_void;
 unsafe extern "C" {
+    fn nator_face_polygon(body: *const c_void, index: usize, output: *mut f64) -> bool;
     fn nator_face_anchors(body: *const c_void, index: usize, output: *mut f64) -> bool;
     fn nator_edge_anchors(body: *const c_void, index: usize, output: *mut f64) -> bool;
 }
 impl Solid {
+    /// Centro do contorno externo triangular/retangular, no plano da face. Não é
+    /// centro de massa: um furo assimétrico não desloca este ponto de referência.
+    pub fn face_polygon_center(&self, index: usize) -> Result<Option<[f64; 3]>, KernelError> {
+        let mut values = [0.; 13];
+        // SAFETY: sólido vivo e buffer exclusivo de treze doubles conforme a ponte.
+        if !unsafe { nator_face_polygon(self.pointer.as_ptr(), index, values.as_mut_ptr()) } {
+            return Err(last_error());
+        }
+        let count = match values[0] {
+            0. => return Ok(None),
+            3. => 3,
+            4. => 4,
+            _ => return Err(KernelError("Contorno de face inválido.".into())),
+        };
+        let points = values[1..1 + count * 3].as_chunks::<3>().0;
+        Ok(nator_geometry::polygon_center(points))
+    }
     pub fn face_anchors(&self, index: usize) -> Result<FaceAnchors, KernelError> {
         let mut values = [0.; 10];
         // SAFETY: sólido vivo nesta thread e buffer exclusivo com dez doubles.

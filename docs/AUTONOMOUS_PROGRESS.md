@@ -1,5 +1,12 @@
 # Execução autônoma
 
+## Vértices de encontro, aparador e centros de polígonos — 27/10/2026
+
+- Encontros finitos de linhas, círculos e arcos viram vértices visíveis e capturáveis. Aparar realça/remove o trecho entre encontros/extremos, trata periodicidade e sentido dos arcos e materializa os extremos com aplicação atômica e histórico de comandos.
+- Triângulos oferecem baricentro; retângulos, encontro das diagonais. Apoios no desenho, construção/referência e movimento ponto a ponto, com consulta exata de faces CAD e reconstrução coplanar de malhas, preservando centros circulares e pontos médios.
+- Cache de referências fora da thread da interface, invalidado também nas prévias sem mudança de revisão. Regressões geométricas e novo fluxo gráfico cobrem captura, corte, cancelamento da prévia, desfazer/refazer e persistência.
+- Aprovados 173 testes sem OCCT, 235 com OCCT, onze ensaios gráficos, formatação, Clippy nas duas configurações e compilação desktop no Linux. Sem alteração do formato, release ou publicação remota.
+
 ## Rascunhos nas faces triangulares do chanfro — 27/10/2026
 
 - Reproduzida a falha nas oito quinas sem nome do cubo chanfrado. Como o suporte do rascunho é um plano fixo, a consulta passa a usar a face exata da geometria selecionada, sem exigir nome estável e sem persistir índices topológicos.

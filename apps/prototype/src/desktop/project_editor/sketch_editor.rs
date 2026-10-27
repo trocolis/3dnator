@@ -7,6 +7,7 @@ use nator_sketch::{
 };
 mod actions;
 mod dynamic_input;
+mod references;
 pub(super) use actions::{edit_icon, edit_label};
 use nator_sketch::edit::Action as EditAction;
 
@@ -64,8 +65,13 @@ pub(super) struct Workspace {
     /// Intenção aberta pela faixa; os cliques alternam a seleção até OK/Cancelar.
     active_action: Option<EditAction>,
     drawing: dynamic_input::Input,
+    references: references::Cache,
 }
 impl Workspace {
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn reference_points(&self) -> &nator_sketch::topology::References {
+        &self.references.points
+    }
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn drawing_fields(&self) -> [(String, bool); 2] {
         std::array::from_fn(|i| (self.drawing.fields[i].clone(), self.drawing.locked[i]))
@@ -110,6 +116,7 @@ impl Workspace {
             reference: false,
             active_action: None,
             drawing: dynamic_input::Input::default(),
+            references: references::Cache::default(),
         }
     }
 }
@@ -147,15 +154,6 @@ fn attach(
             .map_err(sketch_error)?;
     }
     Ok(())
-}
-fn point_segment_distance(p: Point2, a: Point2, b: Point2) -> f64 {
-    let d = nator_sketch::sub(b, a);
-    let denominator = nator_sketch::dot(d, d);
-    if denominator < 1e-18 {
-        return nator_sketch::distance(p, a);
-    }
-    let t = (nator_sketch::dot(nator_sketch::sub(p, a), d) / denominator).clamp(0., 1.);
-    nator_sketch::distance(p, nator_sketch::add(a, nator_sketch::scale(d, t)))
 }
 impl Editor {
     pub(super) fn begin_sketch(&mut self, part: PartId, id: SketchId) {
@@ -470,6 +468,11 @@ impl Editor {
             .map(|p| p.parameters.clone())
             .unwrap_or_default();
         let mut submit = false;
+        if let Some(work) = self.current_mut().sketch_edit.as_mut()
+            && let Err(error) = work.references.prepare(&sketch, ui.ctx())
+        {
+            self.status.error(error);
+        }
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
         };
@@ -510,6 +513,13 @@ impl Editor {
         };
         for point in &sketch.points {
             if let Some(p) = frame.screen(point.position) {
+                painter.circle_filled(p, 2.5, base);
+            }
+        }
+        // Encontros são vértices virtuais enquanto as curvas estão inteiras. Assim
+        // aparecem e atraem o desenho antes de o aparador materializar os extremos.
+        for point in &work.references.points.vertices {
+            if let Some(p) = frame.screen(*point) {
                 painter.circle_filled(p, 2.5, base);
             }
         }
@@ -581,12 +591,13 @@ impl Editor {
             if suspended {
                 None
             } else {
-                snapping::find(
+                snapping::find_with_references(
                     &sketch,
                     point,
                     8. / pixels_per_mm,
                     &work.tracker,
                     &work.projected,
+                    &work.references.points,
                 )
                 .ok()
                 .flatten()
@@ -595,7 +606,13 @@ impl Editor {
         if let Some(snap) = &snap {
             if matches!(
                 snap.kind,
-                Kind::Endpoint(_) | Kind::Center(_) | Kind::Midpoint(_) | Kind::Projected
+                Kind::Endpoint(_)
+                    | Kind::Center(_)
+                    | Kind::Midpoint(_)
+                    | Kind::CurveMidpoint(_)
+                    | Kind::RegionCenter
+                    | Kind::Intersection
+                    | Kind::Projected
             ) {
                 work.tracker.capture(snap.point);
             }
@@ -611,7 +628,26 @@ impl Editor {
                 );
             }
         }
-        let raw_cursor = snap.as_ref().map(|s| s.point).or(hover);
+        // Selecionar/aparar usa o clique real: a atração ao centro ou ao vértice
+        // vizinho não pode deslocar o clique para outro trecho do cruzamento.
+        let raw_cursor = if matches!(work.tool, Tool::Select | Tool::Trim) {
+            hover
+        } else {
+            snap.as_ref().map(|s| s.point).or(hover)
+        };
+        if work.tool == Tool::Trim
+            && let Some(cursor) = hover
+            && let Ok(Some(id)) =
+                nator_sketch::tools::pick_entity(&sketch, cursor, 8. / pixels_per_mm)
+            && let Ok(piece) = nator_sketch::tools::trim_preview(&sketch, id, cursor)
+        {
+            frame.path(
+                &painter,
+                piece.sample(128),
+                egui::Stroke::new(3., theme::DANGER),
+                false,
+            );
+        }
         let mut cursor = raw_cursor;
         let mut confirm = false;
         let mut valid = true;
@@ -666,27 +702,12 @@ impl Editor {
             && let Some(cursor) = cursor
         {
             if matches!(work.tool, Tool::Select | Tool::Trim) {
-                let entity = sketch
-                    .entities
-                    .iter()
-                    .filter_map(|e| {
-                        profiles::segment(&sketch, e).ok().map(|curve| {
-                            (
-                                e.id,
-                                curve
-                                    .sample(128)
-                                    .windows(2)
-                                    .map(|p| point_segment_distance(cursor, p[0], p[1]))
-                                    .fold(f64::INFINITY, f64::min),
-                            )
-                        })
-                    })
-                    .filter(|(_, d)| *d < 8. / pixels_per_mm)
-                    .min_by(|a, b| a.1.total_cmp(&b.1))
-                    .map(|v| v.0);
+                let entity = nator_sketch::tools::pick_entity(&sketch, cursor, 8. / pixels_per_mm)
+                    .ok()
+                    .flatten();
                 if let Some(id) = entity {
                     if work.tool == Tool::Trim {
-                        match nator_sketch::tools::trim_line(&mut sketch, id, cursor) {
+                        match nator_sketch::tools::trim(&mut sketch, id, cursor) {
                             Ok(()) => submit = true,
                             Err(error) => {
                                 painter.text(

@@ -2309,6 +2309,187 @@ mod tests {
         Ok(())
     }
 
+    /// Fluxo real: referências virtuais criam círculos nos centros dos polígonos;
+    /// o aparador remove apenas os trechos entre os encontros, com desfazer/refazer.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_trim_and_polygon_centers_follow_mouse_and_history() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Aparador", Plane::xy());
+        let line = sketch.add_line([-20., 0.], [20., 0.], false)?;
+        let circle = sketch.add_circle([0., 0.], 10., false)?;
+        sketch.add_rectangle([-50., -15.], [-30., 5.], false)?;
+        for (a, b) in [
+            ([-80., -15.], [-60., -15.]),
+            ([-60., -15.], [-80., 15.]),
+            ([-80., 15.], [-80., -15.]),
+        ] {
+            sketch.add_line(a, b, false)?;
+        }
+        sketch.add_line([-100., -80.], [100., -80.], true)?;
+        let mut document = Document::new("Aparar por vértices")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            frame(&mut editor, &context, Vec::new())?;
+            if editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .ok_or("Editor ausente")?
+                .reference_points()
+                .centers
+                .len()
+                == 2
+            {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err("Referências não ficaram prontas".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let position = |editor: &Editor, p| -> Result<egui::Pos2, Box<dyn Error>> {
+            sketch_scene::Frame {
+                camera: editor.viewport.camera.clone(),
+                bounds: editor.display_bounds(),
+                rect: editor.canvas_rect,
+                placement: Placement::default(),
+                plane: Plane::xy(),
+            }
+            .screen(p)
+            .ok_or_else(|| "Ponto sem projeção".into())
+        };
+        for center in [[-40., -5.], [-220. / 3., -5.]] {
+            editor
+                .current_mut()
+                .sketch_edit
+                .as_mut()
+                .ok_or("Editor ausente")?
+                .select_tool(sketch_editor::Tool::Circle);
+            let first = position(&editor, center)? + egui::vec2(2., 2.);
+            click(&mut editor, &context, first)?;
+            let last = position(&editor, [center[0] + 3., center[1]])?;
+            click(&mut editor, &context, last)?;
+            settle(&mut editor, &context)?;
+            let sketch = &editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch;
+            assert!(
+                sketch
+                    .entities
+                    .iter()
+                    .any(|e| sketch
+                        .circle(e.id)
+                        .is_ok_and(|(p, r)| nator_sketch::distance(p, center) < 1e-8
+                            && (r - 3.).abs() < 1e-3)),
+                "Centro {center:?}; círculos {:?}; estado {}; cursores {first:?} {last:?}",
+                sketch
+                    .entities
+                    .iter()
+                    .filter_map(|e| sketch.circle(e.id).ok())
+                    .collect::<Vec<_>>(),
+                editor.status
+            );
+        }
+        editor
+            .current_mut()
+            .sketch_edit
+            .as_mut()
+            .ok_or("Editor ausente")?
+            .select_tool(sketch_editor::Tool::Trim);
+        let revision = editor.current().session.revision();
+        let at = position(&editor, [0., 0.])?;
+        frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+        assert_eq!(editor.current().session.revision(), revision);
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert!(sketch.entity(line).is_err());
+        assert_eq!(sketch.circle(circle)?, ([0., 0.], 10.));
+        let pieces = sketch
+            .entities
+            .iter()
+            .filter_map(|e| sketch.line(e.id).ok())
+            .filter(|(a, b)| a[1].abs() < 1e-8 && b[1].abs() < 1e-8)
+            .collect::<Vec<_>>();
+        assert_eq!(pieces.len(), 2);
+        assert!(
+            pieces
+                .iter()
+                .all(|(a, b)| (nator_sketch::distance(*a, *b) - 10.).abs() < 1e-8)
+        );
+        assert!(editor.current_mut().session.undo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entity(line)
+                .is_ok()
+        );
+        assert!(editor.current_mut().session.redo());
+        editor.current_mut().changed();
+        settle(&mut editor, &context)?;
+        let at = position(&editor, [0., 10.])?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert!(sketch.entity(circle).is_err());
+        let arc = sketch
+            .entities
+            .iter()
+            .find(|e| matches!(e.curve, nator_sketch::Curve::Arc { .. }))
+            .ok_or("Arco restante ausente")?;
+        assert!(
+            nator_sketch::profiles::segment(sketch, arc)?
+                .sample(64)
+                .iter()
+                .all(|p| p[1] <= 1e-8)
+        );
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("aparado.3dnator");
+        nator_project_io::write_project(&path, editor.current().session.document())?;
+        let restored = nator_project_io::read_project(&path)?;
+        assert_eq!(
+            restored
+                .sketch(id)
+                .ok_or("Rascunho perdido")?
+                .sketch
+                .entities
+                .len(),
+            sketch.entities.len()
+        );
+        assert!(!editor.status.has_pending());
+        Ok(())
+    }
+
     /// Digitação sem clicar nos campos, alternância por Tab, Enter único e cancelamento.
     /// Verifica o resultado publicado e as cotas, em vez de apenas inspecionar o formulário.
     #[test]

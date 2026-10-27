@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt};
 
 pub mod areas;
+mod curve_geometry;
 pub mod drafting;
 pub mod edit;
 pub mod profiles;
@@ -10,6 +11,7 @@ pub mod repair;
 pub mod snapping;
 pub mod solver;
 pub mod tools;
+pub mod topology;
 pub type Point2 = [f64; 2];
 pub const MAX_POINTS: usize = 512;
 pub const MAX_ENTITIES: usize = 1024;

@@ -3,6 +3,8 @@
 use std::{collections::HashMap, error::Error, fmt};
 
 mod placement;
+mod polygon;
+pub use polygon::{planar_polygon_centers, polygon_center};
 pub mod query;
 pub use placement::Placement;
 

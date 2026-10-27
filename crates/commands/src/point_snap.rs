@@ -1,6 +1,7 @@
 //! Apoios para movimentação ponto a ponto, consultados sem alterar o documento.
-//! O núcleo fornece centros exatos no plano de cada borda circular. Não aproximamos
-//! círculos por caixas envolventes nem confundimos o centro do furo com o centro de massa.
+//! Centros circulares e de polígonos pertencem ao próprio plano da superfície, inclusive
+//! no vazio. Triângulos usam o baricentro e retângulos, o encontro das diagonais;
+//! furos assimétricos não deslocam esses apoios como deslocariam o centro de massa.
 use nator_document::{Body, DocumentError};
 use nator_geometry::Point3;
 use nator_kernel::CircleAnchor;
@@ -12,6 +13,7 @@ pub enum PointKind {
     CircleCenter,
     ArcCenter,
     CircleBoundary,
+    FaceCenter,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +51,10 @@ pub fn reference_points(
             }
         }
     }
+    let references =
+        nator_sketch::topology::references(sketch).map_err(|e| DocumentError(e.to_string()))?;
+    points.extend(references.vertices);
+    points.extend(references.centers);
     Ok(points)
 }
 
@@ -62,6 +68,15 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
             let solid = nator_kernel::Solid::from_brep(bytes, None)?;
             let mut vertices = Vec::new();
             let mut anchors = Vec::new();
+            for face in 0..solid.face_count()? {
+                if let Some(point) = solid.face_polygon_center(face)? {
+                    anchors.push(PointAnchor {
+                        point,
+                        kind: PointKind::FaceCenter,
+                        circle: None,
+                    });
+                }
+            }
             for edge in 0..solid.edge_count()? {
                 let supports = solid.edge_anchors(edge)?;
                 if let Some(circle) = supports.circle {
@@ -134,6 +149,15 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
         })
         .collect::<Vec<_>>();
     let mesh = body.geometry.mesh();
+    anchors.extend(
+        nator_geometry::planar_polygon_centers(mesh)
+            .into_iter()
+            .map(|point| PointAnchor {
+                point,
+                kind: PointKind::FaceCenter,
+                circle: None,
+            }),
+    );
     let mut midpoints = std::collections::HashSet::new();
     for (triangle, mask) in mesh.triangles().iter().zip(body.geometry.creases()) {
         let points = mesh.triangle_points(*triangle);
@@ -251,6 +275,89 @@ mod tests {
             assert!(anchors.iter().any(|a| a.kind == PointKind::EdgeMidpoint
                 && nator_geometry::norm(nator_geometry::sub(a.point, point)) < 1e-9));
         }
+        let centers = anchors
+            .iter()
+            .filter(|a| a.kind == PointKind::FaceCenter)
+            .collect::<Vec<_>>();
+        assert_eq!(centers.len(), 6);
+        for point in [[11., 7., 7.], [11., 7., 3.], [21., 7., 5.]] {
+            assert!(
+                centers
+                    .iter()
+                    .any(|a| nator_geometry::norm(nator_geometry::sub(a.point, point)) < 1e-9)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn triangular_face_centers_are_centroids_on_each_surface()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use nator_sketch::{Plane, Sketch, areas};
+        let mut sketch = Sketch::new("Triângulo", Plane::xy());
+        for (a, b) in [
+            ([0., 0.], [12., 0.]),
+            ([12., 0.], [0., 6.]),
+            ([0., 6.], [0., 0.]),
+        ] {
+            sketch.add_line(a, b, false)?;
+        }
+        let region = areas::regions(&sketch)?.remove(0);
+        let anchors = anchors(Solid::extrude(&sketch, &region, 0., 2., "triangle")?)?;
+        let centers = anchors
+            .iter()
+            .filter(|a| a.kind == PointKind::FaceCenter)
+            .collect::<Vec<_>>();
+        assert_eq!(centers.len(), 5);
+        for point in [[4., 2., 0.], [4., 2., 2.]] {
+            assert!(
+                centers
+                    .iter()
+                    .any(|a| nator_geometry::norm(nator_geometry::sub(a.point, point)) < 1e-9)
+            );
+        }
+        // O centro de caixa [6,3] não substitui o baricentro [4,2].
+        assert!(!centers.iter().any(|a| a.point == [6., 3., 2.]));
+        Ok(())
+    }
+
+    #[test]
+    fn chamfer_corner_centers_match_the_eight_triangle_centroids()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let cube = Solid::cuboid([0.; 3], [20.; 3])?;
+        let edges = (0..cube.edge_count()?).collect::<Vec<_>>();
+        let chamfered = cube.chamfer(&edges, 2., None, "chamfer")?;
+        let mut corners = Vec::new();
+        for face in 0..chamfered.face_count()? {
+            // No cubo de 20 mm com chanfro de 2 mm, só os oito triângulos
+            // possuem área inferior a 8 mm². A medida de massa superficial
+            // fornece uma comparação independente da média dos vértices.
+            if chamfered.face_measure(face)?.area < 8. {
+                corners.push(chamfered.face_anchors(face)?.centroid);
+            }
+        }
+        assert_eq!(corners.len(), 8);
+        let anchors = anchors(chamfered)?;
+        for center in corners {
+            assert!(anchors.iter().any(|a| a.kind == PointKind::FaceCenter
+                && nator_geometry::norm(nator_geometry::sub(a.point, center)) < 1e-9));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rectangle_with_an_off_center_hole_keeps_its_geometric_center()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let solid = Solid::cuboid([0.; 3], [20., 10., 4.])?.cut(&Solid::cylinder(
+            [4., 5., -1.],
+            1.,
+            6.,
+        )?)?;
+        let anchors = anchors(solid)?;
+        for point in [[10., 5., 0.], [10., 5., 4.]] {
+            assert!(anchors.iter().any(|a| a.kind == PointKind::FaceCenter
+                && nator_geometry::norm(nator_geometry::sub(a.point, point)) < 1e-9));
+        }
         Ok(())
     }
 
@@ -325,6 +432,18 @@ mod mesh_tests {
         assert!(
             !midpoints.contains(&[10., 5., 0.]),
             "A diagonal do retângulo não é uma aresta geométrica"
+        );
+        assert_eq!(
+            anchors
+                .iter()
+                .filter(|a| a.kind == PointKind::FaceCenter)
+                .count(),
+            1
+        );
+        assert!(
+            anchors
+                .iter()
+                .any(|a| a.kind == PointKind::FaceCenter && a.point == [10., 5., 0.])
         );
         Ok(())
     }

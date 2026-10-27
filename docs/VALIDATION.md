@@ -1,5 +1,14 @@
 # Validação local do protótipo
 
+## Aparador entre encontros e referências de polígonos — 27/10/2026
+
+- `curve_geometry` reúne as consultas analíticas antes internas às áreas e compartilha encontros finitos, parâmetros orientados e projeção entre áreas, capturas e aparador. Linhas que só se encontram quando prolongadas não geram vértices; tangências não duplicam nós e círculos coincidentes não inventam um vértice na costura.
+- Aparar usa uma cópia candidata, preserva as outras curvas e transforma limites em extremos reais. Regressões cobrem linha/linha, linha/círculo, círculo atravessando 0°/360°, arco horário, tangência, geometria de construção, restrições das entidades intactas, entrada não finita e falha de alocação de identificadores sem edição parcial.
+- Captura oferece centros de triângulos e retângulos, inclusive auxiliares/de construção, e metade exata dos arcos. Regressões verificam baricentro distinto do centro da caixa, retângulos inclinados/subdivididos, rejeição de quadriláteros arbitrários/não planos, faces triangulares e laterais de um prisma, as oito quinas do cubo chanfrado e retângulo CAD com furo excêntrico. Malhas coplanares não inventam centros nas diagonais internas.
+- Apoios de rascunhos são calculados no trabalhador e invalidados pelas coordenadas/curvas, inclusive sem nova revisão do documento. Apoios de referência da montagem compartilham o cache do movimento ponto a ponto; resultados antigos não são usados por outra revisão.
+- Novo ensaio gráfico usa cliques para criar círculos nos centros do retângulo/triângulo, aparar a linha entre os cruzamentos com um círculo e remover uma semicircunferência, verificando desfazer/refazer e salvamento/reabertura. Prévia não altera o documento; captura do centro conserva posição exata, enquanto raio livre admite a precisão da conversão de pixels.
+- **173 testes sem OCCT e 235 com OCCT aprovados**, mais os onze ensaios gráficos em série (57 testes da aplicação com os ignorados habilitados). Formatação, Clippy com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Windows não exercitado localmente. Versão 0.3.0 em desenvolvimento e formato 17 preservados.
+
 ## Rascunhos nas quinas de cubos chanfrados — 27/10/2026
 
 - Reproduzido um cubo de 20 mm com as doze arestas chanfradas em 2 mm: seis faces originais, doze faces com o nome repetido de chanfro e oito triângulos de transição sem nome. A seleção de suporte exigia uma referência estável apesar de capturar somente um plano fixo.

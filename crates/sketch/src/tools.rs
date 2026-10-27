@@ -47,42 +47,141 @@ pub fn extend_line(sketch: &mut Sketch, line: u64, target: u64, near: Point2) ->
     p.position = point;
     Ok(())
 }
-pub fn trim_line(sketch: &mut Sketch, line: u64, pick: Point2) -> Result<()> {
-    let (a, b) = sketch.line(line)?;
-    let direction = sub(b, a);
-    let at = dot(sub(pick, a), direction) / dot(direction, direction);
-    let mut cuts = vec![0., 1.];
-    for target in &sketch.entities {
-        if target.id == line {
+/// Curva finita mais próxima do cursor, medida analiticamente no plano em mm.
+pub fn pick_entity(sketch: &Sketch, cursor: Point2, tolerance_mm: f64) -> Result<Option<u64>> {
+    use crate::curve_geometry::{closest_parameter, point};
+    let mut best: Option<(u64, f64)> = None;
+    for entity in &sketch.entities {
+        let curve = profiles::segment(sketch, entity)?;
+        let d = distance(cursor, point(&curve, closest_parameter(&curve, cursor)));
+        if d <= tolerance_mm && best.is_none_or(|(_, previous)| d < previous) {
+            best = Some((entity.id, d));
+        }
+    }
+    Ok(best.map(|(id, _)| id))
+}
+
+/// Trecho orientado a remover, delimitado por extremos e encontros reais das curvas.
+/// Círculos são periódicos: o intervalo que cruza 0/2π continua sendo um único trecho.
+/// A prévia usa o mesmo intervalo analítico da aplicação do corte.
+pub fn trim_preview(sketch: &Sketch, entity: u64, pick: Point2) -> Result<profiles::Segment> {
+    let (curve, interval) = trim_interval(sketch, entity, pick)?;
+    if matches!(curve, profiles::Segment::Circle { .. }) && interval[1] - interval[0] >= 1. - 1e-9 {
+        return Ok(curve);
+    }
+    Ok(crate::curve_geometry::slice(
+        &curve,
+        interval[0],
+        interval[1],
+    ))
+}
+
+fn trim_interval(
+    sketch: &Sketch,
+    entity: u64,
+    pick: Point2,
+) -> Result<(profiles::Segment, [f64; 2])> {
+    use crate::curve_geometry::{closest_parameter, intersections, parameter};
+    if pick.iter().any(|v| !v.is_finite()) {
+        return Err(SketchError(
+            "Selecione um trecho válido para aparar.".into(),
+        ));
+    }
+    let curve = profiles::segment(sketch, sketch.entity(entity)?)?;
+    let closed = matches!(curve, profiles::Segment::Circle { .. });
+    let at = closest_parameter(&curve, pick);
+    let mut cuts = if closed { Vec::new() } else { vec![0., 1.] };
+    for other in &sketch.entities {
+        if other.id == entity {
             continue;
         }
-        let Ok((c, d)) = sketch.line(target.id) else {
-            continue;
-        };
-        if let Some((_, t, u)) = profiles::line_intersection(a, b, c, d)
-            .filter(|(_, t, u)| *t > 1e-9 && *t < 1. - 1e-9 && *u >= 0. && *u <= 1.)
-        {
-            let _ = u;
-            cuts.push(t);
+        let target = profiles::segment(sketch, other)?;
+        for point in intersections(&curve, &target) {
+            if let Some(t) = parameter(&curve, point) {
+                cuts.push(t);
+            }
         }
     }
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
-    let interval = cuts
+    if closed {
+        if cuts.len() < 2 {
+            return Ok((curve, [0., 1.]));
+        }
+        let first = cuts[0];
+        cuts.push(first + 1.);
+        let at = if at < first { at + 1. } else { at };
+        let pair = cuts
+            .windows(2)
+            .find(|p| at >= p[0] && at <= p[1])
+            .ok_or_else(|| SketchError("Trecho circular inexistente.".into()))?;
+        return Ok((curve, [pair[0], pair[1]]));
+    }
+    let pair = cuts
         .windows(2)
         .find(|p| at >= p[0] && at <= p[1])
-        .map(|p| [p[0], p[1]])
-        .ok_or_else(|| SketchError("Selecione um trecho da linha.".into()))?;
-    let construction = sketch.entity(line)?.construction;
-    sketch.entities.retain(|e| e.id != line);
-    if interval[0] > 1e-9 {
-        sketch.add_line(a, add(a, scale(direction, interval[0])), construction)?;
+        .ok_or_else(|| SketchError("Selecione um trecho da aresta.".into()))?;
+    Ok((curve, [pair[0], pair[1]]))
+}
+
+/// Aparar é atômico: falhas de criação, limites ou validação preservam o rascunho.
+/// As curvas de encontro não são alteradas. Os extremos novos materializam os vértices
+/// virtuais de interseção; apenas vínculos que perderam entidades/pontos são retirados.
+pub fn trim(sketch: &mut Sketch, entity: u64, pick: Point2) -> Result<()> {
+    use crate::curve_geometry::slice;
+    let (curve, [from, to]) = trim_interval(sketch, entity, pick)?;
+    let original = sketch.entity(entity)?.clone();
+    let mut candidate = sketch.clone();
+    candidate.entities.retain(|e| e.id != entity);
+    let mut intervals = Vec::new();
+    if matches!(curve, profiles::Segment::Circle { .. }) {
+        if to - from < 1. - 1e-9 {
+            intervals.push([to, from + 1.]);
+        }
+    } else {
+        if from > 1e-9 {
+            intervals.push([0., from]);
+        }
+        if to < 1. - 1e-9 {
+            intervals.push([to, 1.]);
+        }
     }
-    if interval[1] < 1. - 1e-9 {
-        sketch.add_line(add(a, scale(direction, interval[1])), b, construction)?;
+    for [a, b] in intervals {
+        match slice(&curve, a, b) {
+            profiles::Segment::Line { a, b } => {
+                candidate.add_line(a, b, original.construction)?;
+            }
+            profiles::Segment::Arc {
+                a, b, clockwise, ..
+            } => {
+                let center = match original.curve {
+                    Curve::Circle { center, .. } | Curve::Arc { center, .. } => center,
+                    _ => return Err(SketchError("Centro do trecho circular ausente.".into())),
+                };
+                let start = candidate.add_point(a)?;
+                let end = candidate.add_point(b)?;
+                candidate.add_curve(
+                    Curve::Arc {
+                        center,
+                        start,
+                        end,
+                        clockwise,
+                    },
+                    original.construction,
+                )?;
+            }
+            _ => return Err(SketchError("Trecho inválido para aparar.".into())),
+        }
     }
-    sketch.prune_unused_points();
+    candidate.prune_unused_points();
+    candidate.validate()?;
+    *sketch = candidate;
     Ok(())
+}
+
+/// Compatibilidade com os chamadores de linhas; o aparador agora aceita também curvas.
+pub fn trim_line(sketch: &mut Sketch, line: u64, pick: Point2) -> Result<()> {
+    trim(sketch, line, pick)
 }
 pub fn mirror(
     sketch: &mut Sketch,
@@ -269,6 +368,115 @@ mod tests {
             .map(|(a, b)| distance(a, b))
             .sum::<f64>();
         assert!((lengths - 40.).abs() < 1e-8);
+        Ok(())
+    }
+
+    #[test]
+    fn trim_uses_circle_crossings_and_preserves_the_other_entities() -> Result<()> {
+        let mut sketch = Sketch::new("Linha e círculo", Plane::xy());
+        let line = sketch.add_line([-20., 0.], [20., 0.], true)?;
+        let circle = sketch.add_circle([0., 0.], 10., false)?;
+        let Curve::Circle { center, .. } = sketch.entity(circle)?.curve else {
+            return Err(SketchError("Centro ausente".into()));
+        };
+        let fixed = sketch.add_constraint(
+            ConstraintKind::Fixed {
+                point: center,
+                position: [0., 0.],
+            },
+            false,
+        )?;
+        let profiles::Segment::Line { a, b } = trim_preview(&sketch, line, [1., 0.])? else {
+            return Err(SketchError("Prévia incorreta".into()));
+        };
+        assert_eq!((a, b), ([-10., 0.], [10., 0.]));
+        trim(&mut sketch, line, [1., 0.])?;
+        assert_eq!(sketch.circle(circle)?, ([0., 0.], 10.));
+        assert!(sketch.constraints.iter().any(|c| c.id == fixed));
+        let pieces = sketch
+            .entities
+            .iter()
+            .filter(|e| matches!(e.curve, Curve::Line { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(pieces.len(), 2);
+        assert!(pieces.iter().all(|e| e.construction));
+        for piece in pieces {
+            let (a, b) = sketch.line(piece.id)?;
+            assert!((distance(a, b) - 10.).abs() < 1e-9);
+        }
+        sketch.validate()?;
+        let line = sketch.add_line([-20., 5.], [20., 5.], false)?;
+        sketch.next_id = u64::MAX;
+        let before = format!("{sketch:?}");
+        assert!(trim(&mut sketch, line, [0., 5.]).is_err());
+        assert_eq!(before, format!("{sketch:?}"));
+        Ok(())
+    }
+
+    #[test]
+    fn trimming_a_circle_across_zero_keeps_one_oriented_arc() -> Result<()> {
+        let mut sketch = Sketch::new("Círculo aparado", Plane::xy());
+        let circle = sketch.add_circle([0., 0.], 10., false)?;
+        let line = sketch.add_line([5., -20.], [5., 20.], false)?;
+        let preview = trim_preview(&sketch, circle, [10., 0.])?;
+        assert!(preview.sample(128).iter().all(|p| p[0] >= 5. - 1e-9));
+        trim(&mut sketch, circle, [10., 0.])?;
+        assert_eq!(sketch.line(line)?, ([5., -20.], [5., 20.]));
+        let arc = sketch
+            .entities
+            .iter()
+            .find(|e| matches!(e.curve, Curve::Arc { .. }))
+            .ok_or_else(|| SketchError("Arco restante ausente".into()))?;
+        let points = profiles::segment(&sketch, arc)?.sample(128);
+        assert!(points.iter().all(|p| p[0] <= 5. + 1e-9));
+        assert!(points.iter().any(|p| p[0] < -9.9));
+        sketch.validate()?;
+        Ok(())
+    }
+
+    #[test]
+    fn clockwise_arcs_tangencies_and_rejected_trims_keep_valid_geometry() -> Result<()> {
+        let mut sketch = Sketch::new("Arco horário", Plane::xy());
+        let center = sketch.add_point([0., 0.])?;
+        let start = sketch.add_point([0., 10.])?;
+        let end = sketch.add_point([0., -10.])?;
+        let arc = sketch.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: true,
+            },
+            false,
+        )?;
+        let line = sketch.add_line([-20., 0.], [20., 0.], false)?;
+        trim(&mut sketch, arc, [7., 7.])?;
+        let remaining = sketch
+            .entities
+            .iter()
+            .find(|e| matches!(e.curve, Curve::Arc { .. }))
+            .ok_or_else(|| SketchError("Arco ausente".into()))?;
+        assert!(matches!(
+            remaining.curve,
+            Curve::Arc {
+                clockwise: true,
+                ..
+            }
+        ));
+        assert!(
+            profiles::segment(&sketch, remaining)?
+                .sample(32)
+                .iter()
+                .all(|p| p[0] >= -1e-9 && p[1] <= 1e-9)
+        );
+        let before = format!("{sketch:?}");
+        assert!(trim(&mut sketch, line, [f64::NAN, 0.]).is_err());
+        assert_eq!(before, format!("{sketch:?}"));
+        let circle = sketch.add_circle([0., 20.], 10., false)?;
+        let tangent = sketch.add_line([-20., 30.], [20., 30.], false)?;
+        trim(&mut sketch, tangent, [-10., 30.])?;
+        assert_eq!(sketch.circle(circle)?, ([0., 20.], 10.));
+        sketch.validate()?;
         Ok(())
     }
 }

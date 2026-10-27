@@ -390,6 +390,7 @@ impl Editor {
                     nator_commands::point_snap::PointKind::EdgeMidpoint => {
                         text(T::EdgeMidpoint).into()
                     }
+                    nator_commands::point_snap::PointKind::FaceCenter => text(T::FaceCenter).into(),
                     nator_commands::point_snap::PointKind::Vertex => document
                         .body(target.pick.body)
                         .map(|b| b.name.clone())

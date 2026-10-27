@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Aparador entre vértices e centros de polígonos
+
+- Cruzamentos e encontros de linhas, círculos e arcos aparecem como vértices de captura no rascunho. São referências derivadas enquanto as curvas permanecem inteiras; aparar materializa os extremos novos.
+- Aparar realça o trecho a remover e corta somente entre os encontros/extremos vizinhos. Aceita círculos e arcos, incluindo trechos que atravessam 0°/360° e sentido horário; usa o clique real para evitar que a atração ao centro escolha outro trecho. A edição é atômica, com desfazer/refazer e persistência.
+- Centros de triângulos (baricentros) e retângulos (encontro das diagonais) passam a servir de referência no desenho, nos rascunhos auxiliares/de construção e no movimento ponto a ponto de sólidos e malhas planas. Os centros ficam no plano da superfície; centros circulares e pontos médios das arestas continuam disponíveis.
+- Encontros e centros são calculados em segundo plano e reaproveitados enquanto a geometria não mudar. Malhas reconstroem faces coplanares para não oferecer centros falsos nas diagonais da tesselação.
+
 ### Rascunhos nas quinas chanfradas
 
 - Corrigida a criação de rascunhos nas faces triangulares das quinas de cubos chanfrados e nas faces planas com nomes repetidos. A seleção consulta a superfície exata sob o clique e captura um plano fixo, sem exigir uma referência topológica persistente.
