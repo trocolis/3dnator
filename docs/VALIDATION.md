@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Pontos médios, bordas circulares e centros de arcos — 27/10/2026
+
+- Apoios exatos na metade do comprimento das arestas; em arcos, o ponto médio permanece sobre a curva. Centros virtuais de arcos são descobertos no setor correspondente, no plano da curva, inclusive fora do material. Círculos completos oferecem quatro quadrantes na borda. Todos os apoios usam a captura existente na origem e no destino.
+- Malhas oferecem pontos médios somente nas arestas vivas; regressão com retângulo triangulado verifica a exclusão da diagonal interna. Rascunhos de referência oferecem pontos médios de linhas/arcos e quadrantes de círculos, mantendo centro e extremos dos arcos.
+- **157 testes sem OCCT e 214 com OCCT aprovados; os nove ensaios gráficos passaram em série.** Regressões novas verificam os doze pontos médios de um bloco, quadrantes internos/externos de uma arruela nas duas alturas, metade do arco em vez da corda, centro virtual do arco no vazio, captura e apoios de referência. O novo ensaio gráfico efetua três alinhamentos entre ponto médio, quadrante e centro de arco, confirma e desfaz/refaz.
+- Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Versão de desenvolvimento 0.3.0 e formato 17 preservados. Validação local em Linux; Windows e janela nativa não foram exercitados.
+
 ## Centros virtuais no movimento ponto a ponto — 27/10/2026
 
 - Centros exatos de bordas circulares são consultados no B-rep em segundo plano, em coordenadas locais. A projeção compõe corpo e ocorrência, e escolhe a borda frontal quando os centros das duas superfícies ocupam o mesmo pixel. Costuras cilíndricas não geram falsos vértices.

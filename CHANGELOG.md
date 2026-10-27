@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Pontos médios, quadrantes e centros de arcos
+
+- Movimentação ponto a ponto oferece a metade do comprimento das arestas, incluindo a metade sobre a curva dos arcos. Malhas oferecem pontos médios nas arestas vivas, sem incluir diagonais internas da triangulação.
+- Círculos passam a oferecer quatro pontos de borda, espaçados a cada 90°, além do centro virtual. Arcos também revelam seu centro no plano da curva, inclusive quando ele está fora do material.
+- Novos apoios compartilham destaque, captura magnética e seleção na origem e no destino; rascunhos de referência oferecem também os pontos médios das linhas/arcos e os quadrantes dos círculos.
+
 ### Captura de centros no movimento ponto a ponto
 
 - Centros virtuais exatos de bordas circulares, inclusive no vazio de furos e arruelas, no plano de cada superfície. Costuras de cilindros deixam de aparecer como vértices artificiais.

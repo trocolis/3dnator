@@ -377,13 +377,23 @@ impl Editor {
             } else if let Some(target) =
                 self.point_target(&document, response.rect, position, ui.ctx())
             {
-                let label = if target.circle {
-                    text(T::VirtualCenter).into()
-                } else {
-                    document
+                let label = match target.kind {
+                    nator_commands::point_snap::PointKind::CircleCenter => {
+                        text(T::VirtualCenter).into()
+                    }
+                    nator_commands::point_snap::PointKind::ArcCenter => {
+                        text(T::VirtualArcCenter).into()
+                    }
+                    nator_commands::point_snap::PointKind::CircleBoundary => {
+                        text(T::CircleBoundaryPoint).into()
+                    }
+                    nator_commands::point_snap::PointKind::EdgeMidpoint => {
+                        text(T::EdgeMidpoint).into()
+                    }
+                    nator_commands::point_snap::PointKind::Vertex => document
                         .body(target.pick.body)
                         .map(|b| b.name.clone())
-                        .unwrap_or_default()
+                        .unwrap_or_default(),
                 };
                 (
                     Overlay {

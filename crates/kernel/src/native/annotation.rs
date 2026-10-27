@@ -1,4 +1,4 @@
-//! Apoios de cotas obtidos da geometria precisa, nunca da tesselação de exibição.
+//! Apoios de cotas e captura obtidos da geometria precisa, sem depender da tesselação.
 use super::{Solid, last_error};
 use crate::{CircleAnchor, EdgeAnchors, FaceAnchors, KernelError};
 use std::ffi::c_void;
@@ -25,8 +25,8 @@ impl Solid {
         })
     }
     pub fn edge_anchors(&self, index: usize) -> Result<EdgeAnchors, KernelError> {
-        let mut values = [0.; 16];
-        // SAFETY: sólido vivo e buffer de dezesseis doubles, cujo tamanho faz parte do ABI.
+        let mut values = [0.; 24];
+        // SAFETY: sólido vivo e buffer de vinte e quatro doubles, conforme o ABI da ponte.
         if !unsafe { nator_edge_anchors(self.pointer.as_ptr(), index, values.as_mut_ptr()) } {
             return Err(last_error());
         }
@@ -36,10 +36,14 @@ impl Solid {
         Ok(EdgeAnchors {
             start: [values[0], values[1], values[2]],
             end: [values[3], values[4], values[5]],
+            midpoint: [values[16], values[17], values[18]],
             circle: (values[9] > 0.5).then_some(CircleAnchor {
                 center: [values[6], values[7], values[8]],
                 normal: [values[10], values[11], values[12]],
+                x_direction: [values[19], values[20], values[21]],
                 radius_mm: values[13],
+                start_angle_rad: values[22],
+                sweep_rad: values[23],
                 closed: values[14] > 0.5,
             }),
             seam: values[15] > 0.5,

@@ -872,6 +872,173 @@ mod tests {
     use nator_document::features::{Operation, RegionRef};
     use nator_sketch::{Plane, Sketch};
 
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn point_alignment_uses_edge_midpoints_circle_quadrants_and_arc_centers()
+    -> Result<(), Box<dyn Error>> {
+        use nator_geometry::{norm, sub};
+        use nator_kernel::Solid;
+        use nator_sketch::{Curve, areas};
+        let mut curved = Sketch::new("Arco", Plane::xy());
+        let center = curved.add_point([0., 0.])?;
+        let start = curved.add_point([10., 0.])?;
+        let end = curved.add_point([0., 10.])?;
+        curved.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: false,
+            },
+            false,
+        )?;
+        curved.add_curve(
+            Curve::Line {
+                start: end,
+                end: start,
+            },
+            false,
+        )?;
+        let region = areas::regions(&curved)?
+            .into_iter()
+            .next()
+            .ok_or("Região ausente")?;
+        let mut session = Session::new(Document::new("Apoios ponto a ponto")?)?;
+        for (name, mut solid) in [
+            ("Bloco", Solid::cuboid([0.; 3], [20., 20., 4.])?),
+            ("Disco", Solid::cylinder([0.; 3], 16., 8.)?),
+            ("Arco", Solid::extrude(&curved, &region, 0., 2., "arc")?),
+        ] {
+            let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+            session.execute(Command::ImportSolid {
+                destination: None,
+                name: name.into(),
+                geometry: Arc::new(MeshAsset::with_faces(mesh, faces)?),
+                brep: Arc::new(solid.to_brep()?),
+                faces: solid.face_count()?,
+            })?;
+        }
+        let context = egui::Context::default();
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = None;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        settle(&mut editor, &context)?;
+        let instances = editor
+            .current()
+            .session
+            .document()
+            .instances()
+            .iter()
+            .map(|i| (i.id, i.placement))
+            .collect::<Vec<_>>();
+        let radial = 10. / 2_f64.sqrt();
+        for (from, source, to, destination, source_label, destination_label) in [
+            (
+                0,
+                [10., 0., 4.],
+                1,
+                [0., 16., 8.],
+                T::EdgeMidpoint,
+                T::CircleBoundaryPoint,
+            ),
+            (
+                2,
+                [0., 0., 2.],
+                0,
+                [10., 0., 4.],
+                T::VirtualArcCenter,
+                T::EdgeMidpoint,
+            ),
+            (
+                1,
+                [0., 16., 8.],
+                2,
+                [radial, radial, 2.],
+                T::CircleBoundaryPoint,
+                T::EdgeMidpoint,
+            ),
+        ] {
+            editor.open_align(navigation::PickMode::Vertex);
+            frame(&mut editor, &context, Vec::new())?;
+            let revision = editor.current().session.revision();
+            let bounds = editor.current().scene_bounds.ok_or("Limites ausentes")?;
+            let source_world = instances[from].1.apply(source);
+            let target_world = instances[to].1.apply(destination);
+            for (point, label) in [
+                (source_world, source_label),
+                (target_world, destination_label),
+            ] {
+                let position = sketch_scene::project(
+                    &editor.viewport.camera,
+                    bounds,
+                    editor.canvas_rect,
+                    point,
+                )
+                .ok_or("Apoio fora da tela")?
+                    + egui::vec2(2., 2.);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    frame(
+                        &mut editor,
+                        &context,
+                        vec![egui::Event::PointerMoved(position)],
+                    )?;
+                    if editor.hover.as_ref().is_some_and(|h| {
+                        h.label == text(label)
+                            && h.overlay.points.iter().any(|p| norm(sub(*p, point)) < 1e-8)
+                    }) {
+                        break;
+                    }
+                    if Instant::now() > deadline {
+                        return Err(format!(
+                            "Apoio {} não realçado: {}",
+                            text(label),
+                            editor.status
+                        )
+                        .into());
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                click(&mut editor, &context, position)?;
+            }
+            assert_eq!(editor.current().session.revision(), revision);
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            )?;
+            settle(&mut editor, &context)?;
+            assert!(editor.assembly_panel.is_none(), "{}", editor.status);
+            let moved = |editor: &Editor| {
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .instance(instances[from].0)
+                    .map(|i| i.placement.apply(source))
+            };
+            assert!(norm(sub(moved(&editor).ok_or("Origem ausente")?, target_world)) < 1e-8);
+            assert!(editor.current_mut().session.undo());
+            assert!(norm(sub(moved(&editor).ok_or("Origem ausente")?, source_world)) < 1e-8);
+            assert!(editor.current_mut().session.redo());
+            assert!(norm(sub(moved(&editor).ok_or("Origem ausente")?, target_world)) < 1e-8);
+            assert!(editor.current_mut().session.undo());
+            editor.current_mut().changed();
+            editor.invalidate_scene();
+            settle(&mut editor, &context)?;
+        }
+        Ok(())
+    }
+
     /// O clique usa o mesmo centro mostrado no vazio, na origem e no destino.
     /// O resultado só entra no documento ao confirmar e mantém desfazer/refazer.
     #[test]
@@ -921,7 +1088,9 @@ mod tests {
         let source_screen =
             sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, from)
                 .ok_or("Origem fora da tela")?;
-        let discovery = source_screen + egui::vec2(30., 0.);
+        // Fora do raio do centro e dos quadrantes da borda interna: aqui
+        // exercitamos a descoberta distante, antes da atração de um apoio.
+        let discovery = source_screen + egui::vec2(16., 16.);
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             frame(

@@ -182,11 +182,14 @@ fn reference_anchor(
         let normal = sketch.plane.normal();
         match kind {
             navigation::PickMode::Vertex => {
-                for point in &sketch.points {
-                    if let Some(screen) = frame.screen(point.position) {
+                let Ok(points) = nator_commands::point_snap::reference_points(sketch) else {
+                    continue;
+                };
+                for point in points {
+                    if let Some(screen) = frame.screen(point) {
                         let distance = screen.distance(position);
                         if distance < 12. {
-                            let world = frame.world(point.position);
+                            let world = frame.world(point);
                             offer(
                                 distance,
                                 Anchor {
@@ -1659,6 +1662,59 @@ fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reference_sketches_offer_line_midpoints_and_circle_quadrants()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut document = Document::new("Apoios de referência")?;
+        let mut sketch = nator_sketch::Sketch::new("Referência", nator_sketch::Plane::xy());
+        sketch.add_line([0., 0.], [20., 0.], false)?;
+        sketch.add_circle([50., 0.], 10., false)?;
+        let center = sketch.add_point([25., -10.])?;
+        let start = sketch.add_point([30., -10.])?;
+        let end = sketch.add_point([25., -15.])?;
+        sketch.add_curve(
+            nator_sketch::Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: true,
+            },
+            false,
+        )?;
+        document.add_reference_sketch(sketch)?;
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let bounds = nator_geometry::Bounds {
+            min: [-10., -20., -5.],
+            max: [70., 20., 5.],
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        for point in [
+            [10., 0., 0.],
+            [60., 0., 0.],
+            [50., 10., 0.],
+            [40., 0., 0.],
+            [50., -10., 0.],
+            [25., -10., 0.],
+            [25. + 5. / 2_f64.sqrt(), -10. - 5. / 2_f64.sqrt(), 0.],
+        ] {
+            let position =
+                sketch_scene::project(&camera, bounds, rect, point).ok_or("Projeção ausente")?;
+            let anchor = reference_anchor(
+                &document,
+                &camera,
+                bounds,
+                rect,
+                position,
+                navigation::PickMode::Vertex,
+            )
+            .ok_or("Apoio de referência ausente")?;
+            assert!(norm(sub(anchor.point, point)) < 1e-9);
+            assert!(anchor.reference);
+        }
+        Ok(())
+    }
 
     #[test]
     fn ring_rotation_snaps_near_multiples_of_45_degrees() {

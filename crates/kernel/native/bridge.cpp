@@ -37,6 +37,7 @@
 #include <BRepTools.hxx>
 #include <ElSLib.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>

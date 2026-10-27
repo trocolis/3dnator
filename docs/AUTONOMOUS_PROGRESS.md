@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Apoios nas arestas, círculos e arcos — 27/10/2026
+
+- Acrescentados pontos médios das arestas, quatro quadrantes das bordas circulares e descoberta dos centros virtuais dos arcos no plano da curva. A metade do arco permanece sobre a curva, distinta do centro virtual. Malhas oferecem pontos médios nas arestas vivas e excluem diagonais internas da triangulação.
+- Rascunhos de referência oferecem também pontos médios das linhas/arcos e quadrantes dos círculos. Novos rótulos de captura centralizados na tradução; consultas nativas seguem em segundo plano e o clique compartilha a escolha com o realce.
+- Aprovados 157 testes sem OCCT, 214 com OCCT e os nove ensaios gráficos em série. Regressões verificam captura dos apoios na origem e no destino, confirmação e desfazer/refazer. Formatação, Clippy nas duas configurações e compilação desktop com OCCT aprovados. Sem release, migração ou publicação remota.
+
 ## Centros circulares e captura no movimento ponto a ponto — 27/10/2026
 
 - Acrescentados centros virtuais exatos das bordas circulares, no plano de cada superfície, inclusive no vazio de furos. A região revela o centro e a proximidade captura a mira em alcance constante na tela; realce e clique compartilham a escolha na origem e no destino.

@@ -582,6 +582,9 @@ pub enum Text {
     MoveEdgeHint,
     MovePointHint,
     VirtualCenter,
+    VirtualArcCenter,
+    EdgeMidpoint,
+    CircleBoundaryPoint,
     PointQueryFailed,
     CopyInstanceHint,
     CopyIndependentHint,
@@ -1195,9 +1198,12 @@ pub fn text(key: Text) -> &'static str {
             "Arestas paralelas; aceita linhas de rascunhos de referência como destino."
         }
         Text::MovePointHint => {
-            "Vértices e centros circulares, inclusive de furos: aproxime o cursor para capturar. Aceita pontos de rascunhos de referência como destino."
+            "Vértices, pontos médios, centros de círculos e arcos e quadrantes da borda: aproxime o cursor para capturar. Aceita pontos de rascunhos de referência como destino."
         }
         Text::VirtualCenter => "Centro circular (virtual)",
+        Text::VirtualArcCenter => "Centro do arco (virtual)",
+        Text::EdgeMidpoint => "Ponto médio da aresta",
+        Text::CircleBoundaryPoint => "Quadrante da borda circular",
         Text::PointQueryFailed => "Não foi possível consultar os pontos de captura.",
         Text::CopyInstanceHint => "Mesma definição, ao lado da original: editar uma altera todas.",
         Text::CopyIndependentHint => {

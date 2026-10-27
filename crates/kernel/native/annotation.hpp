@@ -1,4 +1,4 @@
-// Pontos geométricos de apoio à cotagem. Índices são resolvidos a partir dos nomes
+// Pontos geométricos de apoio à cotagem e à captura. Índices são resolvidos a partir dos nomes
 // estáveis em Rust antes de entrar nesta ponte; nada é associado pela proximidade.
 #pragma once
 extern "C" {
@@ -36,9 +36,9 @@ bool nator_face_anchors(const Shape* body,std::size_t index,double* output) noex
 bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         const auto edge=edge_at(body,index);
-        // Dezesseis doubles: extremos, centro, indicador circular, normal, raio,
-        // fechamento e costura. O centro de massa ficaria a meia altura da arruela.
-        std::fill(output,output+16,0.);
+        // Vinte e quatro doubles: extremos, centro, indicador circular, normal,
+        // raio, fechamento, costura, ponto médio, direção radial e intervalo angular.
+        std::fill(output,output+24,0.);
         // Polos de esferas/cones podem ter uma aresta sem curva 3D. Ela não
         // oferece captura, mas continua fornecendo um apoio finito para cotas.
         if (BRep_Tool::Degenerated(edge)) {
@@ -46,6 +46,7 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
             if (vertex.IsNull()) throw std::runtime_error("Aresta degenerada sem vértice de apoio.");
             const auto point=BRep_Tool::Pnt(vertex);
             output[0]=output[3]=point.X();output[1]=output[4]=point.Y();output[2]=output[5]=point.Z();
+            output[16]=point.X();output[17]=point.Y();output[18]=point.Z();
             output[15]=1.;
             return;
         }
@@ -53,6 +54,17 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
         const auto start=curve.Value(curve.FirstParameter()), end=curve.Value(curve.LastParameter());
         output[0]=start.X();output[1]=start.Y();output[2]=start.Z();
         output[3]=end.X();output[4]=end.Y();output[5]=end.Z();
+        // Linhas/círculos têm velocidade paramétrica constante; nas outras
+        // curvas, dividir o parâmetro ao meio não garante metade do comprimento.
+        double middle=(curve.FirstParameter()+curve.LastParameter())*0.5;
+        if (curve.GetType()!=GeomAbs_Line && curve.GetType()!=GeomAbs_Circle) {
+            const double length=GCPnts_AbscissaPoint::Length(curve,curve.FirstParameter(),curve.LastParameter());
+            GCPnts_AbscissaPoint half(curve,length*0.5,curve.FirstParameter());
+            if (!half.IsDone()) throw std::runtime_error("Não foi possível obter o ponto médio da aresta.");
+            middle=half.Parameter();
+        }
+        const auto midpoint=curve.Value(middle);
+        output[16]=midpoint.X();output[17]=midpoint.Y();output[18]=midpoint.Z();
         if (curve.GetType()==GeomAbs_Circle) {
             const auto circle=curve.Circle();
             const auto center=circle.Location();
@@ -61,6 +73,9 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
             output[10]=normal.X();output[11]=normal.Y();output[12]=normal.Z();
             output[13]=circle.Radius();
             output[14]=std::abs(curve.LastParameter()-curve.FirstParameter()-2.*std::acos(-1.))<1e-7 ? 1. : 0.;
+            const auto radial=circle.Position().XDirection();
+            output[19]=radial.X();output[20]=radial.Y();output[21]=radial.Z();
+            output[22]=curve.FirstParameter();output[23]=curve.LastParameter()-curve.FirstParameter();
         }
         // Uma costura cilíndrica possui duas curvas paramétricas na mesma face.
         // Seus extremos não são vértices geométricos para a captura pelo usuário.

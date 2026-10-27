@@ -2,7 +2,7 @@
 //! Centros são descobertos também no vazio; o cursor de captura aparece no apoio quando
 //! entra no raio em pontos de tela, mantendo a mesma sensação em qualquer zoom.
 use super::*;
-use nator_commands::point_snap::{PointAnchor, body_anchors};
+use nator_commands::point_snap::{PointAnchor, PointKind, body_anchors};
 use nator_document::assembly::Pick;
 use nator_geometry::{Bounds, dot, norm, query::Ray, sub};
 use std::collections::HashMap;
@@ -72,7 +72,7 @@ impl Cache {
 pub(super) struct Target {
     pub pick: Pick,
     pub captured: bool,
-    pub circle: bool,
+    pub kind: PointKind,
 }
 
 /// Raio que passa por uma posição de tela; usado também no centro virtual para
@@ -88,16 +88,31 @@ fn screen_ray(camera: &Camera, bounds: Bounds, rect: egui::Rect, position: egui:
     )
 }
 
-/// Pertencer ao disco permite descobrir o centro longe da captura, inclusive no
-/// furo. Interseção com o plano preserva a elipse projetada em vistas oblíquas.
-fn inside_circle(ray: Ray, center: Point3, normal: Point3, radius: f64) -> bool {
+/// O disco (círculo) ou setor (arco) revela o centro antes da captura, inclusive
+/// no vazio. A interseção no plano acompanha a projeção em vistas oblíquas.
+fn inside_circular_region(ray: Ray, circle: nator_kernel::CircleAnchor, pose: Placement) -> bool {
+    let center = pose.apply(circle.center);
+    let normal = pose.apply_vector(circle.normal);
     let denominator = dot(normal, ray.direction);
     if denominator.abs() < 1e-9 {
         return false;
     }
     let t = dot(normal, sub(center, ray.origin)) / denominator;
     let point = std::array::from_fn(|i| ray.origin[i] + t * ray.direction[i]);
-    t >= 0. && norm(sub(point, center)) <= radius
+    let delta = sub(point, center);
+    let distance = norm(delta);
+    if t < 0. || distance > circle.radius_mm {
+        return false;
+    }
+    if circle.closed || distance < 1e-9 {
+        return true;
+    }
+    // Para arcos, a descoberta usa somente o setor correspondente da curva.
+    // O centro permanece no plano, mesmo que esteja fora da área preenchida.
+    let x = pose.apply_vector(circle.x_direction);
+    let y = nator_geometry::cross(normal, x);
+    let angle = dot(delta, y).atan2(dot(delta, x));
+    (angle - circle.start_angle_rad).rem_euclid(std::f64::consts::TAU) <= circle.sweep_rad + 1e-9
 }
 
 struct Candidate {
@@ -170,17 +185,18 @@ impl Query<'_> {
                         .circle
                         .map(|c| pose.apply_vector(c.normal))
                         .unwrap_or(camera.direction());
-                    let discovered = anchor.circle.is_some_and(|c| {
-                        c.closed && inside_circle(ray, point, normal, c.radius_mm)
-                    }) || (anchor.circle.is_none()
-                        && hovered.as_ref().is_some_and(|p| {
-                            p.body == body.id
-                                && p.instance == instance.id
-                                && norm(sub(
-                                    p.placement.apply([0.; 3]),
-                                    occurrence.placement.apply([0.; 3]),
-                                )) < 1e-9
-                        }));
+                    let discovered = anchor
+                        .circle
+                        .is_some_and(|c| inside_circular_region(ray, c, pose))
+                        || (anchor.circle.is_none()
+                            && hovered.as_ref().is_some_and(|p| {
+                                p.body == body.id
+                                    && p.instance == instance.id
+                                    && norm(sub(
+                                        p.placement.apply([0.; 3]),
+                                        occurrence.placement.apply([0.; 3]),
+                                    )) < 1e-9
+                            }));
                     if !captured && !discovered {
                         continue;
                     }
@@ -199,7 +215,7 @@ impl Query<'_> {
                                 placement: occurrence.placement,
                             },
                             captured,
-                            circle: anchor.circle.is_some(),
+                            kind: anchor.kind,
                         },
                         distance,
                         depth: dot(sub(point, target_ray.origin), target_ray.direction),
@@ -292,7 +308,11 @@ mod mesh_tests {
         camera.set_direction([0., 0., 1.]);
         let bounds = document.scene_mesh()?.ok_or("Cena ausente")?.bounds();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 600.));
-        for point in [[0., 0., 0.], [10., 0., 0.]] {
+        for (point, kind) in [
+            ([0., 0., 0.], PointKind::Vertex),
+            ([10., 0., 0.], PointKind::Vertex),
+            ([5., 0., 0.], PointKind::EdgeMidpoint),
+        ] {
             let position = sketch_scene::project(&camera, bounds, rect, point)
                 .ok_or("Projeção ausente")?
                 + egui::vec2(4., 6.);
@@ -308,7 +328,7 @@ mod mesh_tests {
             };
             let target = query.target(&entries).ok_or("Vértice ausente")?;
             assert_eq!(target.pick.point, point);
-            assert!(target.captured && !target.circle);
+            assert!(target.captured && target.kind == kind);
         }
         let position =
             sketch_scene::project(&camera, bounds, rect, [3., 2., 0.]).ok_or("Projeção ausente")?;
@@ -324,7 +344,8 @@ mod mesh_tests {
         }
         .target(&entries)
         .ok_or("Pré-seleção distante ausente")?;
-        assert_eq!(target.pick.point, [0.; 3]);
+        assert_eq!(target.pick.point, [5., 0., 0.]);
+        assert_eq!(target.kind, PointKind::EdgeMidpoint);
         assert!(
             !target.captured,
             "No interior da face o apoio aparece antes da captura"
@@ -339,6 +360,7 @@ mod mesh_tests {
             BodyId(99),
             vec![PointAnchor {
                 point: [99.; 3],
+                kind: PointKind::Vertex,
                 circle: None,
             }],
         )])))?;
@@ -382,11 +404,14 @@ mod tests {
     impl Fixture {
         fn new(hole: bool) -> Result<Self> {
             let outer = Solid::cylinder([0., 0., 2.], 20., 4.)?;
-            let mut solid = if hole {
+            let solid = if hole {
                 outer.cut(&Solid::cylinder([0.; 3], 10., 10.)?)?
             } else {
                 outer
             };
+            Self::from_solid(solid)
+        }
+        fn from_solid(mut solid: Solid) -> Result<Self> {
             let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
             let mut session = Session::new(Document::new("Centros circulares")?)?;
             let Effect::Imported { part, .. } = session.execute(Command::ImportSolid {
@@ -454,7 +479,7 @@ mod tests {
         let discovered = f
             .at(center, egui::vec2(35., 0.), None, None)
             .ok_or("Centro não descoberto")?;
-        assert!(discovered.circle && !discovered.captured);
+        assert!(discovered.kind == PointKind::CircleCenter && !discovered.captured);
         assert!(norm(sub(discovered.pick.point, center)) < 1e-9);
         let captured = f
             .at(center, egui::vec2(8., 0.), None, None)
@@ -492,6 +517,76 @@ mod tests {
     }
 
     #[test]
+    fn washer_inner_and_outer_quadrants_capture_on_the_front_surface() -> Result<()> {
+        let f = Fixture::new(true)?;
+        for radius in [10., 20.] {
+            for point in [
+                [radius, 0., 6.],
+                [0., radius, 6.],
+                [-radius, 0., 6.],
+                [0., -radius, 6.],
+            ] {
+                let target = f
+                    .at(point, egui::vec2(3., 2.), None, None)
+                    .ok_or("Quadrante ausente")?;
+                assert_eq!(target.kind, PointKind::CircleBoundary);
+                assert!(target.captured);
+                assert!(norm(sub(target.pick.point, point)) < 1e-9);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn arc_center_is_discovered_in_its_empty_sector_and_midpoint_stays_on_curve() -> Result<()> {
+        use nator_sketch::{Curve, Plane, Sketch, areas};
+        let mut sketch = Sketch::new("Arco", Plane::xy());
+        let center = sketch.add_point([0., 0.])?;
+        let start = sketch.add_point([10., 0.])?;
+        let end = sketch.add_point([0., 10.])?;
+        sketch.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: false,
+            },
+            false,
+        )?;
+        sketch.add_curve(
+            Curve::Line {
+                start: end,
+                end: start,
+            },
+            false,
+        )?;
+        let region = areas::regions(&sketch)?
+            .into_iter()
+            .next()
+            .ok_or("Região ausente")?;
+        let f = Fixture::from_solid(Solid::extrude(&sketch, &region, 0., 2., "arc")?)?;
+        let target = f
+            .at([2., 2., 2.], egui::Vec2::ZERO, None, None)
+            .ok_or("Centro do arco ausente")?;
+        assert_eq!(target.kind, PointKind::ArcCenter);
+        assert!(!target.captured);
+        assert!(norm(sub(target.pick.point, [0., 0., 2.])) < 1e-9);
+        assert!(f.at([-2., -2., 2.], egui::Vec2::ZERO, None, None).is_none());
+        let captured = f
+            .at([0., 0., 2.], egui::vec2(3., 2.), None, None)
+            .ok_or("Captura do centro ausente")?;
+        assert!(captured.captured && captured.kind == PointKind::ArcCenter);
+        let radial = 10. / 2_f64.sqrt();
+        let midpoint = [radial, radial, 2.];
+        let captured = f
+            .at(midpoint, egui::vec2(2., 3.), None, None)
+            .ok_or("Captura do ponto médio ausente")?;
+        assert!(captured.captured && captured.kind == PointKind::EdgeMidpoint);
+        assert!(norm(sub(captured.pick.point, midpoint)) < 1e-8);
+        Ok(())
+    }
+
+    #[test]
     fn circular_discovery_follows_the_projected_ellipse_in_oblique_views() -> Result<()> {
         let mut f = Fixture::new(true)?;
         f.camera.set_direction([0.3, -0.25, 1.]);
@@ -499,7 +594,7 @@ mod tests {
         let target = f
             .at(center, egui::vec2(22., 0.), None, None)
             .ok_or("Centro oblíquo ausente")?;
-        assert!(target.circle && !target.captured);
+        assert!(target.kind == PointKind::CircleCenter && !target.captured);
         assert!(norm(sub(target.pick.point, center)) < 1e-9);
         assert!(f.at([25., 0., 6.], egui::Vec2::ZERO, None, None).is_none());
         Ok(())

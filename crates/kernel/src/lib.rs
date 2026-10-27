@@ -83,6 +83,8 @@ pub struct FaceAnchors {
 pub struct EdgeAnchors {
     pub start: [f64; 3],
     pub end: [f64; 3],
+    /// Metade do comprimento percorrido sobre a curva, em mm; não é o centro da corda.
+    pub midpoint: [f64; 3],
     pub circle: Option<CircleAnchor>,
     /// Costura da parametrização ou polo degenerado, sem canto capturável.
     pub seam: bool,
@@ -94,8 +96,13 @@ pub struct EdgeAnchors {
 pub struct CircleAnchor {
     pub center: [f64; 3],
     pub normal: [f64; 3],
+    /// Direção unitária do primeiro quadrante, no referencial da própria geometria.
+    pub x_direction: [f64; 3],
     pub radius_mm: f64,
-    /// Arcos oferecem o centro por proximidade, mas não uma região circular inteira.
+    /// Intervalo angular da curva, em radianos na base X/Y do círculo de apoio.
+    pub start_angle_rad: f64,
+    pub sweep_rad: f64,
+    /// Círculos completos oferecem quatro quadrantes; arcos conservam seus extremos.
     pub closed: bool,
 }
 
