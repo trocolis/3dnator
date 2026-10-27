@@ -257,6 +257,17 @@ struct Menu<'a> {
     items: &'a [(Action, T, T)],
 }
 
+/// As abas compartilham as opções de alinhamento; Livre muda apenas o alvo:
+/// corpos na Peça e componentes na Montagem.
+fn move_menu_items(free: Action) -> [(Action, T, T); 4] {
+    [
+        (free, T::MoveFree, T::MoveFreeHint),
+        (Action::MoveFace, T::MoveFaceToFace, T::MoveFaceHint),
+        (Action::MoveEdge, T::MoveEdgeToEdge, T::MoveEdgeHint),
+        (Action::MovePoint, T::MovePointToPoint, T::MovePointHint),
+    ]
+}
+
 /// Também alimenta a busca: nenhuma entrada anuncia uma ferramenta sem implementação.
 const SEARCH_ACTIONS: &[Action] = &[
     Action::New,
@@ -832,15 +843,25 @@ impl Editor {
         }
     }
     fn ribbon_group(&mut self, ui: &mut egui::Ui, label: T, actions: &[Action]) {
+        self.ribbon_group_with(ui, label, actions.len(), |editor, ui| {
+            for action in actions {
+                editor.action_button(ui, *action, true);
+            }
+        });
+    }
+    /// Um grupo pode combinar botões diretos e menus, mantendo o mesmo rótulo e separador.
+    fn ribbon_group_with(
+        &mut self,
+        ui: &mut egui::Ui,
+        label: T,
+        count: usize,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) {
         ui.vertical(|ui| {
-            let width = actions.len() as f32 * 76. + actions.len().saturating_sub(1) as f32 * 3.;
+            let width = count as f32 * 76. + count.saturating_sub(1) as f32 * 3.;
             ui.set_min_width(width);
             ui.set_max_width(width);
-            ui.horizontal(|ui| {
-                for action in actions {
-                    self.action_button(ui, *action, true);
-                }
-            });
+            ui.horizontal(|ui| body(self, ui));
             ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                 ui.label(
                     egui::RichText::new(text(label))
@@ -854,97 +875,90 @@ impl Editor {
     /// Grupo com um botão de menu: o clique abre as subopções, cada uma com ícone, nome e
     /// uma linha de explicação, habilitadas conforme o contexto.
     fn ribbon_menu_group(&mut self, ui: &mut egui::Ui, label: T, menu: Menu<'_>) {
-        ui.vertical(|ui| {
-            ui.set_min_width(76.);
-            ui.set_max_width(86.);
-            let enabled = menu.items.iter().any(|(a, _, _)| self.action_enabled(*a));
-            let response = ui
-                .add_enabled_ui(enabled, |ui| {
-                    icons::button(ui, menu.icon, text(menu.label), true, false)
-                })
-                .inner;
-            self.shell.menu_rects.push(response.rect);
-            // Seta de menu centrada sob o rótulo, sem cobrir rótulos longos.
-            let corner = response.rect.center_bottom() + egui::vec2(0., -6.);
-            ui.painter().add(egui::Shape::convex_polygon(
-                vec![
-                    corner + egui::vec2(-4., -2.),
-                    corner + egui::vec2(4., -2.),
-                    corner + egui::vec2(0., 3.),
-                ],
-                if enabled { theme::INK } else { theme::MUTED },
-                egui::Stroke::NONE,
-            ));
-            let mut chosen = None;
-            egui::Popup::menu(&response).show(|ui| {
-                // Largura fixa: a descrição quebra em até duas linhas em vez de alargar o menu.
-                ui.set_width(300.);
-                for (action, name, hint) in menu.items {
-                    let enabled = self.action_enabled(*action);
-                    // Item indisponível por falta do núcleo: o motivo substitui a descrição.
-                    let (hint, hint_color) = if !enabled
-                        && *action == Action::NewPartStep
-                        && !nator_kernel::is_available()
-                    {
-                        (T::StepNeedsKernel, theme::WARNING)
-                    } else {
-                        (*hint, theme::MUTED)
-                    };
-                    let row = ui
-                        .add_enabled_ui(enabled, |ui| {
-                            let (rect, row) =
-                                ui.allocate_exact_size(egui::vec2(300., 54.), egui::Sense::click());
-                            if row.hovered() && enabled {
-                                ui.painter().rect_filled(rect, 4, theme::BLUE_FILL);
-                            }
-                            let icon = egui::Rect::from_center_size(
-                                egui::pos2(rect.left() + 20., rect.center().y),
-                                egui::Vec2::splat(24.),
-                            );
-                            icons::paint(ui.painter(), icon, action.icon(), enabled);
-                            let ink = if enabled { theme::INK } else { theme::MUTED };
-                            ui.painter().text(
-                                egui::pos2(rect.left() + 42., rect.top() + 7.),
-                                egui::Align2::LEFT_TOP,
-                                text(*name),
-                                egui::FontId::proportional(13.),
-                                ink,
-                            );
-                            let mut job = egui::text::LayoutJob::simple(
-                                text(hint).to_owned(),
-                                egui::FontId::proportional(10.5),
-                                hint_color,
-                                rect.width() - 48.,
-                            );
-                            job.wrap.max_rows = 2;
-                            let galley = ui.painter().layout_job(job);
-                            ui.painter().galley(
-                                egui::pos2(rect.left() + 42., rect.top() + 24.),
-                                galley,
-                                hint_color,
-                            );
-                            row.on_hover_text(text(hint))
-                                .on_disabled_hover_text(text(hint))
-                        })
-                        .inner;
-                    if row.clicked() && enabled {
-                        chosen = Some(*action);
-                        ui.close();
-                    }
-                }
-            });
-            if let Some(action) = chosen {
-                self.activate_action(ui.ctx(), action);
-            }
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(text(label))
-                        .size(10.)
-                        .color(theme::MUTED),
-                );
-            });
+        self.ribbon_group_with(ui, label, 1, |editor, ui| {
+            editor.ribbon_menu_button(ui, menu);
         });
-        ui.separator();
+    }
+    fn ribbon_menu_button(&mut self, ui: &mut egui::Ui, menu: Menu<'_>) {
+        let enabled = ui.is_enabled() && menu.items.iter().any(|(a, _, _)| self.action_enabled(*a));
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                icons::button(ui, menu.icon, text(menu.label), true, false)
+            })
+            .inner;
+        self.shell.menu_rects.push(response.rect);
+        // Seta de menu centrada sob o rótulo, sem cobrir rótulos longos.
+        let corner = response.rect.center_bottom() + egui::vec2(0., -6.);
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                corner + egui::vec2(-4., -2.),
+                corner + egui::vec2(4., -2.),
+                corner + egui::vec2(0., 3.),
+            ],
+            if enabled { theme::INK } else { theme::MUTED },
+            egui::Stroke::NONE,
+        ));
+        let mut chosen = None;
+        egui::Popup::menu(&response).show(|ui| {
+            // Largura fixa: a descrição quebra em até duas linhas em vez de alargar o menu.
+            ui.set_width(300.);
+            for (action, name, hint) in menu.items {
+                let enabled = self.action_enabled(*action);
+                // Item indisponível por falta do núcleo: o motivo substitui a descrição.
+                let (hint, hint_color) = if !enabled
+                    && *action == Action::NewPartStep
+                    && !nator_kernel::is_available()
+                {
+                    (T::StepNeedsKernel, theme::WARNING)
+                } else {
+                    (*hint, theme::MUTED)
+                };
+                let row = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        let (rect, row) =
+                            ui.allocate_exact_size(egui::vec2(300., 54.), egui::Sense::click());
+                        if row.hovered() && enabled {
+                            ui.painter().rect_filled(rect, 4, theme::BLUE_FILL);
+                        }
+                        let icon = egui::Rect::from_center_size(
+                            egui::pos2(rect.left() + 20., rect.center().y),
+                            egui::Vec2::splat(24.),
+                        );
+                        icons::paint(ui.painter(), icon, action.icon(), enabled);
+                        let ink = if enabled { theme::INK } else { theme::MUTED };
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 42., rect.top() + 7.),
+                            egui::Align2::LEFT_TOP,
+                            text(*name),
+                            egui::FontId::proportional(13.),
+                            ink,
+                        );
+                        let mut job = egui::text::LayoutJob::simple(
+                            text(hint).to_owned(),
+                            egui::FontId::proportional(10.5),
+                            hint_color,
+                            rect.width() - 48.,
+                        );
+                        job.wrap.max_rows = 2;
+                        let galley = ui.painter().layout_job(job);
+                        ui.painter().galley(
+                            egui::pos2(rect.left() + 42., rect.top() + 24.),
+                            galley,
+                            hint_color,
+                        );
+                        row.on_hover_text(text(hint))
+                            .on_disabled_hover_text(text(hint))
+                    })
+                    .inner;
+                if row.clicked() && enabled {
+                    chosen = Some(*action);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(action) = chosen {
+            self.activate_action(ui.ctx(), action);
+        }
     }
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
         self.shell.menu_rects.clear();
@@ -969,16 +983,26 @@ impl Editor {
                         Action::Solid(SolidTool::Shell),
                     ],
                 );
-                self.ribbon_group(
-                    ui,
-                    T::ModifyGroup,
-                    &[
-                        Action::MoveBody,
+                self.ribbon_group_with(ui, T::ModifyGroup, 4, |editor, ui| {
+                    let enabled = editor.action_enabled(Action::MoveBody);
+                    ui.add_enabled_ui(enabled, |ui| {
+                        editor.ribbon_menu_button(
+                            ui,
+                            Menu {
+                                icon: Icon::Move,
+                                label: T::MoveMenu,
+                                items: &move_menu_items(Action::MoveBody),
+                            },
+                        );
+                    });
+                    for action in [
                         Action::CopyBody,
                         Action::Solid(SolidTool::Join),
                         Action::Solid(SolidTool::Split),
-                    ],
-                );
+                    ] {
+                        editor.action_button(ui, action, true);
+                    }
+                });
             }
             // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
             // posicionamento, cópias e organização.
@@ -1003,12 +1027,7 @@ impl Editor {
                     Menu {
                         icon: Icon::Move,
                         label: T::MoveMenu,
-                        items: &[
-                            (Action::MoveCopy, T::MoveFree, T::MoveFreeHint),
-                            (Action::MoveFace, T::MoveFaceToFace, T::MoveFaceHint),
-                            (Action::MoveEdge, T::MoveEdgeToEdge, T::MoveEdgeHint),
-                            (Action::MovePoint, T::MovePointToPoint, T::MovePointHint),
-                        ],
+                        items: &move_menu_items(Action::MoveCopy),
                     },
                 );
                 self.ribbon_menu_group(

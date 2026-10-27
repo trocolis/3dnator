@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Menu Mover na aba Peça
+
+- Mover passa a abrir o mesmo menu de opções da Montagem: **Livre**, **Face a face**, **Aresta a aresta** e **Vértice a vértice**, com ícones e descrições.
+- Na aba Peça, Livre mantém o modo de mover corpos, e os alinhamentos aceitam apenas corpos da peça ativa como origem. Geometria de outras peças e rascunhos de referência continua disponível como destino.
+
 ### Simplificação das abas
 
 - Removidas as abas **Inserir** e **Vista**. A faixa mantém Montagem, Peça, Inspecionar e a aba contextual Rascunho.

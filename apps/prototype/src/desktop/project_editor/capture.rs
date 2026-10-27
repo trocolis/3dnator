@@ -40,11 +40,11 @@ pub(crate) fn render_ui_scenario(
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
         | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import"
         | "menu-new-part" | "menu-move" | "menu-copy" | "reference-align" | "reference-sketch"
-        | "copy-beside" | "tree-folders" => {}
+        | "copy-beside" | "tree-folders" | "part-menu-move" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move."
                     .into(),
             );
         }
@@ -71,6 +71,7 @@ pub(crate) fn render_ui_scenario(
             // primeira subopção.
             let ribbon_menu = match pointer.as_str() {
                 "menu-new-part" => Some(0),
+                "part-menu-move" => Some(0),
                 "menu-move" => Some(1),
                 "menu-copy" => Some(2),
                 _ => None,
@@ -350,6 +351,10 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(instance.map(Selection::Instance));
+        }
+        "part-menu-move" => {
+            editor.current_mut().active_part = Some(part);
+            editor.shell.tab = shell::RibbonTab::Model;
         }
         "tree-folders" => {
             // Peça da raiz em edição, com a origem dela visível e a pasta de rascunhos
@@ -1116,6 +1121,18 @@ mod tests {
             "Suporte".into(),
             Arc::new(MeshAsset::new(reference_bracket()?)),
         )?;
+        let (other_part, _) = document.add_mesh(
+            None,
+            "Outra peça".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let other_instance = document
+            .instances()
+            .iter()
+            .find(|i| i.part == other_part)
+            .ok_or("Instância externa ausente")?
+            .id;
+        document.instance_mut(other_instance)?.placement = Placement::new([300., 0., 0.], [0.; 3])?;
         let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
         editor.recoveries.clear();
         editor.show_recovery = false;
@@ -1182,6 +1199,8 @@ mod tests {
         settle(&mut editor, &context)?;
         let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
         click(&mut editor, &context, move_button)?;
+        let free = label_position(&mut editor, &context, text(T::MoveFree))?;
+        click(&mut editor, &context, free)?;
         editor.set_move_for_capture([50., 0., 0.], [0.; 3]);
         frame(&mut editor, &context, vec![enter()])?;
         settle(&mut editor, &context)?;
@@ -1237,6 +1256,92 @@ mod tests {
                 .bodies
                 .len(),
             1
+        );
+        editor.current_mut().changed();
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: original }));
+        editor.invalidate_scene();
+        settle(&mut editor, &context)?;
+        // Cada subopção usa geometria da malha real e altera somente a posição do
+        // corpo. Desfazer entre os casos mantém a mesma origem de referência.
+        for (label, mode) in [
+            (T::MoveFaceToFace, navigation::PickMode::Face),
+            (T::MoveEdgeToEdge, navigation::PickMode::Edge),
+            (T::MovePointToPoint, navigation::PickMode::Vertex),
+        ] {
+            let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
+            click(&mut editor, &context, move_button)?;
+            let option = label_position(&mut editor, &context, text(label))?;
+            click(&mut editor, &context, option)?;
+            assert_eq!(editor.pick_mode, mode);
+            let mut from = editor
+                .current()
+                .session
+                .document()
+                .pick(nator_geometry::query::Ray {
+                    origin: [10., 10., 100.],
+                    direction: [0., 0., -1.],
+                })?
+                .ok_or("Corpo de origem não atingido")?;
+            navigation::snap_pick(&mut from, mode);
+            let target = std::array::from_fn(|i| from.point[i] + [5., 6., 7.][i]);
+            editor.set_align_for_capture(from.clone(), target);
+            frame(&mut editor, &context, vec![enter()])?;
+            settle(&mut editor, &context)?;
+            let document = editor.current().session.document();
+            let body = document.body(original).ok_or("Corpo alinhado ausente")?;
+            assert_eq!(document.part(part).ok_or("Peça ausente")?.bodies.len(), 1);
+            assert!(
+                nator_geometry::norm(nator_geometry::sub(
+                    body.placement.apply(from.point),
+                    target
+                )) < 1e-8
+            );
+            assert_eq!(
+                document
+                    .instance(from.instance)
+                    .ok_or("Instância ausente")?
+                    .placement
+                    .translation_mm(),
+                [0.; 3]
+            );
+            assert!(editor.current_mut().session.undo());
+            editor.current_mut().changed();
+            editor.invalidate_scene();
+            settle(&mut editor, &context)?;
+        }
+        // Uma origem pertencente a outra peça nunca pode transformar esse componente
+        // durante a edição da peça ativa, mesmo que chegue ao painel por uma seleção.
+        let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
+        click(&mut editor, &context, move_button)?;
+        let option = label_position(&mut editor, &context, text(T::MovePointToPoint))?;
+        click(&mut editor, &context, option)?;
+        let foreign = editor
+            .current()
+            .session
+            .document()
+            .pick(nator_geometry::query::Ray {
+                origin: [310., 10., 100.],
+                direction: [0., 0., -1.],
+            })?
+            .ok_or("Corpo externo não atingido")?;
+        assert_eq!(foreign.part, other_part);
+        let revision = editor.current().session.revision();
+        editor.set_align_for_capture(foreign, [0.; 3]);
+        frame(&mut editor, &context, vec![enter()])?;
+        assert!(editor.assembly_panel.is_some());
+        assert_eq!(editor.current().session.revision(), revision);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .instance(other_instance)
+                .ok_or("Instância externa ausente")?
+                .placement
+                .translation_mm(),
+            [300., 0., 0.]
         );
         Ok(())
     }

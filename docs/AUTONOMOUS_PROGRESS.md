@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Subopções de Mover na aba Peça — 26/10/2026
+
+- Mover na Peça agora abre o mesmo menu da Montagem: Livre, Face a face, Aresta a aresta e Vértice a vértice. As opções compartilham uma definição; Livre mantém a distinção entre corpos e componentes. O grupo Modificar conserva Copiar, Combinar e Dividir ao lado do menu.
+- Alinhamentos durante a construção recusam origens de outras peças e continuam aceitando geometria externa como destino. Ensaio gráfico ampliado verifica as quatro entradas, alinhamento de corpos, instâncias preservadas e desfazer, além da recusa de origem externa.
+- Aprovados os 30 testes da aplicação com e sem OCCT, os quatro ensaios gráficos em série, formatação, Clippy nas duas configurações e compilação desktop com OCCT. Menus capturados e inspecionados em `target/codex-validation/part-move-menu-20261026/`; cenário novo `part-menu-move`. Sem release, migração ou publicação remota.
+
 ## Faixa sem Inserir e Vista — 26/10/2026
 
 - Removidas as abas Inserir e Vista e seus grupos da faixa, com ajuste do cenário de captura de inserção para Montagem. A faixa mantém Montagem, Peça e Inspecionar, além de Rascunho contextual. Busca e controles existentes conservam acesso às ferramentas.

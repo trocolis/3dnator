@@ -543,14 +543,15 @@ impl Editor {
             draft.rotation = rotation;
         }
     }
-    /// Origem e destino de um alinhamento ponto a ponto, para capturas de ensaio.
+    /// Origem e destino de um alinhamento para capturas de ensaio. O destino define
+    /// normal +Z e aresta +X, também válidos para os modos face e aresta.
     pub(super) fn set_align_for_capture(&mut self, from: Pick, to: Point3) {
         if let Some(Panel::Align(d)) = &mut self.assembly_panel {
             d.from = Some(from);
             d.to = Some(Anchor {
                 point: to,
                 normal: [0., 0., 1.],
-                edge: [to; 2],
+                edge: [to, [to[0] + 1., to[1], to[2]]],
                 label: text(T::ReferenceSketch).into(),
                 reference: true,
             });
@@ -787,8 +788,12 @@ impl Editor {
                 navigation::snap_pick(&mut pick, d.kind);
                 // A origem é sempre geometria do elemento que se move.
                 if d.field == Some(AlignField::From) {
-                    d.from = Some(pick);
-                    d.field = d.to.is_none().then_some(AlignField::To);
+                    if active.is_some_and(|p| p != pick.part) {
+                        self.status = text(T::PickOtherPart).into();
+                    } else {
+                        d.from = Some(pick);
+                        d.field = d.to.is_none().then_some(AlignField::To);
+                    }
                 }
             }
             Some(Panel::Pattern(d)) => {
@@ -919,6 +924,9 @@ impl Editor {
             }
             Panel::Align(d) => {
                 let from = d.from.as_ref()?;
+                if tab.active_part.is_some_and(|p| p != from.part) {
+                    return None;
+                }
                 d.to.as_ref()?;
                 let delta = d.delta()?;
                 let item = if tab.active_part == Some(from.part) {

@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Menu Mover compartilhado por Peça e Montagem — 26/10/2026
+
+- Aba Peça passa a abrir Mover como menu no mesmo grupo Modificar. As opções e suas descrições são compartilhadas com Montagem: Livre, Face a face, Aresta a aresta e Vértice a vértice. O alvo de Livre é corpo na Peça e componente na Montagem. Alinhamentos recusam origens externas durante a edição de uma peça, tanto na seleção quanto na geração do comando.
+- Ensaio egui/wgpu ampliado clica nas quatro opções, usa geometria da malha para alinhar o corpo, verifica coincidência no destino, instância sem deslocamento, quantidade de corpos e desfazer. Também verifica que uma origem de outra peça não publica movimento.
+- Os **30 testes da aplicação passaram com e sem OCCT**; os quatro ensaios gráficos optativos foram executados em série e aprovados. Formatação, Clippy do workspace com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Capturas reais 1440 × 900 dos menus nas duas abas inspecionadas, pelo egui/wgpu/GL llvmpipe, sem erros de validação.
+- Cenário de captura `part-menu-move` disponível. Evidências em `target/codex-validation/part-move-menu-20261026/`. Versão 0.3.0 e formato 15 preservados; Windows e janela nativa não foram exercitados.
+
 ## Remoção das abas Inserir e Vista — 26/10/2026
 
 - Removidas as duas abas, seus grupos na faixa e a referência no cenário de captura de inserção. Mantidas Montagem, Peça, Inspecionar e Rascunho contextual; ações continuam na busca por S e nos controles existentes. Os identificadores antigos de tradução ficam reservados.
