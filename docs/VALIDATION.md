@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Cubo conforme a referência e edição sem barra de câmera — 27/10/2026
+
+- Removida a faixa permanente de vistas/projeção do canvas. O ensaio gráfico da interface compacta verifica a ausência de Ortográfica/Perspectiva/Enquadrar nessa faixa e o espaço recuperado no topo, em 1280 e 900 pixels.
+- Navegador com chanfro de 0,60, maior escala, tons de cinza, nomes em dicas, Home preenchido e duas setas curvas preenchidas como na imagem fornecida. A geometria continua fechada com 26 direções; seleção acompanha os polígonos. Faixas das setas usam triângulos explícitos para não preencher o recorte côncavo da ponta.
+- Testes do navegador verificam Home com pan/zoom/roll e projeção preservada, passos de 45° nas duas setas, inversão por Shift e botão secundário, menu com troca de projeção/enquadramento/giro de 90°, seleção/arraste sem clique no modelo e tesselação limitada em polos/diagonais/giros. Os giros menores foram transferidos ao menu.
+- A posição inicial da paleta de rascunho fica abaixo do navegador; em canvas curto nasce recolhida, preservando posições ajustadas pelo usuário. Capturas reais inspecionadas em `target/codex-validation/view-cube-reference-20261027/`: `final.png` (1440 × 900), `compact-final.png` (900 × 600), `sketch-final.png` e `sketch-compact.png`. A imagem fornecida permanece fora do versionamento.
+- **178 testes sem OCCT e 241 com OCCT aprovados**, além dos doze ensaios gráficos em série (60 testes da aplicação com os ignorados habilitados). Formatação, Clippy do workspace com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux, com capturas via GL/llvmpipe. Windows não exercitado localmente. Versão 0.3.0 em desenvolvimento e formato 17 preservados.
+
 ## Apoios do modelo projetados no rascunho — 27/10/2026
 
 - Identificada a lacuna: ao abrir um rascunho, a interface projetava somente uma amostra de até 64 vértices da malha por corpo, limitada às primeiras oito ocorrências. Os centros e pontos médios geométricos do movimento ponto a ponto não alimentavam essa lista.

@@ -943,6 +943,16 @@ mod tests {
         }
         for width in [1280., 900.] {
             let labels = draw(&mut editor, &context, width, vec![]);
+            // A câmera agora é controlada pelo cubo e por seu menu; a faixa
+            // permanente de vistas/projeção não deve voltar ao topo do canvas.
+            assert!(
+                !labels
+                    .iter()
+                    .any(|(label, _)| label == text(T::Orthographic)
+                        || label == text(T::Perspective)
+                        || label == text(T::Fit))
+            );
+            assert!(editor.canvas_rect.top() < 210.);
             assert!(!labels.iter().any(|(label, _)| label == text(T::Project) || label.contains(text(T::UnitsMm))));
             let history = labels
                 .iter()

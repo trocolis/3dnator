@@ -8,9 +8,9 @@ use super::{
 };
 use nator_geometry::{dot, norm};
 
-const SIZE: egui::Vec2 = egui::vec2(192., 196.);
-const BEVEL: f64 = 0.72;
-const SCALE: f32 = 34.;
+const SIZE: egui::Vec2 = egui::vec2(208., 200.);
+const BEVEL: f64 = 0.60;
+const SCALE: f32 = 55.;
 
 struct Face {
     normal: Point3,
@@ -22,7 +22,6 @@ struct ProjectedFace {
     polygon: Vec<egui::Pos2>,
     label: Option<T>,
     depth: f64,
-    label_direction: egui::Vec2,
 }
 
 pub(super) fn rect(canvas: egui::Rect) -> egui::Rect {
@@ -33,7 +32,7 @@ pub(super) fn rect(canvas: egui::Rect) -> egui::Rect {
 }
 
 /// Uma única região de arraste impede que a seleção mude de face durante um
-/// movimento. Home, rotação e órbita têm áreas próprias ao redor do cubo.
+/// movimento. Home e órbita têm áreas próprias; os demais controles ficam no menu.
 pub(super) fn show(ui: &mut egui::Ui, camera: &mut Camera, canvas: egui::Rect) {
     let area = rect(canvas);
     if !area.is_positive() {
@@ -57,12 +56,12 @@ pub(super) fn show(ui: &mut egui::Ui, camera: &mut Camera, canvas: egui::Rect) {
 fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: f32) {
     let painter = ui.painter().with_clip_rect(area.intersect(ui.clip_rect()));
     let control =
-        |x, y| egui::Rect::from_min_size(area.min + egui::vec2(x, y), egui::Vec2::splat(24.));
+        |x, y| egui::Rect::from_min_size(area.min + egui::vec2(x, y), egui::Vec2::splat(30.));
     if icon_control(
         ui,
         &painter,
         "view_home",
-        control(4., 35.),
+        control(2., 15.),
         Icon::Home,
         T::ViewHome,
     )
@@ -74,57 +73,23 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
         camera.fit(f64::from(aspect));
         ui.ctx().request_repaint();
     }
-    for (x, icon, label, clockwise) in [
-        (134., Icon::RotateCounterclockwise, T::ViewRotateLeft, false),
-        (160., Icon::RotateClockwise, T::ViewRotateRight, true),
-    ] {
-        if icon_control(
-            ui,
-            &painter,
-            ("view_roll", clockwise),
-            control(x, 35.),
-            icon,
-            label,
-        )
-        .clicked()
-        {
-            camera.rotate_quarter_turn(clockwise);
-            ui.ctx().request_repaint();
-        }
-    }
-    // As setas externas orbitam em passos de 45°; as pequenas giram a tela em
-    // 90°. Áreas disjuntas impedem que esses cliques atinjam faces ou o modelo.
+    // A referência visual usa somente duas setas largas. O gesto modificado
+    // oferece o sentido inverso sem acrescentar botões permanentes ao navegador.
     let step = std::f64::consts::FRAC_PI_4 / 0.008;
     for (index, offset, size, curve, label, delta) in [
         (
             0,
-            [31., 4.],
-            [61., 27.],
-            [[0.95, 0.8], [0.55, 0.05], [0.08, 0.75]],
+            [61., 0.],
+            [93., 44.],
+            [[0.90, 0.74], [0.65, 0.46], [0.25, 0.46]],
             T::ViewOrbitLeft,
             [-step, 0.],
         ),
         (
             1,
-            [92., 4.],
-            [61., 27.],
-            [[0.05, 0.8], [0.45, 0.05], [0.92, 0.75]],
-            T::ViewOrbitRight,
-            [step, 0.],
-        ),
-        (
-            2,
-            [159., 62.],
-            [29., 58.],
-            [[0.25, 0.95], [0.95, 0.5], [0.3, 0.08]],
-            T::ViewOrbitUp,
-            [0., -step],
-        ),
-        (
-            3,
-            [159., 120.],
-            [29., 58.],
-            [[0.25, 0.05], [0.95, 0.5], [0.3, 0.92]],
+            [160., 55.],
+            [45., 91.],
+            [[0.25, 0.10], [0.53, 0.40], [0.53, 0.75]],
             T::ViewOrbitDown,
             [0., step],
         ),
@@ -133,8 +98,11 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
             area.min + egui::vec2(offset[0], offset[1]),
             egui::vec2(size[0], size[1]),
         );
-        if curved_control(ui, &painter, index, rect, curve, label).clicked() {
-            camera.orbit(delta);
+        let response = curved_control(ui, &painter, index, rect, curve, label);
+        if response.clicked() || response.clicked_by(egui::PointerButton::Secondary) {
+            let reverse = response.clicked_by(egui::PointerButton::Secondary)
+                || ui.input(|i| i.modifiers.shift);
+            camera.orbit(delta.map(|v| if reverse { -v } else { v }));
             ui.ctx().request_repaint();
         }
     }
@@ -163,7 +131,52 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text(T::ViewCubeHint))
     });
-    response.clone().on_hover_text(text(T::ViewCubeHint));
+    let hint = hit
+        .and_then(|i| before[i].label)
+        .map(|label| format!("{}\n{}", text(label), text(T::ViewCubeHint)))
+        .unwrap_or_else(|| text(T::ViewCubeHint).into());
+    response.clone().on_hover_text(hint);
+    response.context_menu(|ui| {
+        ui.label(text(T::Projection));
+        for (projection, label) in [
+            (nator_renderer::Projection::Orthographic, T::Orthographic),
+            (nator_renderer::Projection::Perspective, T::Perspective),
+        ] {
+            if ui
+                .selectable_value(&mut camera.projection, projection, text(label))
+                .clicked()
+            {
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button(text(T::Fit)).clicked() {
+            camera.fit(f64::from(aspect));
+            ui.close();
+        }
+        for (icon, label, hint, clockwise) in [
+            (
+                Icon::RotateCounterclockwise,
+                T::ViewRollLeft,
+                T::ViewRotateLeft,
+                false,
+            ),
+            (
+                Icon::RotateClockwise,
+                T::ViewRollRight,
+                T::ViewRotateRight,
+                true,
+            ),
+        ] {
+            if icons::entry(ui, icon, text(label), false)
+                .on_hover_text(text(hint))
+                .clicked()
+            {
+                camera.rotate_quarter_turn(clockwise);
+                ui.close();
+            }
+        }
+    });
     let faces = projected_faces(camera, center);
     let hovered = if response.dragged() {
         None
@@ -176,7 +189,7 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
 }
 
 fn body_rect(area: egui::Rect) -> egui::Rect {
-    egui::Rect::from_center_size(area.min + egui::vec2(94., 119.), egui::Vec2::splat(118.))
+    egui::Rect::from_center_size(area.min + egui::vec2(84., 122.), egui::Vec2::splat(150.))
 }
 
 fn icon_control(
@@ -191,7 +204,17 @@ fn icon_control(
     if response.hovered() {
         painter.rect_filled(rect, 4, theme::BLUE_FILL);
     }
-    icons::paint(painter, rect.shrink(3.), icon, true);
+    icons::paint_with_ink(
+        painter,
+        rect.shrink(3.),
+        icon,
+        true,
+        if response.hovered() {
+            theme::ACCENT
+        } else {
+            egui::Color32::from_rgb(167, 179, 187)
+        },
+    );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text(label)));
     response.on_hover_text(text(label))
 }
@@ -209,44 +232,74 @@ fn curved_control(
         ui.make_persistent_id(("view_orbit", index)),
         egui::Sense::click(),
     );
-    let points: Vec<_> = (0..=20)
-        .map(|i| {
-            let t = i as f32 / 20.;
-            let q: [f32; 2] = std::array::from_fn(|k| {
-                (1. - t).powi(2) * curve[0][k]
-                    + 2. * t * (1. - t) * curve[1][k]
-                    + t * t * curve[2][k]
-            });
-            rect.min + egui::vec2(q[0] * rect.width(), q[1] * rect.height())
-        })
-        .collect();
     let color = if response.hovered() {
         theme::ACCENT
     } else {
-        theme::MUTED
+        egui::Color32::from_rgb(167, 179, 187)
     };
-    painter.add(egui::Shape::line(
-        points.clone(),
-        egui::Stroke::new(3., color),
-    ));
-    if let Some((tip, preceding)) = points
-        .last()
-        .zip(points.get(points.len().saturating_sub(2)))
-    {
-        let direction = (*tip - *preceding).normalized();
+    // A faixa curva usa pares de vértices; a ponta usa um triângulo separado.
+    // Um leque convexo seria incorreto no pescoço côncavo da seta e preencheria o vazio.
+    let mut mesh = egui::Mesh::default();
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for i in 0..=24 {
+        let t = i as f32 / 24.;
+        let at = |k: usize| {
+            (1. - t).powi(2) * curve[0][k] + 2. * t * (1. - t) * curve[1][k] + t * t * curve[2][k]
+        };
+        let direction = egui::vec2(
+            ((1. - t) * (curve[1][0] - curve[0][0]) + t * (curve[2][0] - curve[1][0]))
+                * rect.width(),
+            ((1. - t) * (curve[1][1] - curve[0][1]) + t * (curve[2][1] - curve[1][1]))
+                * rect.height(),
+        )
+        .normalized();
+        let center = rect.min + egui::vec2(at(0) * rect.width(), at(1) * rect.height());
         let perpendicular = egui::vec2(-direction.y, direction.x);
-        painter.add(egui::Shape::convex_polygon(
-            vec![
-                *tip,
-                *tip - direction * 9. + perpendicular * 5.,
-                *tip - direction * 9. - perpendicular * 5.,
-            ],
-            color,
-            egui::Stroke::NONE,
-        ));
+        let a = center + perpendicular * 10.;
+        let b = center - perpendicular * 10.;
+        mesh.colored_vertex(a, color);
+        mesh.colored_vertex(b, color);
+        left.push(a);
+        right.push(b);
+        if i > 0 {
+            let n = (i * 2) as u32;
+            mesh.add_triangle(n - 2, n - 1, n);
+            mesh.add_triangle(n - 1, n + 1, n);
+        }
     }
+    let end = rect.min + egui::vec2(curve[2][0] * rect.width(), curve[2][1] * rect.height());
+    let direction = egui::vec2(
+        (curve[2][0] - curve[1][0]) * rect.width(),
+        (curve[2][1] - curve[1][1]) * rect.height(),
+    )
+    .normalized();
+    let perpendicular = egui::vec2(-direction.y, direction.x);
+    let a = end + perpendicular * 18.5;
+    let b = end - perpendicular * 18.5;
+    let tip = end + direction * 22.;
+    let n = mesh.vertices.len() as u32;
+    for p in [a, tip, b] {
+        mesh.colored_vertex(p, color);
+    }
+    mesh.add_triangle(n, n + 1, n + 2);
+    painter.add(egui::Shape::mesh(mesh));
+    let outline = left
+        .into_iter()
+        .chain([a, tip, b])
+        .chain(right.into_iter().rev())
+        .collect();
+    painter.add(egui::Shape::closed_line(
+        outline,
+        egui::Stroke::new(0.6, egui::Color32::from_rgb(75, 84, 91)),
+    ));
+
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text(label)));
-    response.on_hover_text(text(label))
+    response.on_hover_text(format!(
+        "{}\n{}",
+        text(label),
+        text(T::ViewOrbitReverseHint)
+    ))
 }
 
 fn cube_faces() -> Vec<Face> {
@@ -364,16 +417,7 @@ fn projected_faces(camera: &Camera, center: egui::Pos2) -> Vec<ProjectedFace> {
                 .map(|p| dot(*p, direction))
                 .sum::<f64>()
                 / face.vertices.len() as f64;
-            let label_axis = if face.normal[0].abs() > 0.5 {
-                [0., face.normal[0], 0.]
-            } else if face.normal[1].abs() > 0.5 {
-                [-face.normal[1], 0., 0.]
-            } else {
-                [1., 0., 0.]
-            };
-            let axis = camera.axis_projection(label_axis);
             Some(ProjectedFace {
-                label_direction: egui::vec2(axis[0] as f32, axis[1] as f32),
                 normal: face.normal,
                 polygon,
                 label: face.label,
@@ -443,14 +487,16 @@ fn paint_faces(painter: &egui::Painter, faces: &[ProjectedFace], hovered: Option
             egui::Color32::from_rgb(170, 210, 247)
         } else if face.label.is_some() {
             if face.normal[2].abs() > 0.5 {
-                egui::Color32::from_rgb(232, 240, 249)
+                egui::Color32::from_rgb(153, 163, 171)
             } else if face.normal[0].abs() > 0.5 {
-                egui::Color32::from_rgb(201, 220, 239)
+                egui::Color32::from_rgb(103, 113, 121)
             } else {
-                egui::Color32::from_rgb(216, 231, 246)
+                egui::Color32::from_rgb(121, 131, 139)
             }
+        } else if face.normal[2].abs() > 0.5 {
+            egui::Color32::from_rgb(167, 179, 187)
         } else {
-            egui::Color32::from_rgb(185, 205, 226)
+            egui::Color32::from_rgb(129, 139, 147)
         };
         // Preenchimento por triângulos e contornos independentes não criam junções
         // com miter ilimitado em ângulos quase planos. Mesmo uma regressão futura
@@ -470,32 +516,11 @@ fn paint_faces(painter: &egui::Painter, faces: &[ProjectedFace], hovered: Option
             .take(face.polygon.len())
         {
             if a.distance_sq(*b) > 0.25 {
-                painter.line_segment([*a, *b], egui::Stroke::new(1., theme::MUTED));
+                painter.line_segment(
+                    [*a, *b],
+                    egui::Stroke::new(0.75, egui::Color32::from_rgb(56, 62, 67)),
+                );
             }
-        }
-        if let Some(label) = face.label
-            && signed_area(&face.polygon).abs() > 650.
-        {
-            let sum = face
-                .polygon
-                .iter()
-                .fold(egui::Vec2::ZERO, |s, p| s + p.to_vec2());
-            let center = (sum / face.polygon.len() as f32).to_pos2();
-            let span = face.label_direction.length() * 2. * BEVEL as f32 * SCALE;
-            let font = (span / text(label).chars().count() as f32 * 1.5).clamp(7.5, 10.);
-            let galley = painter.layout_no_wrap(
-                text(label).into(),
-                egui::FontId::proportional(font),
-                theme::INK,
-            );
-            // O texto acompanha a orientação da face e o roll da câmera. Não
-            // corrigir o ângulo para mantê-lo horizontal: isso esconderia os giros.
-            let pos = center - galley.size() * 0.5;
-            let angle = face.label_direction.y.atan2(face.label_direction.x);
-            painter.add(
-                egui::epaint::TextShape::new(pos, galley, theme::INK)
-                    .with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER),
-            );
         }
     }
 }
@@ -579,7 +604,7 @@ mod tests {
     fn tessellation_stays_bounded_at_poles_diagonals_and_quarter_turns() {
         let context = egui::Context::default();
         let center = egui::pos2(260., 180.);
-        let allowed = egui::Rect::from_center_size(center, egui::Vec2::splat(114.));
+        let allowed = egui::Rect::from_center_size(center, egui::Vec2::splat(150.));
         for yaw in 0..16 {
             for pitch in -6..=6 {
                 for turns in 0..4 {
@@ -661,7 +686,7 @@ mod tests {
     }
 
     #[test]
-    fn roll_buttons_step_through_quarter_turns_and_home_restores_the_camera() {
+    fn home_restores_orientation_roll_pan_and_zoom_without_changing_projection() {
         let context = egui::Context::default();
         let mut camera = Camera::default();
         for _ in 0..3 {
@@ -671,25 +696,12 @@ mod tests {
             egui::Pos2::ZERO,
             egui::vec2(620., 400.),
         ));
-        let original = camera.direction();
-        for angle in [90., 180., 270., 0.] {
-            let position = area.min + egui::vec2(172., 47.);
-            frame(&context, &mut camera, pointer(position, true));
-            let released = frame(&context, &mut camera, pointer(position, false));
-            assert!(!released.canvas_clicked);
-            assert!((camera.roll_angle().to_degrees() - angle).abs() < 1e-9);
-            assert_eq!(camera.direction(), original);
-        }
-        let position = area.min + egui::vec2(146., 47.);
-        frame(&context, &mut camera, pointer(position, true));
-        frame(&context, &mut camera, pointer(position, false));
-        assert!((camera.roll_angle().to_degrees() - 270.).abs() < 1e-9);
         camera.projection = nator_renderer::Projection::Perspective;
         camera.set_direction([1., 0., 0.]);
         camera.pan([60., -35.], 400.);
         camera.span = 0.3;
         camera.rotate_quarter_turn(true);
-        let position = area.min + egui::vec2(16., 47.);
+        let position = area.min + egui::vec2(17., 30.);
         frame(&context, &mut camera, pointer(position, true));
         frame(&context, &mut camera, pointer(position, false));
         assert!(camera.roll_angle().abs() < 1e-12);
@@ -712,7 +724,7 @@ mod tests {
     }
 
     #[test]
-    fn external_arrows_orbit_45_degrees_without_clicking_the_canvas() {
+    fn two_filled_arrows_orbit_in_both_directions_without_clicking_the_canvas() {
         let context = egui::Context::default();
         let mut camera = Camera::default();
         for _ in 0..3 {
@@ -722,20 +734,104 @@ mod tests {
             egui::Pos2::ZERO,
             egui::vec2(620., 400.),
         ));
-        for offset in [
-            egui::vec2(61., 17.),
-            egui::vec2(122., 17.),
-            egui::vec2(173., 92.),
-            egui::vec2(173., 150.),
-        ] {
-            let before = camera.direction();
+        for offset in [egui::vec2(110., 25.), egui::vec2(183., 98.)] {
+            let original = camera.direction();
             let position = area.min + offset;
             frame(&context, &mut camera, pointer(position, true));
-            let after = frame(&context, &mut camera, pointer(position, false));
-            assert!(!after.canvas_clicked);
-            let angle = dot(before, camera.direction()).clamp(-1., 1.).acos();
+            let released = frame(&context, &mut camera, pointer(position, false));
+            assert!(!released.canvas_clicked);
+            let angle = dot(original, camera.direction()).clamp(-1., 1.).acos();
             assert!((angle - std::f64::consts::FRAC_PI_4).abs() < 1e-10);
+            for pressed in [true, false] {
+                let mut events = pointer(position, pressed);
+                for event in &mut events {
+                    if let egui::Event::PointerButton { modifiers, .. } = event {
+                        modifiers.shift = true;
+                    }
+                }
+                let released =
+                    frame_with_modifiers(&context, &mut camera, events, egui::Modifiers::SHIFT);
+                assert!(!released.canvas_clicked);
+            }
+            assert!(norm(sub(camera.direction(), original)) < 1e-10);
+            for pressed in [true, false] {
+                let mut events = pointer(position, pressed);
+                for event in &mut events {
+                    if let egui::Event::PointerButton { button, .. } = event {
+                        *button = egui::PointerButton::Secondary;
+                    }
+                }
+                let released = frame(&context, &mut camera, events);
+                assert!(!released.canvas_clicked);
+            }
+            assert!(norm(sub(camera.direction(), original)) > 0.1);
+            // Restaurar a base antes de conferir o outro eixo.
+            camera.set_direction(original);
         }
+    }
+
+    #[test]
+    fn cube_menu_preserves_projection_fit_and_quarter_turn_controls() -> TestResult<()> {
+        let context = egui::Context::default();
+        let mut camera = Camera::default();
+        for _ in 0..3 {
+            frame(&context, &mut camera, vec![]);
+        }
+        let area = rect(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(620., 400.),
+        ));
+        let direction = camera.direction();
+        for (label, turn) in [
+            (T::Perspective, 0.),
+            (T::ViewRollRight, 90.),
+            (T::ViewRollLeft, 0.),
+            (T::Orthographic, 0.),
+            (T::Fit, 0.),
+        ] {
+            let mut menu = frame(&context, &mut camera, vec![]);
+            for pressed in [true, false] {
+                let mut events = pointer(body_rect(area).center(), pressed);
+                for event in &mut events {
+                    if let egui::Event::PointerButton { button, .. } = event {
+                        *button = egui::PointerButton::Secondary;
+                    }
+                }
+                menu = frame(&context, &mut camera, events);
+                assert!(!menu.canvas_clicked);
+            }
+            // O popup estabiliza o tamanho no quadro seguinte antes do clique.
+            let output = frame(&context, &mut camera, vec![]);
+            let position = output
+                .commands
+                .shapes
+                .iter()
+                .chain(&menu.commands.shapes)
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.job.text == text(label) => {
+                        Some(t.visual_bounding_rect().center())
+                    }
+                    _ => None,
+                })
+                .ok_or("Item ausente no menu do cubo")?;
+            for pressed in [true, false] {
+                frame(&context, &mut camera, pointer(position, pressed));
+            }
+            assert_eq!(camera.direction(), direction);
+            assert!((camera.roll_angle().to_degrees() - turn).abs() < 1e-9);
+            if matches!(label, T::Perspective) {
+                assert_eq!(camera.projection, nator_renderer::Projection::Perspective);
+            }
+            if matches!(label, T::Orthographic) {
+                assert_eq!(camera.projection, nator_renderer::Projection::Orthographic);
+            }
+            if matches!(label, T::Fit) {
+                let mut expected = Camera::default();
+                expected.fit(620. / 400.);
+                assert!((camera.span - expected.span).abs() < 1e-12);
+            }
+        }
+        Ok(())
     }
 
     struct Frame {
@@ -744,6 +840,16 @@ mod tests {
         canvas_dragged: bool,
     }
     fn frame(context: &egui::Context, camera: &mut Camera, events: Vec<egui::Event>) -> Frame {
+        frame_with_modifiers(context, camera, events, egui::Modifiers::NONE)
+    }
+    fn frame_with_modifiers(
+        context: &egui::Context,
+        camera: &mut Camera,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> Frame {
+        let mut events = events;
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
         let mut canvas_clicked = false;
         let mut canvas_dragged = false;
         let mut output = context.run_ui(

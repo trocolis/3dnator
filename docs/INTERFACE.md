@@ -45,7 +45,7 @@ A origem do projeto (global) aparece na área 3D por padrão; a origem de cada p
 
 O rascunho permanece visível ao concluir. Criar uma extrusão, revolução ou furo oculta o rascunho usado, apenas depois de uma operação bem-sucedida. Cada rascunho tem um olho na árvore, inclusive em subpeças, para mostrar/ocultar sem abrir a edição. Clicar no nome abre a edição e mostra o perfil. A visibilidade é salva e participa de desfazer/refazer; recálculos não anulam uma reexibição manual. Projetos anteriores preservam a visibilidade já armazenada.
 
-O rascunho existente é enquadrado ao abrir, considerando centros e extensões de círculos/arcos. O botão **Enquadrar** da faixa sobre o canvas restaura essa vista após zoom, deslocamento ou redimensionamento da janela. As cotas usam a formatação em português, sem zeros decimais desnecessários.
+O rascunho existente é enquadrado ao abrir, considerando centros e extensões de círculos/arcos. O comando **Enquadrar**, disponível na busca por S, restaura essa vista após zoom, deslocamento ou redimensionamento da janela. As cotas usam a formatação em português, sem zeros decimais desnecessários.
 
 A árvore usa ícones, controles de visibilidade, nomes abreviados por elipse e pastas por tipo (ver **Árvore do projeto**). Duplo clique em peça entra na edição dela. O ícone de pasta no canto da faixa recolhe/restaura a árvore. O painel lateral Propriedades foi eliminado; o viewport ocupa todo o espaço à direita da árvore. A árvore tem largura ajustável e rolagem; a faixa de ferramentas também rola horizontalmente em janelas menores.
 
@@ -166,11 +166,13 @@ O fundo claro do renderizador e do rascunho usa a mesma paleta dos painéis. Cor
 
 ## Cubo de orientação
 
-No canto superior direito da área 3D, clique em uma face, aresta chanfrada ou canto para escolher uma das 26 direções. A área selecionável acompanha o polígono visível, e as faces têm nomes em português que giram junto da orientação. O indicador separado de linhas XYZ foi removido.
+No canto superior direito da área 3D, o cubo segue o desenho de referência: tons de cinza, chanfros largos, Home à esquerda e duas setas curvas preenchidas. Clique em uma face, aresta chanfrada ou canto para escolher uma das 26 direções. A área selecionável acompanha o polígono visível; os nomes em português aparecem na dica do mouse, sem texto sobre o cubo. A área de edição não tem a antiga barra permanente de vistas/projeção.
 
 Arraste com o botão esquerdo sobre o cubo para orbitar livremente. O movimento continua ao passar pelas vistas superior e inferior; não seleciona nem desloca corpos. A órbita com Shift + botão do meio usa o mesmo referencial da tela.
 
-O botão **Home**, à esquerda do cubo, restaura a vista isométrica padrão, zera a inclinação da tela e enquadra o modelo, conservando a projeção ortográfica/perspectiva. As setas curvas grandes acima e à direita orbitam a câmera em passos de 45°, nos sentidos horizontal e vertical. As duas setas pequenas no alto à direita giram a tela até o próximo múltiplo de 90°, conservando direção observada, alvo e zoom. Os controles ocupam regiões separadas das faces e não selecionam o modelo.
+O botão **Home**, à esquerda do cubo, restaura a vista isométrica padrão, zera a inclinação da tela e enquadra o modelo, conservando a projeção ortográfica/perspectiva. A seta superior gira para a esquerda, e a lateral, para baixo, em passos de 45°. **Shift+clique** ou botão direito na seta inverte o sentido. Os controles ocupam regiões separadas das faces e não selecionam o modelo.
+
+O **botão direito no cubo** abre o menu com **Ortográfica**, **Perspectiva**, **Enquadrar** e giros da tela em 90° para esquerda/direita. Os giros conservam direção observada, alvo e zoom. Vistas convencionais e enquadramento também continuam na busca de ferramentas por S.
 
 O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visualização; não acrescenta operações ao histórico paramétrico ou ao desfazer/refazer do documento.
 

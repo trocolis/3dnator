@@ -299,15 +299,17 @@ impl Editor {
         let mut submit = false;
         let mut open_repair = false;
         let mut edit_dimension = false;
+        // A paleta começa abaixo do navegador maior, sem cobrir cantos/setas.
+        // Em janelas curtas nasce recolhida; posições arrastadas pelo usuário
+        // continuam sendo conservadas pelo estado da janela do egui.
+        let tools_top =
+            (view_cube::rect(self.canvas_rect).bottom() + 12.).max(self.canvas_rect.top() + 170.);
         egui::Window::new(text(T::Sketch))
             .id(egui::Id::new("sketch_tools"))
             .default_width(245.)
             .default_height(200.)
-            .default_open(self.canvas_rect.height() > 320.)
-            .default_pos(egui::pos2(
-                self.canvas_rect.right() - 265.,
-                self.canvas_rect.top() + 170.,
-            ))
+            .default_open(self.canvas_rect.height() > 440.)
+            .default_pos(egui::pos2(self.canvas_rect.right() - 265., tools_top))
             .show(context, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height((self.canvas_rect.height() - 230.).max(120.))

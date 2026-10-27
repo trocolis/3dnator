@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Cubo de vista segundo a imagem e remoção da barra do canvas — 27/10/2026
+
+- Retirada a barra permanente da câmera. Navegador redesenhado em cinza, com chanfros largos, Home preenchido e duas setas preenchidas; nomes das faces em dicas. Shift/botão secundário inverte a órbita, e o menu do cubo reúne projeção, enquadramento e giros de 90°.
+- Conservadas as 26 orientações, seleção por polígono, arraste e restauração Home. A paleta de rascunho inicia abaixo do novo controle e recolhida em telas curtas. Capturas em `target/codex-validation/view-cube-reference-20261027/` conferidas nas duas dimensões e no modo rascunho.
+- Aprovados 178 testes sem OCCT, 241 com OCCT, doze ensaios gráficos (60 testes da aplicação no total), formatação, Clippy nas duas configurações e compilação desktop com OCCT. Sem alteração de formato, release ou publicação remota; imagem do usuário preservada fora do commit.
+
 ## Captura dos apoios projetados no plano do rascunho — 27/10/2026
 
 - Substituída a projeção inicial de vértices amostrados pela consulta dos apoios geométricos completos, incluindo pontos médios de arestas e centros triangulares/retangulares. Composição de posições antes da projeção ortogonal; sem limite às primeiras oito ocorrências ou 64 vértices.

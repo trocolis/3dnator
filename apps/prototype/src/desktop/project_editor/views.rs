@@ -224,7 +224,6 @@ impl Editor {
             .frame(egui::Frame::new().fill(theme::CANVAS).inner_margin(8))
             .show(ui, |ui| {
                 self.animate_camera(ui.ctx());
-                self.camera_bar(ui);
                 if self.current().plane_pick.is_some() {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(text(T::ChooseSketchPlane));

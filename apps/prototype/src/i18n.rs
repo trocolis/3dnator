@@ -11,6 +11,8 @@ pub enum Text {
     ViewBottom,
     ViewRotateLeft,
     ViewRotateRight,
+    ViewRollLeft,
+    ViewRollRight,
     #[allow(dead_code)]
     ViewUpright,
     ViewCubeHint,
@@ -84,9 +86,12 @@ pub enum Text {
     StatusAttention,
     ViewHome,
     ViewOrbitLeft,
+    #[allow(dead_code)]
     ViewOrbitRight,
+    #[allow(dead_code)]
     ViewOrbitUp,
     ViewOrbitDown,
+    ViewOrbitReverseHint,
     Extrude,
     Revolve,
     Join,
@@ -294,6 +299,7 @@ pub enum Text {
     Saved,
     Imported,
     Assembly,
+    #[allow(dead_code)]
     Construction,
     EditPart,
     LeavePart,
@@ -622,9 +628,11 @@ pub fn text(key: Text) -> &'static str {
         Text::ViewBottom => "Inferior",
         Text::ViewRotateLeft => "Girar até a próxima orientação de 90° no sentido anti-horário",
         Text::ViewRotateRight => "Girar até a próxima orientação de 90° no sentido horário",
+        Text::ViewRollLeft => "Girar 90° à esquerda",
+        Text::ViewRollRight => "Girar 90° à direita",
         Text::ViewUpright => "Retornar à orientação de 0°",
         Text::ViewCubeHint => {
-            "Cubo de orientação: clique em faces, arestas ou cantos; arraste para orbitar."
+            "Cubo de orientação: clique em faces, arestas ou cantos; arraste para orbitar. Botão direito abre as opções da vista."
         }
 
         Text::MinimizeWindow => "Minimizar janela",
@@ -784,6 +792,9 @@ pub fn text(key: Text) -> &'static str {
         Text::ViewOrbitRight => "Girar vista para a direita",
         Text::ViewOrbitUp => "Girar vista para cima",
         Text::ViewOrbitDown => "Girar vista para baixo",
+        Text::ViewOrbitReverseHint => {
+            "Passo de 45°. Shift+clique ou botão direito inverte o sentido."
+        }
         Text::Extrude => "Extrusão",
         Text::Revolve => "Revolução",
         Text::Join => "Unir",

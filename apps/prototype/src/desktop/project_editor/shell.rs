@@ -1437,52 +1437,6 @@ impl Editor {
                 );
             });
     }
-    pub(super) fn camera_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.;
-            for action in [
-                Action::Fit,
-                Action::Iso,
-                Action::Front,
-                Action::Top,
-                Action::Side,
-            ] {
-                self.action_button(ui, action, false);
-            }
-            ui.separator();
-            egui::ComboBox::from_id_salt("camera_projection")
-                .width(120.)
-                .selected_text(text(match self.viewport.camera.projection {
-                    nator_renderer::Projection::Orthographic => T::Orthographic,
-                    nator_renderer::Projection::Perspective => T::Perspective,
-                }))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.viewport.camera.projection,
-                        nator_renderer::Projection::Orthographic,
-                        text(T::Orthographic),
-                    );
-                    ui.selectable_value(
-                        &mut self.viewport.camera.projection,
-                        nator_renderer::Projection::Perspective,
-                        text(T::Perspective),
-                    );
-                })
-                .response
-                .on_hover_text(text(T::Projection));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(text(if self.current().active_part.is_some() {
-                        T::Construction
-                    } else {
-                        T::Assembly
-                    }))
-                    .small()
-                    .color(theme::MUTED),
-                );
-            });
-        });
-    }
     pub(super) fn command_palette(&mut self, context: &egui::Context) {
         if !self.shell.search_open {
             return;

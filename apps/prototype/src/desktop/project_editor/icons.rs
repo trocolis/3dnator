@@ -214,20 +214,12 @@ pub(super) fn paint_with_ink(
     let p = &pen;
     match icon {
         Icon::Home => {
-            p.line(&[[3., 11.], [12., 3.], [21., 11.]], p.ink);
-            p.line(
-                &[
-                    [5., 10.],
-                    [5., 21.],
-                    [10., 21.],
-                    [10., 14.],
-                    [14., 14.],
-                    [14., 21.],
-                    [19., 21.],
-                    [19., 10.],
-                ],
-                p.ink,
-            );
+            // Silhueta preenchida com porta vazada, seguindo o navegador de vista.
+            // Partes convexas mantêm a tesselação correta no recorte da porta.
+            p.face(&[[2., 9.], [12., 3.], [22., 9.]], p.ink);
+            p.face(&[[5., 9.], [19., 9.], [19., 14.], [5., 14.]], p.ink);
+            p.face(&[[5., 14.], [9., 14.], [9., 22.], [5., 22.]], p.ink);
+            p.face(&[[15., 14.], [19., 14.], [19., 22.], [15., 22.]], p.ink);
         }
         Icon::Cube
         | Icon::Extrude
