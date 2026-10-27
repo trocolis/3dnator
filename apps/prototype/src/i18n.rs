@@ -24,8 +24,12 @@ pub enum Text {
     ArcShort,
     Visibility,
     ModelTab,
+    /// Identificador reservado da aba removida, preservado para futuras traduções.
+    #[allow(dead_code)]
     InsertTab,
     InspectTab,
+    /// Identificador reservado da aba removida, preservado para futuras traduções.
+    #[allow(dead_code)]
     ViewTab,
     FileMenu,
     SketchXZ,
@@ -42,10 +46,15 @@ pub enum Text {
     #[allow(dead_code)]
     ManageGroup,
     DocumentGroup,
+    /// Rótulos reservados dos grupos das antigas abas Inserir e Vista.
+    #[allow(dead_code)]
     ImportGroup,
     ExportGroup,
+    #[allow(dead_code)]
     SketchPlanes,
+    #[allow(dead_code)]
     CameraGroup,
+    #[allow(dead_code)]
     PanelsGroup,
     FinishGroup,
     TimelineEmpty,

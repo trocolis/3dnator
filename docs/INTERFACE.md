@@ -5,16 +5,14 @@ A organização visual usa como referência o shell compacto do SolidCraft e seu
 ## Organização e uso
 
 - **Barra superior:** menu Arquivo, salvar, desfazer/refazer, projetos em abas, novo projeto e busca. À direita ficam minimizar, maximizar/restaurar e fechar o aplicativo, substituindo a barra de título nativa. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar.
-A faixa mostra apenas os grupos de ferramentas da aba escolhida, sem bloco fixo de identificação do espaço de trabalho.
+A faixa contém Montagem, Peça e Inspecionar, além de Rascunho durante a edição. Mostra apenas os grupos de ferramentas da aba escolhida, sem bloco fixo de identificação do espaço de trabalho. Importações e ferramentas de visualização também podem ser acessadas pela busca por S; câmera e projeção continuam na faixa sobre a área 3D.
 
 - **Montagem:** primeira aba, aberta por padrão, com o fluxo próprio na ordem de trabalho: **Rascunho de referência** (Referência); **Nova peça** ▾ com Criar nova peça, Criar a partir de STEP e Criar a partir de STL (Peças); **Mover** ▾ com Movimento livre, Face a face, Aresta a aresta e Ponto a ponto (Posicionar); **Copiar** ▾ com Nova instância, Cópia independente e Padrão de repetição; e Agrupar/Desagrupar (Organizar). Os botões com ▾ abrem a lista de subopções, cada uma com ícone e uma linha de explicação. Espelhar componente continua no menu de contexto da árvore; folha técnica e STEP ficam em Inspecionar.
 - **Peça:** substitui a aba Modelo. Grupos na ordem de trabalho: **Rascunho** (Novo rascunho), **Criar** (Extrusão, Revolução, Furo), **Acabamento** (Arredondar, Chanfro, Casca) e **Modificar** (Mover, Copiar, Combinar, Dividir). Mover e Copiar abrem modos separados para corpos da peça ativa, com manipulador e prévia: Mover altera a posição e Copiar mantém o original. Espelhamento e padrões continuam na busca por S; parâmetros ficam em Inspecionar. As operações abrem seu editor com a ferramenta escolhida; perfil e corpo são sugeridos pelo contexto e continuam sujeitos à confirmação.
-- **Inserir:** importação STL/STEP, suporte de referência, rascunhos XY/XZ/YZ ou na face selecionada e exportação. O arquivo próprio continua sendo o meio de preservar o histórico.
 - **Inspecionar:** medição da seleção, folha técnica, parâmetros e exportação. Medir exige um elemento capturado na área 3D; os resultados exatos continuam sendo preparados em segundo plano.
-- **Vista:** enquadramento, orientações, projeção, sombras, triangulação e visibilidade dos painéis. A pequena faixa sobre a área 3D mantém os atalhos de câmera fora da região de seleção.
 - **Rascunho:** aba contextual selecionada ao entrar em edição, com selecionar, linha, retângulo, círculo, arco, aparar e concluir. As cotas, restrições e ferramentas de refinamento permanecem no inspetor rolável. Uma edição pendente precisa ser resolvida ou cancelada antes de concluir. Ao concluir, a faixa volta à aba de onde o rascunho foi aberto.
 
-**Novo rascunho** entra na seleção de suporte sem modificar o documento. Clique num plano colorido da origem (XY/XZ/YZ), num dos atalhos da faixa sobre a área 3D ou numa face plana do sólido. Cancelar/Esc sai da seleção. Faces curvas e malhas não definem planos de rascunho; a seleção de faces exige OCCT. Os atalhos explícitos de XY/XZ/YZ em Inserir continuam disponíveis.
+**Novo rascunho** entra na seleção de suporte sem modificar o documento. Clique num plano colorido da origem (XY/XZ/YZ), num dos atalhos da faixa sobre a área 3D ou numa face plana do sólido. Cancelar/Esc sai da seleção. Faces curvas e malhas não definem planos de rascunho; a seleção de faces exige OCCT. Os atalhos explícitos de XY/XZ/YZ continuam disponíveis na busca de ferramentas por S.
 
 A edição acontece no mesmo viewport do modelo. A câmera se desloca e alinha ao plano, conservando a projeção; os sólidos continuam desenhados. Grade, entidades, cotas, encaixes e cursor usam o plano local da peça e sua posição na montagem. O cubo, pan, zoom e órbita continuam disponíveis durante a edição. Ao concluir, a câmera retorna à orientação anterior, mantendo o alvo e a escala de trabalho.
 
@@ -63,7 +61,7 @@ O STL não informa a unidade. Depois da leitura, o painel **Inserir malha STL** 
 
 ## Peças de outro projeto
 
-**Peça de outro projeto** (aba Inserir) lista os outros projetos abertos em abas e suas definições, com as de topo primeiro e a quantidade de subpeças. OK copia a definição escolhida para o projeto ativo como peças novas e independentes: subpeças repetidas continuam compartilhando a definição copiada e os grupos internos vêm junto. Na construção, a cópia entra como subpeça da peça ativa; na montagem, na raiz. Não há vínculo com o arquivo de origem, que não é alterado. Para repetir uma peça do próprio projeto, use **Nova instância**.
+**Peça de outro projeto** (busca de ferramentas por S) lista os outros projetos abertos em abas e suas definições, com as de topo primeiro e a quantidade de subpeças. OK copia a definição escolhida para o projeto ativo como peças novas e independentes: subpeças repetidas continuam compartilhando a definição copiada e os grupos internos vêm junto. Na construção, a cópia entra como subpeça da peça ativa; na montagem, na raiz. Não há vínculo com o arquivo de origem, que não é alterado. Para repetir uma peça do próprio projeto, use **Nova instância**.
 
 ## Unidades, precisão e miniatura
 
@@ -83,7 +81,7 @@ Cada sugestão tem caixa de seleção e aparece em laranja na área 3D; cruzamen
 
 ## Corte de seção
 
-**Corte de seção** (abas Inspecionar e Vista) esconde a parte do modelo para onde aponta a seta do plano e mostra a seção como tampa hachurada. O plano pode ser XY, XZ, YZ ou o da face escolhida na área 3D (capturado no momento). O deslocamento é digitado ou ajustado arrastando a seta vermelha; **Inverter** troca o lado escondido. OK mantém o corte; Cancelar volta ao estado anterior.
+**Corte de seção** (aba Inspecionar) esconde a parte do modelo para onde aponta a seta do plano e mostra a seção como tampa hachurada. O plano pode ser XY, XZ, YZ ou o da face escolhida na área 3D (capturado no momento). O deslocamento é digitado ou ajustado arrastando a seta vermelha; **Inverter** troca o lado escondido. OK mantém o corte; Cancelar volta ao estado anterior.
 
 O corte é um controle visual da aba, como isolamento e transparência: não altera geometria, histórico nem desfazer, e não é salvo no projeto. Aparece em **Análises** na árvore, com olho para mostrar/ocultar e menu para editar ou excluir. Seleção, pré-seleção e a lista de sobrepostos ignoram a parte cortada. A tampa é desenhada pelas faces internas do sólido: em malhas abertas, o interior exposto aparece igualmente hachurado.
 

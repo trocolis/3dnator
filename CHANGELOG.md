@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Simplificação das abas
+
+- Removidas as abas **Inserir** e **Vista**. A faixa mantém Montagem, Peça, Inspecionar e a aba contextual Rascunho.
+- As ferramentas continuam acessíveis pela busca por S e pelos controles de câmera, menus e painéis existentes. O cenário de captura de inserção de outro projeto agora usa Montagem.
+
 ### Aba Peça
 
 - Modelo passa a se chamar **Peça**, com os grupos: Novo rascunho; Criar (Extrusão, Revolução, Furo); Acabamento (Arredondar, Chanfro, Casca); Modificar (Mover, Copiar, Combinar, Dividir).

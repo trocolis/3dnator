@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Remoção das abas Inserir e Vista — 26/10/2026
+
+- Removidas as duas abas, seus grupos na faixa e a referência no cenário de captura de inserção. Mantidas Montagem, Peça, Inspecionar e Rascunho contextual; ações continuam na busca por S e nos controles existentes. Os identificadores antigos de tradução ficam reservados.
+- Os **30 testes da aplicação passaram com e sem OCCT**; os quatro ensaios gráficos optativos ficaram ignorados nesta execução. Formatação, Clippy do workspace com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados.
+- Captura 1440 × 900 da aba Peça inspecionada sem Inserir/Vista; cenário de inserção de outro projeto também executado com sucesso. Evidências em `target/codex-validation/remove-tabs-20261026/`. Versão 0.3.0 e formato 15 preservados; sem execução Windows ou janela nativa.
+
 ## Aba Peça e modos Mover/Copiar — 26/10/2026
 
 - Modelo renomeada para Peça pelo identificador de tradução existente. Faixa organizada em Rascunho; Criar (Extrusão, Revolução, Furo); Acabamento (Arredondar, Chanfro, Casca); Modificar (Mover, Copiar, Combinar, Dividir). Espelhamento e padrões continuam na busca; parâmetros continuam em Inspecionar. A definição do item solicitado como “Plano extendido” permanece aguardando esclarecimento.

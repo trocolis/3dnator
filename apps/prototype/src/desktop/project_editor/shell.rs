@@ -13,9 +13,7 @@ pub(super) enum RibbonTab {
     #[default]
     Assembly,
     Model,
-    Insert,
     Inspect,
-    View,
     Sketch,
 }
 impl RibbonTab {
@@ -23,9 +21,7 @@ impl RibbonTab {
         match self {
             Self::Model => T::ModelTab,
             Self::Assembly => T::Assembly,
-            Self::Insert => T::InsertTab,
             Self::Inspect => T::InspectTab,
-            Self::View => T::ViewTab,
             Self::Sketch => T::Sketch,
         }
     }
@@ -732,9 +728,7 @@ impl Editor {
                     for tab in [
                         RibbonTab::Assembly,
                         RibbonTab::Model,
-                        RibbonTab::Insert,
                         RibbonTab::Inspect,
-                        RibbonTab::View,
                         RibbonTab::Sketch,
                     ] {
                         if tab == RibbonTab::Sketch && sketch.is_none() {
@@ -1040,52 +1034,10 @@ impl Editor {
                 );
                 self.ribbon_group(ui, T::ArrangeGroup, &[Action::Group, Action::Ungroup]);
             }
-            RibbonTab::Insert => {
-                self.ribbon_group(
-                    ui,
-                    T::ImportGroup,
-                    &[Action::Import, Action::InsertPart, Action::Reference],
-                );
-                self.ribbon_group(
-                    ui,
-                    T::SketchPlanes,
-                    &[
-                        Action::SketchXY,
-                        Action::SketchXZ,
-                        Action::SketchYZ,
-                        Action::SketchFace,
-                    ],
-                );
-                self.ribbon_group(ui, T::ExportGroup, &[Action::ExportStl, Action::ExportStep]);
-            }
             RibbonTab::Inspect => {
                 self.ribbon_group(ui, T::AnalysesGroup, &[Action::Measure, Action::Section]);
                 self.ribbon_group(ui, T::DocumentGroup, &[Action::Drawing, Action::Parameters]);
                 self.ribbon_group(ui, T::ExportGroup, &[Action::ExportStl, Action::ExportStep]);
-            }
-            RibbonTab::View => {
-                self.ribbon_group(
-                    ui,
-                    T::CameraGroup,
-                    &[
-                        Action::Fit,
-                        Action::Iso,
-                        Action::Front,
-                        Action::Top,
-                        Action::Side,
-                    ],
-                );
-                self.ribbon_group(
-                    ui,
-                    T::VisualControls,
-                    &[
-                        Action::Perspective,
-                        Action::Shadows,
-                        Action::Triangles,
-                        Action::Section,
-                    ],
-                );
-                self.ribbon_group(ui, T::PanelsGroup, &[Action::Browser, Action::Properties]);
             }
             RibbonTab::Sketch => {
                 self.ribbon_group(

@@ -287,7 +287,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             // Do projeto auxiliar, inserir uma peça do projeto capturado.
             let source = editor.current().id;
             editor.switch(1);
-            editor.shell.tab = shell::RibbonTab::Insert;
+            editor.shell.tab = shell::RibbonTab::Assembly;
             editor.open_insert_part();
             if let Some(draft) = editor.insert_part.as_mut() {
                 draft.choose_for_capture(source, part);

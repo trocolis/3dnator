@@ -1,5 +1,10 @@
 # Execução autônoma
 
+## Faixa sem Inserir e Vista — 26/10/2026
+
+- Removidas as abas Inserir e Vista e seus grupos da faixa, com ajuste do cenário de captura de inserção para Montagem. A faixa mantém Montagem, Peça e Inspecionar, além de Rascunho contextual. Busca e controles existentes conservam acesso às ferramentas.
+- Aprovados os 30 testes da aplicação nas configurações com e sem OCCT, formatação, Clippy do workspace nas duas configurações e compilação desktop com OCCT. Captura da faixa inspecionada e cenário de inserção executado; evidências em `target/codex-validation/remove-tabs-20261026/`.
+
 ## Reorganização da aba Peça — 26/10/2026
 
 - Aba Modelo renomeada para Peça e ferramentas reagrupadas conforme os itens definidos: Novo rascunho; Extrusão/Revolução/Furo; Arredondar/Chanfro/Casca; Mover/Copiar/Combinar/Dividir. Mover e Copiar abrem modos próprios; a cópia não desloca o original. Ferramentas retiradas da faixa continuam na busca e parâmetros em Inspecionar.
