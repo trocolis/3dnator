@@ -1352,12 +1352,33 @@ impl Editor {
                     egui::vec2(ui.available_width(), 34.),
                     egui::Sense::hover(),
                 );
+                let busy = self.busy();
+                let (label, color) = if !busy && self.pending_failure.is_some() {
+                    (text(T::Failed), theme::DANGER)
+                } else {
+                    self.status.indicator(busy)
+                };
+                let label = label.to_owned();
+                let text_width = ui
+                    .painter()
+                    .layout_no_wrap(
+                        label.clone(),
+                        egui::TextStyle::Small.resolve(ui.style()),
+                        theme::MUTED,
+                    )
+                    .size()
+                    .x;
+                // Mensagens recebem mais espaço, mas mantêm a barra em uma linha
+                // e deixam ao menos metade da largura para histórico e operações.
+                let status_width = (text_width + 20.).clamp(130., (row.width() * 0.45).max(130.));
                 // Reservas independentes mantêm o status na direita e impedem
                 // que uma linha do tempo longa crie uma segunda linha no rodapé.
                 let left =
                     egui::Rect::from_min_max(row.min, egui::pos2(row.left() + 150., row.bottom()));
-                let right =
-                    egui::Rect::from_min_max(egui::pos2(row.right() - 130., row.top()), row.max);
+                let right = egui::Rect::from_min_max(
+                    egui::pos2(row.right() - status_width, row.top()),
+                    row.max,
+                );
                 let middle = egui::Rect::from_min_max(
                     egui::pos2(left.right() + 8., row.top()),
                     egui::pos2(right.left() - 8., row.bottom()),
@@ -1391,20 +1412,29 @@ impl Editor {
                     strip.set_clip_rect(middle.intersect(ui.clip_rect()));
                     self.timeline_strip(&mut strip);
                 }
-                let busy = self.busy();
-                let (label, color) = if !busy && self.pending_failure.is_some() {
-                    (T::Failed, theme::DANGER)
-                } else {
-                    self.status.indicator(busy)
-                };
+                let label_rect = egui::Rect::from_min_max(
+                    egui::pos2(
+                        right.right() - text_width.min(status_width - 20.),
+                        right.top(),
+                    ),
+                    right.max,
+                );
                 let mut state = ui.new_child(
                     egui::UiBuilder::new()
-                        .max_rect(right)
-                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                        .max_rect(label_rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
-                state.label(egui::RichText::new(text(label)).small().color(theme::MUTED));
-                let (dot, _) = state.allocate_exact_size(egui::vec2(8., 8.), egui::Sense::hover());
-                state.painter().circle_filled(dot.center(), 3., color);
+                state
+                    .add(
+                        egui::Label::new(egui::RichText::new(&label).small().color(theme::MUTED))
+                            .truncate(),
+                    )
+                    .on_hover_text(&label);
+                ui.painter().circle_filled(
+                    egui::pos2(label_rect.left() - 12., row.center().y),
+                    3.,
+                    color,
+                );
             });
     }
     pub(super) fn camera_bar(&mut self, ui: &mut egui::Ui) {

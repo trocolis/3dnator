@@ -1,5 +1,12 @@
 # Execução autônoma
 
+## Política de mensagens e erros — 27/10/2026
+
+- Informações e avisos agora permanecem na barra de status. Apenas erros abrem diálogos e entram na fila de confirmação; o diagnóstico paramétrico conserva seu diálogo próprio.
+- Espaço dinâmico e truncamento com dica preservam o rodapé em uma linha, mesmo para mensagens longas. Testes de estado e ensaio gráfico atualizados para o novo comportamento.
+- Aprovados 37 testes da aplicação sem OCCT e 54 com OCCT, incluindo os dez gráficos em série, além de formatação, Clippy nas duas configurações e compilação desktop no Linux.
+- Sem release, migração ou publicação remota.
+
 ## Árvore, rodapé único e Home — 27/10/2026
 
 - Árvore sem título e com linhas menores; raiz com ícone do aplicativo e visibilidade obrigatória, normalizada em arquivos legados. Rodapé reúne Histórico, desfazer/refazer, linha do tempo e indicador curto, sem unidade. Recuperação e precisão ficam em Arquivo.

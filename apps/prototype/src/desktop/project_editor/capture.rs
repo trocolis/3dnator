@@ -257,7 +257,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
         .map(|p| p.features.clone())
         .unwrap_or_default();
     match scenario {
-        "status-dialog" => editor.status.warning(text(T::StaleResult)),
+        "status-dialog" => editor.status.error(text(T::Failed)),
         "extrude-face" | "extrude-cut" => {
             use nator_document::features::{FaceRef, Operation};
             let doc = editor.current().session.document();
@@ -966,8 +966,36 @@ mod tests {
                     .all(|(_, rect)| rect.top() > 775. && rect.right() < ready.left())
             );
         }
-        editor.status.warning("Confira a operação de teste.");
+        editor.status.set("Projeto salvo de teste.");
+        let labels = draw(&mut editor, &context, 1280., vec![]);
+        assert!(!editor.status.has_pending());
+        assert!(!labels.iter().any(|(label, _)| label == text(T::Ok)));
+        assert!(
+            labels
+                .iter()
+                .any(|(label, rect)| label == "Projeto salvo de teste." && rect.top() > 775.)
+        );
+        let warning = "Confira a operação de teste: esta mensagem longa deve permanecer na barra de status, em uma linha, sem cobrir o histórico nem abrir um diálogo.";
+        editor.status.warning(warning);
+        editor.status.set(text(T::Ready));
+        let labels = draw(&mut editor, &context, 900., vec![]);
+        assert!(!editor.status.has_pending());
+        assert!(!labels.iter().any(|(label, _)| label == text(T::Ok)));
+        let status = labels
+            .iter()
+            .find(|(label, _)| label == warning)
+            .ok_or("Aviso ausente no status")?
+            .1;
+        assert!(status.top() > 775. && status.right() < 900.);
+        assert!(
+            editor
+                .timeline
+                .tiles
+                .iter()
+                .all(|(_, rect)| rect.right() < status.left())
+        );
         editor.status.error("Falha de importação de teste.");
+        editor.status.error("Arquivo STEP inválido de teste.");
         for _ in 0..3 {
             draw(&mut editor, &context, 1280., vec![]);
         }
@@ -975,12 +1003,12 @@ mod tests {
         assert!(
             labels
                 .iter()
-                .any(|(label, _)| label == "Confira a operação de teste.")
+                .any(|(label, _)| label == "Falha de importação de teste.")
         );
         assert!(
             !labels
                 .iter()
-                .any(|(label, _)| label == "Falha de importação de teste.")
+                .any(|(label, _)| label == "Arquivo STEP inválido de teste.")
         );
         let ok = labels
             .iter()
@@ -1008,12 +1036,12 @@ mod tests {
         assert!(
             labels
                 .iter()
-                .any(|(label, _)| label == "Falha de importação de teste.")
+                .any(|(label, _)| label == "Arquivo STEP inválido de teste.")
         );
         assert!(
             !labels
                 .iter()
-                .any(|(label, _)| label == "Confira a operação de teste.")
+                .any(|(label, _)| label == "Falha de importação de teste.")
         );
         draw(
             &mut editor,
@@ -2822,8 +2850,8 @@ mod tests {
         context: &egui::Context,
         events: Vec<egui::Event>,
     ) -> Result<egui::Rect, Box<dyn Error>> {
-        // Estes ensaios exercitam ferramentas do CAD. O diálogo de mensagens
-        // tem um ensaio próprio abaixo; nos demais, sua leitura é considerada
+        // Estes ensaios exercitam ferramentas do CAD. O diálogo de erros
+        // tem um ensaio próprio; nos demais, sua leitura é considerada
         // concluída para que ele não intercepte o próximo gesto da ferramenta.
         while editor.status.has_pending() {
             editor.status.dismiss();

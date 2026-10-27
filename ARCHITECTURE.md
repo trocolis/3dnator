@@ -74,7 +74,7 @@ O shell desktop mantém tema, ícones vetoriais e organização de ferramentas e
 
 O navegador `view_cube` é um widget próprio: projeta um poliedro fechado, seleciona seus polígonos e limita o desenho à sua área. A câmera em `renderer` mantém a direção e a inclinação da tela em radianos; órbita, projeção, seleção, pan e zoom usam a mesma base ortonormal. Botões de vistas e faces do cubo escolhem a mesma orientação convencional. O estado é da câmera de cada aba, sem alteração do documento ou do formato de projeto.
 
-O controlador dispõe de Home (isométrica e enquadramento), setas externas de órbita de 45° e controles menores de giro da tela de 90°, com áreas de interação separadas das faces. A barra inferior reúne histórico e estado em uma linha. `notifications::Status` separa estados transitórios de mensagens, mantém uma fila de diálogos e consome a confirmação antes dos painéis de comando. A raiz da árvore é sempre visível por regra de `document`; `restore_folders` normaliza a opção legada sem alterar as escolhas dos descendentes.
+O controlador dispõe de Home (isométrica e enquadramento), setas externas de órbita de 45° e controles menores de giro da tela de 90°, com áreas de interação separadas das faces. A barra inferior reúne histórico e estado/mensagem em uma linha. `notifications::Status` mantém informações e avisos na barra, separa as transições de processamento e reserva a fila de diálogos para erros, consumindo sua confirmação antes dos painéis de comando. A raiz da árvore é sempre visível por regra de `document`; `restore_folders` normaliza a opção legada sem alterar as escolhas dos descendentes.
 
 ### Rascunhos no viewport CAD
 

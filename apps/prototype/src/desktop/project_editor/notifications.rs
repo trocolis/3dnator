@@ -1,5 +1,5 @@
-//! Mensagens são eventos, distintos do estado curto exibido na barra. A fila
-//! preserva avisos entregues no mesmo quadro e a conclusão de tarefas assíncronas.
+//! Informações e avisos ficam na barra de status. Somente erros entram na fila
+//! de diálogos, preservando falhas recebidas durante tarefas assíncronas.
 use super::*;
 use std::{collections::VecDeque, fmt};
 
@@ -17,6 +17,7 @@ pub(super) struct Notice {
 
 pub(super) struct Status {
     last: String,
+    current: Option<Notice>,
     pending: VecDeque<Notice>,
     presented: bool,
 }
@@ -24,6 +25,7 @@ impl Default for Status {
     fn default() -> Self {
         Self {
             last: text(T::Ready).into(),
+            current: None,
             pending: VecDeque::new(),
             presented: false,
         }
@@ -48,31 +50,62 @@ impl Status {
     /// recálculo. Continua disponível aos relatórios sem duplicar sua janela.
     pub fn record(&mut self, message: impl ToString) {
         self.last = message.to_string();
+        self.current = Some(Notice {
+            message: self.last.clone(),
+            level: Level::Error,
+        });
     }
     fn report(&mut self, message: String, level: Level) {
         self.last = message.clone();
-        // Pronto e processamento são estados, não mensagens que exijam leitura.
+        // A preparação de cena também emite Pronto/Processando. Essas transições
+        // não devem apagar uma informação ou aviso antes que se possa lê-lo.
         if message.is_empty() || message == text(T::Ready) || message == text(T::Loading) {
+            if message == text(T::Ready)
+                && self.pending.is_empty()
+                && self
+                    .current
+                    .as_ref()
+                    .is_some_and(|n| n.level == Level::Error)
+            {
+                self.current = None;
+            }
             return;
         }
         let notice = Notice { message, level };
-        if self.pending.back() != Some(&notice) {
+        self.current = Some(notice.clone());
+        if level == Level::Error && self.pending.back() != Some(&notice) {
             self.pending.push_back(notice);
         }
     }
-    pub fn indicator(&self, busy: bool) -> (T, egui::Color32) {
-        if busy {
-            return (T::Loading, theme::ACCENT);
+    pub fn indicator(&self, busy: bool) -> (&str, egui::Color32) {
+        if let Some(error) = self.pending.front() {
+            return (&error.message, theme::DANGER);
         }
-        match self.pending.front().map(|n| n.level) {
-            Some(Level::Error) => (T::Failed, theme::DANGER),
-            Some(Level::Warning) => (T::StatusAttention, theme::WARNING),
-            Some(Level::Information) => (T::StatusMessage, theme::ACCENT),
-            None => (T::Ready, theme::GREEN),
+        if busy {
+            return (text(T::Loading), theme::ACCENT);
+        }
+        match self.current.as_ref() {
+            Some(notice) => (
+                &notice.message,
+                match notice.level {
+                    Level::Error => theme::DANGER,
+                    Level::Warning => theme::WARNING,
+                    Level::Information => theme::GREEN,
+                },
+            ),
+            None => (text(T::Ready), theme::GREEN),
         }
     }
     pub fn dismiss(&mut self) {
         self.pending.pop_front();
+        if self.pending.is_empty()
+            && self
+                .current
+                .as_ref()
+                .is_some_and(|n| n.level == Level::Error)
+        {
+            self.current = None;
+        }
         self.presented = false;
     }
     pub fn has_pending(&self) -> bool {
@@ -96,11 +129,7 @@ impl Editor {
         let was_presented = self.status.presented;
         let result = egui::Modal::new(egui::Id::new("status_message")).show(context, |ui| {
             ui.set_width(390_f32.min((context.content_rect().width() - 60.).max(180.)));
-            ui.heading(text(match notice.level {
-                Level::Information => T::StatusMessage,
-                Level::Warning => T::StatusAttention,
-                Level::Error => T::Failed,
-            }));
+            ui.heading(text(T::Failed));
             ui.add_space(6.);
             egui::ScrollArea::vertical()
                 .max_height(context.content_rect().height() * 0.5)
@@ -130,19 +159,34 @@ impl Editor {
 mod tests {
     use super::*;
     #[test]
-    fn task_states_do_not_erase_pending_messages_or_open_dialogs() {
+    fn information_and_warnings_stay_in_status_while_only_errors_open_dialogs() {
         let mut status = Status::default();
-        status.set(text(T::Loading));
-        assert!(status.pending.is_empty());
-        status.error("Falha de importação");
-        status.error("Falha de importação");
-        status.set(text(T::Ready));
+        status.set("Projeto salvo");
+        assert!(!status.has_pending());
+        assert_eq!(status.indicator(false), ("Projeto salvo", theme::GREEN));
         status.warning("Corrija a medida");
+        status.set(text(T::Loading));
+        assert_eq!(status.indicator(true).0, text(T::Loading));
+        status.set(text(T::Ready));
+        assert!(status.pending.is_empty());
+        assert_eq!(
+            status.indicator(false),
+            ("Corrija a medida", theme::WARNING)
+        );
+        status.error("Falha de importação");
+        status.error("Falha de importação");
+        status.error("Arquivo inválido");
+        status.set(text(T::Ready));
+        status.set("Informação recebida durante o erro");
         assert_eq!(status.pending.len(), 2);
-        assert_eq!(text(status.indicator(false).0), text(T::Failed));
+        assert_eq!(status.indicator(false).0, "Falha de importação");
         status.dismiss();
-        assert_eq!(text(status.indicator(false).0), text(T::StatusAttention));
+        assert_eq!(status.indicator(false).0, "Arquivo inválido");
         status.dismiss();
-        assert_eq!(text(status.indicator(false).0), text(T::Ready));
+        assert!(!status.has_pending());
+        assert_eq!(
+            status.indicator(false).0,
+            "Informação recebida durante o erro"
+        );
     }
 }

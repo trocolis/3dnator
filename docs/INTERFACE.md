@@ -47,9 +47,11 @@ Arraste o fundo livre da barra escura para mover a janela. Duplo clique nessa re
 
 ## Linha do tempo do histórico
 
-Na base há uma única barra: **Histórico**, desfazer/refazer, um separador, a linha do tempo das operações da peça ativa e, à direita, um ponto colorido seguido do estado curto. A linha do tempo representa o histórico paramétrico persistido; desfazer/refazer pertence à sessão e cobre todas as ações abaixo. A faixa central rola horizontalmente e não invade o indicador de estado. O rodapé não mostra a unidade.
+Na base há uma única barra: **Histórico**, desfazer/refazer, um separador, a linha do tempo das operações da peça ativa e, à direita, um ponto colorido seguido do estado ou da mensagem. A linha do tempo representa o histórico paramétrico persistido; desfazer/refazer pertence à sessão e cobre todas as ações abaixo. A faixa central rola horizontalmente e não invade a mensagem. O rodapé não mostra a unidade.
 
-Mensagens informativas, avisos e erros abrem um diálogo com OK; Esc também fecha a mensagem atual. Uma fila preserva mensagens recebidas no mesmo quadro. Pronto e Processando são estados curtos, sem abrir diálogo. Falhas paramétricas mantêm o diálogo específico com as opções de resolução, sem repetir o mesmo diagnóstico em outra janela.
+Mensagens informativas e avisos aparecem na barra de status, com ponto verde ou laranja, sem interromper o trabalho. A mensagem permanece após a preparação da cena; durante o processamento, a barra indica a atividade. Mensagens longas recebem mais espaço, limitado a 45% do rodapé, e são abreviadas em uma linha, com o texto completo na dica do mouse.
+
+Somente erros abrem diálogo, com OK, Enter ou Esc para confirmar a leitura. A fila preserva erros recebidos no mesmo quadro; informações e avisos não entram nessa fila. Falhas paramétricas mantêm o diálogo específico com as opções de resolução, sem repetir o mesmo diagnóstico em outra janela.
 
 - **Reprodução:** os botões ⏮ ◀ ▶ ⏭ movem o marcador do histórico para o início, uma operação para trás, uma para a frente ou para o fim.
 - **Marcador:** a barra azul com alça pode ser arrastada entre as operações para voltar a uma etapa. As operações depois dele ficam esmaecidas e não são construídas; seus resultados ficam ocultos. Novas operações entram na posição do marcador, que avança junto. Avançar o marcador reconstrói as operações reativadas.

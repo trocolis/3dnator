@@ -5,7 +5,7 @@
 ### Árvore compacta, rodapé único e navegação da vista
 
 - Removido o cabeçalho “Árvore do projeto” e reduzida a altura das linhas. A raiz usa o ícone do aplicativo e permanece sempre visível; projetos antigos com a raiz oculta são normalizados ao abrir, preservando as opções dos descendentes.
-- Rodapé em uma linha: Histórico, desfazer/refazer, linha do tempo e indicador de estado à direita. Unidade removida; precisão e recuperação ficam no menu Arquivo. Mensagens e alertas aparecem em diálogos, com fila para preservar entregas no mesmo quadro.
+- Rodapé em uma linha: Histórico, desfazer/refazer, linha do tempo e estado/mensagem à direita. Unidade removida; precisão e recuperação ficam no menu Arquivo. Informações e avisos aparecem na barra de status; somente erros abrem diálogos, com fila para preservar falhas recebidas no mesmo quadro. Mensagens longas são abreviadas com texto completo na dica, sem cobrir a linha do tempo.
 - Cubo com Home, setas curvas de órbita em passos de 45° e botões de giro da tela em 90°, seguindo o esboço. Home restaura a vista isométrica e enquadra o modelo, preservando a projeção escolhida.
 
 ### Importação STEP com triângulos colapsados

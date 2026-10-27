@@ -78,7 +78,9 @@ pub enum Text {
     GroupMembers,
     SolidBody,
     ParametricHistory,
+    #[allow(dead_code)]
     StatusMessage,
+    #[allow(dead_code)]
     StatusAttention,
     ViewHome,
     ViewOrbitLeft,

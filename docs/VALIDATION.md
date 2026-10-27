@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Informações no status e diálogo somente para erros — 27/10/2026
+
+- Informações e avisos exibem o texto na barra, com indicador verde/laranja, sem abrir janela ou bloquear atalhos. Pronto/Processando não apagam essas mensagens ao preparar a cena; erros permanecem na fila exclusiva de diálogos.
+- A reserva de largura acompanha o texto até 45% do rodapé. Mensagens longas recebem elipse e dica com o conteúdo integral, preservando uma linha e a área da linha do tempo.
+- Regressões atualizadas verificam informação e aviso sem diálogo, persistência após transições de processamento, texto longo na barra em 900 pixels, fila de dois erros, confirmação por OK/Esc/Enter e documento intacto. O cenário `status-dialog` passa a representar uma falha.
+- Aplicação aprovada com **37 testes sem OCCT e 54 com OCCT**, incluindo os dez ensaios gráficos executados em série. Formatação, Clippy do workspace nas duas configurações e compilação desktop com OCCT aprovados no Linux. Versão 0.3.0 e formato 17 preservados; Windows e janela nativa não exercitados.
+
 ## Árvore compacta, rodapé e controle de vista — 27/10/2026
 
 - Removido o cabeçalho da árvore e reduzidas as linhas. A raiz usa o ícone do aplicativo, sem olho; o documento recusa sua ocultação e normaliza a opção legada na leitura, preservando a visibilidade dos descendentes. Regressão existente ampliada para verificar essa compatibilidade.
