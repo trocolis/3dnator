@@ -50,6 +50,18 @@ pub(super) enum Icon {
     Circle,
     Arc,
     Trim,
+    SketchOffset,
+    SketchFillet,
+    SketchMirror,
+    CircularPattern,
+    RectangularPattern,
+    Dimension,
+    ConstraintHorizontalVertical,
+    ConstraintCoincident,
+    ConstraintTangent,
+    ConstraintEqual,
+    ConstraintParallel,
+    ConstraintPerpendicular,
     Folder,
     First,
     Previous,
@@ -146,16 +158,48 @@ pub(super) fn paint_with_ink(
     enabled: bool,
     ink: egui::Color32,
 ) {
+    // Geometria de rascunho em verde e restrições em vermelho permitem distinguir
+    // rapidamente criação e intenção geométrica, inclusive na galeria compacta.
+    let constraint = matches!(
+        icon,
+        Icon::ConstraintHorizontalVertical
+            | Icon::ConstraintCoincident
+            | Icon::ConstraintTangent
+            | Icon::ConstraintEqual
+            | Icon::ConstraintParallel
+            | Icon::ConstraintPerpendicular
+    );
+    let sketch = matches!(
+        icon,
+        Icon::Line
+            | Icon::Rectangle
+            | Icon::Circle
+            | Icon::Arc
+            | Icon::Trim
+            | Icon::SketchOffset
+            | Icon::SketchFillet
+            | Icon::SketchMirror
+            | Icon::CircularPattern
+            | Icon::RectangularPattern
+            | Icon::Dimension
+    );
+    let accent = if constraint {
+        theme::DANGER
+    } else if sketch {
+        theme::GREEN
+    } else {
+        theme::ACCENT
+    };
     let pen = Pen {
         painter,
         rect,
         ink: if enabled {
-            ink
+            if constraint { accent } else { ink }
         } else {
             egui::Color32::from_gray(165)
         },
         accent: if enabled {
-            theme::ACCENT
+            accent
         } else {
             egui::Color32::from_gray(165)
         },
@@ -299,12 +343,16 @@ pub(super) fn paint_with_ink(
             p.face(&[[3., 19.], [9., 6.], [9., 19.]], p.fill);
             p.face(&[[15., 6.], [21., 19.], [15., 19.]], p.fill);
         }
-        Icon::Pattern => {
+        Icon::Pattern | Icon::RectangularPattern => {
             for x in [3., 14.] {
                 for y in [3., 14.] {
                     p.face(
                         &[[x, y], [x + 6., y], [x + 6., y + 6.], [x, y + 6.]],
-                        p.fill,
+                        if icon == Icon::RectangularPattern {
+                            p.accent.gamma_multiply(0.35)
+                        } else {
+                            p.fill
+                        },
                     );
                 }
             }
@@ -456,6 +504,67 @@ pub(super) fn paint_with_ink(
             p.circle(18., 18., 3., p.ink);
             p.line(&[[7., 15.], [19., 3.]], p.accent);
             p.line(&[[17., 15.], [5., 3.]], p.accent);
+        }
+        Icon::SketchOffset => {
+            p.line(&[[3., 19.], [3., 8.], [8., 3.], [20., 3.]], p.ink);
+            p.line(&[[8., 21.], [8., 11.], [11., 8.], [22., 8.]], p.accent);
+            p.arrow([13., 16.], [20., 16.]);
+        }
+        Icon::SketchFillet => {
+            p.line(
+                &[[3., 22.], [3., 3.], [22., 3.]],
+                egui::Color32::from_gray(175),
+            );
+            p.line(&[[7., 22.], [7., 14.]], p.accent);
+            let points: Vec<_> = (0..=12)
+                .map(|i| {
+                    let angle = std::f32::consts::PI + i as f32 / 12. * std::f32::consts::FRAC_PI_2;
+                    [14. + 7. * angle.cos(), 14. + 7. * angle.sin()]
+                })
+                .collect();
+            p.line(&points, p.accent);
+            p.line(&[[14., 7.], [22., 7.]], p.accent);
+        }
+        Icon::SketchMirror => {
+            p.line(&[[12., 2.], [12., 22.]], p.ink);
+            p.face(&[[3., 18.], [8., 7.], [8., 18.]], p.accent);
+            p.line(&[[21., 18.], [16., 7.], [16., 18.], [21., 18.]], p.accent);
+        }
+        Icon::CircularPattern => {
+            for i in 0..6 {
+                let angle = i as f32 * std::f32::consts::TAU / 6.;
+                p.circle(12. + 8. * angle.cos(), 12. + 8. * angle.sin(), 2., p.accent);
+            }
+            p.circle(12., 12., 1., p.ink);
+        }
+        Icon::Dimension => {
+            p.line(&[[3., 3.], [3., 21.]], p.ink);
+            p.line(&[[21., 3.], [21., 21.]], p.ink);
+            p.line(&[[4., 12.], [20., 12.]], p.accent);
+            p.arrow([9., 12.], [4., 12.]);
+            p.arrow([15., 12.], [20., 12.]);
+        }
+        Icon::ConstraintHorizontalVertical => p.line(&[[5., 3.], [5., 19.], [21., 19.]], p.accent),
+        Icon::ConstraintCoincident => {
+            p.line(&[[3., 19.], [10., 12.], [21., 17.]], p.ink);
+            p.circle(10., 12., 3., p.accent);
+        }
+        Icon::ConstraintTangent => {
+            p.circle(12., 13., 6., p.accent);
+            p.line(&[[2., 7.], [22., 7.]], p.ink);
+        }
+        Icon::ConstraintEqual => {
+            p.line(&[[4., 8.], [20., 8.]], p.accent);
+            p.line(&[[4., 16.], [20., 16.]], p.accent);
+        }
+        Icon::ConstraintParallel => {
+            p.line(&[[4., 19.], [12., 4.]], p.accent);
+            p.line(&[[12., 20.], [20., 5.]], p.accent);
+        }
+        Icon::ConstraintPerpendicular => {
+            p.line(&[[3., 19.], [21., 19.]], p.accent);
+            p.line(&[[12., 3.], [12., 19.]], p.accent);
+            p.line(&[[12., 14.], [17., 14.], [17., 19.]], p.ink);
         }
         // Controles de reprodução da linha do tempo: barra indica o limite do histórico.
         Icon::First | Icon::Last => {

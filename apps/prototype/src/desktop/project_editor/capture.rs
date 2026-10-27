@@ -1388,6 +1388,214 @@ mod tests {
         Ok(())
     }
 
+    /// Exercita os comandos promovidos da nova faixa, incluindo expressão, confirmação,
+    /// cancelamento e desfazer. O rascunho continua no mesmo viewport durante todo o fluxo.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_ribbon_dimensions_offset_and_cancel_are_transactional() -> Result<(), Box<dyn Error>>
+    {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Faixa do rascunho", Plane::xy());
+        let line = sketch.add_line([0., 0.], [20., 0.], false)?;
+        sketch.add_line([0., -10.], [0., 10.], true)?;
+        sketch.add_circle([40., 0.], 5., true)?;
+        let mut document = Document::new("Rascunho pela faixa")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let enter = || key(egui::Key::Enter, egui::Modifiers::NONE);
+        let point = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [10., 0., 0.],
+        )
+        .ok_or("Linha sem projeção")?;
+        click(&mut editor, &context, point)?;
+        let dimension = label_position(&mut editor, &context, text(T::SketchDimension))?;
+        click(&mut editor, &context, dimension)?;
+        let field = label_position(&mut editor, &context, "20 mm")?;
+        click(&mut editor, &context, field)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                key(
+                    egui::Key::A,
+                    egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                ),
+                egui::Event::Text("32 mm".into()),
+            ],
+        )?;
+        frame(&mut editor, &context, vec![enter()])?;
+        assert!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .and_then(|w| w.active_action())
+                .is_some()
+        );
+        frame(&mut editor, &context, Vec::new())?;
+        frame(&mut editor, &context, vec![enter()])?;
+        settle(&mut editor, &context)?;
+        let record = editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?;
+        let (a, b) = record.sketch.line(line)?;
+        assert!((nator_sketch::distance(a, b) - 32.).abs() < 1e-6);
+        assert_eq!(record.sketch.dimension_expressions.len(), 1);
+        frame(
+            &mut editor,
+            &context,
+            vec![key(
+                egui::Key::Z,
+                egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                },
+            )],
+        )?;
+        settle(&mut editor, &context)?;
+        let record = editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?;
+        let (a, b) = record.sketch.line(line)?;
+        assert!((nator_sketch::distance(a, b) - 20.).abs() < 1e-6);
+        assert!(record.sketch.constraints.is_empty());
+
+        // Deslocar cria uma entidade; o original conserva sua geometria.
+        let offset = label_position(&mut editor, &context, text(T::OffsetField))?;
+        click(&mut editor, &context, offset)?;
+        let field = label_position(&mut editor, &context, "32 mm")?;
+        click(&mut editor, &context, field)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                key(
+                    egui::Key::A,
+                    egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                ),
+                egui::Event::Text("5 mm".into()),
+            ],
+        )?;
+        frame(&mut editor, &context, vec![enter()])?;
+        frame(&mut editor, &context, Vec::new())?;
+        frame(&mut editor, &context, vec![enter()])?;
+        settle(&mut editor, &context)?;
+        let record = editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?;
+        assert_eq!(record.sketch.entities.len(), 4);
+        assert_eq!(record.sketch.line(line)?, ([0., 0.], [20., 0.]));
+        let last = record
+            .sketch
+            .entities
+            .last()
+            .ok_or("Deslocamento ausente")?
+            .id;
+        assert_eq!(record.sketch.line(last)?, ([0., 5.], [20., 5.]));
+        frame(
+            &mut editor,
+            &context,
+            vec![key(
+                egui::Key::Z,
+                egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                },
+            )],
+        )?;
+        settle(&mut editor, &context)?;
+
+        let circular = label_position(&mut editor, &context, text(T::SketchCircularShort))?;
+        click(&mut editor, &context, circular)?;
+        let center = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [45., 0., 0.],
+        )
+        .ok_or("Círculo sem projeção")?;
+        click(&mut editor, &context, center)?;
+        let revision = editor.current().session.revision();
+        frame(
+            &mut editor,
+            &context,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        )?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            3
+        );
+
+        // Em 900 px, Concluir precisa continuar à direita, mesmo com rolagem dos grupos.
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900., 600.),
+                )),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        let finish = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(t) if t.galley.job.text == text(T::FinishSketch) => {
+                    Some(t.visual_bounding_rect())
+                }
+                _ => None,
+            })
+            .ok_or("Concluir escondido na janela compacta")?;
+        assert!(finish.left() > 800. && finish.right() <= 900., "{finish:?}");
+        output.textures_delta.clear();
+        Ok(())
+    }
+
     fn label_position(
         editor: &mut Editor,
         context: &egui::Context,

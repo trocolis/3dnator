@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Faixa Rascunho
+
+- Reorganizada conforme a referência visual do SolidCraft, sem as seções Reference e Configure: Criar (Linha, Retângulo, Círculo, Arco), Modificar (Aparar, Deslocamento, Arredondar), Padrão (Espelhar, Circular, Retangular) e Restringir (Cota e grade de seis restrições). Concluir rascunho fica fixo à direita, acessível também em janelas menores.
+- Menus nos nomes dos grupos dão acesso às ferramentas secundárias; cotas, restrições, deslocamentos, cantos e padrões usam painéis com seleção, validação e OK/Cancelar. Alterações passam pelo solver em segundo plano e pelo histórico de comandos, com desfazer/refazer. A paleta flutuante fica compacta, com diagnóstico, reparo e lista de restrições.
+- Intenções geométricas ficam no módulo de rascunho, sem dependência da interface, e preservam a geometria e os identificadores quando uma edição falha. Ícones vetoriais próprios distinguem criação em verde e restrições em vermelho.
+
 ### Área 3D sem painel Propriedades
 
 - Eliminados o painel lateral Propriedades, seu botão na faixa e sua entrada na busca. A área 3D ocupa todo o espaço à direita da árvore.

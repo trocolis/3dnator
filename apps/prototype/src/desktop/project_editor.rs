@@ -175,7 +175,7 @@ struct Tab {
     path: Option<PathBuf>,
     camera: Camera,
     scene_bounds: Option<nator_geometry::Bounds>,
-    /// Elemento principal da seleção, mostrado nas propriedades.
+    /// Elemento principal da seleção, usado pelas ferramentas e pelos menus da árvore.
     selection: Option<Selection>,
     /// Todos os elementos selecionados (Ctrl+clique, seleção por janela), incluindo o principal.
     selected: Vec<Selection>,
@@ -1482,6 +1482,7 @@ impl Editor {
         }
         self.canvas(ui);
         self.sketch_tools_window(ui.ctx());
+        self.sketch_action_panel(ui.ctx());
         self.measure_window(ui.ctx());
         self.dialogs(ui.ctx());
         self.feature_dialog(ui.ctx());

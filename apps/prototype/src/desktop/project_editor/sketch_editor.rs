@@ -5,6 +5,9 @@ use nator_sketch::{
     snapping::{self, Kind, Tracker},
     solver::{self, Status},
 };
+mod actions;
+pub(super) use actions::{edit_icon, edit_label};
+use nator_sketch::edit::Action as EditAction;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Tool {
@@ -57,12 +60,18 @@ pub(super) struct Workspace {
     reference: bool,
     /// Ocorrências dos padrões do rascunho (o espaçamento usa `dimension`).
     pattern_count: usize,
+    /// Intenção aberta pela faixa; os cliques alternam a seleção até OK/Cancelar.
+    active_action: Option<EditAction>,
 }
 impl Workspace {
+    pub(super) fn active_action(&self) -> Option<EditAction> {
+        self.active_action
+    }
     pub(super) fn tool(&self) -> Tool {
         self.tool
     }
     pub(super) fn select_tool(&mut self, tool: Tool) {
+        self.active_action = None;
         self.tool = tool;
         self.anchors.clear();
         self.anchor_kinds.clear();
@@ -89,6 +98,7 @@ impl Workspace {
             dimension_expression: "10 mm".into(),
             pattern_count: 3,
             reference: false,
+            active_action: None,
         }
     }
 }
@@ -275,41 +285,39 @@ impl Editor {
                 .map(|r| r.sketch.clone())
         })
     }
-    /// Controles contextuais do rascunho sobre o viewport, sem reservar uma coluna
-    /// lateral. A janela acompanha a edição e pode ser movida ou recolhida.
+    /// Paleta compacta de estado e restrições. As operações ficam na faixa; a paleta
+    /// pode ser movida/recolhida e cede espaço ao painel de uma intenção em edição.
     pub(super) fn sketch_tools_window(&mut self, context: &egui::Context) {
         let Some(mut sketch) = self.working_sketch() else {
             return;
         };
-        let busy = self.busy();
-        let parameters = self
+        if self
             .current()
-            .session
-            .document()
-            .parts()
-            .iter()
-            .find(|p| {
-                p.sketches
-                    .iter()
-                    .any(|s| Some(s.id) == self.current().sketch_edit.as_ref().map(|w| w.id))
-            })
-            .map(|p| p.parameters.clone())
-            .unwrap_or_default();
+            .sketch_edit
+            .as_ref()
+            .is_some_and(|w| w.active_action.is_some())
+        {
+            return;
+        }
+        let busy = self.busy();
         let mut submit = false;
-        let mut issue = None;
         let mut open_repair = false;
-        egui::Window::new(text(T::SketchTools))
+        let mut edit_dimension = false;
+        egui::Window::new(text(T::Sketch))
             .id(egui::Id::new("sketch_tools"))
-            .default_width(285.)
-            .default_pos(command_panel::default_position(self.canvas_rect))
+            .default_width(245.)
+            .default_height(200.)
+            .default_open(self.canvas_rect.height() > 320.)
+            .default_pos(egui::pos2(
+                self.canvas_rect.right() - 265.,
+                self.canvas_rect.top() + 170.,
+            ))
             .show(context, |ui| {
                 egui::ScrollArea::vertical()
-                    .id_salt("sketch_tools_scroll")
-                    .max_height((self.canvas_rect.height() - 120.).max(180.))
+                    .max_height((self.canvas_rect.height() - 230.).max(120.))
                     .show(ui, |ui| {
                         ui.label(&sketch.name);
-                        let work = self.current_mut().sketch_edit.as_mut();
-                        let Some(work) = work else {
+                        let Some(work) = self.current_mut().sketch_edit.as_mut() else {
                             return;
                         };
                         let (label, color) = match work.status {
@@ -327,10 +335,7 @@ impl Editor {
                             ));
                         }
                         if work.redundant {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(183, 106, 17),
-                                text(T::Redundant),
-                            );
+                            ui.colored_label(theme::WARNING, text(T::Redundant));
                         }
                         if work.pending.is_some() && ui.button(text(T::Cancel)).clicked() {
                             work.pending = None;
@@ -339,341 +344,79 @@ impl Editor {
                                 degrees_of_freedom: 0,
                             };
                         }
-                        if ui
-                            .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
-                            .on_hover_text(text(T::RepairHint))
-                            .clicked()
-                        {
-                            open_repair = true;
-                        }
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} · {}",
-                                text(T::SketchTools),
-                                text(work.tool.label())
-                            ))
-                            .small()
-                            .color(theme::MUTED),
-                        );
-                        ui.separator();
-                        ui.label(text(T::Dimension));
-                        if ui
-                            .add(
-                                egui::DragValue::new(&mut work.dimension)
-                                    .range(-1e9..=1e9)
-                                    .speed(0.1),
-                            )
-                            .changed()
-                        {
-                            work.dimension_expression = format!("{} mm", work.dimension);
-                        }
-                        ui.text_edit_singleline(&mut work.dimension_expression);
-                        let evaluated = parameters.evaluate(
-                            &work.dimension_expression,
-                            nator_document::parameters::Dimension::Length,
-                        );
-                        if let Ok(value) = &evaluated {
-                            work.dimension = *value;
-                        } else if let Err(error) = &evaluated {
-                            ui.colored_label(theme::DANGER, error.to_string());
-                        }
-                        ui.checkbox(&mut work.reference, text(T::ReferenceDimension));
-                        if let Some(id) = work.constraint
-                            && ui
-                                .add_enabled(
-                                    !busy && evaluated.is_ok(),
-                                    egui::Button::new(text(T::EditDimension)),
-                                )
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(!busy, egui::Button::new(text(T::Select)))
                                 .clicked()
-                            && let Some(c) = sketch.constraints.iter_mut().find(|c| c.id == id)
-                        {
-                            set_dimension_value(&mut c.kind, work.dimension);
-                            c.reference = work.reference;
-                            bind_dimension(&mut sketch, id, work);
-                            submit = true;
-                        }
-                        let selected = work.selected.clone();
-                        if let Some(id) = selected.first().copied() {
-                            ui.label(format!("{}: {id}", text(T::Entity)));
-                            ui.add_enabled_ui(!busy, |ui| {
-                                if ui
-                                    .add_enabled(
-                                        evaluated.is_ok(),
-                                        egui::Button::new(text(T::ApplyDimension)),
-                                    )
-                                    .clicked()
-                                    && let Ok(entity) = sketch.entity(id)
-                                {
-                                    let kind = match entity.curve {
-                                        Curve::Line { start, end } => {
-                                            Some(ConstraintKind::Distance {
-                                                a: start,
-                                                b: end,
-                                                value: work.dimension,
-                                            })
-                                        }
-                                        Curve::Circle { .. } | Curve::Arc { .. } => {
-                                            Some(ConstraintKind::Radius {
-                                                circle: id,
-                                                value: work.dimension,
-                                            })
-                                        }
-                                    };
-                                    if let Some(kind) = kind {
-                                        let old = sketch.constraints.iter_mut().find(|c| {
-                                            match (&c.kind, &kind) {
-                                                (
-                                                    ConstraintKind::Distance { a, b, .. },
-                                                    ConstraintKind::Distance { a: x, b: y, .. },
-                                                ) => a == x && b == y,
-                                                (
-                                                    ConstraintKind::Radius { circle, .. },
-                                                    ConstraintKind::Radius { circle: x, .. },
-                                                ) => circle == x,
-                                                _ => false,
-                                            }
-                                        });
-                                        let dimension_id = if let Some(old) = old {
-                                            old.kind = kind;
-                                            old.reference = work.reference;
-                                            Ok(old.id)
-                                        } else {
-                                            sketch.add_constraint(kind, work.reference)
-                                        };
-                                        match dimension_id {
-                                            Ok(id) => bind_dimension(&mut sketch, id, work),
-                                            Err(error) => issue = Some(error.to_string()),
-                                        }
-                                        submit = true;
-                                    }
-                                }
-                                if ui.button(text(T::FixPoint)).clicked()
-                                    && let Ok(entity) = sketch.entity(id)
-                                    && let Some(point) = entity.point_ids().first().copied()
-                                    && let Ok(position) = sketch.point(point)
-                                {
-                                    if let Err(error) = sketch.add_constraint(
-                                        ConstraintKind::Fixed { point, position },
-                                        false,
-                                    ) {
-                                        issue = Some(error.to_string());
-                                    }
-                                    submit = true;
-                                }
-                                if ui.button(text(T::ConstructionGeometry)).clicked()
-                                    && let Some(entity) =
-                                        sketch.entities.iter_mut().find(|e| e.id == id)
-                                {
-                                    entity.construction = !entity.construction;
-                                    submit = true;
-                                }
-                                if ui.button(text(T::Offset)).clicked() {
-                                    match nator_sketch::tools::offset_entity(
-                                        &mut sketch,
-                                        id,
-                                        work.dimension,
-                                    ) {
-                                        Ok(_) => submit = true,
-                                        Err(error) => issue = Some(error.to_string()),
-                                    };
-                                }
-                                if ui.button(text(T::DeleteEntity)).clicked() {
-                                    sketch.entities.retain(|e| !selected.contains(&e.id));
-                                    sketch.prune_unused_points();
-                                    work.selected.clear();
-                                    submit = true;
-                                }
-                            });
-                        }
-                        if selected.len() == 2
-                            && sketch.line(selected[0]).is_ok()
-                            && sketch.line(selected[1]).is_ok()
-                        {
-                            for (label, rounded) in [(T::Fillet, true), (T::Chamfer, false)] {
-                                if ui
-                                    .add_enabled(!busy, egui::Button::new(text(label)))
-                                    .clicked()
-                                {
-                                    match nator_sketch::tools::refine_corner(
-                                        &mut sketch,
-                                        selected[0],
-                                        selected[1],
-                                        work.dimension,
-                                        rounded,
-                                    ) {
-                                        Ok(_) => submit = true,
-                                        Err(e) => issue = Some(e.to_string()),
-                                    }
-                                }
+                            {
+                                work.select_tool(Tool::Select);
                             }
                             if ui
-                                .add_enabled(!busy, egui::Button::new(text(T::Extend)))
+                                .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
+                                .on_hover_text(text(T::RepairHint))
                                 .clicked()
-                                && let Ok((a, _)) = sketch.line(selected[0])
                             {
-                                match nator_sketch::tools::extend_line(
-                                    &mut sketch,
-                                    selected[0],
-                                    selected[1],
-                                    a,
-                                ) {
-                                    Ok(()) => submit = true,
-                                    Err(e) => issue = Some(e.to_string()),
-                                }
+                                open_repair = true;
                             }
-                            if ui
-                                .add_enabled(!busy, egui::Button::new(text(T::Mirror)))
-                                .clicked()
-                                && let Ok((a, b)) = sketch.line(selected[1])
-                            {
-                                match nator_sketch::tools::mirror(&mut sketch, &selected[..1], a, b)
-                                {
-                                    Ok(_) => submit = true,
-                                    Err(e) => issue = Some(e.to_string()),
-                                }
-                            }
-                            for (label, kind) in [
-                                (
-                                    T::Parallel,
-                                    ConstraintKind::Parallel {
-                                        a: selected[0],
-                                        b: selected[1],
-                                    },
-                                ),
-                                (
-                                    T::Perpendicular,
-                                    ConstraintKind::Perpendicular {
-                                        a: selected[0],
-                                        b: selected[1],
-                                    },
-                                ),
-                                (
-                                    T::EqualLength,
-                                    ConstraintKind::EqualLength {
-                                        a: selected[0],
-                                        b: selected[1],
-                                    },
-                                ),
-                            ] {
-                                if ui
-                                    .add_enabled(!busy, egui::Button::new(text(label)))
-                                    .clicked()
-                                {
-                                    if let Err(error) = sketch.add_constraint(kind, false) {
-                                        issue = Some(error.to_string());
-                                    }
-                                    submit = true;
-                                }
-                            }
-                        }
-                        // Padrões: a primeira seleção é repetida; a segunda define direção ou centro.
-                        if selected.len() == 2 {
-                            ui.add(
-                                egui::DragValue::new(&mut work.pattern_count)
-                                    .range(2..=100)
-                                    .prefix(format!("{} ", text(T::PatternCount))),
-                            );
-                            let linear = sketch.line(selected[1]).ok();
-                            let center = sketch.radial(selected[1]).ok().map(|(c, _)| c);
-                            if let Some((a, b)) = linear
-                                && ui
-                                    .add_enabled(
-                                        !busy,
-                                        egui::Button::new(text(T::SketchLinearPattern)),
-                                    )
-                                    .clicked()
-                            {
-                                match nator_sketch::tools::pattern_linear(
-                                    &mut sketch,
-                                    &selected[..1],
-                                    nator_sketch::sub(b, a),
-                                    work.pattern_count,
-                                    work.dimension,
-                                ) {
-                                    Ok(_) => submit = true,
-                                    Err(e) => issue = Some(e.to_string()),
-                                }
-                            }
-                            if let Some(center) = center
-                                && ui
-                                    .add_enabled(
-                                        !busy,
-                                        egui::Button::new(text(T::SketchCircularPattern)),
-                                    )
-                                    .clicked()
-                            {
-                                match nator_sketch::tools::pattern_circular(
-                                    &mut sketch,
-                                    &selected[..1],
-                                    center,
-                                    work.pattern_count,
-                                ) {
-                                    Ok(_) => submit = true,
-                                    Err(e) => issue = Some(e.to_string()),
-                                }
-                            }
-                        }
+                        });
                         ui.separator();
                         ui.label(text(T::Constraints));
                         let mut remove = None;
-                        egui::ScrollArea::vertical()
-                            .max_height(170.)
-                            .show(ui, |ui| {
-                                for constraint in &sketch.constraints {
-                                    ui.horizontal(|ui| {
-                                        if ui
-                                            .selectable_label(
-                                                work.constraint == Some(constraint.id),
-                                                constraint_label(&constraint.kind),
-                                            )
-                                            .clicked()
-                                        {
-                                            work.constraint = Some(constraint.id);
-                                            if let Some(value) = dimension_value(&constraint.kind) {
-                                                work.dimension = value;
-                                                work.dimension_expression = sketch
-                                                    .dimension_expressions
-                                                    .get(&constraint.id)
-                                                    .cloned()
-                                                    .unwrap_or_else(|| format!("{value} mm"));
-                                                work.reference = constraint.reference;
-                                            }
-                                        }
-                                        if ui
-                                            .add_enabled(!busy, egui::Button::new("×").small())
-                                            .clicked()
-                                        {
-                                            remove = Some(constraint.id);
-                                        }
-                                    });
+                        for constraint in &sketch.constraints {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .selectable_label(
+                                        work.constraint == Some(constraint.id),
+                                        constraint_label(&constraint.kind),
+                                    )
+                                    .clicked()
+                                {
+                                    work.constraint = Some(constraint.id);
+                                    if let Some(value) = dimension_value(&constraint.kind) {
+                                        work.dimension = value;
+                                        work.dimension_expression = sketch
+                                            .dimension_expressions
+                                            .get(&constraint.id)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("{value} mm"));
+                                        work.reference = constraint.reference;
+                                    }
+                                }
+                                if ui
+                                    .add_enabled(!busy, egui::Button::new("×").small())
+                                    .clicked()
+                                {
+                                    remove = Some(constraint.id);
                                 }
                             });
+                        }
                         if let Some(id) = remove {
                             sketch.constraints.retain(|c| c.id != id);
                             sketch.dimension_expressions.remove(&id);
                             work.constraint = None;
                             submit = true;
                         }
-                        ui.separator();
-                        if ui
-                            .add_enabled(
-                                !busy && work.pending.is_none(),
-                                egui::Button::new(text(T::FinishSketch)),
-                            )
+                        if work.constraint.is_some_and(|id| {
+                            sketch
+                                .constraints
+                                .iter()
+                                .any(|c| c.id == id && dimension_value(&c.kind).is_some())
+                        }) && ui
+                            .add_enabled(!busy, egui::Button::new(text(T::EditDimension)))
                             .clicked()
                         {
-                            self.finish_sketch();
+                            edit_dimension = true;
                         }
                     });
             });
-        if let Some(issue) = issue {
-            self.status = issue;
-        } else if submit {
+        if submit {
             self.solve_sketch(context, sketch);
         }
         if open_repair {
             self.open_sketch_repair();
+        }
+        if edit_dimension {
+            self.open_sketch_action(context, EditAction::Dimension);
         }
     }
     pub(super) fn sketch_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) {
@@ -904,22 +647,32 @@ impl Editor {
                             }
                         }
                     } else {
-                        if !ui.input(|i| i.modifiers.ctrl) {
+                        if work.active_action.is_some() {
+                            if let Some(index) = work.selected.iter().position(|e| *e == id) {
+                                work.selected.remove(index);
+                            } else {
+                                work.selected.push(id);
+                            }
+                        } else if !ui.input(|i| i.modifiers.ctrl) {
                             work.selected.clear();
-                        }
-                        if !work.selected.contains(&id) {
+                            work.selected.push(id);
+                        } else if !work.selected.contains(&id) {
                             work.selected.push(id);
                         }
                         work.constraint = None;
-                        work.dimension = sketch
-                            .line(id)
-                            .map(|(a, b)| nator_sketch::distance(a, b))
-                            .or_else(|_| sketch.radial(id).map(|(_, r)| r))
-                            .unwrap_or(10.);
-                        work.dimension_expression = format!("{} mm", work.dimension);
+                        if work.active_action.is_none() {
+                            work.dimension = sketch
+                                .line(id)
+                                .map(|(a, b)| nator_sketch::distance(a, b))
+                                .or_else(|_| sketch.radial(id).map(|(_, r)| r))
+                                .unwrap_or(10.);
+                            work.dimension_expression = format!("{} mm", work.dimension);
+                        }
                     }
                 } else {
-                    work.selected.clear();
+                    if work.active_action.is_none() {
+                        work.selected.clear();
+                    }
                 }
             } else {
                 work.anchors.push(cursor);

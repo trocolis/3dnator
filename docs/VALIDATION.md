@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Faixa Rascunho conforme referência visual — 26/10/2026
+
+- Layout do SolidCraft consultado localmente, com Reference e Configure omitidos. Grupos Criar, Modificar, Padrão e Restringir, grade de seis restrições e Concluir fixo à direita. Capturas 1440 × 900 e 900 × 600 inspecionadas; paleta compacta e recolhida inicialmente em altura menor.
+- **146 testes sem OCCT e 188 com OCCT aprovados.** Seis regressões geométricas cobrem edição atômica (incluindo falha parcial por esgotamento de identificadores), padrões/referências, cotas, restrições, tangência e refinamento de cantos. Cinco ensaios gráficos optativos passaram em série; o novo ensaio aplica cota por expressão e deslocamento, desfaz ambos, cancela um padrão sem mudar a revisão e verifica acesso a Concluir em 900 × 600.
+- Formatação, Clippy do workspace com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Evidências em `target/codex-validation/sketch-ribbon-20261026/`; renderização egui/wgpu/GL llvmpipe. Versão 0.3.0 e formato 15 preservados; Windows e janela nativa não exercitados. Recursos e limites dos comandos documentados em `INTERFACE.md`.
+
 ## Remoção do painel lateral Propriedades — 26/10/2026
 
 - Removidos o painel fixo à direita, o botão/ação que o exibia e os campos de edição associados. A árvore continua recolhível, e o viewport ocupa a largura restante. Controles do rascunho foram transferidos para janela contextual arrastável/recolhível; Medir seleção abre janela própria. O menu de corpo ganhou edição de cor; renomeação, movimento, exportação e exclusão continuam nos comandos existentes.

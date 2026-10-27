@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Faixa contextual Rascunho — 26/10/2026
+
+- Consultados o layout e o estudo visual de rascunho do SolidCraft local. Aplicados Criar, Modificar, Padrão e Restringir, com Cota/grade 3 × 2, menus nos rótulos e Concluir fixo à direita; Reference e Configure omitidos. Código e ícones próprios, sem copiar recursos externos.
+- Ferramentas existentes passaram aos painéis de comando com confirmação e seleção no viewport. Intenções e validação atômica ficam em `nator_sketch::edit`, sem egui; resolução e publicação continuam pelo trabalhador e por `UpdateSketch`. A janela contextual fica restrita a estado, reparo e lista de restrições. Limitações de seleção/padrões/tangência documentadas em `INTERFACE.md`.
+- Aprovados 146 testes sem OCCT, 188 com OCCT e cinco ensaios gráficos em série, incluindo aplicação/desfazer de cota e deslocamento e cancelamento de padrão. Formatação, Clippy nas duas configurações e compilação desktop com OCCT aprovados. Capturas 1440 × 900 e 900 × 600 em `target/codex-validation/sketch-ribbon-20261026/`. Sem release, migração ou publicação remota; Windows e janela nativa não exercitados.
+
 ## Área de edição sem Propriedades lateral — 26/10/2026
 
 - Eliminado o painel lateral Propriedades, seu botão na faixa, sua ação na busca e os campos legados de nome/posição da seleção. O viewport agora ocupa todo o espaço à direita da árvore.

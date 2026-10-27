@@ -56,6 +56,8 @@ pub enum Text {
     CameraGroup,
     #[allow(dead_code)]
     PanelsGroup,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     FinishGroup,
     TimelineEmpty,
     UnitsMm,
@@ -140,7 +142,11 @@ pub enum Text {
     DrawingDate,
     SketchOnFace,
     MirroredSuffix,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     SketchLinearPattern,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     SketchCircularPattern,
     HoleTool,
     LinearPattern,
@@ -180,7 +186,11 @@ pub enum Text {
     #[cfg(feature = "occt")]
     MeshIsNotSolid,
     Tangent,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     Extend,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     Mirror,
     Drawing,
     DrawingTitle,
@@ -314,6 +324,24 @@ pub enum Text {
     FileAlreadyOpen,
     StaleResult,
     Sketch,
+    SketchPatternGroup,
+    ConstrainGroup,
+    SketchExitGroup,
+    SketchDimension,
+    HorizontalVertical,
+    SketchExtendShort,
+    SketchCircularShort,
+    SketchRectangularShort,
+    SketchValue,
+    SketchEntities,
+    SketchSelectOne,
+    SketchSelectTwo,
+    SketchSelectDimension,
+    SketchMirrorSelectionHint,
+    SketchCircularSelectionHint,
+    SketchRectangularSelectionHint,
+    SketchTangentSelectionHint,
+    SketchCoincidentSelectionHint,
     Parameters,
     ParameterName,
     Expression,
@@ -343,6 +371,8 @@ pub enum Text {
     UnderConstrained,
     DegreesOfFreedom,
     Redundant,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     SketchTools,
     Select,
     Line,
@@ -353,9 +383,13 @@ pub enum Text {
     Dimension,
     ReferenceDimension,
     Entity,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     ApplyDimension,
     FixPoint,
     ConstructionGeometry,
+    /// Identificador reservado da organização anterior do rascunho.
+    #[allow(dead_code)]
     Offset,
     DeleteEntity,
     Parallel,
@@ -627,6 +661,34 @@ pub fn text(key: Text) -> &'static str {
         Text::EditDimension => "Alterar cota selecionada",
 
         Text::Sketch => "Rascunho",
+        Text::SketchPatternGroup => "Padrão",
+        Text::ConstrainGroup => "Restringir",
+        Text::SketchExitGroup => "Sair",
+        Text::SketchDimension => "Cota",
+        Text::HorizontalVertical => "Horizontal/vertical",
+        Text::SketchExtendShort => "Estender",
+        Text::SketchCircularShort => "Circular",
+        Text::SketchRectangularShort => "Retangular",
+        Text::SketchValue => "Valor (mm)",
+        Text::SketchEntities => "Entidades",
+        Text::SketchSelectOne => "Selecione uma entidade no rascunho.",
+        Text::SketchSelectTwo => "Selecione duas entidades no rascunho, na ordem indicada.",
+        Text::SketchSelectDimension => "Selecione uma cota ou uma linha, círculo ou arco.",
+        Text::SketchMirrorSelectionHint => {
+            "Selecione primeiro a entidade a copiar e depois a linha do eixo."
+        }
+        Text::SketchCircularSelectionHint => {
+            "Selecione primeiro a entidade e depois um círculo ou arco que define o centro."
+        }
+        Text::SketchRectangularSelectionHint => {
+            "Selecione primeiro a entidade e depois uma linha para a direção. O valor é o espaçamento entre ocorrências."
+        }
+        Text::SketchTangentSelectionHint => {
+            "Selecione uma linha e um arco com extremidade compartilhada."
+        }
+        Text::SketchCoincidentSelectionHint => {
+            "Selecione duas entidades. Suas pontas mais próximas (ou centros de círculos) serão coincidentes."
+        }
         Text::NewSketch => "Novo rascunho",
         Text::SketchConflict => "Restrições em conflito — alteração pendente",
         Text::FullyConstrained => "Totalmente restrito",
