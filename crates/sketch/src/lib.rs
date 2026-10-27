@@ -6,6 +6,7 @@ pub mod areas;
 mod curve_geometry;
 pub mod drafting;
 pub mod edit;
+pub mod lines;
 pub mod profiles;
 pub mod repair;
 pub mod snapping;
@@ -147,8 +148,28 @@ pub struct Entity {
     pub id: u64,
     pub curve: Curve,
     pub construction: bool,
+    /// Dois pontos parametrizam posição/direção, mas não limitam a reta. Somente
+    /// linhas de construção podem ser infinitas; os apoios não são extremos.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub infinite: bool,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LineType {
+    #[default]
+    Normal,
+    Construction,
+    Infinite,
 }
 impl Entity {
+    pub fn line_type(&self) -> LineType {
+        if self.infinite {
+            LineType::Infinite
+        } else if self.construction {
+            LineType::Construction
+        } else {
+            LineType::Normal
+        }
+    }
     pub fn point_ids(&self) -> Vec<u64> {
         match self.curve {
             Curve::Line { start, end } => vec![start, end],
@@ -164,22 +185,80 @@ impl Entity {
 /// em radianos, no sentido anti-horário; comprimentos continuam em mm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConstraintKind {
-    Tangent { line: u64, arc: u64, point: u64 },
-    Fixed { point: u64, position: Point2 },
-    Coincident { a: u64, b: u64 },
-    Horizontal { line: u64 },
-    Vertical { line: u64 },
-    Distance { a: u64, b: u64, value: f64 },
-    DeltaX { a: u64, b: u64, value: f64 },
-    DeltaY { a: u64, b: u64, value: f64 },
-    Radius { circle: u64, value: f64 },
-    Angle { a: u64, b: u64, value: f64 },
-    Parallel { a: u64, b: u64 },
-    Perpendicular { a: u64, b: u64 },
-    EqualLength { a: u64, b: u64 },
-    Midpoint { point: u64, line: u64 },
-    PointOnLine { point: u64, line: u64 },
-    Concentric { a: u64, b: u64 },
+    Tangent {
+        line: u64,
+        arc: u64,
+        point: u64,
+    },
+    Fixed {
+        point: u64,
+        position: Point2,
+    },
+    Coincident {
+        a: u64,
+        b: u64,
+    },
+    Horizontal {
+        line: u64,
+    },
+    Vertical {
+        line: u64,
+    },
+    Distance {
+        a: u64,
+        b: u64,
+        value: f64,
+    },
+    DeltaX {
+        a: u64,
+        b: u64,
+        value: f64,
+    },
+    DeltaY {
+        a: u64,
+        b: u64,
+        value: f64,
+    },
+    Radius {
+        circle: u64,
+        value: f64,
+    },
+    Angle {
+        a: u64,
+        b: u64,
+        value: f64,
+    },
+    /// Ângulo orientado entre as direções das duas linhas, em radianos. Ao
+    /// recalcular a linha de referência, a nova linha acompanha sua orientação.
+    LineAngle {
+        line: u64,
+        reference: u64,
+        value: f64,
+    },
+    Parallel {
+        a: u64,
+        b: u64,
+    },
+    Perpendicular {
+        a: u64,
+        b: u64,
+    },
+    EqualLength {
+        a: u64,
+        b: u64,
+    },
+    Midpoint {
+        point: u64,
+        line: u64,
+    },
+    PointOnLine {
+        point: u64,
+        line: u64,
+    },
+    Concentric {
+        a: u64,
+        b: u64,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Constraint {
@@ -200,6 +279,29 @@ pub struct Sketch {
     pub dimension_expressions: std::collections::BTreeMap<u64, String>,
 }
 impl Sketch {
+    /// Apoios da parametrização de retas infinitas não viram extremos visíveis
+    /// nem capturas pontuais. Pontos isolados e compartilhados continuam visíveis.
+    pub fn visible_points(&self) -> impl Iterator<Item = &Point> {
+        let mut hidden: HashSet<_> = self
+            .entities
+            .iter()
+            .filter(|e| e.infinite)
+            .flat_map(Entity::point_ids)
+            .collect();
+        // Rascunhos sem retas infinitas não precisam resolver todos os apoios
+        // de entidades a cada quadro apenas para desenhar seus pontos.
+        if !hidden.is_empty() {
+            for id in self
+                .entities
+                .iter()
+                .filter(|e| !e.infinite)
+                .flat_map(Entity::point_ids)
+            {
+                hidden.remove(&id);
+            }
+        }
+        self.points.iter().filter(move |p| !hidden.contains(&p.id))
+    }
     pub fn new(name: impl Into<String>, plane: Plane) -> Self {
         Self {
             name: name.into(),
@@ -273,6 +375,16 @@ impl Sketch {
                     let d = sub(source.point(*b)?, source.point(*a)?);
                     *value = d[1].atan2(d[0]);
                 }
+                ConstraintKind::LineAngle {
+                    line,
+                    reference,
+                    value,
+                } => {
+                    *value = lines::relative_angle(
+                        lines::angle(&source, *line)?,
+                        lines::angle(&source, *reference)?,
+                    );
+                }
                 _ => {}
             }
         }
@@ -297,6 +409,7 @@ impl Sketch {
             id,
             curve,
             construction,
+            infinite: false,
         });
         Ok(id)
     }
@@ -309,6 +422,15 @@ impl Sketch {
         let start = self.add_point(a)?;
         let end = self.add_point(b)?;
         self.add_curve(Curve::Line { start, end }, construction)
+    }
+    pub fn add_line_with_type(&mut self, a: Point2, b: Point2, kind: LineType) -> Result<u64> {
+        let id = self.add_line(a, b, kind != LineType::Normal)?;
+        if kind == LineType::Infinite
+            && let Some(entity) = self.entities.iter_mut().find(|e| e.id == id)
+        {
+            entity.infinite = true;
+        }
+        Ok(id)
     }
     pub fn add_circle(&mut self, center: Point2, radius: f64, construction: bool) -> Result<u64> {
         if !radius.is_finite() || radius <= 1e-9 {
@@ -393,6 +515,13 @@ impl Sketch {
             }
         }
         for entity in &self.entities {
+            if entity.infinite
+                && (!entity.construction || !matches!(entity.curve, Curve::Line { .. }))
+            {
+                return Err(SketchError(
+                    "Somente uma linha de construção pode ser infinita.".into(),
+                ));
+            }
             for point in entity.point_ids() {
                 self.point(point)?;
             }
@@ -436,6 +565,7 @@ impl Sketch {
                                 | ConstraintKind::DeltaY { .. }
                                 | ConstraintKind::Radius { .. }
                                 | ConstraintKind::Angle { .. }
+                                | ConstraintKind::LineAngle { .. }
                         )
                 })
             {

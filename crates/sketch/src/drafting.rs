@@ -33,6 +33,21 @@ pub fn preview(
     cursor: Point2,
     locked: [Option<f64>; 2],
 ) -> Result<Preview> {
+    preview_with_reference(primitive, anchors, cursor, locked, 0.)
+}
+
+/// A direção da linha de origem é capturada no primeiro clique. As demais
+/// primitivas conservam suas convenções: arco usa direção inicial/abertura.
+pub fn preview_with_reference(
+    primitive: Primitive,
+    anchors: &[Point2],
+    cursor: Point2,
+    locked: [Option<f64>; 2],
+    reference: f64,
+) -> Result<Preview> {
+    if !reference.is_finite() {
+        return Err(SketchError("Referência angular inválida.".into()));
+    }
     let first = *anchors
         .first()
         .ok_or_else(|| SketchError("Escolha o primeiro ponto.".into()))?;
@@ -53,7 +68,14 @@ pub fn preview(
             (direction - start_angle.unwrap_or(0.)).rem_euclid(std::f64::consts::TAU),
         ]
     } else {
-        [distance(first, cursor), direction]
+        [
+            distance(first, cursor),
+            if primitive == Primitive::Line {
+                crate::lines::relative_angle(direction, reference)
+            } else {
+                direction
+            },
+        ]
     };
     for field in 0..primitive.field_count() {
         if let Some(value) = locked[field] {
@@ -78,6 +100,8 @@ pub fn preview(
         start_angle.unwrap_or(0.) + values[1]
     } else if primitive == Primitive::Circle {
         direction
+    } else if primitive == Primitive::Line {
+        reference + values[1]
     } else {
         values[1]
     };
@@ -131,6 +155,30 @@ pub fn preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn line_angles_are_relative_to_the_captured_reference_only() -> Result<()> {
+        let reference = std::f64::consts::FRAC_PI_4;
+        let p = preview_with_reference(
+            Primitive::Line,
+            &[[0., 0.]],
+            [0., 10.],
+            [None, None],
+            reference,
+        )?;
+        assert!((p.values[1] - reference).abs() < 1e-10);
+        let p = preview_with_reference(
+            Primitive::Line,
+            &[[0., 0.]],
+            [10., 0.],
+            [Some(20.), Some(std::f64::consts::FRAC_PI_2)],
+            reference,
+        )?;
+        assert!((p.point[0] + 2_f64.sqrt() * 10.).abs() < 1e-10);
+        assert!((p.point[1] - 2_f64.sqrt() * 10.).abs() < 1e-10);
+        let p = preview(Primitive::Line, &[[0., 0.]], [0., 10.], [None, None])?;
+        assert!((p.values[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-10);
+        Ok(())
+    }
     #[test]
     fn locked_values_override_cursor_without_losing_quadrants_or_arc_radius() -> Result<()> {
         let p = preview(

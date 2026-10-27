@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 17
+# Formato de projeto — versão interna 18
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 17; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 18; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -23,6 +23,10 @@ Cada peça contém:
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
 - histórico de operações (`features`), cada uma com nome, corpo resultante, operação e, desde a versão 12, `suppressed` opcional (operação suprimida, com parâmetros preservados);
 - desde a versão 12, `history_marker` opcional: quantidade de operações construídas a partir do início. As posteriores ficam inativas, com a última geometria oculta, e novas operações entram nessa posição. Ausente, todo o histórico é construído; o marcador nunca aponta para o fim (forma canônica).
+
+Desde a versão 18, entidades de rascunho aceitam `infinite` opcional, omitido quando `false`. Somente `Curve::Line` com `construction = true` pode usar `infinite = true`. Seus pontos `start`/`end` parametrizam posição e direção para o solver, sem limitar a reta nem fornecer capturas de extremos/ponto médio. Cópias rígidas e espelhamentos preservam o tipo; áreas/extrusões ignoram a entidade. Projetos anteriores mantêm segmentos finitos pelo valor padrão.
+
+A restrição `LineAngle { line, reference, value }` mede a direção de `line` em relação à direção de `reference`, em radianos e no sentido anti-horário. As duas entidades devem ser linhas distintas existentes. Expressões são avaliadas como ângulo, incluindo números em graus quando não há unidade explícita. A cota acompanha a referência no recálculo, e referências angulares atualizam seu valor medido. `Angle { a, b, value }` continua medindo uma direção em relação ao eixo X local.
 
 Desde a versão 14, o manifesto pode conter `reference_sketches`: rascunhos de referência da montagem, com o mesmo formato dos rascunhos de peça e coordenadas da montagem. Os identificadores compartilham o espaço dos rascunhos de peça. Não pertencem a peça nenhuma, não têm parâmetros (cotas guardam valores numéricos) e nenhuma operação pode usá-los como perfil; servem apenas de destino para posicionar componentes. Ausente, a lista é vazia.
 
@@ -85,6 +89,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 17 → 18: `Entity::infinite` opcional e restrição `LineAngle`. Ausência do campo mantém todas as linhas antigas finitas; não há conversão de geometria nem alteração dos perfis existentes.
 - 16 → 17: `Operation::ExtrudeFace` registra corpo/face de origem, limites, combinação opcional e face limite opcional. A origem é referência mesmo quando Novo corpo não a consome. `RegionRef::Area` registra um ciclo canônico de pares (entidade, sentido invertido), distinguindo células que usam as mesmas curvas. Regiões antigas `Boundary`/`Index` preservam sua interpretação anterior; não há conversão implícita que altere sólidos existentes. O modo automático só é resolvido na criação do comando; o arquivo guarda Unir/Remover/Interseção ou Novo corpo concretos. Laterais de extrusão de face recebem nomes derivados dos papéis das faces adjacentes à aresta de origem, sem depender da ordem das arestas.
 - 15 → 16: rascunhos podem conter a restrição `Angle { a, b, value }`, orientação do vetor entre dois pontos em relação ao eixo X local. `value` usa radianos; expressões associadas são avaliadas como ângulo (números sem unidade usam graus). Referências angulares medem a geometria sem dirigi-la. Não há campos obrigatórios novos nos projetos anteriores.
 - 14 → 15: o manifesto e as peças acrescentam `folders` (ausente vale o padrão: tudo visível, exceto a origem das peças). A origem global, antes um controle da sessão sempre visível ao abrir, passa a ser gravada.

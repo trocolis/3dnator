@@ -93,6 +93,21 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
             let delta = d[1].atan2(d[0]) - target;
             vec![delta.sin().atan2(delta.cos())]
         }
+        ConstraintKind::LineAngle {
+            line,
+            reference,
+            value,
+        } => {
+            if line == reference {
+                return Err(SketchError(
+                    "A referência angular deve ser outra linha.".into(),
+                ));
+            }
+            let a = direction(line)?;
+            let b = direction(reference)?;
+            let measured = cross(b, a).atan2(dot(b, a));
+            vec![lines::relative_angle(measured, checked(value)?)]
+        }
         ConstraintKind::Parallel { a, b } => vec![cross(direction(a)?, direction(b)?)],
         ConstraintKind::Perpendicular { a, b } => vec![dot(direction(a)?, direction(b)?)],
         ConstraintKind::EqualLength { a, b } => {
@@ -174,7 +189,10 @@ fn jacobian(s: &Sketch, x: &[f64], r: &[f64]) -> Result<Vec<Vec<f64>>> {
     let mut angular = vec![false; r.len()];
     let mut offset = 0;
     for constraint in s.constraints.iter().filter(|c| !c.reference) {
-        if matches!(constraint.kind, ConstraintKind::Angle { .. }) {
+        if matches!(
+            constraint.kind,
+            ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
+        ) {
             angular[offset] = true;
         }
         offset += constraint_residuals(s, &constraint.kind)?.len();

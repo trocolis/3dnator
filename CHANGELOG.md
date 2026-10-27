@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Tipos de linha, ângulos relativos e medidas flutuantes
+
+- Painel Linha com os tipos Normal, Construção e Infinita, cada um com ícone e destaque do ativo. Construção e Infinita são tracejadas laranja e não participam de áreas nem extrusões; retas infinitas atravessam o canvas e oferecem captura/interseções além dos apoios de definição, sem extremos fictícios.
+- Ângulo em relação à horizontal quando o primeiro ponto está livre ou à direção da linha capturada no início. Cotas relativas acompanham a linha de origem no recálculo. Captura perpendicular ao iniciar, terminar ou cruzar outra linha, respeitando medidas digitadas e suspensão por Alt.
+- Prévia angular tracejada preta; comprimento junto ao mouse e ângulo junto à prévia, em campos independentes sem caixa compartilhada. Tab, Enter, Esc, expressões e medidas travadas são preservados; campos próximos recebem folga para não se sobrepor. Ferramentas de desenho exibem seu ícone ao lado do cursor sobre a área de edição.
+- Formato de projeto 18 registra retas infinitas e cotas angulares relativas, com leitura dos projetos anteriores. Preservados desfazer/refazer, cópias, espelhamento e padrões de retas auxiliares; retas infinitas não recebem cota de comprimento, aparo ou refinamento de extremos.
+
 ### Abas espaçadas e painéis por ferramenta de rascunho
 
 - Abas de ferramentas com títulos mais espaçados e área de clique maior; abas de projetos com mais margem. Um `|` separa abas consecutivas não selecionadas.

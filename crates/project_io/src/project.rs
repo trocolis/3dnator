@@ -26,7 +26,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 11: cotas associativas das folhas, com caminhos e referências topológicas estáveis.
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
-pub const FORMAT_VERSION: u32 = 17;
+/// Versão 18: retas infinitas de construção e cotas angulares relativas a linhas.
+pub const FORMAT_VERSION: u32 = 18;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -999,6 +1000,52 @@ mod tests {
             Some("45 deg")
         );
         sketch.validate()?;
+        Ok(())
+    }
+
+    #[test]
+    fn infinite_lines_and_relative_angles_round_trip_without_changing_legacy_lines()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, LineType, Plane, Sketch};
+        let mut sketch = Sketch::new("Referências lineares", Plane::xy());
+        let reference = sketch.add_line_with_type([0., 0.], [1., 1.], LineType::Infinite)?;
+        let line = sketch.add_line_with_type([10., 0.], [0., 10.], LineType::Construction)?;
+        let constraint = sketch.add_constraint(
+            ConstraintKind::LineAngle {
+                line,
+                reference,
+                value: std::f64::consts::FRAC_PI_2,
+            },
+            false,
+        )?;
+        sketch
+            .dimension_expressions
+            .insert(constraint, "90 deg".into());
+        let mut document = Document::new("Linhas de referência")?;
+        let (_, id) = document.add_sketch(None, sketch)?;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("linhas.3dnator");
+        write_project(&path, &document)?;
+        let reopened = read_project(&path)?;
+        let sketch = &reopened.sketch(id).ok_or("Rascunho ausente")?.sketch;
+        assert_eq!(sketch.entity(reference)?.line_type(), LineType::Infinite);
+        assert_eq!(sketch.entity(line)?.line_type(), LineType::Construction);
+        assert!(
+            matches!(sketch.constraints[0].kind,ConstraintKind::LineAngle { line:a,reference:b,..} if a==line && b==reference)
+        );
+        assert_eq!(
+            sketch
+                .dimension_expressions
+                .get(&constraint)
+                .map(String::as_str),
+            Some("90 deg")
+        );
+        let mut legacy = Sketch::new("Linha antiga", Plane::xy());
+        let old = legacy.add_line([0., 0.], [1., 0.], false)?;
+        let value = serde_json::to_value(&legacy)?;
+        assert!(value["entities"][0].get("infinite").is_none());
+        let decoded: Sketch = serde_json::from_value(value)?;
+        assert_eq!(decoded.entity(old)?.line_type(), LineType::Normal);
         Ok(())
     }
 

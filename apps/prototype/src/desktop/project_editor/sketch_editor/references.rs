@@ -20,7 +20,11 @@ fn key(sketch: &Sketch) -> Vec<u64> {
         ]);
     }
     for entity in &sketch.entities {
-        result.extend([entity.id, u64::from(entity.construction)]);
+        result.extend([
+            entity.id,
+            u64::from(entity.construction),
+            u64::from(entity.infinite),
+        ]);
         match entity.curve {
             Curve::Line { start, end } => result.extend([0, start, end]),
             Curve::Circle { center, radius } => result.extend([1, center, radius.to_bits()]),

@@ -157,6 +157,42 @@ pub(crate) fn intersections(a: &Segment, b: &Segment) -> Vec<Point2> {
     points
 }
 
+/// Os limites finitos continuam valendo em segmentos/arcos. Retas de referência
+/// aceitam qualquer parâmetro, incluindo cruzamentos além dos apoios internos.
+pub(crate) fn entity_intersections(sketch: &Sketch, a: &Entity, b: &Entity) -> Result<Vec<Point2>> {
+    let first = profiles::segment(sketch, a)?;
+    let second = profiles::segment(sketch, b)?;
+    Ok(intersections_with_infinite(
+        &first, &second, a.infinite, b.infinite,
+    ))
+}
+
+pub(crate) fn intersections_with_infinite(
+    first: &Segment,
+    second: &Segment,
+    infinite_a: bool,
+    infinite_b: bool,
+) -> Vec<Point2> {
+    if !infinite_a && !infinite_b {
+        return intersections(first, second);
+    }
+    if let (Segment::Line { a: p, b: q }, Segment::Line { a: r, b: s }) = (first, second)
+        && profiles::line_intersection(*p, *q, *r, *s).is_none()
+    {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    for p in candidates(first, second) {
+        if (infinite_a || parameter(first, p).is_some())
+            && (infinite_b || parameter(second, p).is_some())
+            && !result.iter().any(|q| distance(*q, p) < EPS)
+        {
+            result.push(p);
+        }
+    }
+    result
+}
+
 /// Projeta o clique na curva exata. Em arcos, projeções fora da abertura ficam no
 /// extremo mais próximo, em vez de alcançar a continuação imaginária do círculo.
 pub(crate) fn closest_parameter(s: &Segment, p: Point2) -> f64 {

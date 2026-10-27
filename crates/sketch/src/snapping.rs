@@ -68,14 +68,18 @@ pub fn find_with_references(
         match entity.curve {
             Curve::Line { start, end } => {
                 let (a, b) = (sketch.point(start)?, sketch.point(end)?);
-                candidates.extend([
-                    (a, Kind::Endpoint(start), 0),
-                    (b, Kind::Endpoint(end), 0),
-                    (scale(add(a, b), 0.5), Kind::Midpoint(entity.id), 1),
-                ]);
-                let direction = sub(b, a);
-                let t = (dot(sub(cursor, a), direction) / dot(direction, direction)).clamp(0., 1.);
-                candidates.push((add(a, scale(direction, t)), Kind::OnCurve(entity.id), 3));
+                if !entity.infinite {
+                    candidates.extend([
+                        (a, Kind::Endpoint(start), 0),
+                        (b, Kind::Endpoint(end), 0),
+                        (scale(add(a, b), 0.5), Kind::Midpoint(entity.id), 1),
+                    ]);
+                }
+                candidates.push((
+                    lines::closest(sketch, entity, cursor)?,
+                    Kind::OnCurve(entity.id),
+                    3,
+                ));
             }
             Curve::Circle { center, radius } => {
                 let c = sketch.point(center)?;

@@ -1,6 +1,6 @@
 //! Vértices virtuais e centros das células, sem modificar entidades ou suas cotas.
 //! O aparador e a captura compartilham os mesmos encontros analíticos das curvas.
-use crate::{curve_geometry::intersections, profiles, *};
+use crate::{curve_geometry::intersections_with_infinite, profiles, *};
 
 #[derive(Debug, Clone, Default)]
 pub struct References {
@@ -9,15 +9,16 @@ pub struct References {
 }
 
 pub fn references(sketch: &Sketch) -> Result<References> {
+    // Resolver os IDs uma única vez antes da consulta quadrática entre curvas.
     let curves = sketch
         .entities
         .iter()
-        .map(|e| profiles::segment(sketch, e))
+        .map(|e| Ok((profiles::segment(sketch, e)?, e.infinite)))
         .collect::<Result<Vec<_>>>()?;
     let mut result = References::default();
-    for (i, a) in curves.iter().enumerate() {
-        for b in &curves[i + 1..] {
-            for p in intersections(a, b) {
+    for (i, (a, infinite_a)) in curves.iter().enumerate() {
+        for (b, infinite_b) in &curves[i + 1..] {
+            for p in intersections_with_infinite(a, b, *infinite_a, *infinite_b) {
                 if !result.vertices.iter().any(|q| distance(*q, p) < 1e-6) {
                     result.vertices.push(p);
                 }
@@ -28,7 +29,7 @@ pub fn references(sketch: &Sketch) -> Result<References> {
     // mas um triângulo/retângulo auxiliar ainda possui centro para captura.
     let mut contours = sketch.clone();
     for entity in &mut contours.entities {
-        entity.construction = false;
+        entity.construction = entity.infinite;
     }
     for region in areas::regions(&contours)? {
         // O centro pertence ao contorno externo. Um furo interno não desloca

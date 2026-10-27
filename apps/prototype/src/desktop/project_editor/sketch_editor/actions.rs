@@ -67,7 +67,11 @@ fn candidate(
 ) -> Result<Sketch, String> {
     let angular = action == Action::Dimension
         && source.constraints.iter().any(|c| {
-            Some(c.id) == work.constraint && matches!(c.kind, ConstraintKind::Angle { .. })
+            Some(c.id) == work.constraint
+                && matches!(
+                    c.kind,
+                    ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
+                )
         });
     let value = if action.needs_value() {
         parameters
@@ -189,7 +193,10 @@ impl Editor {
                     let angular = action == Action::Dimension
                         && source.constraints.iter().any(|c| {
                             Some(c.id) == work.constraint
-                                && matches!(c.kind, ConstraintKind::Angle { .. })
+                                && matches!(
+                                    c.kind,
+                                    ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
+                                )
                         });
                     panel::row(
                         ui,

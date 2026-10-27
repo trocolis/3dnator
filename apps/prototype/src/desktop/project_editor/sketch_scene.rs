@@ -91,6 +91,72 @@ impl Frame {
             .fold(0_f64, f64::max)
             .max(1e-6)
     }
+    /// A reta é projetada e recortada ao canvas, sem inventar um comprimento em
+    /// mm nem alterar os limites de enquadramento do documento ao navegar.
+    pub fn infinite_line(
+        &self,
+        painter: &egui::Painter,
+        a: Point2,
+        b: Point2,
+        stroke: egui::Stroke,
+    ) {
+        let Some((a, b)) = self.screen(a).zip(self.screen(b)) else {
+            return;
+        };
+        let d = b - a;
+        if d.length_sq() < 1e-8 {
+            return;
+        }
+        let mut low = f32::NEG_INFINITY;
+        let mut high = f32::INFINITY;
+        for (p, v, min, max) in [
+            (a.x, d.x, self.rect.left(), self.rect.right()),
+            (a.y, d.y, self.rect.top(), self.rect.bottom()),
+        ] {
+            if v.abs() < 1e-6 {
+                if p < min || p > max {
+                    return;
+                }
+            } else {
+                let first = (min - p) / v;
+                let last = (max - p) / v;
+                low = low.max(first.min(last));
+                high = high.min(first.max(last));
+            }
+        }
+        if low.is_finite() && high.is_finite() && low < high {
+            for shape in egui::Shape::dashed_line(&[a + d * low, a + d * high], stroke, 6., 4.) {
+                painter.add(shape);
+            }
+        }
+    }
+
+    fn entity(
+        &self,
+        painter: &egui::Painter,
+        sketch: &Sketch,
+        entity: &nator_sketch::Entity,
+        color: egui::Color32,
+    ) {
+        let Ok(curve) = profiles::segment(sketch, entity) else {
+            return;
+        };
+        let stroke = egui::Stroke::new(
+            1.5,
+            if entity.construction {
+                theme::CONSTRUCTION
+            } else {
+                color
+            },
+        );
+        if entity.infinite {
+            if let profiles::Segment::Line { a, b } = curve {
+                self.infinite_line(painter, a, b, stroke);
+            }
+        } else {
+            self.path(painter, curve.sample(96), stroke, entity.construction);
+        }
+    }
     pub fn path(
         &self,
         painter: &egui::Painter,
@@ -400,20 +466,13 @@ impl Editor {
                     placement: occurrence.placement,
                     plane: record.sketch.plane,
                 };
-                for point in &record.sketch.points {
+                for point in record.sketch.visible_points() {
                     if let Some(p) = frame.screen(point.position) {
                         painter.circle_filled(p, 2., theme::ACCENT);
                     }
                 }
                 for entity in &record.sketch.entities {
-                    if let Ok(curve) = profiles::segment(&record.sketch, entity) {
-                        frame.path(
-                            &painter,
-                            curve.sample(96),
-                            egui::Stroke::new(1.5, theme::ACCENT),
-                            entity.construction,
-                        );
-                    }
+                    frame.entity(&painter, &record.sketch, entity, theme::ACCENT);
                 }
             }
         }
@@ -429,20 +488,13 @@ impl Editor {
                 placement: Placement::default(),
                 plane: record.sketch.plane,
             };
-            for point in &record.sketch.points {
+            for point in record.sketch.visible_points() {
                 if let Some(p) = frame.screen(point.position) {
                     painter.circle_filled(p, 2.5, theme::REFERENCE);
                 }
             }
             for entity in &record.sketch.entities {
-                if let Ok(curve) = profiles::segment(&record.sketch, entity) {
-                    frame.path(
-                        &painter,
-                        curve.sample(96),
-                        egui::Stroke::new(1.5, theme::REFERENCE),
-                        entity.construction,
-                    );
-                }
+                frame.entity(&painter, &record.sketch, entity, theme::REFERENCE);
             }
         }
         visible

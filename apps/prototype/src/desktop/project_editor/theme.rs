@@ -15,6 +15,8 @@ pub(super) const WARNING: egui::Color32 = egui::Color32::from_rgb(157, 93, 15);
 pub(super) const DANGER: egui::Color32 = egui::Color32::from_rgb(189, 63, 68);
 /// Rascunhos de referência da montagem, distintos dos rascunhos de peça.
 pub(super) const REFERENCE: egui::Color32 = egui::Color32::from_rgb(124, 82, 196);
+/// Geometria auxiliar, excluída das áreas: segmentos de construção e retas infinitas.
+pub(super) const CONSTRUCTION: egui::Color32 = egui::Color32::from_rgb(224, 123, 31);
 
 pub(super) fn apply(context: &egui::Context) {
     let mut style = egui::Style {

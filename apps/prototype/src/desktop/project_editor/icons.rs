@@ -46,6 +46,8 @@ pub(super) enum Icon {
     Check,
     Select,
     Line,
+    LineConstruction,
+    LineInfinite,
     Rectangle,
     Circle,
     Arc,
@@ -499,6 +501,19 @@ pub(super) fn paint_with_ink(
             p.line(&[[4., 19.], [20., 4.]], p.accent);
             p.circle(4., 19., 2., p.ink);
             p.circle(20., 4., 2., p.ink);
+        }
+        Icon::LineConstruction | Icon::LineInfinite => {
+            let color = if enabled { theme::CONSTRUCTION } else { p.ink };
+            for (a, b) in [(3., 7.), (10., 14.), (17., 21.)] {
+                p.line(&[[a, 24. - a], [b, 24. - b]], color);
+            }
+            if icon == Icon::LineConstruction {
+                p.circle(3., 21., 1.5, color);
+                p.circle(21., 3., 1.5, color);
+            } else {
+                p.line(&[[1., 18.], [1., 23.], [6., 23.]], color);
+                p.line(&[[18., 1.], [23., 1.], [23., 6.]], color);
+            }
         }
         Icon::Rectangle => p.face(&[[3., 5.], [21., 5.], [21., 19.], [3., 19.]], p.fill),
         Icon::Circle => {

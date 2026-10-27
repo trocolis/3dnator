@@ -358,6 +358,13 @@ pub enum Text {
     SketchValueLocked,
     SketchDynamicHint,
     SketchToolSettingsPending,
+    SketchLineType,
+    SketchLineNormal,
+    SketchLineInfinite,
+    SketchLineNormalHint,
+    SketchLineConstructionHint,
+    SketchLineInfiniteHint,
+    SketchRelativeAngleHint,
     SketchAngleValue,
     SketchHorizontalAngleHint,
     SketchPatternGroup,
@@ -728,6 +735,19 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::SketchDynamicHint => "Tab: alternar · Enter: confirmar · Esc: cancelar",
         Text::SketchToolSettingsPending => "Configurações desta ferramenta a definir.",
+        Text::SketchLineType => "Tipo",
+        Text::SketchLineNormal => "Normal",
+        Text::SketchLineInfinite => "Infinita",
+        Text::SketchLineNormalHint => "Linha de desenho; participa de áreas e extrusões.",
+        Text::SketchLineConstructionHint => {
+            "Segmento tracejado laranja de referência; não define áreas nem extrusões."
+        }
+        Text::SketchLineInfiniteHint => {
+            "Reta tracejada laranja sem extremos; serve apenas de referência."
+        }
+        Text::SketchRelativeAngleHint => {
+            "Ângulo em relação à linha capturada no primeiro ponto; positivo no sentido anti-horário."
+        }
         Text::SketchAngleValue => "Ângulo (°)",
         Text::SketchHorizontalAngleHint => {
             "Ângulo em relação ao eixo horizontal do rascunho; positivo no sentido anti-horário."

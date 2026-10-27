@@ -11,7 +11,7 @@ pub fn offset_entity(sketch: &mut Sketch, id: u64, distance_mm: f64) -> Result<u
             let (a, b) = (sketch.point(start)?, sketch.point(end)?);
             let d = sub(b, a);
             let n = scale([-d[1], d[0]], distance_mm / distance(a, b));
-            sketch.add_line(add(a, n), add(b, n), entity.construction)
+            sketch.add_line_with_type(add(a, n), add(b, n), entity.line_type())
         }
         Curve::Circle { center, radius } => sketch.add_circle(
             sketch.point(center)?,
@@ -22,6 +22,11 @@ pub fn offset_entity(sketch: &mut Sketch, id: u64, distance_mm: f64) -> Result<u
     }
 }
 pub fn extend_line(sketch: &mut Sketch, line: u64, target: u64, near: Point2) -> Result<()> {
+    if sketch.entity(line)?.infinite {
+        return Err(SketchError(
+            "Uma reta infinita não tem extremo para estender.".into(),
+        ));
+    }
     let (a, b) = sketch.line(line)?;
     let (c, d) = sketch.line(target)?;
     let (point, t, _) = profiles::line_intersection(a, b, c, d)
@@ -53,7 +58,12 @@ pub fn pick_entity(sketch: &Sketch, cursor: Point2, tolerance_mm: f64) -> Result
     let mut best: Option<(u64, f64)> = None;
     for entity in &sketch.entities {
         let curve = profiles::segment(sketch, entity)?;
-        let d = distance(cursor, point(&curve, closest_parameter(&curve, cursor)));
+        let nearest = if entity.infinite {
+            lines::closest(sketch, entity, cursor)?
+        } else {
+            point(&curve, closest_parameter(&curve, cursor))
+        };
+        let d = distance(cursor, nearest);
         if d <= tolerance_mm && best.is_none_or(|(_, previous)| d < previous) {
             best = Some((entity.id, d));
         }
@@ -81,13 +91,19 @@ fn trim_interval(
     entity: u64,
     pick: Point2,
 ) -> Result<(profiles::Segment, [f64; 2])> {
-    use crate::curve_geometry::{closest_parameter, intersections, parameter};
+    use crate::curve_geometry::{closest_parameter, entity_intersections, parameter};
     if pick.iter().any(|v| !v.is_finite()) {
         return Err(SketchError(
             "Selecione um trecho válido para aparar.".into(),
         ));
     }
-    let curve = profiles::segment(sketch, sketch.entity(entity)?)?;
+    let original = sketch.entity(entity)?;
+    if original.infinite {
+        return Err(SketchError(
+            "Uma reta infinita serve de referência e não pode ser aparada.".into(),
+        ));
+    }
+    let curve = profiles::segment(sketch, original)?;
     let closed = matches!(curve, profiles::Segment::Circle { .. });
     let at = closest_parameter(&curve, pick);
     let mut cuts = if closed { Vec::new() } else { vec![0., 1.] };
@@ -95,8 +111,7 @@ fn trim_interval(
         if other.id == entity {
             continue;
         }
-        let target = profiles::segment(sketch, other)?;
-        for point in intersections(&curve, &target) {
+        for point in entity_intersections(sketch, original, other)? {
             if let Some(t) = parameter(&curve, point) {
                 cuts.push(t);
             }
@@ -203,10 +218,10 @@ pub fn mirror(
     for id in ids {
         let entity = sketch.entity(*id)?.clone();
         let new = match entity.curve {
-            Curve::Line { start, end } => sketch.add_line(
+            Curve::Line { start, end } => sketch.add_line_with_type(
                 reflect(sketch.point(start)?),
                 reflect(sketch.point(end)?),
-                entity.construction,
+                entity.line_type(),
             )?,
             Curve::Circle { center, radius } => {
                 sketch.add_circle(reflect(sketch.point(center)?), radius, entity.construction)?
@@ -241,10 +256,10 @@ pub fn mirror(
 fn copy_rigid(sketch: &mut Sketch, id: u64, transform: &dyn Fn(Point2) -> Point2) -> Result<u64> {
     let entity = sketch.entity(id)?.clone();
     match entity.curve {
-        Curve::Line { start, end } => sketch.add_line(
+        Curve::Line { start, end } => sketch.add_line_with_type(
             transform(sketch.point(start)?),
             transform(sketch.point(end)?),
-            entity.construction,
+            entity.line_type(),
         ),
         Curve::Circle { center, radius } => sketch.add_circle(
             transform(sketch.point(center)?),
@@ -490,6 +505,11 @@ pub fn refine_corner(
     size: f64,
     rounded: bool,
 ) -> Result<u64> {
+    if sketch.entity(first)?.infinite || sketch.entity(second)?.infinite {
+        return Err(SketchError(
+            "Retas infinitas não têm extremos para formar um canto.".into(),
+        ));
+    }
     if first == second || !size.is_finite() || size <= 1e-9 {
         return Err(SketchError(
             "Selecione duas linhas e uma dimensão positiva.".into(),

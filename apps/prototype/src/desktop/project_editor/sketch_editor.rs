@@ -1,12 +1,13 @@
 //! Edição 2D no plano, com prévias locais e publicação por comandos da sessão.
 use super::*;
 use nator_sketch::{
-    ConstraintKind, Curve, Point2, Sketch, profiles,
+    ConstraintKind, Curve, LineType, Point2, Sketch, profiles,
     snapping::{self, Kind, Tracker},
     solver::{self, Status},
 };
 mod actions;
 mod dynamic_input;
+mod line_tools;
 mod projection;
 mod references;
 pub(super) use actions::{edit_icon, edit_label};
@@ -51,6 +52,10 @@ pub(super) struct Workspace {
     tool: Tool,
     /// Entrar no rascunho não abre painel; somente uma escolha explícita na faixa.
     tool_panel_open: bool,
+    pub(super) line_type: LineType,
+    /// Capturada uma vez no primeiro clique; não muda ao cruzar outra linha.
+    line_reference: Option<u64>,
+    perpendicular: Option<u64>,
     anchors: Vec<Point2>,
     anchor_kinds: Vec<Option<Kind>>,
     selected: Vec<u64>,
@@ -100,6 +105,8 @@ impl Workspace {
         self.tool_panel_open = true;
         self.anchors.clear();
         self.anchor_kinds.clear();
+        self.line_reference = None;
+        self.perpendicular = None;
         self.drawing = dynamic_input::Input::default();
     }
     pub fn new(id: SketchId) -> Self {
@@ -112,6 +119,9 @@ impl Workspace {
             redundant: false,
             tool: Tool::Select,
             tool_panel_open: false,
+            line_type: LineType::Normal,
+            line_reference: None,
+            perpendicular: None,
             anchors: Vec::new(),
             anchor_kinds: Vec::new(),
             selected: Vec::new(),
@@ -318,6 +328,14 @@ impl Editor {
                 egui::ScrollArea::vertical()
                     .max_height((self.canvas_rect.height() - 230.).max(120.))
                     .show(ui, |ui| {
+                        if tool == Tool::Line {
+                            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    line_tools::settings(ui, &mut work.line_type)
+                                });
+                            }
+                            return;
+                        }
                         // Os parâmetros novos serão definidos por ferramenta. Não
                         // antecipar campos nem alterar as regras geométricas atuais.
                         if tool != Tool::Select {
@@ -525,7 +543,7 @@ impl Editor {
             Status::Conflict => theme::DANGER,
             _ => theme::ACCENT,
         };
-        for point in &sketch.points {
+        for point in sketch.visible_points() {
             if let Some(p) = frame.screen(point.position) {
                 painter.circle_filled(p, 2.5, base);
             }
@@ -541,16 +559,24 @@ impl Editor {
             if let Ok(segment) = profiles::segment(&sketch, entity) {
                 let color = if work.selected.contains(&entity.id) {
                     egui::Color32::from_rgb(183, 106, 17)
+                } else if entity.construction {
+                    theme::CONSTRUCTION
                 } else {
                     base
                 };
-                frame.path(
-                    &painter,
-                    segment.sample(128),
-                    egui::Stroke::new(1.5, color),
-                    entity.construction,
-                );
-                for id in entity.point_ids() {
+                if entity.infinite {
+                    if let profiles::Segment::Line { a, b } = segment {
+                        frame.infinite_line(&painter, a, b, egui::Stroke::new(1.5, color));
+                    }
+                } else {
+                    frame.path(
+                        &painter,
+                        segment.sample(128),
+                        egui::Stroke::new(1.5, color),
+                        entity.construction,
+                    );
+                }
+                for id in entity.point_ids().into_iter().filter(|_| !entity.infinite) {
                     if let Some(p) = sketch.point(id).ok().and_then(|p| frame.screen(p)) {
                         painter.circle_filled(p, 2.5, color);
                     }
@@ -585,6 +611,14 @@ impl Editor {
                             format!("{}°", nator_drawing::format_mm(value.to_degrees())),
                         )
                     }),
+                ConstraintKind::LineAngle { line, value, .. } => {
+                    sketch.line(line).ok().map(|(a, b)| {
+                        (
+                            nator_sketch::scale(nator_sketch::add(a, b), 0.5),
+                            format!("{}°", nator_drawing::format_mm(value.to_degrees())),
+                        )
+                    })
+                }
                 _ => None,
             };
             if let Some((point, label)) = annotation
@@ -601,7 +635,7 @@ impl Editor {
         }
 
         let suspended = ui.input(|i| i.modifiers.alt);
-        let snap = hover.and_then(|point| {
+        let mut snap = hover.and_then(|point| {
             if suspended {
                 None
             } else {
@@ -617,6 +651,35 @@ impl Editor {
                 .flatten()
             }
         });
+        if hover.is_some() || suspended || work.drawing.locked[1] || work.anchors.is_empty() {
+            work.perpendicular = None;
+        }
+        if work.tool == Tool::Line
+            && !suspended
+            && !work.drawing.locked[1]
+            && let (Some(start), Some(point)) = (
+                work.anchors.first().copied(),
+                snap.as_ref().map(|s| s.point).or(hover),
+            )
+            && let Ok(Some(perpendicular)) = nator_sketch::lines::perpendicular(
+                &sketch,
+                start,
+                point,
+                8. / pixels_per_mm,
+                work.line_reference,
+            )
+        {
+            work.perpendicular = Some(perpendicular.line);
+            snap = Some(snapping::Snap {
+                point: perpendicular.point,
+                kind: if perpendicular.on_line {
+                    Kind::OnCurve(perpendicular.line)
+                } else {
+                    Kind::Alignment
+                },
+                guides: vec![(start, perpendicular.foot)],
+            });
+        }
         if let Some(snap) = &snap {
             if matches!(
                 snap.kind,
@@ -670,6 +733,7 @@ impl Editor {
         if !work.anchors.is_empty()
             && let Some(primitive) = dynamic_input::primitive(work.tool)
         {
+            work.drawing.infinite = work.tool == Tool::Line && work.line_type == LineType::Infinite;
             if let Some(point) = raw_cursor {
                 work.drawing.cursor = Some(point);
             }
@@ -691,12 +755,20 @@ impl Editor {
                 if let Some(start) = preview.arc_start {
                     work.anchors[1] = start;
                 }
-                frame.path(
-                    &painter,
-                    preview.path,
-                    egui::Stroke::new(1., theme::INK),
-                    false,
+                let construction = work.tool == Tool::Line && work.line_type != LineType::Normal;
+                let stroke = egui::Stroke::new(
+                    1.5,
+                    if construction {
+                        theme::CONSTRUCTION
+                    } else {
+                        theme::INK
+                    },
                 );
+                if work.tool == Tool::Line && work.line_type == LineType::Infinite {
+                    frame.infinite_line(&painter, work.anchors[0], preview.point, stroke);
+                } else {
+                    frame.path(&painter, preview.path, stroke, construction);
+                }
             }
         } else {
             escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
@@ -774,6 +846,19 @@ impl Editor {
                 let needed = if work.tool == Tool::Arc { 3 } else { 2 };
                 if work.anchors.len() == 1 {
                     work.drawing.start(cursor);
+                    if work.tool == Tool::Line {
+                        let preferred = snap.as_ref().and_then(|s| match s.kind {
+                            Kind::OnCurve(id) | Kind::Midpoint(id) => Some(id),
+                            _ => None,
+                        });
+                        work.line_reference =
+                            nator_sketch::lines::reference(&sketch, cursor, 1e-6, preferred);
+                        work.drawing.relative = work.line_reference.is_some();
+                        work.drawing.reference_angle = work
+                            .line_reference
+                            .and_then(|id| nator_sketch::lines::angle(&sketch, id).ok())
+                            .unwrap_or(0.);
+                    }
                     ui.ctx().request_repaint();
                 }
                 if work.tool == Tool::Arc && work.anchors.len() == 2 {
@@ -803,6 +888,26 @@ impl Editor {
                 }
             }
         }
+        // O distintivo usa o mesmo ícone da faixa e só existe sobre o canvas,
+        // sem substituir o ponteiro nem cobrir a ponta usada para capturar apoios.
+        if work.tool != Tool::Select
+            && work.active_action.is_none()
+            && let Some(position) = response
+                .hover_pos()
+                .filter(|p| !view_cube::rect(response.rect).contains(*p))
+        {
+            let icon = if work.tool == Tool::Line {
+                line_tools::icon(work.line_type)
+            } else {
+                work.tool.icon()
+            };
+            icons::paint(
+                &painter,
+                egui::Rect::from_min_size(position + egui::vec2(16., -28.), egui::Vec2::splat(22.)),
+                icon,
+                true,
+            );
+        }
         if submit {
             self.solve_sketch(ui.ctx(), sketch);
         }
@@ -818,21 +923,46 @@ fn draw_entity(
     let b = work.anchors[1];
     match work.tool {
         Tool::Line => {
-            let id = sketch.add_line(a, b, false).map_err(sketch_error)?;
+            let id = sketch
+                .add_line_with_type(a, b, work.line_type)
+                .map_err(sketch_error)?;
             if let Curve::Line { start, end } = sketch.entity(id).map_err(sketch_error)?.curve {
                 attach(sketch, start, work.anchor_kinds[0], a)?;
                 attach(sketch, end, work.anchor_kinds[1], b)?;
-                if !work.drawing.locked[1] && (a[1] - b[1]).abs() < 1e-6 {
+                let perpendicular = work.perpendicular.filter(|reference| {
+                    sketch.line(*reference).is_ok_and(|(c, d)| {
+                        let u = nator_sketch::sub(b, a);
+                        let v = nator_sketch::sub(d, c);
+                        nator_sketch::dot(u, v).abs()
+                            < 1e-7 * nator_sketch::distance(a, b) * nator_sketch::distance(c, d)
+                    })
+                });
+                if !work.drawing.locked[1]
+                    && let Some(reference) = perpendicular
+                {
+                    sketch
+                        .add_constraint(
+                            ConstraintKind::Perpendicular {
+                                a: reference,
+                                b: id,
+                            },
+                            false,
+                        )
+                        .map_err(sketch_error)?;
+                }
+                if !work.drawing.locked[1] && perpendicular.is_none() && (a[1] - b[1]).abs() < 1e-6
+                {
                     sketch
                         .add_constraint(ConstraintKind::Horizontal { line: id }, false)
                         .map_err(sketch_error)?;
                 }
-                if !work.drawing.locked[1] && (a[0] - b[0]).abs() < 1e-6 {
+                if !work.drawing.locked[1] && perpendicular.is_none() && (a[0] - b[0]).abs() < 1e-6
+                {
                     sketch
                         .add_constraint(ConstraintKind::Vertical { line: id }, false)
                         .map_err(sketch_error)?;
                 }
-                if work.drawing.locked[0] {
+                if work.drawing.locked[0] && work.line_type != LineType::Infinite {
                     drive(
                         sketch,
                         ConstraintKind::Distance {
@@ -847,10 +977,21 @@ fn draw_entity(
                     let d = nator_sketch::sub(b, a);
                     drive(
                         sketch,
-                        ConstraintKind::Angle {
-                            a: start,
-                            b: end,
-                            value: d[1].atan2(d[0]),
+                        if let Some(reference) = work.line_reference {
+                            ConstraintKind::LineAngle {
+                                line: id,
+                                reference,
+                                value: nator_sketch::lines::relative_angle(
+                                    d[1].atan2(d[0]),
+                                    work.drawing.reference_angle,
+                                ),
+                            }
+                        } else {
+                            ConstraintKind::Angle {
+                                a: start,
+                                b: end,
+                                value: d[1].atan2(d[0]),
+                            }
                         },
                         work.drawing.fields[1].clone(),
                     )?;
@@ -1017,7 +1158,10 @@ fn angle_expression(
     }
 }
 fn dimension_expression(kind: &ConstraintKind, value: f64) -> String {
-    if matches!(kind, ConstraintKind::Angle { .. }) {
+    if matches!(
+        kind,
+        ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
+    ) {
         format!("{} deg", value.to_degrees())
     } else {
         format!("{value} mm")
@@ -1029,7 +1173,8 @@ fn dimension_value(kind: &ConstraintKind) -> Option<f64> {
         | ConstraintKind::DeltaX { value, .. }
         | ConstraintKind::DeltaY { value, .. }
         | ConstraintKind::Radius { value, .. }
-        | ConstraintKind::Angle { value, .. } => Some(value),
+        | ConstraintKind::Angle { value, .. }
+        | ConstraintKind::LineAngle { value, .. } => Some(value),
         _ => None,
     }
 }
@@ -1039,7 +1184,8 @@ fn set_dimension_value(kind: &mut ConstraintKind, next: f64) {
         | ConstraintKind::DeltaX { value, .. }
         | ConstraintKind::DeltaY { value, .. }
         | ConstraintKind::Radius { value, .. }
-        | ConstraintKind::Angle { value, .. } => *value = next,
+        | ConstraintKind::Angle { value, .. }
+        | ConstraintKind::LineAngle { value, .. } => *value = next,
         _ => {}
     }
 }
@@ -1053,7 +1199,7 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::DeltaX { .. } => T::HorizontalDimension,
         ConstraintKind::DeltaY { .. } => T::VerticalDimension,
         ConstraintKind::Radius { .. } => T::Radius,
-        ConstraintKind::Angle { .. } => T::AngleLabel,
+        ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. } => T::AngleLabel,
         ConstraintKind::Parallel { .. } => T::Parallel,
         ConstraintKind::Perpendicular { .. } => T::Perpendicular,
         ConstraintKind::EqualLength { .. } => T::EqualLength,
@@ -1063,11 +1209,18 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::Tangent { .. } => T::Tangent,
     };
     match dimension_value(kind) {
-        Some(value) if matches!(kind, ConstraintKind::Angle { .. }) => format!(
-            "{}: {}°",
-            text(key),
-            nator_drawing::format_mm(value.to_degrees())
-        ),
+        Some(value)
+            if matches!(
+                kind,
+                ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
+            ) =>
+        {
+            format!(
+                "{}: {}°",
+                text(key),
+                nator_drawing::format_mm(value.to_degrees())
+            )
+        }
         Some(value) => format!("{}: {value:.3}", text(key)),
         None => text(key).into(),
     }

@@ -31,8 +31,11 @@ pub fn reference_points(
     sketch: &nator_sketch::Sketch,
 ) -> Result<Vec<nator_sketch::Point2>, DocumentError> {
     use nator_sketch::profiles::{Segment, segment};
-    let mut points = sketch.points.iter().map(|p| p.position).collect::<Vec<_>>();
-    for entity in &sketch.entities {
+    let mut points = sketch
+        .visible_points()
+        .map(|p| p.position)
+        .collect::<Vec<_>>();
+    for entity in sketch.entities.iter().filter(|e| !e.infinite) {
         match segment(sketch, entity).map_err(|e| DocumentError(e.to_string()))? {
             Segment::Line { a, b } => points.push([(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5]),
             Segment::Circle { center, radius } => points.extend([

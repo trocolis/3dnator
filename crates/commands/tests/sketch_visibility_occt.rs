@@ -45,6 +45,30 @@ fn extrusion(part: PartId, sketch: SketchId, to: &str) -> Command {
 }
 
 #[test]
+fn construction_and_infinite_lines_never_change_an_extrusion_profile() -> Result<()> {
+    use nator_sketch::LineType;
+    let (mut session, part, id) = profile(false)?;
+    let mut sketch = session
+        .document()
+        .sketch(id)
+        .ok_or("Perfil ausente")?
+        .sketch
+        .clone();
+    sketch.add_line_with_type([0., 0.], [20., 15.], LineType::Construction)?;
+    sketch.add_line_with_type([0., 7.], [1., 7.], LineType::Infinite)?;
+    session.execute(Command::UpdateSketch { id, sketch })?;
+    let Effect::Imported { body, .. } = session.execute(extrusion(part, id, "8 mm"))? else {
+        return Err("Corpo ausente".into());
+    };
+    let volume = measure::body_properties(session.document(), body)?.volume_mm3;
+    assert!((volume - 2400.).abs() < 1e-6);
+    assert!(session.undo());
+    assert!(session.redo());
+    assert!((measure::body_properties(session.document(), body)?.volume_mm3 - volume).abs() < 1e-6);
+    Ok(())
+}
+
+#[test]
 fn consumed_sketch_visibility_is_atomic_undoable_and_persistent() -> Result<()> {
     let (mut session, part, id) = profile(false)?;
     assert!(

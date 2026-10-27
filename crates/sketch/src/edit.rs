@@ -150,6 +150,12 @@ fn apply_inner(
         Action::Construction => {
             for entity in &mut sketch.entities {
                 if unique.contains(&entity.id) {
+                    if entity.infinite {
+                        return Err(SketchError(
+                            "Uma reta infinita deve permanecer como referência de construção."
+                                .into(),
+                        ));
+                    }
                     entity.construction = !entity.construction;
                 }
             }
@@ -159,6 +165,11 @@ fn apply_inner(
             sketch.prune_unused_points();
         }
         Action::Dimension => {
+            if sketch.entity(first)?.infinite {
+                return Err(SketchError(
+                    "Uma reta infinita não tem comprimento para cotar.".into(),
+                ));
+            }
             let kind = match sketch.entity(first)?.curve {
                 Curve::Line { start, end } => ConstraintKind::Distance {
                     a: start,

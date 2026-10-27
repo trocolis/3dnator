@@ -12,7 +12,10 @@ pub fn resolve_sketch(sketch: &mut nator_sketch::Sketch, parameters: &Parameters
             .iter_mut()
             .find(|c| c.id == *id)
             .ok_or_else(|| DocumentError("Expressão sem cota correspondente.".into()))?;
-        let dimension = if matches!(constraint.kind, ConstraintKind::Angle { .. }) {
+        let dimension = if matches!(
+            constraint.kind,
+            ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
+        ) {
             Dimension::Angle
         } else {
             Dimension::Length
@@ -23,6 +26,7 @@ pub fn resolve_sketch(sketch: &mut nator_sketch::Sketch, parameters: &Parameters
             | ConstraintKind::DeltaX { value: target, .. }
             | ConstraintKind::DeltaY { value: target, .. }
             | ConstraintKind::Angle { value: target, .. }
+            | ConstraintKind::LineAngle { value: target, .. }
             | ConstraintKind::Radius { value: target, .. } => *target = value,
             _ => {
                 return Err(DocumentError(

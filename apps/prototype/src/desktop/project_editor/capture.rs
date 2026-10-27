@@ -65,6 +65,8 @@ pub(crate) fn render_ui_scenario(
         | "part-menu-move"
         | "measure"
         | "sketch-line-input"
+        | "sketch-construction-input"
+        | "sketch-infinite-input"
         | "sketch-circle-input"
         | "sketch-rectangle-input"
         | "extrude-face"
@@ -73,7 +75,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -113,19 +115,25 @@ pub(crate) fn render_ui_scenario(
                     5 => vec![egui::Event::Text(
                         if pointer == "sketch-circle-input" {
                             "12,5"
+                        } else if pointer == "sketch-infinite-input" {
+                            "30"
                         } else {
                             "40"
                         }
                         .into(),
                     )],
-                    6 if pointer != "sketch-circle-input" => vec![egui::Event::Key {
-                        key: egui::Key::Tab,
-                        physical_key: None,
-                        pressed: true,
-                        repeat: false,
-                        modifiers: egui::Modifiers::NONE,
-                    }],
-                    7 if pointer != "sketch-circle-input" => vec![egui::Event::Text("30".into())],
+                    6 if pointer != "sketch-circle-input" && pointer != "sketch-infinite-input" => {
+                        vec![egui::Event::Key {
+                            key: egui::Key::Tab,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }]
+                    }
+                    7 if pointer != "sketch-circle-input" && pointer != "sketch-infinite-input" => {
+                        vec![egui::Event::Text("30".into())]
+                    }
                     _ => Vec::new(),
                 };
             }
@@ -300,7 +308,11 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 });
             }
         }
-        "sketch-line-input" | "sketch-circle-input" | "sketch-rectangle-input" => {
+        "sketch-line-input"
+        | "sketch-circle-input"
+        | "sketch-rectangle-input"
+        | "sketch-construction-input"
+        | "sketch-infinite-input" => {
             open_first_sketch(editor)?;
             let work = editor
                 .current_mut()
@@ -308,10 +320,15 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 .as_mut()
                 .ok_or("Rascunho ausente")?;
             work.select_tool(match scenario {
-                "sketch-line-input" => sketch_editor::Tool::Line,
                 "sketch-circle-input" => sketch_editor::Tool::Circle,
-                _ => sketch_editor::Tool::Rectangle,
+                "sketch-rectangle-input" => sketch_editor::Tool::Rectangle,
+                _ => sketch_editor::Tool::Line,
             });
+            work.line_type = match scenario {
+                "sketch-construction-input" => nator_sketch::LineType::Construction,
+                "sketch-infinite-input" => nator_sketch::LineType::Infinite,
+                _ => nator_sketch::LineType::Normal,
+            };
         }
         "measure" => {
             // A primeira face da malha fornece uma seleção real, inclusive nos
@@ -1599,7 +1616,15 @@ mod tests {
                 editor.current().sketch_edit.as_ref().map(|w| w.tool()),
                 Some(tool)
             );
-            label_position(&mut editor, &context, text(T::SketchToolSettingsPending))?;
+            label_position(
+                &mut editor,
+                &context,
+                text(if tool == Tool::Line {
+                    T::SketchLineType
+                } else {
+                    T::SketchToolSettingsPending
+                }),
+            )?;
             assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
         }
         // Selecionar conserva os diagnósticos e a lista de restrições que antes
@@ -2832,6 +2857,212 @@ mod tests {
 
     /// Digitação sem clicar nos campos, alternância por Tab, Enter único e cancelamento.
     /// Verifica o resultado publicado e as cotas, em vez de apenas inspecionar o formulário.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn line_types_relative_angle_and_floating_fields_follow_the_canvas()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, LineType, lines};
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Linhas", Plane::xy());
+        let reference = sketch.add_line([-40., -20.], [-10., 10.], false)?;
+        let target = sketch.add_line([20., -30.], [60., -30.], false)?;
+        sketch.add_point([-60., -60.])?;
+        sketch.add_point([80., 60.])?;
+        let mut document = Document::new("Desenho de linhas")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        frame(&mut editor, &context, Vec::new())?;
+        settle(&mut editor, &context)?;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let position = |editor: &Editor, p: [f64; 2]| {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                [p[0], p[1], 0.],
+            )
+            .ok_or("Ponto fora do canvas")
+        };
+        let tool = label_position(&mut editor, &context, text(T::Line))?;
+        click(&mut editor, &context, tool)?;
+        let start = position(&editor, [-25., -5.])?;
+        click(&mut editor, &context, start)?;
+        let mouse = position(&editor, [-50., 20.])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(mouse)],
+        )?;
+        frame(&mut editor, &context, Vec::new())?;
+        let length =
+            egui::AreaState::load(&context, egui::Id::new(("sketch_dynamic_input", 0_usize)))
+                .ok_or("Campo de comprimento ausente")?
+                .rect();
+        let angle =
+            egui::AreaState::load(&context, egui::Id::new(("sketch_dynamic_input", 1_usize)))
+                .ok_or("Campo de ângulo ausente")?
+                .rect();
+        assert!(
+            length.min.distance(mouse + egui::vec2(24., 16.)) < 3.,
+            "{length:?}; {mouse:?}"
+        );
+        assert!(angle.center().distance(start) < 160.);
+        assert!(
+            !length.intersects(angle),
+            "comprimento: {length:?}; ângulo: {angle:?}"
+        );
+        // O ícone da linha acompanha o ponteiro sem ocupar sua ponta de captura.
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 820.),
+                )),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        let badge = mouse + egui::vec2(16., -28.) + egui::vec2(4., 19.) * (22. / 24.);
+        assert!(
+            output.shapes.iter().any(
+                |s| matches!(&s.shape,egui::Shape::Circle(c) if c.center.distance(badge) < 0.5)
+            )
+        );
+        output.textures_delta.clear();
+        frame(&mut editor, &context, vec![egui::Event::Text("12".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Tab)])?;
+        frame(&mut editor, &context, vec![egui::Event::Text("90".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let line = sketch.entities.last().ok_or("Linha não criada")?.id;
+        let (a, b) = sketch.line(line)?;
+        assert!((nator_sketch::distance(a, b) - 12.).abs() < 1e-6);
+        assert!(
+            (lines::relative_angle(
+                lines::angle(sketch, line)?,
+                lines::angle(sketch, reference)?
+            ) - std::f64::consts::FRAC_PI_2)
+                .abs()
+                < 1e-6
+        );
+        assert!(sketch.constraints.iter().any(|c| matches!(c.kind,ConstraintKind::LineAngle {line:l, reference:r,..} if l==line && r==reference)));
+        // Aproximar a outra linha termina exatamente a 90°, com incidência
+        // sobre o alvo e uma restrição perpendicular publicada no histórico.
+        let start = position(&editor, [35., -5.])?;
+        let end = position(&editor, [35.1, -29.9])?;
+        click(&mut editor, &context, start)?;
+        frame(&mut editor, &context, vec![egui::Event::PointerMoved(end)])?;
+        click(&mut editor, &context, end)?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let perpendicular = sketch.entities.last().ok_or("Perpendicular ausente")?.id;
+        let (a, b) = sketch.line(perpendicular)?;
+        assert!((a[0] - b[0]).abs() < 1e-6 && (b[1] + 30.).abs() < 1e-6);
+        assert!(sketch.constraints.iter().any(|c| matches!(c.kind,ConstraintKind::Perpendicular {a,b} if (a==target && b==perpendicular) || (b==target && a==perpendicular))));
+        for (kind, label, a, b) in [
+            (
+                LineType::Construction,
+                T::Construction,
+                [15., 35.],
+                [45., 30.],
+            ),
+            (
+                LineType::Infinite,
+                T::SketchLineInfinite,
+                [25., 5.],
+                [55., 15.],
+            ),
+        ] {
+            let choice = label_position(&mut editor, &context, text(label))?;
+            click(&mut editor, &context, choice)?;
+            assert_eq!(
+                editor
+                    .current()
+                    .sketch_edit
+                    .as_ref()
+                    .ok_or("Editor ausente")?
+                    .line_type,
+                kind
+            );
+            let start = position(&editor, a)?;
+            let end = position(&editor, b)?;
+            click(&mut editor, &context, start)?;
+            frame(&mut editor, &context, vec![egui::Event::PointerMoved(end)])?;
+            click(&mut editor, &context, end)?;
+            settle(&mut editor, &context)?;
+            let sketch = &editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch;
+            assert_eq!(
+                sketch.entities.last().ok_or("Linha ausente")?.line_type(),
+                kind,
+                "{}",
+                editor.status
+            );
+        }
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("linhas.3dnator");
+        write_project(&path, editor.current().session.document())?;
+        let reopened = read_project(&path)?;
+        let sketch = &reopened.sketch(id).ok_or("Rascunho ausente")?.sketch;
+        let infinite = sketch.entities.last().ok_or("Reta ausente")?.id;
+        // Guias de alinhamento podem deslocar a origem escolhida. A referência
+        // deve continuar capturável longe dos dois apoios realmente publicados.
+        let (a, b) = sketch.line(infinite)?;
+        let far = nator_sketch::add(a, nator_sketch::scale(nator_sketch::sub(b, a), 10.));
+        assert_eq!(
+            nator_sketch::tools::pick_entity(sketch, far, 0.01)?,
+            Some(infinite)
+        );
+        assert!(editor.current_mut().session.undo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .is_some_and(|s| s.sketch.entity(infinite).is_err())
+        );
+        assert!(editor.current_mut().session.redo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .is_some_and(|s| s.sketch.entity(infinite).is_ok())
+        );
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn drawing_dimensions_follow_typing_tab_enter_and_escape() -> Result<(), Box<dyn Error>> {
