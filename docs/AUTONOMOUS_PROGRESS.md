@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Cubo azul compacto e rotação pela face predominante — 27/10/2026
+
+- Reduzido o controle para 80%, restaurando azuis claros, nomes sobre as faces e Home de contorno. Enquadrar abaixo de Home reutiliza a ação contextual do editor para modelo ou rascunho, sem abrir novamente a barra da câmera.
+- Giros das setas e do menu em 45° pela normal da face principal predominante. A câmera conserva o eixo durante a sequência e reinicia a referência após outra orientação; alvo, escala e projeção ficam intactos. Arraste livre preservado.
+- Aprovados 181 testes sem OCCT, 244 com OCCT, doze ensaios gráficos (61 testes da aplicação no total), formatação, Clippy nas duas configurações e compilação desktop com OCCT. Capturas conferidas em `target/codex-validation/view-cube-blue-80-20261027/`. Sem alteração de formato, release ou publicação remota.
+
 ## Cubo de vista segundo a imagem e remoção da barra do canvas — 27/10/2026
 
 - Retirada a barra permanente da câmera. Navegador redesenhado em cinza, com chanfros largos, Home preenchido e duas setas preenchidas; nomes das faces em dicas. Shift/botão secundário inverte a órbita, e o menu do cubo reúne projeção, enquadramento e giros de 90°.

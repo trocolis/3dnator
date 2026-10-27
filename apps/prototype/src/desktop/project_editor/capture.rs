@@ -1486,6 +1486,7 @@ mod tests {
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn sketch_workflow_keeps_the_model_and_the_same_viewport() -> Result<(), Box<dyn Error>> {
+        use nator_geometry::{norm, sub};
         let state = gpu_state()?;
         let context = egui::Context::default();
         let mut base = Sketch::new("Base", Plane::xy());
@@ -1617,6 +1618,38 @@ mod tests {
         );
         assert_eq!(editor.texture, texture);
         assert!(editor.scene.is_some());
+        // Enquadrar abaixo de Home usa o contexto do rascunho, sem substituí-lo
+        // pelo enquadramento dos sólidos visíveis ou alterar o documento.
+        editor.align_sketch_camera(true, false);
+        let expected = editor.viewport.camera.clone();
+        editor
+            .viewport
+            .camera
+            .pan([90., -50.], f64::from(editor.canvas_rect.height()));
+        editor.viewport.camera.span *= 0.3;
+        let revision = editor.current().session.revision();
+        let fit = view_cube::rect(editor.canvas_rect).min + egui::vec2(17., 47.) * 0.8;
+        click(&mut editor, &context, fit)?;
+        frame(&mut editor, &context, Vec::new())?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(
+            norm(sub(
+                editor.viewport.camera.direction(),
+                expected.direction()
+            )) < 1e-12
+        );
+        assert!((editor.viewport.camera.span - expected.span).abs() < 1e-12);
+        let bounds = editor.display_bounds();
+        let aspect = f64::from(editor.canvas_rect.aspect_ratio());
+        assert!(
+            norm(sub(
+                editor
+                    .viewport
+                    .camera
+                    .world_on_target_plane([0.; 2], bounds, aspect),
+                expected.world_on_target_plane([0.; 2], bounds, aspect)
+            )) < 1e-9
+        );
         editor.finish_sketch();
         assert!(editor.current().sketch_edit.is_none());
         assert!(

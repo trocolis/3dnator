@@ -2,11 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
-### Cubo de vista conforme a nova referência
+### Cubo de vista compacto e giros pela face predominante
 
 - Removida a barra permanente acima da área de edição com vistas, enquadramento, seletor de projeção e indicação do contexto. A área 3D passa a ocupar esse espaço.
-- Cubo maior, em tons de cinza e com chanfros mais largos, acompanhado de Home preenchido à esquerda e somente duas setas curvas preenchidas, acima e à direita. Os nomes das faces aparecem na dica, sem textos sobre o cubo.
-- Setas orbitam em passos de 45°; Shift+clique ou botão direito na seta inverte o sentido. Faces, arestas, cantos e arraste continuam controlando a orientação. O menu do cubo reúne projeção ortográfica/perspectiva, enquadramento e giro de 90°; os comandos de vista continuam na busca.
+- Controle com 80% do tamanho da referência anterior, em azuis claros, mantendo chanfros largos e duas setas preenchidas. Nomes das faces voltam ao cubo, incluindo Frente, Superior e Inferior. Home volta ao desenho de contorno e recebe Enquadrar logo abaixo, respeitando modelo ou rascunho ativo.
+- Setas e menu giram de 45° em 45° ao redor da normal da face principal predominante. O eixo permanece durante uma sequência para não mudar de plano entre os cliques; escolher outra vista ou arrastar define uma nova referência. Shift+clique ou botão direito na seta inverte o sentido. Arraste livre e seleção das 26 direções continuam disponíveis.
+- O menu do cubo reúne projeção ortográfica/perspectiva, enquadramento e os mesmos giros de 45°; os comandos de vista continuam na busca. Os giros conservam alvo, escala e projeção.
 - A paleta de rascunho começa abaixo do cubo e recolhida em janelas curtas para manter o navegador acessível, conservando posições ajustadas pelo usuário.
 
 ### Projeção dos apoios do modelo no rascunho

@@ -508,6 +508,9 @@ impl Editor {
             self.activate_action(ui.ctx(), action);
         }
     }
+    pub(super) fn fit_view(&mut self, context: &egui::Context) {
+        self.activate_action(context, Action::Fit);
+    }
     fn activate_action(&mut self, context: &egui::Context, action: Action) {
         if !self.action_enabled(action) {
             return;

@@ -175,6 +175,17 @@ pub struct Camera {
     pub span: f64,
     pub projection: Projection,
     target: Point3,
+    /// O eixo escolhido no primeiro passo permanece durante a sequência. Sem
+    /// isso, outra face poderia ficar maior após 45° e inverter o eixo do clique
+    /// seguinte. A base gravada também detecta alterações diretas de yaw/pitch.
+    step_rotation: Option<StepRotation>,
+}
+
+#[derive(Debug, Clone)]
+struct StepRotation {
+    axis: Point3,
+    direction: Point3,
+    right: Point3,
 }
 
 impl Default for Camera {
@@ -186,6 +197,7 @@ impl Default for Camera {
             span: 1.5,
             projection: Projection::Orthographic,
             target: [0.; 3],
+            step_rotation: None,
         }
     }
 }
@@ -349,6 +361,7 @@ impl Camera {
         if !length.is_finite() || length <= 1e-12 {
             return;
         }
+        self.step_rotation = None;
         let direction = direction.map(|v| v / length);
         let horizontal = direction[0].hypot(direction[1]);
         if horizontal > 1e-10 {
@@ -364,6 +377,7 @@ impl Camera {
     /// inclinada pelo arraste volta a uma orientação ortogonal da tela, em vez
     /// de conservar indefinidamente um desvio de alguns graus.
     pub fn rotate_quarter_turn(&mut self, clockwise: bool) {
+        self.step_rotation = None;
         let turns = self.roll / std::f64::consts::FRAC_PI_2;
         let rounded = turns.round();
         let base = if (turns - rounded).abs() < 1e-10 {
@@ -382,6 +396,49 @@ impl Camera {
     }
     pub fn reset_roll(&mut self) {
         self.roll = 0.;
+        self.step_rotation = None;
+    }
+
+    /// Passo rígido de 45° ao redor da normal da face principal predominante.
+    /// A área projetada das seis faces iguais é proporcional a |normal·direção|.
+    /// Empates usam Z, depois Y, depois X, com tolerância para ruído nos polos.
+    /// O sinal aponta para o observador, mantendo horário/anti-horário coerentes
+    /// também nas vistas inferior/traseira/esquerda. Alvo, escala e projeção não mudam.
+    pub fn rotate_view_step(&mut self, clockwise: bool) {
+        let (right, _, direction) = self.basis();
+        let axis = self
+            .step_rotation
+            .as_ref()
+            .filter(|step| {
+                norm(sub(step.direction, direction)) < 1e-10 && norm(sub(step.right, right)) < 1e-10
+            })
+            .map(|step| step.axis)
+            .unwrap_or_else(|| {
+                let mut dominant = 2;
+                for candidate in [1, 0] {
+                    if direction[candidate].abs() > direction[dominant].abs() + 1e-10 {
+                        dominant = candidate;
+                    }
+                }
+                let mut axis = [0.; 3];
+                axis[dominant] = direction[dominant].signum();
+                axis
+            });
+        let angle = if clockwise {
+            std::f64::consts::FRAC_PI_4
+        } else {
+            -std::f64::consts::FRAC_PI_4
+        };
+        self.set_orientation(
+            rotate_vector(direction, axis, angle),
+            rotate_vector(right, axis, angle),
+        );
+        let (right, _, direction) = self.basis();
+        self.step_rotation = Some(StepRotation {
+            axis,
+            direction,
+            right,
+        });
     }
 
     pub fn pan(&mut self, delta: [f64; 2], height: f64) {
@@ -410,6 +467,7 @@ impl Camera {
     pub fn set_direction(&mut self, direction: Point3) {
         let length = norm(direction);
         if length.is_finite() && length > 1e-9 {
+            self.step_rotation = None;
             // Vistas superior/inferior usam X para a direita. Isso mantém o clique
             // no cubo coerente com o botão Superior, inclusive exatamente no polo.
             self.yaw = if direction[0].hypot(direction[1]) < length * 1e-12 {
@@ -1250,6 +1308,87 @@ mod tests {
     }
 
     #[test]
+    fn view_steps_follow_the_normal_of_each_face_in_45_degree_increments() {
+        for projection in PROJECTIONS {
+            for normal in [
+                [1., 0., 0.],
+                [-1., 0., 0.],
+                [0., 1., 0.],
+                [0., -1., 0.],
+                [0., 0., 1.],
+                [0., 0., -1.],
+            ] {
+                let mut camera = Camera {
+                    projection,
+                    ..Camera::default()
+                };
+                camera.set_direction(normal);
+                camera.pan([70., -35.], 600.);
+                camera.span = 0.7;
+                let before = camera.basis();
+                let target = camera.target;
+                for turn in 1..=8 {
+                    camera.rotate_view_step(true);
+                    assert!(norm(sub(camera.direction(), normal)) < 1e-12);
+                    let p = camera.axis_projection(before.0);
+                    let angle = f64::from(turn) * std::f64::consts::FRAC_PI_4;
+                    assert!((p[0] - angle.cos()).abs() < 1e-12);
+                    assert!((p[1] - angle.sin()).abs() < 1e-12);
+                    assert_eq!(camera.target, target);
+                    assert_eq!(camera.span, 0.7);
+                    assert_eq!(camera.projection, projection);
+                }
+                assert!(norm(sub(camera.basis().0, before.0)) < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn oblique_view_steps_keep_the_initial_dominant_axis_until_orientation_changes()
+    -> Result<(), String> {
+        let mut camera = Camera::default();
+        let before = camera.basis();
+        camera.rotate_view_step(false);
+        // A vista inicial tem Frente predominante. Após o primeiro giro, Direita
+        // fica maior; conservar o eixo inicial impede que o clique seguinte troque
+        // de plano. A comparação usa uma rotação geométrica independente da câmera.
+        let rotation =
+            nator_geometry::Placement::new([0.; 3], [0., std::f64::consts::FRAC_PI_4, 0.])
+                .map_err(|e| e.to_string())?;
+        assert!(norm(sub(camera.direction(), rotation.apply_vector(before.2))) < 1e-12);
+        assert!(camera.direction()[0].abs() > camera.direction()[1].abs());
+        for _ in 1..8 {
+            camera.rotate_view_step(false);
+        }
+        assert!(norm(sub(camera.direction(), before.2)) < 1e-12);
+        assert!(norm(sub(camera.basis().0, before.0)) < 1e-12);
+        camera.set_direction([0., 0., 1.]);
+        camera.rotate_view_step(false);
+        assert_eq!(
+            camera.step_rotation.as_ref().map(|s| s.axis),
+            Some([0., 0., 1.])
+        );
+        camera.orbit([10., -20.]);
+        assert!(camera.step_rotation.is_none());
+        camera.yaw = 0.;
+        camera.pitch = 0.;
+        camera.rotate_view_step(true);
+        assert_eq!(
+            camera.step_rotation.as_ref().map(|s| s.axis),
+            Some([1., 0., 0.])
+        );
+        for direction in [[1., 1., 1.], [-1., -1., -1.]] {
+            camera.set_direction(direction);
+            camera.rotate_view_step(true);
+            assert_eq!(
+                camera.step_rotation.as_ref().map(|s| s.axis),
+                Some([0., 0., direction[2]])
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn free_orbit_crosses_poles_with_a_continuous_orthonormal_frame() {
         let mut camera = Camera::default();
         camera.set_direction([0., 0., 1.]);
@@ -1294,6 +1433,7 @@ mod tests {
             };
             camera.rotate_quarter_turn(true);
             camera.orbit([17., -11.]);
+            camera.rotate_view_step(true);
             camera.pan([23., 37.], 600.);
             for cursor in [[0., 0.], [-0.4, 0.2], [0.6, -0.5]] {
                 let point = camera.world_on_target_plane(cursor, BOUNDS, 1.6);

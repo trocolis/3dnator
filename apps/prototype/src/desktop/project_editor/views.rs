@@ -336,7 +336,9 @@ impl Editor {
                 if ui.input(|i| i.pointer.any_down()) && starts_on_cube {
                     self.current_mut().camera_transition = None;
                 }
-                view_cube::show(ui, &mut self.viewport.camera, response.rect);
+                if view_cube::show(ui, &mut self.viewport.camera, response.rect) {
+                    self.fit_view(ui.ctx());
+                }
                 self.viewport.render(&self.gpu.device, &self.gpu.queue);
                 let origin_chosen = self.origin_overlay(ui, &response);
                 if !origin_chosen

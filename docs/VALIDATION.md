@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Cubo azul em 80%, rótulos, Enquadrar e giros pela normal — 27/10/2026
+
+- Controle reduzido de 208 × 200 para 166,4 × 160 pontos lógicos, incluindo geometria, posições, setas e áreas de clique. Restaurados azuis claros, textos orientados nas seis faces e Home de contorno. Enquadrar ocupa o espaço abaixo de Home; o retângulo de interação do cubo não intercepta o botão nos vazios da silhueta.
+- As setas e o menu usam `Camera::rotate_view_step`: 45° em torno da normal assinada da face principal predominante. A normal inicial fica conservada durante uma sequência para evitar troca de eixo quando outra face passar a ser maior. Arraste/presets invalidam a sequência; a base gravada também detecta alterações diretas de yaw/pitch. Alvo, escala e projeção são preservados; arraste continua livre.
+- Novas regressões do renderizador cobrem as seis normais, oito passos fechando uma volta, projeções ortográfica/perspectiva, eixo estável na vista oblíqua, reinício após troca de orientação e desempate determinístico. O ensaio de concordância entre matriz GPU, raios, pan e zoom também passa por um giro novo.
+- Ensaios do widget verificam dimensões, nomes das seis faces, Home, Enquadrar, giro/inversão das duas setas, menu em 45° e ausência de clique no canvas. O fluxo gráfico de rascunho confirma que Enquadrar usa o plano/perfil ativo e não modifica o documento.
+- Capturas reais inspecionadas em `target/codex-validation/view-cube-blue-80-20261027/`: `final.png` (1440 × 900), `compact.png` (900 × 600) e `sketch.png`. O executável desktop foi recompilado. **181 testes sem OCCT e 244 com OCCT aprovados**, além dos doze ensaios gráficos em série (61 testes da aplicação com os ignorados habilitados). Formatação e Clippy do workspace com todos os alvos/avisos negados nas duas configurações aprovados. Validação local no Linux/GL llvmpipe; Windows não exercitado. Versão 0.3.0 em desenvolvimento e formato 17 preservados.
+
 ## Cubo conforme a referência e edição sem barra de câmera — 27/10/2026
 
 - Removida a faixa permanente de vistas/projeção do canvas. O ensaio gráfico da interface compacta verifica a ausência de Ortográfica/Perspectiva/Enquadrar nessa faixa e o espaço recuperado no topo, em 1280 e 900 pixels.

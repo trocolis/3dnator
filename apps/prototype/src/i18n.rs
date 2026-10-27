@@ -6,6 +6,7 @@ pub enum Text {
     Origin,
     SketchXY,
     ViewRight,
+    ViewFront,
     ViewLeft,
     ViewBack,
     ViewBottom,
@@ -85,11 +86,13 @@ pub enum Text {
     #[allow(dead_code)]
     StatusAttention,
     ViewHome,
+    #[allow(dead_code)]
     ViewOrbitLeft,
     #[allow(dead_code)]
     ViewOrbitRight,
     #[allow(dead_code)]
     ViewOrbitUp,
+    #[allow(dead_code)]
     ViewOrbitDown,
     ViewOrbitReverseHint,
     Extrude,
@@ -623,13 +626,18 @@ pub fn text(key: Text) -> &'static str {
         Text::Origin => "Origem",
         Text::SketchXY => "Rascunho XY",
         Text::ViewRight => "Direita",
+        Text::ViewFront => "Frente",
         Text::ViewLeft => "Esquerda",
         Text::ViewBack => "Traseira",
         Text::ViewBottom => "Inferior",
-        Text::ViewRotateLeft => "Girar até a próxima orientação de 90° no sentido anti-horário",
-        Text::ViewRotateRight => "Girar até a próxima orientação de 90° no sentido horário",
-        Text::ViewRollLeft => "Girar 90° à esquerda",
-        Text::ViewRollRight => "Girar 90° à direita",
+        Text::ViewRotateLeft => {
+            "Girar 45° no sentido anti-horário ao redor da normal da face predominante"
+        }
+        Text::ViewRotateRight => {
+            "Girar 45° no sentido horário ao redor da normal da face predominante"
+        }
+        Text::ViewRollLeft => "Girar 45° à esquerda",
+        Text::ViewRollRight => "Girar 45° à direita",
         Text::ViewUpright => "Retornar à orientação de 0°",
         Text::ViewCubeHint => {
             "Cubo de orientação: clique em faces, arestas ou cantos; arraste para orbitar. Botão direito abre as opções da vista."
@@ -793,7 +801,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ViewOrbitUp => "Girar vista para cima",
         Text::ViewOrbitDown => "Girar vista para baixo",
         Text::ViewOrbitReverseHint => {
-            "Passo de 45°. Shift+clique ou botão direito inverte o sentido."
+            "Passo de 45° ao redor da normal da face predominante. Shift+clique ou botão direito inverte o sentido."
         }
         Text::Extrude => "Extrusão",
         Text::Revolve => "Revolução",

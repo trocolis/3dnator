@@ -166,13 +166,15 @@ O fundo claro do renderizador e do rascunho usa a mesma paleta dos painéis. Cor
 
 ## Cubo de orientação
 
-No canto superior direito da área 3D, o cubo segue o desenho de referência: tons de cinza, chanfros largos, Home à esquerda e duas setas curvas preenchidas. Clique em uma face, aresta chanfrada ou canto para escolher uma das 26 direções. A área selecionável acompanha o polígono visível; os nomes em português aparecem na dica do mouse, sem texto sobre o cubo. A área de edição não tem a antiga barra permanente de vistas/projeção.
+No canto superior direito da área 3D, o cubo tem azuis claros, chanfros largos, Home de contorno à esquerda, Enquadrar logo abaixo e duas setas curvas preenchidas. O controle mede 80% do desenho anterior (166,4 × 160 pontos de tela). Clique em uma face, aresta chanfrada ou canto para escolher uma das 26 direções. A área selecionável acompanha o polígono visível; os nomes em português aparecem nas faces e acompanham sua orientação, incluindo Frente, Superior e Inferior. A área de edição não tem a antiga barra permanente de vistas/projeção.
 
 Arraste com o botão esquerdo sobre o cubo para orbitar livremente. O movimento continua ao passar pelas vistas superior e inferior; não seleciona nem desloca corpos. A órbita com Shift + botão do meio usa o mesmo referencial da tela.
 
-O botão **Home**, à esquerda do cubo, restaura a vista isométrica padrão, zera a inclinação da tela e enquadra o modelo, conservando a projeção ortográfica/perspectiva. A seta superior gira para a esquerda, e a lateral, para baixo, em passos de 45°. **Shift+clique** ou botão direito na seta inverte o sentido. Os controles ocupam regiões separadas das faces e não selecionam o modelo.
+O botão **Home**, à esquerda do cubo, restaura a vista isométrica padrão, zera a inclinação da tela e enquadra o modelo, conservando a projeção ortográfica/perspectiva. **Enquadrar**, abaixo dele, usa o contexto do editor: modelo na vista 3D ou rascunho em seu plano de trabalho.
 
-O **botão direito no cubo** abre o menu com **Ortográfica**, **Perspectiva**, **Enquadrar** e giros da tela em 90° para esquerda/direita. Os giros conservam direção observada, alvo e zoom. Vistas convencionais e enquadramento também continuam na busca de ferramentas por S.
+As duas setas giram de **45° em 45°**, em sentidos opostos, ao redor do eixo perpendicular à face principal mais voltada ao observador. Em uma sequência de cliques, o eixo inicial é conservado mesmo se outra face passar a ocupar mais espaço; escolher uma face ou arrastar inicia uma nova referência. Nas vistas frontal, superior e inferior, o giro permanece no plano exibido. **Shift+clique** ou botão direito na seta inverte o sentido. Os controles não selecionam o modelo nem modificam alvo, zoom ou projeção.
+
+O **botão direito no cubo** abre o menu com **Ortográfica**, **Perspectiva**, **Enquadrar** e os mesmos giros de 45°. Vistas convencionais e enquadramento também continuam na busca de ferramentas por S.
 
 O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visualização; não acrescenta operações ao histórico paramétrico ou ao desfazer/refazer do documento.
 

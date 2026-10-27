@@ -299,7 +299,7 @@ impl Editor {
         let mut submit = false;
         let mut open_repair = false;
         let mut edit_dimension = false;
-        // A paleta começa abaixo do navegador maior, sem cobrir cantos/setas.
+        // A paleta começa abaixo do navegador, sem cobrir cantos/setas.
         // Em janelas curtas nasce recolhida; posições arrastadas pelo usuário
         // continuam sendo conservadas pelo estado da janela do egui.
         let tools_top =
