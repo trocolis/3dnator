@@ -4,7 +4,7 @@ A organização visual usa como referência o shell compacto do SolidCraft e seu
 
 ## Organização e uso
 
-- **Barra superior:** menu Arquivo, salvar, desfazer/refazer, projetos em abas, novo projeto e busca. À direita ficam minimizar, maximizar/restaurar e fechar o aplicativo, substituindo a barra de título nativa. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar.
+- **Barra superior:** menu Arquivo, salvar, projetos em abas, novo projeto e busca. À direita ficam minimizar, maximizar/restaurar e fechar o aplicativo, substituindo a barra de título nativa. O ponto no nome da aba indica alterações não salvas; o fechamento continua oferecendo salvar, descartar ou cancelar. Recuperação e casas decimais ficam no menu Arquivo.
 A faixa contém Montagem, Peça e Inspecionar, além de Rascunho durante a edição. Mostra apenas os grupos de ferramentas da aba escolhida, sem bloco fixo de identificação do espaço de trabalho. Importações e ferramentas de visualização também podem ser acessadas pela busca por S; câmera e projeção continuam na faixa sobre a área 3D.
 
 - **Montagem:** primeira aba, aberta por padrão, com o fluxo próprio na ordem de trabalho: **Rascunho de referência** (Referência); **Nova peça** ▾ com Criar nova peça, Criar a partir de STEP e Criar a partir de STL (Peças); **Mover** ▾ com Livre, Face a face, Aresta a aresta e Vértice a vértice (Posicionar); **Copiar** ▾ com Nova instância, Cópia independente e Padrão de repetição; e Agrupar/Desagrupar (Organizar). Os botões com ▾ abrem a lista de subopções, cada uma com ícone e uma linha de explicação. Espelhar componente continua no menu de contexto da árvore; folha técnica e STEP ficam em Inspecionar.
@@ -47,7 +47,9 @@ Arraste o fundo livre da barra escura para mover a janela. Duplo clique nessa re
 
 ## Linha do tempo do histórico
 
-Na base fica a linha do tempo das operações da peça ativa, como nos CADs de mercado. Ela representa o histórico paramétrico persistido; desfazer/refazer continua pertencendo à sessão e cobre todas as ações abaixo.
+Na base há uma única barra: **Histórico**, desfazer/refazer, um separador, a linha do tempo das operações da peça ativa e, à direita, um ponto colorido seguido do estado curto. A linha do tempo representa o histórico paramétrico persistido; desfazer/refazer pertence à sessão e cobre todas as ações abaixo. A faixa central rola horizontalmente e não invade o indicador de estado. O rodapé não mostra a unidade.
+
+Mensagens informativas, avisos e erros abrem um diálogo com OK; Esc também fecha a mensagem atual. Uma fila preserva mensagens recebidas no mesmo quadro. Pronto e Processando são estados curtos, sem abrir diálogo. Falhas paramétricas mantêm o diálogo específico com as opções de resolução, sem repetir o mesmo diagnóstico em outra janela.
 
 - **Reprodução:** os botões ⏮ ◀ ▶ ⏭ movem o marcador do histórico para o início, uma operação para trás, uma para a frente ou para o fim.
 - **Marcador:** a barra azul com alça pode ser arrastada entre as operações para voltar a uma etapa. As operações depois dele ficam esmaecidas e não são construídas; seus resultados ficam ocultos. Novas operações entram na posição do marcador, que avança junto. Avançar o marcador reconstrói as operações reativadas.
@@ -88,7 +90,7 @@ O STL não informa a unidade. Depois da leitura, o painel **Inserir malha STL** 
 
 ## Unidades, precisão e miniatura
 
-A barra de status mostra a unidade e a precisão de exibição (por exemplo, `mm · 0,00`). O menu permite escolher de 0 a 6 casas decimais para medidas, dimensões do corpo na janela Medir seleção, coordenadas e parâmetros. A escolha é uma configuração do documento, salva no projeto e reversível por desfazer; não muda a precisão interna. As cotas dos rascunhos continuam omitindo zeros desnecessários.
+**Arquivo → Casas decimais exibidas** permite escolher de 0 a 6 casas para medidas, dimensões do corpo na janela Medir seleção, coordenadas e parâmetros. A escolha é uma configuração do documento, salva no projeto e reversível por desfazer; não muda a precisão interna. As cotas dos rascunhos continuam omitindo zeros desnecessários.
 
 Cada gravação inclui uma miniatura isométrica do modelo, mostrada na janela de recuperação para reconhecer as cópias.
 
@@ -110,10 +112,10 @@ O corte é um controle visual da aba, como isolamento e transparência: não alt
 
 ## Árvore do projeto
 
-A raiz **Projeto** contém **Peças**, **Rascunhos** (de referência da montagem) e **Origem**. Cada peça é um nó com o nome da ocorrência (a definição aparece na dica) e as pastas **Corpos**, **Sub-peças**, **Rascunhos** e **Origem**; cada subpeça repete a mesma estrutura. Pastas vazias dentro das peças não aparecem; as do projeto aparecem sempre.
+A árvore usa linhas compactas e começa diretamente no contexto de edição ou na raiz, sem o cabeçalho “Árvore do projeto”. A raiz **Projeto**, com o ícone do aplicativo e sempre visível, contém **Peças**, **Rascunhos** (de referência da montagem) e **Origem**. Cada peça é um nó com o nome da ocorrência (a definição aparece na dica) e as pastas **Corpos**, **Sub-peças**, **Rascunhos** e **Origem**; cada subpeça repete a mesma estrutura. Pastas vazias dentro das peças não aparecem; as do projeto aparecem sempre.
 
 - **Corpos e operações:** a pasta Corpos lista os resultados atuais, sem acumular etapas anteriores ocultas. Arredondar, chanfrar ou modificar um corpo conserva seu nome; a operação aparece na linha do tempo. Para inspecionar uma etapa anterior, recue o marcador do histórico. Corpos independentes ocultados manualmente continuam listados para permitir reexibi-los, assim como etapas antigas explicitamente mostradas em projetos existentes.
-- **Visibilidade:** todo nó tem um olho. O da pasta não altera a escolha de cada elemento: a visibilidade efetiva combina a do elemento com a de todos os nós acima dele, e o que fica oculto por um nó acima aparece esmaecido. Ocultar **Projeto** esconde tudo; **Peças**, as peças da raiz; **Sub-peças**, as subpeças daquela peça. As pastas são gravadas no projeto, participam de desfazer/refazer e valem para todas as ocorrências da peça. Cena, seleção, medições, miniatura, folhas técnicas e exportações seguem a visibilidade efetiva.
+- **Visibilidade:** os descendentes da raiz têm um olho. O da pasta não altera a escolha de cada elemento: a visibilidade efetiva combina a do elemento com a dos nós acima dele, e o que fica oculto por um ancestral aparece esmaecido. **Peças** controla as peças da raiz; **Sub-peças**, as subpeças daquela peça. As opções são gravadas no projeto, participam de desfazer/refazer e valem para todas as ocorrências da peça. Uma raiz oculta em arquivo antigo é restaurada ao abrir, conservando as escolhas dos descendentes.
 - **Origem:** a do projeto começa visível; a de cada peça começa oculta e, aberta, desenha os eixos em cada ocorrência da peça.
 - **Edição da peça:** o lápis ao lado do olho entra na edição da peça (construção), abre o nó dela e leva a faixa da aba Montagem para Peça; na peça em edição, o lápis fica destacado e um novo clique volta à montagem (e a faixa, de Peça para Montagem). O nome da peça em edição fica no topo da árvore, com um botão para sair.
 - Clique seleciona (Ctrl+clique acrescenta); clique num rascunho abre a edição dele; clicar no nome de uma pasta abre ou fecha a pasta. Grupos, análises e folhas técnicas ficam abaixo da raiz.
@@ -158,7 +160,7 @@ No canto superior direito da área 3D, clique em uma face, aresta chanfrada ou c
 
 Arraste com o botão esquerdo sobre o cubo para orbitar livremente. O movimento continua ao passar pelas vistas superior e inferior; não seleciona nem desloca corpos. A órbita com Shift + botão do meio usa o mesmo referencial da tela.
 
-As duas setas acima do cubo giram a vista no sentido horário ou anti-horário até o próximo múltiplo de 90°. Cliques sucessivos percorrem 0°, 90°, 180° e 270°. Se a vista estiver inclinada pelo arraste, a primeira seta a alinha ao próximo desses ângulos; clicar no número restaura 0°. A direção observada, o alvo, o zoom e a projeção são preservados durante esse giro. Clicar em uma face restaura a orientação convencional dessa vista.
+O botão **Home**, à esquerda do cubo, restaura a vista isométrica padrão, zera a inclinação da tela e enquadra o modelo, conservando a projeção ortográfica/perspectiva. As setas curvas grandes acima e à direita orbitam a câmera em passos de 45°, nos sentidos horizontal e vertical. As duas setas pequenas no alto à direita giram a tela até o próximo múltiplo de 90°, conservando direção observada, alvo e zoom. Os controles ocupam regiões separadas das faces e não selecionam o modelo.
 
 O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visualização; não acrescenta operações ao histórico paramétrico ou ao desfazer/refazer do documento.
 

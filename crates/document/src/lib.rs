@@ -234,8 +234,8 @@ impl Default for PartFolders {
     }
 }
 
-/// Visibilidade dos nós do projeto na árvore: o próprio projeto (tudo), as peças da raiz,
-/// os rascunhos de referência e a origem da montagem.
+/// Visibilidade dos nós do projeto. `project` permanece na persistência por
+/// compatibilidade; a raiz é sempre visível, e só os seus descendentes podem ser ocultos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProjectFolders {
@@ -356,7 +356,12 @@ impl Document {
         self.folders
     }
     pub fn restore_folders(&mut self, folders: ProjectFolders) {
-        self.folders = folders;
+        // Projetos antigos podiam ocultar a raiz. A árvore atual não oferece
+        // esse controle; normalizar evita carregar um projeto impossível de revelar.
+        self.folders = ProjectFolders {
+            project: true,
+            ..folders
+        };
     }
     /// Visibilidade própria do nó, sem considerar os nós acima dele.
     pub fn folder_visible(&self, folder: Folder) -> Result<bool, DocumentError> {
@@ -381,6 +386,11 @@ impl Document {
         folder: Folder,
         visible: bool,
     ) -> Result<(), DocumentError> {
+        if folder == Folder::Project && !visible {
+            return Err(DocumentError(
+                "A raiz do projeto deve permanecer visível.".into(),
+            ));
+        }
         let flag = match folder {
             Folder::Project => &mut self.folders.project,
             Folder::Parts => &mut self.folders.parts,

@@ -683,7 +683,7 @@ mod tests {
         doc.set_folder_visible(Folder::Subparts(part), true)?;
         doc.set_folder_visible(Folder::Bodies(part), true)?;
         assert_eq!(triangles(&doc)?, full);
-        // Peças, ou o projeto inteiro, ocultam todas as ocorrências da raiz.
+        // A pasta Peças controla as ocorrências da raiz; o projeto permanece visível.
         doc.set_folder_visible(Folder::Parts, false)?;
         assert!(doc.occurrences()?.is_empty());
         doc.set_folder_visible(Folder::Parts, true)?;
@@ -692,9 +692,16 @@ mod tests {
         let reference = doc.add_reference_sketch(layout)?;
         let record = doc.sketch(reference).ok_or("Rascunho ausente")?.clone();
         assert!(doc.shows_reference_sketch(&record));
-        doc.set_folder_visible(Folder::Project, false)?;
-        assert!(doc.occurrences()?.is_empty());
-        assert!(!doc.shows_origin() && !doc.shows_reference_sketch(&record));
+        assert!(doc.set_folder_visible(Folder::Project, false).is_err());
+        assert!(!doc.occurrences()?.is_empty());
+        assert!(doc.shows_origin() && doc.shows_reference_sketch(&record));
+        doc.restore_folders(ProjectFolders {
+            project: false,
+            sketches: false,
+            ..doc.folders()
+        });
+        assert!(doc.folder_visible(Folder::Project)?);
+        assert!(!doc.folder_visible(Folder::ReferenceSketches)?);
         assert!(doc.folder_visible(Folder::Parts)?);
         Ok(())
     }

@@ -693,7 +693,7 @@ impl Editor {
             })
             .collect::<Vec<_>>();
         if members.is_empty() {
-            self.status = text(T::GroupMembers).into();
+            self.status.warning(text(T::GroupMembers));
             return;
         }
         let name = format!(
@@ -828,7 +828,7 @@ impl Editor {
             Some(Panel::Move(d)) => {
                 // Alterna o elemento; na construção, só corpos da peça ativa se movem.
                 if active.is_some_and(|p| p != pick.part) {
-                    self.status = text(T::PickOtherPart).into();
+                    self.status.warning(text(T::PickOtherPart));
                 } else if let Some(i) = d.targets.iter().position(|t| *t == item) {
                     d.targets.remove(i);
                 } else {
@@ -840,7 +840,7 @@ impl Editor {
                 // A origem é sempre geometria do elemento que se move.
                 if d.field == Some(AlignField::From) {
                     if active.is_some_and(|p| p != pick.part) {
-                        self.status = text(T::PickOtherPart).into();
+                        self.status.warning(text(T::PickOtherPart));
                     } else {
                         d.from = Some(pick);
                         d.field = d.to.is_none().then_some(AlignField::To);

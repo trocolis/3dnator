@@ -1,5 +1,13 @@
 # Execução autônoma
 
+## Árvore, rodapé único e Home — 27/10/2026
+
+- Árvore sem título e com linhas menores; raiz com ícone do aplicativo e visibilidade obrigatória, normalizada em arquivos legados. Rodapé reúne Histórico, desfazer/refazer, linha do tempo e indicador curto, sem unidade. Recuperação e precisão ficam em Arquivo.
+- Mensagens e alertas em diálogos com fila, separados de Pronto/Processando. Confirmação de aviso precede o teclado dos painéis; não aplica operações por trás da janela nem descarta a mensagem no quadro em que surgiu.
+- Controlador de vista com Home (isométrica e enquadramento), setas curvas de órbita em 45° e giro da tela em 90°. Capturas da árvore, histórico e diálogo inspecionadas em `target/codex-validation/compact-shell-20261027/`.
+- Aprovados 162 testes sem OCCT, 219 com OCCT, os dez ensaios gráficos, formatação, Clippy nas duas configurações e compilação desktop com OCCT. Capturas finais 1440 × 900 e 900 × 600.
+- Sem release, migração ou publicação remota. O esboço fornecido permanece fora do commit.
+
 ## Importação do STEP ESP32 Wroom — 27/10/2026
 
 - Reproduzido o erro no modelo real: os 142 sólidos são válidos, mas a tesselação contém triângulos colapsados com vértices repetidos. A adaptação Rust da malha agora descarta apenas elementos de área exatamente zero, preservando o B-rep, os detalhes com área positiva e os índices de face dos demais triângulos.

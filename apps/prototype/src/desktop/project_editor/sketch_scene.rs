@@ -193,7 +193,7 @@ impl Editor {
         {
             Ok(p) => p.unwrap_or_default(),
             Err(error) => {
-                self.status = error;
+                self.status.error(error);
                 return;
             }
         };
@@ -202,7 +202,7 @@ impl Editor {
             placement,
             reference: false,
         });
-        self.status = text(T::ChooseSketchPlane).into();
+        self.status.set(text(T::ChooseSketchPlane));
     }
     /// Seletor de plano para um rascunho de referência da montagem.
     pub(super) fn start_reference_sketch_plane(&mut self) {
@@ -216,7 +216,7 @@ impl Editor {
             placement: Placement::default(),
             reference: true,
         });
-        self.status = text(T::ChooseSketchPlane).into();
+        self.status.set(text(T::ChooseSketchPlane));
     }
     pub(super) fn choose_origin_plane(&mut self, plane: Plane) {
         if self.busy() {
@@ -335,7 +335,7 @@ impl Editor {
             extent = std::array::from_fn(|i| (max[i] - min[i]).max(10.));
         }
         if let Err(error) = next.align_plane(plane.world(center), plane.u, plane.v, bounds) {
-            self.status = error;
+            self.status.error(error);
             return;
         }
         if fit {

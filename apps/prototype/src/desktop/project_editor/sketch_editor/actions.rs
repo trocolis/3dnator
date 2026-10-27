@@ -229,7 +229,7 @@ impl Editor {
                     work.selected.retain(|id| sketch.entity(*id).is_ok());
                     self.solve_sketch(context, sketch);
                 }
-                Err(message) => self.status = message,
+                Err(message) => self.status.error(message),
             }
         }
     }

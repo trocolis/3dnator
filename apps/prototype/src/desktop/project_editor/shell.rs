@@ -529,7 +529,7 @@ impl Editor {
                     .map_err(|e| e.to_string())
                     .and_then(|d| self.add_tab(d, None, None))
                 {
-                    self.status = error;
+                    self.status.error(error);
                 }
             }
             Action::Open => self.open(context, None),
@@ -717,10 +717,42 @@ impl Editor {
                                 ui.close();
                             }
                         }
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                !self.recoveries.is_empty(),
+                                egui::Button::new(text(T::Recovery)),
+                            )
+                            .clicked()
+                        {
+                            self.show_recovery = true;
+                            ui.close();
+                        }
+                        ui.menu_button(text(T::DisplayDecimals), |ui| {
+                            let mut decimals = self
+                                .current()
+                                .session
+                                .document()
+                                .settings()
+                                .display_decimals;
+                            if ui
+                                .add_enabled(
+                                    !self.busy(),
+                                    egui::DragValue::new(&mut decimals)
+                                        .range(0..=nator_document::MAX_DISPLAY_DECIMALS),
+                                )
+                                .changed()
+                            {
+                                self.execute(Command::SetSettings {
+                                    settings: nator_document::Settings {
+                                        display_decimals: decimals,
+                                    },
+                                });
+                            }
+                            ui.label(text(T::DisplayDecimalsHint));
+                        });
                     });
-                    for action in [Action::Save, Action::Undo, Action::Redo] {
-                        self.action_button(ui, action, false);
-                    }
+                    self.action_button(ui, Action::Save, false);
                     ui.separator();
                     let width =
                         (ui.available_width() - 90. - window_frame::CONTROLS_WIDTH).max(110.);
@@ -1312,84 +1344,67 @@ impl Editor {
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::WHITE)
-                    .inner_margin(egui::Margin::symmetric(12, 6))
+                    .inner_margin(egui::Margin::symmetric(10, 3))
                     .stroke(egui::Stroke::new(1., theme::BORDER)),
             )
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(text(T::ParametricHistory))
-                            .strong()
-                            .size(12.),
+                let (row, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 34.),
+                    egui::Sense::hover(),
+                );
+                // Reservas independentes mantêm o status na direita e impedem
+                // que uma linha do tempo longa crie uma segunda linha no rodapé.
+                let left =
+                    egui::Rect::from_min_max(row.min, egui::pos2(row.left() + 150., row.bottom()));
+                let right =
+                    egui::Rect::from_min_max(egui::pos2(row.right() - 130., row.top()), row.max);
+                let middle = egui::Rect::from_min_max(
+                    egui::pos2(left.right() + 8., row.top()),
+                    egui::pos2(right.left() - 8., row.bottom()),
+                );
+                let mut controls = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(left)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                controls.spacing_mut().item_spacing.x = 4.;
+                controls.label(
+                    egui::RichText::new(text(T::ParametricHistory))
+                        .strong()
+                        .size(12.),
+                );
+                self.action_button(&mut controls, Action::Undo, false);
+                self.action_button(&mut controls, Action::Redo, false);
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(left.right(), row.top() + 4.),
+                        egui::pos2(left.right(), row.bottom() - 4.),
+                    ],
+                    egui::Stroke::new(1., theme::BORDER),
+                );
+                if middle.is_positive() {
+                    let mut strip = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(middle)
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     );
-                    self.action_button(ui, Action::Undo, false);
-                    self.action_button(ui, Action::Redo, false);
-                    ui.separator();
-                    self.timeline_strip(ui);
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if self.busy() {
-                        ui.spinner();
-                    } else {
-                        let (r, _) =
-                            ui.allocate_exact_size(egui::vec2(8., 8.), egui::Sense::hover());
-                        ui.painter().circle_filled(r.center(), 3., theme::GREEN);
-                    }
-                    ui.label(
-                        egui::RichText::new(&self.status)
-                            .small()
-                            .color(theme::MUTED),
-                    );
-                    if !self.recoveries.is_empty()
-                        && ui
-                            .small_button(format!(
-                                "{} ({})",
-                                text(T::Recovery),
-                                self.recoveries.len()
-                            ))
-                            .clicked()
-                    {
-                        self.show_recovery = true;
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Unidade e precisão de exibição do documento.
-                        let settings = self.current().session.document().settings();
-                        let label = format!(
-                            "{} · {}",
-                            text(T::UnitsMm),
-                            nator_drawing::format_fixed(0., usize::from(settings.display_decimals))
-                        );
-                        let mut decimals = settings.display_decimals;
-                        let mut changed = false;
-                        ui.menu_button(
-                            egui::RichText::new(label).small().color(theme::MUTED),
-                            |ui| {
-                                ui.label(text(T::DisplayDecimals));
-                                changed = ui
-                                    .add(
-                                        egui::DragValue::new(&mut decimals)
-                                            .range(0..=nator_document::MAX_DISPLAY_DECIMALS),
-                                    )
-                                    .changed();
-                                ui.label(
-                                    egui::RichText::new(text(T::DisplayDecimalsHint))
-                                        .small()
-                                        .color(theme::MUTED),
-                                );
-                            },
-                        )
-                        .response
-                        .on_hover_text(text(T::DisplayDecimals));
-                        if changed && !self.busy() {
-                            self.execute(Command::SetSettings {
-                                settings: nator_document::Settings {
-                                    display_decimals: decimals,
-                                },
-                            });
-                        }
-                    });
-                });
+                    strip.set_clip_rect(middle.intersect(ui.clip_rect()));
+                    self.timeline_strip(&mut strip);
+                }
+                let busy = self.busy();
+                let (label, color) = if !busy && self.pending_failure.is_some() {
+                    (T::Failed, theme::DANGER)
+                } else {
+                    self.status.indicator(busy)
+                };
+                let mut state = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(right)
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                );
+                state.label(egui::RichText::new(text(label)).small().color(theme::MUTED));
+                let (dot, _) = state.allocate_exact_size(egui::vec2(8., 8.), egui::Sense::hover());
+                state.painter().circle_filled(dot.center(), 3., color);
             });
     }
     pub(super) fn camera_bar(&mut self, ui: &mut egui::Ui) {

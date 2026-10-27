@@ -56,7 +56,7 @@ impl Editor {
             }
             return;
         }
-        if self.busy() || self.pending_close.is_some() {
+        if self.busy() || self.pending_close.is_some() || self.status.has_pending() {
             return;
         }
         if context.input_mut(|i| {
@@ -127,18 +127,6 @@ impl Editor {
             .show(ui, |ui| {
                 let tab = self.current();
                 let document = tab.session.document();
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(text(T::Project)).strong().size(14.))
-                        .on_hover_text(text(T::PrototypeNotice));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(document.parts().len().to_string())
-                                .small()
-                                .color(theme::MUTED),
-                        );
-                    });
-                });
-                ui.separator();
                 // Peça em edição: nome e saída rápida, além do lápis na árvore.
                 if let Some(part) = tab.active_part.and_then(|p| document.part(p)) {
                     ui.horizontal(|ui| {

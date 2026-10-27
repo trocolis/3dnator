@@ -1,5 +1,5 @@
 //! Árvore do projeto: Projeto → Peças, Rascunhos (de referência) e Origem; cada peça →
-//! Corpos, Subpeças, Rascunhos e Origem (oculta por padrão). Todo nó tem visibilidade
+//! Corpos, Subpeças, Rascunhos e Origem (oculta por padrão). Descendentes têm visibilidade
 //! própria, gravada no documento e com desfazer; a efetiva combina a dos nós acima, e um
 //! nó oculto por um ancestral aparece esmaecido. O lápis de uma peça entra na edição dela.
 //! Pastas vazias dentro das peças não aparecem.
@@ -181,25 +181,21 @@ impl<'a> Tree<'a> {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         // Recuo curto: a hierarquia tem até quatro níveis antes dos elementos.
         ui.spacing_mut().indent = 14.;
-        let project = self.document.folders().project;
+        ui.spacing_mut().item_spacing.y = 0.;
+        ui.spacing_mut().interact_size.y = 20.;
         let id = self.id("project");
         self.node(
             ui,
             id,
             true,
             |tree, ui| {
-                if tree.eye(ui, project, true) {
-                    tree.intents
-                        .push(Intent::Command(Box::new(Command::SetFolderVisibility {
-                            folder: Folder::Project,
-                            visible: !project,
-                        })));
-                }
-                icons::entry_styled(ui, Icon::Project, text(T::ProjectNode), false, !project)
+                // O cubo é a marca do aplicativo; a raiz não tem olho nem ação
+                // de ocultação, permanecendo acessível em qualquer projeto.
+                icons::entry_styled(ui, Icon::Cube, text(T::ProjectNode), false, false)
                     .on_hover_text(tree.document.name())
                     .clicked()
             },
-            |tree, ui| tree.project_body(ui, project),
+            |tree, ui| tree.project_body(ui, true),
         );
         self.groups(ui);
         self.analyses(ui);

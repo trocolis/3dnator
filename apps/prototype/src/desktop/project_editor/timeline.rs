@@ -155,11 +155,6 @@ impl Editor {
             .cloned()
             .filter(|p| !p.features.is_empty())
         else {
-            ui.label(
-                egui::RichText::new(text(T::TimelineEmpty))
-                    .small()
-                    .color(theme::MUTED),
-            );
             return;
         };
         let states = nator_document::features::states(&part);

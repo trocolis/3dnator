@@ -250,7 +250,7 @@ impl Editor {
                     if let Err(error) =
                         draft.preview_interactions(ui, rect, scale, revision, self.busy())
                     {
-                        self.status = error;
+                        self.status.error(error);
                     }
                 }
             });

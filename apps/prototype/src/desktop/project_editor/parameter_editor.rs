@@ -38,7 +38,7 @@ impl Editor {
             .as_ref()
             .is_some_and(|w| w.pending.is_some())
         {
-            self.status = text(T::PendingEdit).into();
+            self.status.warning(text(T::PendingEdit));
             return;
         }
         let document = tab.session.document().clone();

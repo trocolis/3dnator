@@ -26,7 +26,7 @@ Cada peça contém:
 
 Desde a versão 14, o manifesto pode conter `reference_sketches`: rascunhos de referência da montagem, com o mesmo formato dos rascunhos de peça e coordenadas da montagem. Os identificadores compartilham o espaço dos rascunhos de peça. Não pertencem a peça nenhuma, não têm parâmetros (cotas guardam valores numéricos) e nenhuma operação pode usá-los como perfil; servem apenas de destino para posicionar componentes. Ausente, a lista é vazia.
 
-Desde a versão 15, o manifesto e cada peça podem conter `folders`, a visibilidade das pastas da árvore. No projeto: `project`, `parts`, `sketches` (rascunhos de referência) e `origin`, todos `true` por padrão. Na peça: `bodies`, `subparts`, `sketches` (`true` por padrão) e `origin` (`false`). A visibilidade efetiva de um corpo, rascunho ou instância combina a dele com a das pastas acima; a de cada elemento é preservada. O campo só é gravado quando difere do padrão.
+Desde a versão 15, o manifesto e cada peça podem conter `folders`, a visibilidade das pastas da árvore. No projeto: `project`, `parts`, `sketches` (rascunhos de referência) e `origin`, todos `true` por padrão. `project` é mantido por compatibilidade e normalizado para `true` na leitura: a raiz atual é sempre visível. Na peça: `bodies`, `subparts`, `sketches` (`true` por padrão) e `origin` (`false`). A visibilidade efetiva de um corpo, rascunho ou instância combina a dele com a das pastas acima; a de cada elemento é preservada. O campo só é gravado quando difere do padrão.
 
 Cada instância referencia uma definição de peça, a peça pai opcional (subconjuntos) e guarda posição/orientação relativas ao pai. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
 

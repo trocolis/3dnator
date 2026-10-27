@@ -67,11 +67,12 @@ pub(crate) fn render_ui_scenario(
         | "sketch-circle-input"
         | "sketch-rectangle-input"
         | "extrude-face"
+        | "status-dialog"
         | "extrude-cut" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -256,6 +257,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
         .map(|p| p.features.clone())
         .unwrap_or_default();
     match scenario {
+        "status-dialog" => editor.status.warning(text(T::StaleResult)),
         "extrude-face" | "extrude-cut" => {
             use nator_document::features::{FaceRef, Operation};
             let doc = editor.current().session.document();
@@ -871,6 +873,236 @@ mod tests {
     use super::*;
     use nator_document::features::{Operation, RegionRef};
     use nator_sketch::{Plane, Sketch};
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn compact_footer_and_status_dialog_preserve_messages_and_document()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Interface compacta")?)?;
+        let mut sketch = Sketch::new("Base", Plane::xy());
+        sketch.add_rectangle([0., 0.], [20., 10.], false)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        session.execute(Command::AddFeature {
+            part,
+            name: "Base".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "5 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.show_recovery = false;
+        editor.recoveries.clear();
+        editor.current_mut().active_part = Some(part);
+        settle(&mut editor, &context)?;
+        let revision = editor.current().session.revision();
+        // Este ensaio usa o desenho real e eventos de confirmação, sem a
+        // leitura automática de avisos usada pelos ensaios das outras ferramentas.
+        fn draw(
+            editor: &mut Editor,
+            context: &egui::Context,
+            width: f32,
+            events: Vec<egui::Event>,
+        ) -> Vec<(String, egui::Rect)> {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 820.),
+                    )),
+                    time: Some(context.input(|i| i.time) + 1. / 60.),
+                    events,
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            let labels = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => {
+                        Some((t.galley.job.text.clone(), t.visual_bounding_rect()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+            labels
+        }
+        for width in [1280., 900.] {
+            let labels = draw(&mut editor, &context, width, vec![]);
+            assert!(!labels.iter().any(|(label, _)| label == text(T::Project) || label.contains(text(T::UnitsMm))));
+            let history = labels
+                .iter()
+                .find(|(label, _)| label == text(T::ParametricHistory))
+                .ok_or("Histórico ausente")?
+                .1;
+            let ready = labels
+                .iter()
+                .find(|(label, _)| label == text(T::Ready))
+                .ok_or("Status ausente")?
+                .1;
+            assert!(history.top() > 775. && ready.top() > 775.);
+            assert!((history.center().y - ready.center().y).abs() < 6.);
+            assert!(history.right() < ready.left());
+            assert!(!editor.timeline.tiles.is_empty());
+            assert!(
+                editor
+                    .timeline
+                    .tiles
+                    .iter()
+                    .all(|(_, rect)| rect.top() > 775. && rect.right() < ready.left())
+            );
+        }
+        editor.status.warning("Confira a operação de teste.");
+        editor.status.error("Falha de importação de teste.");
+        for _ in 0..3 {
+            draw(&mut editor, &context, 1280., vec![]);
+        }
+        let labels = draw(&mut editor, &context, 1280., vec![]);
+        assert!(
+            labels
+                .iter()
+                .any(|(label, _)| label == "Confira a operação de teste.")
+        );
+        assert!(
+            !labels
+                .iter()
+                .any(|(label, _)| label == "Falha de importação de teste.")
+        );
+        let ok = labels
+            .iter()
+            .find(|(label, _)| label == text(T::Ok))
+            .ok_or("Confirmação ausente")?
+            .1
+            .center();
+        for pressed in [true, false] {
+            draw(
+                &mut editor,
+                &context,
+                1280.,
+                vec![
+                    egui::Event::PointerMoved(ok),
+                    egui::Event::PointerButton {
+                        pos: ok,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        let labels = draw(&mut editor, &context, 1280., vec![]);
+        assert!(
+            labels
+                .iter()
+                .any(|(label, _)| label == "Falha de importação de teste.")
+        );
+        assert!(
+            !labels
+                .iter()
+                .any(|(label, _)| label == "Confira a operação de teste.")
+        );
+        draw(
+            &mut editor,
+            &context,
+            1280.,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!editor.status.has_pending());
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .folder_visible(nator_document::Folder::Project)?
+        );
+        // Enter confirma a leitura do aviso, sem confirmar o comando Mover que
+        // está aberto por trás dele. A prévia precisa estar pronta para que a
+        // regressão detecte uma confirmação acidental do documento.
+        let body = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .and_then(|p| p.shown_bodies().next())
+            .ok_or("Corpo ausente")?
+            .id;
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        editor.open_body_move(false);
+        editor.set_move_for_capture([5., 0., 0.], [0.; 3]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            draw(&mut editor, &context, 1280., vec![]);
+            if editor.preview.shown != 0 && editor.preview_idle() {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err("Prévia do movimento não concluiu".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        editor.status.error("Confirme a leitura antes de mover.");
+        for _ in 0..3 {
+            draw(&mut editor, &context, 1280., vec![]);
+        }
+        draw(
+            &mut editor,
+            &context,
+            1280.,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!editor.status.has_pending());
+        assert!(editor.assembly_panel.is_some());
+        assert_eq!(editor.current().session.revision(), revision);
+        editor.status.error("Aviso novo no mesmo quadro do Enter.");
+        draw(
+            &mut editor,
+            &context,
+            1280.,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(
+            editor.status.has_pending(),
+            "O Enter que originou o aviso não pode fechá-lo"
+        );
+        assert!(editor.assembly_panel.is_some());
+        assert_eq!(editor.current().session.revision(), revision);
+        Ok(())
+    }
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
@@ -2590,6 +2822,12 @@ mod tests {
         context: &egui::Context,
         events: Vec<egui::Event>,
     ) -> Result<egui::Rect, Box<dyn Error>> {
+        // Estes ensaios exercitam ferramentas do CAD. O diálogo de mensagens
+        // tem um ensaio próprio abaixo; nos demais, sua leitura é considerada
+        // concluída para que ele não intercepte o próximo gesto da ferramenta.
+        while editor.status.has_pending() {
+            editor.status.dismiss();
+        }
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -2600,6 +2838,9 @@ mod tests {
             ..Default::default()
         };
         let mut output = context.run_ui(input, |ui| editor.draw(ui));
+        while editor.status.has_pending() {
+            editor.status.dismiss();
+        }
         output.textures_delta.clear();
         let primitives = context.tessellate(output.shapes, output.pixels_per_point);
         let images: Vec<_> = primitives

@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Árvore compacta, rodapé único e navegação da vista
+
+- Removido o cabeçalho “Árvore do projeto” e reduzida a altura das linhas. A raiz usa o ícone do aplicativo e permanece sempre visível; projetos antigos com a raiz oculta são normalizados ao abrir, preservando as opções dos descendentes.
+- Rodapé em uma linha: Histórico, desfazer/refazer, linha do tempo e indicador de estado à direita. Unidade removida; precisão e recuperação ficam no menu Arquivo. Mensagens e alertas aparecem em diálogos, com fila para preservar entregas no mesmo quadro.
+- Cubo com Home, setas curvas de órbita em passos de 45° e botões de giro da tela em 90°, seguindo o esboço. Home restaura a vista isométrica e enquadra o modelo, preservando a projeção escolhida.
+
 ### Importação STEP com triângulos colapsados
 
 - Corrigida a importação de sólidos válidos cuja tesselação OCCT produz triângulos de área zero em costuras/singularidades, como o modelo ESP32 Wroom de 30 pinos. Esses elementos são descartados somente na malha de exibição, preservando o B-rep e a correspondência entre triângulos e faces.

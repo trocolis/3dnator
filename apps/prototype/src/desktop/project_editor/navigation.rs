@@ -334,7 +334,7 @@ impl Editor {
             if let Some(result) = result {
                 match result {
                     Ok(command) => self.prepare_command(ui.ctx(), self.current().id, command),
-                    Err(e) => self.status = e.to_string(),
+                    Err(e) => self.status.error(e.to_string()),
                 }
             }
         }
@@ -477,7 +477,7 @@ impl Editor {
                         self.prepare_command(ui.ctx(), self.current().id, command);
                         self.alignment = None;
                     }
-                    Err(e) => self.status = e.to_string(),
+                    Err(e) => self.status.error(e.to_string()),
                 }
             }
             ui.label(text(T::RotateAngle));
@@ -529,7 +529,7 @@ impl Editor {
                                 placement,
                             },
                         ),
-                        Err(e) => self.status = e.to_string(),
+                        Err(e) => self.status.error(e.to_string()),
                     }
                 }
             }

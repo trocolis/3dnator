@@ -11,6 +11,7 @@ mod insert_part;
 mod live_preview;
 mod mesh_import;
 mod navigation;
+mod notifications;
 mod parameter_editor;
 mod point_snap;
 mod profile_pick;
@@ -415,7 +416,7 @@ pub struct Editor {
     active: usize,
     next_tab: u64,
     worker: Option<Worker>,
-    status: String,
+    status: notifications::Status,
     scene: Option<Mesh>,
     rendered: Option<SceneKey>,
     /// Chave da preparação de cena; liberada ao receber a cena calculada.
@@ -599,7 +600,7 @@ impl Editor {
             active: 0,
             next_tab: 2,
             worker: None,
-            status: text(T::Ready).into(),
+            status: notifications::Status::default(),
             scene: None,
             rendered: None,
             requested: None,
@@ -718,7 +719,7 @@ impl Editor {
                 }
                 self.follow_assembly_effect(effect);
             }
-            Err(error) => self.status = error.to_string(),
+            Err(error) => self.status.error(error.to_string()),
         }
     }
     /// Efeitos dos comandos de montagem na aba ativa: o rascunho de referência novo abre
@@ -765,9 +766,9 @@ impl Editor {
             }) {
             Ok(_) => {
                 self.worker = Some(Worker { receiver, recovery });
-                self.status = text(T::Loading).into();
+                self.status.set(text(T::Loading));
             }
-            Err(error) => self.status = error.to_string(),
+            Err(error) => self.status.error(error.to_string()),
         }
     }
     fn collect(&mut self) {
@@ -783,7 +784,7 @@ impl Editor {
             return;
         };
         let recovery = self.worker.take().and_then(|w| w.recovery);
-        self.status = text(T::Ready).into();
+        self.status.set(text(T::Ready));
         match result {
             Ok(Outcome::Picked {
                 tab,
@@ -804,13 +805,13 @@ impl Editor {
                 {
                     match result {
                         Ok(_) if p.part != draft.part() => {
-                            self.status = text(T::PickOtherPart).into();
+                            self.status.warning(text(T::PickOtherPart));
                         }
                         Ok(kept) => {
-                            self.status = feature_editor::Draft::describe(&kept);
+                            self.status.set(feature_editor::Draft::describe(&kept));
                             draft.apply_pick(p.body, kept);
                         }
-                        Err(error) => self.status = error,
+                        Err(error) => self.status.error(error),
                     }
                 }
                 if let Some(target) = self
@@ -862,7 +863,7 @@ impl Editor {
                     work.redundant = report.redundant;
                     if report.status == nator_sketch::solver::Status::Conflict {
                         work.pending = Some(report.sketch);
-                        self.status = text(T::SketchConflict).into();
+                        self.status.warning(text(T::SketchConflict));
                     } else {
                         work.pending = None;
                         match prepared.and_then(|command| Ok(target.session.commit(command)?)) {
@@ -880,7 +881,11 @@ impl Editor {
                 // A alteração do rascunho quebrou uma operação: ela fica pendente e o
                 // usuário decide entre corrigir, suprimir ou cancelar.
                 if let Some((error, sketch)) = rejected {
-                    self.status = error.to_string();
+                    if error.failure.is_some() {
+                        self.status.record(&error);
+                    } else {
+                        self.status.error(&error);
+                    }
                     if let Some(failure) = error.failure {
                         self.pending_failure = Some(timeline::PendingFailure {
                             tab,
@@ -898,14 +903,14 @@ impl Editor {
                 {
                     tab.recovery_state = Some(state);
                 }
-                self.status = format!(
+                self.status.error(format!(
                     "{}: {error}",
                     if recovery.is_some() {
                         text(T::RecoveryFailed)
                     } else {
                         text(T::Failed)
                     }
-                );
+                ));
             }
             Ok(Outcome::Drawing {
                 tab,
@@ -947,11 +952,11 @@ impl Editor {
             }) => {
                 match deliver_import(&mut self.tabs, tab, revision, destination, name, geometry) {
                     Ok(true) => {
-                        self.status = text(T::Imported).into();
+                        self.status.set(text(T::Imported));
                         self.requested = None;
                     }
-                    Ok(false) => self.status = text(T::StaleResult).into(),
-                    Err(error) => self.status = error,
+                    Ok(false) => self.status.warning(text(T::StaleResult)),
+                    Err(error) => self.status.error(error),
                 }
             }
             Ok(Outcome::MeshRead {
@@ -976,7 +981,7 @@ impl Editor {
                 recovery,
             }) => {
                 if let Err(error) = self.add_tab(document, path, recovery) {
-                    self.status = error;
+                    self.status.error(error);
                 }
             }
             Ok(Outcome::Saved {
@@ -990,7 +995,7 @@ impl Editor {
                     target.session.mark_saved(state);
                     target.recovery_state = None;
                 }
-                self.status = text(T::Saved).into();
+                self.status.set(text(T::Saved));
                 if close_after {
                     self.close_tab(tab);
                 }
@@ -1015,9 +1020,9 @@ impl Editor {
                 if let Some(target) = self.find_tab(tab) {
                     target.recovery_state = Some(state);
                 }
-                self.status = text(T::RecoverySaved).into();
+                self.status.set(text(T::RecoverySaved));
             }
-            Ok(Outcome::Exported) => self.status = text(T::Exported).into(),
+            Ok(Outcome::Exported) => self.status.set(text(T::Exported)),
             Ok(Outcome::ExportSummary {
                 tab,
                 revision,
@@ -1097,7 +1102,7 @@ impl Editor {
                     self.requested = None;
                     self.resolve_pending_failure(tab);
                 }
-                Err(error) => self.status = error.to_string(),
+                Err(error) => self.status.error(error.to_string()),
             }
         }
         if tab == active_tab {
@@ -1120,7 +1125,11 @@ impl Editor {
     /// Edição recusada: uma falha atribuída a uma operação aguarda a decisão do usuário.
     fn reject_command(&mut self, tab: u64, command: Command, error: nator_commands::CommandError) {
         self.resolving = None;
-        self.status = error.to_string();
+        if error.failure.is_some() {
+            self.status.record(&error);
+        } else {
+            self.status.error(&error);
+        }
         if let Some(failure) = error.failure
             && self.tabs.iter().any(|t| t.id == tab)
         {
@@ -1177,7 +1186,7 @@ impl Editor {
                 self.rendered = Some(key);
                 self.viewport.camera = camera;
             }
-            Err(error) => self.status = error,
+            Err(error) => self.status.error(error),
         }
     }
     fn scene_key(&self) -> SceneKey {
@@ -1325,7 +1334,7 @@ impl Editor {
             .find(|t| t.id == tab_id)
             .is_some_and(|t| t.sketch_edit.as_ref().is_some_and(|w| w.pending.is_some()))
         {
-            self.status = text(T::PendingEdit).into();
+            self.status.warning(text(T::PendingEdit));
             return;
         }
         let other_paths = self
@@ -1472,7 +1481,7 @@ impl Editor {
                 .map_err(|e| e.to_string())
                 .and_then(|doc| self.add_tab(doc, None, None));
             if let Err(error) = result {
-                self.status = error;
+                self.status.error(error);
                 return;
             }
         }
@@ -1530,6 +1539,12 @@ impl Editor {
         }
         self.poll_preview(ui.ctx());
         self.ensure_scene(ui.ctx());
+        // Um diálogo já aberto recebe Enter/Esc antes dos painéis de comando.
+        // Mensagens geradas neste quadro ainda podem abrir ao final do desenho.
+        let status_open = self.status.has_pending();
+        if status_open {
+            self.status_dialog(ui.ctx());
+        }
         self.shortcuts(ui.ctx());
         self.toolbar(ui);
         if self.shell.browser_visible {
@@ -1556,6 +1571,9 @@ impl Editor {
         self.preview.finish_frame(ui.ctx());
         window_frame::resize_handles(ui);
         self.maybe_recover(ui.ctx());
+        if !status_open {
+            self.status_dialog(ui.ctx());
+        }
     }
 }
 

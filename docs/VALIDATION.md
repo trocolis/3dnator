@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Árvore compacta, rodapé e controle de vista — 27/10/2026
+
+- Removido o cabeçalho da árvore e reduzidas as linhas. A raiz usa o ícone do aplicativo, sem olho; o documento recusa sua ocultação e normaliza a opção legada na leitura, preservando a visibilidade dos descendentes. Regressão existente ampliada para verificar essa compatibilidade.
+- Rodapé de uma linha com Histórico, desfazer/refazer, faixa rolável de operações e indicador à direita. Unidade removida; precisão e recuperação disponíveis no menu Arquivo. Mensagens passam por fila tipada e diálogos, sem se perderem quando o estado volta a Pronto. Falhas paramétricas mantêm seu diálogo especializado.
+- Navegador conforme o esboço: Home à esquerda, setas de órbita de 45° ao redor e giro da tela em 90°. Ensaios verificam Home após órbita/pan/zoom e roll, preservação da projeção, ângulo das setas, seleção das faces e ausência de cliques no modelo.
+- O novo ensaio gráfico confere a barra em 1280 e 900 pixels, fila de avisos/erros, OK/Esc e documento intacto. Enter confirma somente a leitura, sem aplicar um comando Mover pronto por trás do diálogo; um aviso novo não é fechado pelo mesmo Enter que o originou. Capturas reais em `target/codex-validation/compact-shell-20261027/`: árvore do ESP32, linha do tempo e diálogo (`tree.png`, `timeline.png`, `status.png`).
+- **162 testes sem OCCT, 219 com OCCT e os dez ensaios gráficos em série aprovados.** Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados. Capturas finais em `final.png` (1440 × 900) e `compact.png` (900 × 600). Formato 17 e versão 0.3.0 preservados. Validação local em Linux; Windows e janela nativa não exercitados.
+
 ## STEP ESP32 com triângulos colapsados — 27/10/2026
 
 - Reproduzida a falha ao importar `esp32_Wroom_30pins_C-Type.STEP` (AP214/SolidWorks, cerca de 14 MiB): a leitura XCAF aceita uma definição com 142 sólidos válidos, mas a malha do corpo de índice 12 contém triângulos com primeiro e terceiro vértices idênticos. A construção estrita de `Mesh` rejeitava a importação inteira com “Triângulo degenerado ou fora do intervalo numérico”.

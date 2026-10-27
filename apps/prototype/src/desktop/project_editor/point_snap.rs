@@ -268,7 +268,7 @@ impl Editor {
             document,
             context,
         ) {
-            self.status = error;
+            self.status.error(error);
         }
         Query {
             document,

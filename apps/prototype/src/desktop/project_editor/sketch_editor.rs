@@ -175,7 +175,7 @@ impl Editor {
             .as_ref()
             .is_some_and(|w| w.pending.is_some())
         {
-            self.status = text(T::PendingEdit).into();
+            self.status.warning(text(T::PendingEdit));
             return;
         }
         let Some(record) = self.current().session.document().sketch(id).cloned() else {
@@ -194,7 +194,7 @@ impl Editor {
         let target = match target {
             Ok(p) => p,
             Err(e) => {
-                self.status = e;
+                self.status.error(e);
                 return;
             }
         };

@@ -11,6 +11,7 @@ pub enum Text {
     ViewBottom,
     ViewRotateLeft,
     ViewRotateRight,
+    #[allow(dead_code)]
     ViewUpright,
     ViewCubeHint,
 
@@ -59,7 +60,9 @@ pub enum Text {
     /// Identificador reservado da organização anterior do rascunho.
     #[allow(dead_code)]
     FinishGroup,
+    #[allow(dead_code)]
     TimelineEmpty,
+    #[allow(dead_code)]
     UnitsMm,
     BrowserEmpty,
     StartSketch,
@@ -75,6 +78,13 @@ pub enum Text {
     GroupMembers,
     SolidBody,
     ParametricHistory,
+    StatusMessage,
+    StatusAttention,
+    ViewHome,
+    ViewOrbitLeft,
+    ViewOrbitRight,
+    ViewOrbitUp,
+    ViewOrbitDown,
     Extrude,
     Revolve,
     Join,
@@ -273,6 +283,7 @@ pub enum Text {
     Navigation,
     Scale,
     BoundaryEdges,
+    #[allow(dead_code)]
     PrototypeNotice,
     VolumeNotice,
     Failed,
@@ -762,7 +773,14 @@ pub fn text(key: Text) -> &'static str {
         Text::Groups => "Grupos organizacionais",
         Text::GroupMembers => "Selecione instâncias do mesmo nível",
         Text::SolidBody => "Sólido CAD",
-        Text::ParametricHistory => "Histórico paramétrico",
+        Text::ParametricHistory => "Histórico",
+        Text::StatusMessage => "Mensagem",
+        Text::StatusAttention => "Atenção",
+        Text::ViewHome => "Home: vista isométrica e enquadrar modelo",
+        Text::ViewOrbitLeft => "Girar vista para a esquerda",
+        Text::ViewOrbitRight => "Girar vista para a direita",
+        Text::ViewOrbitUp => "Girar vista para cima",
+        Text::ViewOrbitDown => "Girar vista para baixo",
         Text::Extrude => "Extrusão",
         Text::Revolve => "Revolução",
         Text::Join => "Unir",

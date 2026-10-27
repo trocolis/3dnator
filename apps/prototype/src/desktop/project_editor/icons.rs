@@ -91,7 +91,9 @@ pub(super) enum Icon {
     Part,
     Edit,
     Origin,
+    #[allow(dead_code)]
     Project,
+    Home,
 }
 
 /// Elementos geométricos mantêm proporção e traço em qualquer tamanho de botão.
@@ -211,6 +213,22 @@ pub(super) fn paint_with_ink(
     };
     let p = &pen;
     match icon {
+        Icon::Home => {
+            p.line(&[[3., 11.], [12., 3.], [21., 11.]], p.ink);
+            p.line(
+                &[
+                    [5., 10.],
+                    [5., 21.],
+                    [10., 21.],
+                    [10., 14.],
+                    [14., 14.],
+                    [14., 21.],
+                    [19., 21.],
+                    [19., 10.],
+                ],
+                p.ink,
+            );
+        }
         Icon::Cube
         | Icon::Extrude
         | Icon::Hole
@@ -883,7 +901,7 @@ pub(super) fn tree_button(
 ) -> egui::Response {
     let response = ui.add(
         egui::Button::new("")
-            .min_size(egui::Vec2::splat(24.))
+            .min_size(egui::Vec2::splat(20.))
             .selected(selected)
             .frame(selected),
     );
@@ -929,7 +947,7 @@ pub(super) fn entry_styled(
     let ink = if dimmed { theme::MUTED } else { theme::INK };
     let response = ui.add(
         egui::Button::new("")
-            .min_size(egui::vec2(ui.available_width().max(40.), 27.))
+            .min_size(egui::vec2(ui.available_width().max(40.), 22.))
             .selected(selected)
             .frame(selected),
     );
