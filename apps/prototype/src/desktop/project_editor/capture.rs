@@ -1593,7 +1593,7 @@ mod tests {
         assert!(editor.current().sketch_edit.is_some());
         assert!(editor.current().plane_pick.is_none());
         assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
-        assert!(label_position(&mut editor, &context, text(T::SketchToolSettingsPending)).is_err());
+        assert!(label_position(&mut editor, &context, text(T::SketchLineType)).is_err());
         let revision = editor.current().session.revision();
         for tool in [
             Tool::Line,
@@ -1619,12 +1619,22 @@ mod tests {
             label_position(
                 &mut editor,
                 &context,
-                text(if tool == Tool::Line {
-                    T::SketchLineType
+                text(if tool == Tool::Trim {
+                    T::Trim
                 } else {
-                    T::SketchToolSettingsPending
+                    T::SketchLineType
                 }),
             )?;
+            if tool != Tool::Trim {
+                label_position(&mut editor, &context, text(T::SketchMeasurements))?;
+            }
+            for hint in [
+                T::SketchContinuousLineHint,
+                T::SketchRectangleNormalHint,
+                T::SketchCircleNormalHint,
+            ] {
+                assert!(label_position(&mut editor, &context, text(hint)).is_err());
+            }
             assert!(label_position(&mut editor, &context, text(T::Constraints)).is_err());
         }
         // Selecionar conserva os diagnósticos e a lista de restrições que antes
@@ -2628,6 +2638,9 @@ mod tests {
                 .as_mut()
                 .ok_or("Editor ausente")?
                 .select_tool(sketch_editor::Tool::Line);
+            // A troca direta usada pelo teste deve produzir o mesmo quadro da
+            // faixa: remover os campos da cadeia anterior antes do próximo clique.
+            frame(&mut editor, &context, Vec::new())?;
             let first = position(&editor, expected)? + egui::vec2(2., 2.);
             click(&mut editor, &context, first)?;
             let last = position(&editor, [expected[0] + 8., expected[1] + 15.])?;
@@ -2964,6 +2977,7 @@ mod tests {
                 < 1e-6
         );
         assert!(sketch.constraints.iter().any(|c| matches!(c.kind,ConstraintKind::LineAngle {line:l, reference:r,..} if l==line && r==reference)));
+        frame(&mut editor, &context, vec![key(egui::Key::Escape)])?;
         // Aproximar a outra linha termina exatamente a 90°, com incidência
         // sobre o alvo e uma restrição perpendicular publicada no histórico.
         let start = position(&editor, [35., -5.])?;
@@ -3060,6 +3074,278 @@ mod tests {
                 .sketch(id)
                 .is_some_and(|s| s.sketch.entity(infinite).is_ok())
         );
+        Ok(())
+    }
+
+    /// Exercita os cliques reais: seleção de modo, etapas adicionais, continuidade
+    /// e Esc. As regressões sem GPU verificam recálculo, persistência e dimensões.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn drawing_modes_follow_clicks_and_continuous_chains() -> Result<(), Box<dyn Error>> {
+        use sketch_editor::Tool;
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Modos de desenho", Plane::xy());
+        sketch.add_point([-100., -100.])?;
+        sketch.add_point([100., 100.])?;
+        sketch.add_line([35., 35.], [65., 35.], false)?;
+        sketch.add_line([50., 20.], [50., 50.], false)?;
+        let mut document = Document::new("Gestos de desenho")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let select = |editor: &mut Editor, tool| -> Result<(), Box<dyn Error>> {
+            editor
+                .current_mut()
+                .sketch_edit
+                .as_mut()
+                .ok_or("Editor ausente")?
+                .select_tool(tool);
+            frame(editor, &context, Vec::new())?;
+            Ok(())
+        };
+        let choose = |editor: &mut Editor, label| -> Result<(), Box<dyn Error>> {
+            let position = label_position(editor, &context, text(label))?;
+            click(editor, &context, position)
+        };
+        let point = |editor: &mut Editor, p: [f64; 2]| -> Result<(), Box<dyn Error>> {
+            let position = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                [p[0], p[1], 0.],
+            )
+            .ok_or("Ponto fora do canvas")?;
+            click(editor, &context, position)?;
+            settle(editor, &context)
+        };
+        let drawing = |editor: &Editor| {
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|work| work.is_drawing())
+        };
+        select(&mut editor, Tool::Line)?;
+        point(&mut editor, [-70., 0.])?;
+        for p in [[-50., 0.], [-50., 20.]] {
+            point(&mut editor, p)?;
+            assert!(drawing(&editor));
+        }
+        point(&mut editor, [-70., 0.])?;
+        assert!(!drawing(&editor));
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            5
+        );
+        choose(&mut editor, T::Symmetric)?;
+        point(&mut editor, [-70., -30.])?;
+        point(&mut editor, [-60., -20.])?;
+        assert!(drawing(&editor));
+        let revision = editor.current().session.revision();
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        assert!(!drawing(&editor));
+        assert_eq!(editor.current().session.revision(), revision);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            7
+        );
+
+        select(&mut editor, Tool::Rectangle)?;
+        choose(&mut editor, T::SketchRectangleCenter)?;
+        point(&mut editor, [-25., -40.])?;
+        point(&mut editor, [-15., -35.])?;
+        assert!(!drawing(&editor));
+        let rectangle = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let corners = rectangle.entities[7..11]
+            .iter()
+            .map(|entity| rectangle.line(entity.id).map(|line| line.0))
+            .collect::<nator_sketch::Result<Vec<_>>>()?;
+        assert!(
+            nator_sketch::distance(
+                nator_sketch::scale(nator_sketch::add(corners[0], corners[2]), 0.5),
+                [-25., -40.]
+            ) < 1e-5
+        );
+        choose(&mut editor, T::SketchRectangleInclined)?;
+        point(&mut editor, [-70., 55.])?;
+        point(&mut editor, [-50., 65.])?;
+        assert!(drawing(&editor));
+        point(&mut editor, [-55., 75.])?;
+        assert!(!drawing(&editor));
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            15
+        );
+
+        select(&mut editor, Tool::Circle)?;
+        assert!(label_position(&mut editor, &context, text(T::SketchLineInfinite)).is_err());
+        choose(&mut editor, T::SketchCircleDiameter)?;
+        point(&mut editor, [0., -40.])?;
+        point(&mut editor, [20., -40.])?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let (center, radius) =
+            sketch.circle(sketch.entities.last().ok_or("Círculo ausente")?.id)?;
+        assert!(nator_sketch::distance(center, [10., -40.]) < 1e-5);
+        assert!((radius - 10.).abs() < 1e-5);
+        choose(&mut editor, T::SketchCircleTangent)?;
+        point(&mut editor, [40., 35.])?;
+        point(&mut editor, [50., 25.])?;
+        assert!(drawing(&editor));
+        point(&mut editor, [55., 40.])?;
+        assert!(!drawing(&editor));
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let (center, radius) =
+            sketch.circle(sketch.entities.last().ok_or("Círculo ausente")?.id)?;
+        assert!((center[0] - 50. - radius).abs() < 1e-5);
+        assert!((center[1] - 35. - radius).abs() < 1e-5);
+        assert_eq!(
+            sketch
+                .constraints
+                .iter()
+                .filter(|constraint| matches!(
+                    constraint.kind,
+                    nator_sketch::ConstraintKind::Tangent { .. }
+                ))
+                .count(),
+            2
+        );
+        // Preset digitado antes da origem e edição do ângulo no painel durante a
+        // prévia devem confirmar a mesma cota por Enter, sem roubar o foco.
+        select(&mut editor, Tool::Line)?;
+        let field = |index: usize| -> Result<egui::Pos2, Box<dyn Error>> {
+            context
+                .read_response(egui::Id::new(("sketch_measurement_field", index)))
+                .map(|response| response.rect.center())
+                .ok_or_else(|| "Campo de medida ausente".into())
+        };
+        let length_field = field(0)?;
+        click(&mut editor, &context, length_field)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("12 mm".into())],
+        )?;
+        point(&mut editor, [60., -60.])?;
+        assert_eq!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .ok_or("Editor ausente")?
+                .drawing_fields()[0],
+            ("12 mm".into(), true)
+        );
+        let mouse = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [80., -50., 0.],
+        )
+        .ok_or("Ponto sem projeção")?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(mouse)],
+        )?;
+        let angle_field = field(1)?;
+        click(&mut editor, &context, angle_field)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("30 deg".into())],
+        )?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let line = sketch.entities[sketch.entities.len() - 2].id;
+        let (a, b) = sketch.line(line)?;
+        assert!(
+            (nator_sketch::distance(a, b) - 12.).abs() < 1e-6,
+            "{a:?}; {b:?}; {}",
+            editor.status
+        );
+        assert!((nator_sketch::lines::angle(sketch, line)?.to_degrees() - 30.).abs() < 1e-6);
+
+        // A área pode se apoiar nas retas anteriores, sem voltar a um ponto da
+        // cadeia recém-iniciada. A resposta do trabalhador também deve encerrá-la.
+        select(&mut editor, Tool::Line)?;
+        point(&mut editor, [35., 35.])?;
+        point(&mut editor, [50., 20.])?;
+        assert!(!drawing(&editor));
+
         Ok(())
     }
 

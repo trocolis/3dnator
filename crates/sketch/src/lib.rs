@@ -185,6 +185,8 @@ impl Entity {
 /// em radianos, no sentido anti-horário; comprimentos continuam em mm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConstraintKind {
+    /// Arcos usam uma extremidade compartilhada. Para círculo completo, `point`
+    /// é seu centro e a tangência usa a distância até a reta suporte.
     Tangent {
         line: u64,
         arc: u64,

@@ -2,6 +2,15 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Modos de construção e Traço nas ferramentas de desenho
+
+- Linha com modos Normal e Simétrica: a segunda opção acrescenta um segmento de mesmo tamanho no lado oposto ao primeiro clique, mantendo colinearidade e igualdade no recálculo. Desenho contínuo a partir do último vértice, até Esc ou fechar uma área; cruzar um trecho anterior ou completar um contorno com linhas já existentes também encerra a cadeia.
+- Antigo Tipo renomeado para Traço, disponível em Linha, Retângulo, Círculo e Arco. Normal e Construção nas quatro ferramentas; Infinita apenas em Linha e Retângulo. Retângulos infinitos criam quatro retas auxiliares, sem participar de áreas e extrusões.
+- Retângulo Normal por cantos opostos, Do centro para fora com largura/altura totais e Inclinado em três cliques: início/fim do lado e largura perpendicular. Medidas digitadas do lado, ângulo e largura são preservadas.
+- Círculo Normal por centro/raio, Dois pontos pelos extremos do diâmetro e Duas linhas perpendiculares com tangência às retas suporte. Após selecionar as linhas, mouse define quadrante/raio; raio também aceita digitação. Tangência e cotas permanecem no histórico e na persistência.
+- Variações em botões com ícones vetoriais próprios e seleção visível, como em Traço. Painéis sem descrições; dicas aparecem ao passar o mouse. Nova seção Medidas com campos editáveis sincronizados ao canvas, inclusive antes do primeiro clique. Campos acompanham a etapa atual e respeitam Tab, Enter e Esc; o ícone junto ao cursor também acompanha a variação.
+- Formato interno 19 reconhece a tangência entre círculo completo e reta, preservando a leitura dos projetos anteriores.
+
 ### Tipos de linha, ângulos relativos e medidas flutuantes
 
 - Painel Linha com os tipos Normal, Construção e Infinita, cada um com ícone e destaque do ativo. Construção e Infinita são tracejadas laranja e não participam de áreas nem extrusões; retas infinitas atravessam o canvas e oferecem captura/interseções além dos apoios de definição, sem extremos fictícios.

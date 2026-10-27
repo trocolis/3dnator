@@ -37,6 +37,18 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
     };
     let result = match *c {
         ConstraintKind::Tangent { line, arc, point } => {
+            if let Curve::Circle { center, radius } = s.entity(arc)?.curve {
+                // Círculos completos não têm extremos. O campo `point` identifica
+                // seu centro; a distância à reta suporte deve ser igual ao raio.
+                if point != center {
+                    return Err(SketchError(
+                        "Centro inválido na tangência do círculo.".into(),
+                    ));
+                }
+                let (a, _) = s.line(line)?;
+                return checked(cross(sub(s.point(center)?, a), direction(line)?).abs() - radius)
+                    .map(|value| vec![value]);
+            }
             if !s.entity(line)?.point_ids().contains(&point)
                 || !s.entity(arc)?.point_ids().contains(&point)
             {

@@ -353,6 +353,7 @@ enum Outcome {
         id: SketchId,
         report: nator_sketch::solver::Report,
         prepared: Result<PreparedCommand, nator_commands::CommandError>,
+        chain_closed: bool,
     },
     Imported {
         tab: u64,
@@ -771,7 +772,7 @@ impl Editor {
             Err(error) => self.status.error(error.to_string()),
         }
     }
-    fn collect(&mut self) {
+    fn collect(&mut self, context: &egui::Context) {
         let Some(result) = self
             .worker
             .as_ref()
@@ -852,6 +853,7 @@ impl Editor {
                 id,
                 report,
                 prepared,
+                chain_closed,
             }) => {
                 let mut rejected = None;
                 if let Some(target) = self
@@ -868,6 +870,9 @@ impl Editor {
                         work.pending = None;
                         match prepared.and_then(|command| Ok(target.session.commit(command)?)) {
                             Ok(_) => {
+                                if chain_closed && work.tool() == sketch_editor::Tool::Line {
+                                    work.reset_drawing(context);
+                                }
                                 target.changed();
                                 self.requested = None;
                             }
@@ -1523,7 +1528,7 @@ impl eframe::App for Editor {
 }
 impl Editor {
     fn draw(&mut self, ui: &mut egui::Ui) {
-        self.collect();
+        self.collect(ui.ctx());
         if ui.ctx().input(|i| i.viewport().close_requested()) && !self.allow_exit {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);

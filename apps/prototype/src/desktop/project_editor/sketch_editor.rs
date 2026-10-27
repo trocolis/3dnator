@@ -1,5 +1,6 @@
 //! Edição 2D no plano, com prévias locais e publicação por comandos da sessão.
 use super::*;
+use nator_sketch::drafting::{self, Primitive};
 use nator_sketch::{
     ConstraintKind, Curve, LineType, Point2, Sketch, profiles,
     snapping::{self, Kind, Tracker},
@@ -44,6 +45,26 @@ impl Tool {
         }
     }
 }
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum LineMode {
+    #[default]
+    Normal,
+    Symmetric,
+}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum RectangleMode {
+    #[default]
+    Normal,
+    Center,
+    Inclined,
+}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum CircleMode {
+    #[default]
+    Normal,
+    Diameter,
+    Tangent,
+}
 pub(super) struct Workspace {
     pub id: SketchId,
     pub pending: Option<Sketch>,
@@ -53,6 +74,12 @@ pub(super) struct Workspace {
     /// Entrar no rascunho não abre painel; somente uma escolha explícita na faixa.
     tool_panel_open: bool,
     pub(super) line_type: LineType,
+    line_mode: LineMode,
+    rectangle_mode: RectangleMode,
+    circle_mode: CircleMode,
+    tangent_lines: Vec<u64>,
+    /// Ponto inicial e vértices já percorridos da cadeia, para encerrar ao fechar.
+    chain_points: Vec<Point2>,
     /// Capturada uma vez no primeiro clique; não muda ao cruzar outra linha.
     line_reference: Option<u64>,
     perpendicular: Option<u64>,
@@ -107,7 +134,72 @@ impl Workspace {
         self.anchor_kinds.clear();
         self.line_reference = None;
         self.perpendicular = None;
+        self.chain_points.clear();
+        self.tangent_lines.clear();
+        if !matches!(tool, Tool::Line | Tool::Rectangle) && self.line_type == LineType::Infinite {
+            self.line_type = LineType::Normal;
+        }
         self.drawing = dynamic_input::Input::default();
+    }
+    fn primitive(&self) -> Option<Primitive> {
+        Some(match self.tool {
+            Tool::Line if self.line_mode == LineMode::Symmetric => Primitive::SymmetricLine,
+            Tool::Rectangle if self.rectangle_mode == RectangleMode::Center => {
+                Primitive::CenterRectangle
+            }
+            Tool::Rectangle if self.rectangle_mode == RectangleMode::Inclined => {
+                Primitive::InclinedRectangle
+            }
+            Tool::Circle if self.circle_mode == CircleMode::Diameter => Primitive::DiameterCircle,
+            Tool::Circle if self.circle_mode == CircleMode::Tangent => Primitive::TangentCircle,
+            _ => return dynamic_input::primitive(self.tool),
+        })
+    }
+    pub(super) fn reset_drawing(&mut self, context: &egui::Context) {
+        self.anchors.clear();
+        self.anchor_kinds.clear();
+        self.chain_points.clear();
+        self.tangent_lines.clear();
+        self.line_reference = None;
+        self.perpendicular = None;
+        self.drawing.clear(context);
+    }
+    /// Cada segmento confirmado conserva o último ponto e captura o próximo
+    /// ângulo a partir dele. Medidas digitadas pertencem somente ao segmento atual.
+    fn continue_line(&mut self, sketch: &Sketch, context: &egui::Context, end: Point2) {
+        let closed =
+            self.line_type != LineType::Infinite && drafting::closes_chain(&self.chain_points, end);
+        if closed {
+            self.reset_drawing(context);
+            return;
+        }
+        self.chain_points.push(end);
+        let last = sketch.entities.iter().rev().find(|entity| {
+            matches!(entity.curve, Curve::Line { .. })
+                && entity.point_ids().into_iter().any(|id| {
+                    sketch
+                        .point(id)
+                        .is_ok_and(|p| nator_sketch::distance(p, end) < 1e-7)
+                })
+        });
+        let endpoint = last.and_then(|entity| {
+            entity.point_ids().into_iter().find(|id| {
+                sketch
+                    .point(*id)
+                    .is_ok_and(|p| nator_sketch::distance(p, end) < 1e-7)
+            })
+        });
+        self.anchors = vec![end];
+        self.anchor_kinds = vec![endpoint.map(Kind::Endpoint)];
+        self.drawing.clear(context);
+        self.drawing.start(end);
+        self.line_reference = last.map(|entity| entity.id);
+        self.drawing.relative = self.line_reference.is_some();
+        self.drawing.reference_angle = self
+            .line_reference
+            .and_then(|id| nator_sketch::lines::angle(sketch, id).ok())
+            .unwrap_or(0.);
+        self.perpendicular = None;
     }
     pub fn new(id: SketchId) -> Self {
         Self {
@@ -120,6 +212,11 @@ impl Workspace {
             tool: Tool::Select,
             tool_panel_open: false,
             line_type: LineType::Normal,
+            line_mode: LineMode::Normal,
+            rectangle_mode: RectangleMode::Normal,
+            circle_mode: CircleMode::Normal,
+            tangent_lines: Vec::new(),
+            chain_points: Vec::new(),
             line_reference: None,
             perpendicular: None,
             anchors: Vec::new(),
@@ -244,6 +341,8 @@ impl Editor {
             return;
         };
         let id = work.id;
+        let check_area =
+            work.tool == Tool::Line && work.line_type == LineType::Normal && work.is_drawing();
         let tab = self.current().id;
         let revision = self.current().session.revision();
         let document = self.current().session.document().clone();
@@ -261,6 +360,13 @@ impl Editor {
             nator_document::parameters::resolve_sketch(&mut sketch, &parameters)
                 .map_err(sketch_error)?;
             let report = solver::solve(&sketch).map_err(sketch_error)?;
+            // O fechamento com linhas já existentes só é conhecido após resolver
+            // a geometria. Esta consulta fica fora da thread da interface.
+            let chain_closed = check_area
+                && report.status != Status::Conflict
+                && document.sketch(id).is_some_and(|previous| {
+                    drafting::creates_area(&previous.sketch, &report.sketch).unwrap_or(false)
+                });
             let prepared = if report.status == Status::Conflict {
                 Err(nator_commands::CommandError {
                     message: text(T::SketchConflict).into(),
@@ -282,6 +388,7 @@ impl Editor {
                 id,
                 report,
                 prepared,
+                chain_closed,
             })
         });
     }
@@ -328,18 +435,10 @@ impl Editor {
                 egui::ScrollArea::vertical()
                     .max_height((self.canvas_rect.height() - 230.).max(120.))
                     .show(ui, |ui| {
-                        if tool == Tool::Line {
-                            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
-                                ui.add_enabled_ui(!busy, |ui| {
-                                    line_tools::settings(ui, &mut work.line_type)
-                                });
-                            }
-                            return;
-                        }
-                        // Os parâmetros novos serão definidos por ferramenta. Não
-                        // antecipar campos nem alterar as regras geométricas atuais.
                         if tool != Tool::Select {
-                            ui.label(text(T::SketchToolSettingsPending));
+                            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                                ui.add_enabled_ui(!busy, |ui| line_tools::settings(ui, work));
+                            }
                             return;
                         }
                         ui.label(&sketch.name);
@@ -707,7 +806,10 @@ impl Editor {
         }
         // Selecionar/aparar usa o clique real: a atração ao centro ou ao vértice
         // vizinho não pode deslocar o clique para outro trecho do cruzamento.
-        let raw_cursor = if matches!(work.tool, Tool::Select | Tool::Trim) {
+        let tangent_selection = work.tool == Tool::Circle
+            && work.circle_mode == CircleMode::Tangent
+            && work.tangent_lines.len() < 2;
+        let raw_cursor = if matches!(work.tool, Tool::Select | Tool::Trim) || tangent_selection {
             hover
         } else {
             snap.as_ref().map(|s| s.point).or(hover)
@@ -725,13 +827,33 @@ impl Editor {
                 false,
             );
         }
+        if work.tool == Tool::Circle && work.circle_mode == CircleMode::Tangent {
+            for id in &work.tangent_lines {
+                if let Ok((a, b)) = sketch.line(*id) {
+                    frame.infinite_line(&painter, a, b, egui::Stroke::new(2., theme::GREEN));
+                }
+            }
+            if tangent_selection {
+                painter.text(
+                    response.rect.left_top() + egui::vec2(12., 12.),
+                    egui::Align2::LEFT_TOP,
+                    text(if work.tangent_lines.is_empty() {
+                        T::SketchPickFirstTangent
+                    } else {
+                        T::SketchPickSecondTangent
+                    }),
+                    egui::FontId::proportional(13.),
+                    theme::INK,
+                );
+            }
+        }
         let mut cursor = raw_cursor;
         let mut confirm = false;
         let mut valid = true;
         let mut adjusted = false;
         let escape;
         if !work.anchors.is_empty()
-            && let Some(primitive) = dynamic_input::primitive(work.tool)
+            && let Some(primitive) = work.primitive()
         {
             work.drawing.infinite = work.tool == Tool::Line && work.line_type == LineType::Infinite;
             if let Some(point) = raw_cursor {
@@ -755,7 +877,7 @@ impl Editor {
                 if let Some(start) = preview.arc_start {
                     work.anchors[1] = start;
                 }
-                let construction = work.tool == Tool::Line && work.line_type != LineType::Normal;
+                let construction = work.line_type != LineType::Normal;
                 let stroke = egui::Stroke::new(
                     1.5,
                     if construction {
@@ -764,8 +886,20 @@ impl Editor {
                         theme::INK
                     },
                 );
+                if primitive == Primitive::DiameterCircle {
+                    frame.path(
+                        &painter,
+                        [work.anchors[0], preview.point],
+                        egui::Stroke::new(1., theme::INK),
+                        true,
+                    );
+                }
                 if work.tool == Tool::Line && work.line_type == LineType::Infinite {
                     frame.infinite_line(&painter, work.anchors[0], preview.point, stroke);
+                } else if work.tool == Tool::Rectangle && work.line_type == LineType::Infinite {
+                    for edge in preview.path.windows(2) {
+                        frame.infinite_line(&painter, edge[0], edge[1], stroke);
+                    }
                 } else {
                     frame.path(&painter, preview.path, stroke, construction);
                 }
@@ -774,16 +908,19 @@ impl Editor {
             escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         }
         if escape {
-            work.anchors.clear();
-            work.anchor_kinds.clear();
+            work.reset_drawing(ui.ctx());
             work.pending = None;
             work.tracker.clear();
-            work.drawing.clear(ui.ctx());
         }
         if !busy
             && !animating
             && !escape
             && valid
+            && !(work.tool == Tool::Rectangle
+                && work.rectangle_mode == RectangleMode::Inclined
+                && work.anchors.len() == 1
+                && cursor
+                    .is_some_and(|point| nator_sketch::distance(work.anchors[0], point) < 1e-9))
             && (response.clicked_by(egui::PointerButton::Primary) || confirm)
             && let Some(cursor) = cursor
         {
@@ -833,6 +970,37 @@ impl Editor {
                         work.selected.clear();
                     }
                 }
+            } else if tangent_selection {
+                let selection =
+                    nator_sketch::tools::pick_entity(&sketch, cursor, 8. / pixels_per_mm)
+                        .and_then(|id| {
+                            id.ok_or_else(|| {
+                                nator_sketch::SketchError(text(T::SketchPickLine).into())
+                            })
+                        })
+                        .and_then(|id| {
+                            sketch.line(id)?;
+                            Ok(id)
+                        });
+                let selection = selection.and_then(|id| {
+                    if let Some(first) = work.tangent_lines.first() {
+                        let anchors = drafting::tangent_frame(&sketch, *first, id)?;
+                        work.anchors = anchors.to_vec();
+                        work.anchor_kinds = vec![None; 3];
+                        work.drawing.start(cursor);
+                    }
+                    work.tangent_lines.push(id);
+                    Ok(())
+                });
+                if let Err(error) = selection {
+                    painter.text(
+                        response.rect.left_top() + egui::vec2(12., 36.),
+                        egui::Align2::LEFT_TOP,
+                        error.to_string(),
+                        egui::FontId::proportional(13.),
+                        theme::DANGER,
+                    );
+                }
             } else {
                 work.anchors.push(cursor);
                 // Uma medida digitada pode afastar a ponta da captura. Não gravar
@@ -843,10 +1011,15 @@ impl Editor {
                     snap.as_ref().map(|s| s.kind)
                 });
                 work.tracker.capture(cursor);
-                let needed = if work.tool == Tool::Arc { 3 } else { 2 };
+                let needed = match work.primitive() {
+                    Some(Primitive::Arc | Primitive::InclinedRectangle) => 3,
+                    Some(Primitive::TangentCircle) => 4,
+                    _ => 2,
+                };
                 if work.anchors.len() == 1 {
                     work.drawing.start(cursor);
                     if work.tool == Tool::Line {
+                        work.chain_points = vec![cursor];
                         let preferred = snap.as_ref().and_then(|s| match s.kind {
                             Kind::OnCurve(id) | Kind::Midpoint(id) => Some(id),
                             _ => None,
@@ -864,14 +1037,28 @@ impl Editor {
                 if work.tool == Tool::Arc && work.anchors.len() == 2 {
                     work.drawing.arc_next();
                 }
+                if work.tool == Tool::Rectangle
+                    && work.rectangle_mode == RectangleMode::Inclined
+                    && work.anchors.len() == 2
+                {
+                    work.drawing.side_fields =
+                        Some((work.drawing.fields.clone(), work.drawing.locked));
+                    work.drawing.start_width(cursor);
+                }
                 if work.anchors.len() == needed {
-                    let result = draw_entity(&mut sketch, work, &parameters);
+                    // A falha descarta também pontos/restrições parciais. Somente
+                    // a geometria completa segue para o comando de atualização.
+                    let mut candidate = sketch.clone();
+                    let result = draw_entity(&mut candidate, work, &parameters);
                     match result {
                         Ok(()) => {
+                            sketch = candidate;
                             submit = true;
-                            work.anchors.clear();
-                            work.anchor_kinds.clear();
-                            work.drawing.clear(ui.ctx());
+                            if work.tool == Tool::Line {
+                                work.continue_line(&sketch, ui.ctx(), cursor);
+                            } else {
+                                work.reset_drawing(ui.ctx());
+                            }
                         }
                         Err(error) => {
                             painter.text(
@@ -896,11 +1083,7 @@ impl Editor {
                 .hover_pos()
                 .filter(|p| !view_cube::rect(response.rect).contains(*p))
         {
-            let icon = if work.tool == Tool::Line {
-                line_tools::icon(work.line_type)
-            } else {
-                work.tool.icon()
-            };
+            let icon = line_tools::cursor_icon(work);
             icons::paint(
                 &painter,
                 egui::Rect::from_min_size(position + egui::vec2(16., -28.), egui::Vec2::splat(22.)),
@@ -996,59 +1179,203 @@ fn draw_entity(
                         work.drawing.fields[1].clone(),
                     )?;
                 }
+                if work.line_mode == LineMode::Symmetric {
+                    let opposite = nator_sketch::sub(nator_sketch::scale(a, 2.), b);
+                    let mirror_start = sketch.add_point(opposite).map_err(sketch_error)?;
+                    // Compartilhar o ponto central evita duas metades desconectadas.
+                    // Paralelismo e igualdade mantêm a simetria ao editar as medidas.
+                    let mirror = sketch
+                        .add_curve(
+                            Curve::Line {
+                                start: mirror_start,
+                                end: start,
+                            },
+                            work.line_type != LineType::Normal,
+                        )
+                        .map_err(sketch_error)?;
+                    if work.line_type == LineType::Infinite
+                        && let Some(entity) = sketch
+                            .entities
+                            .iter_mut()
+                            .find(|entity| entity.id == mirror)
+                    {
+                        entity.infinite = true;
+                    }
+                    sketch
+                        .add_constraint(ConstraintKind::Parallel { a: id, b: mirror }, false)
+                        .map_err(sketch_error)?;
+                    sketch
+                        .add_constraint(ConstraintKind::EqualLength { a: id, b: mirror }, false)
+                        .map_err(sketch_error)?;
+                }
             }
         }
         Tool::Rectangle => {
-            let offset = sketch.points.len();
-            sketch.add_rectangle(a, b, false).map_err(sketch_error)?;
-            attach(sketch, sketch.points[offset].id, work.anchor_kinds[0], a)?;
-            attach(
-                sketch,
-                sketch.points[offset + 2].id,
-                work.anchor_kinds[1],
-                b,
-            )?;
-            for (index, end) in [(0, offset + 1), (1, offset + 3)] {
-                if work.drawing.locked[index] {
-                    let value = b[index] - a[index];
-                    let expression = if value < 0. {
-                        format!("-({})", work.drawing.fields[index])
+            let inclined = work.rectangle_mode == RectangleMode::Inclined;
+            let corners = match work.rectangle_mode {
+                RectangleMode::Normal => [a, [b[0], a[1]], b, [a[0], b[1]]],
+                RectangleMode::Center => {
+                    let opposite = nator_sketch::sub(nator_sketch::scale(a, 2.), b);
+                    [opposite, [b[0], opposite[1]], b, [opposite[0], b[1]]]
+                }
+                RectangleMode::Inclined => {
+                    let preview = drafting::preview(
+                        Primitive::InclinedRectangle,
+                        &[a, b],
+                        work.anchors[2],
+                        [None, None],
+                    )
+                    .map_err(sketch_error)?;
+                    [
+                        preview.path[0],
+                        preview.path[1],
+                        preview.path[2],
+                        preview.path[3],
+                    ]
+                }
+            };
+            let lines = drafting::add_rectangle(sketch, corners, work.line_type, inclined)
+                .map_err(sketch_error)?;
+            let point_ids = lines
+                .iter()
+                .map(|id| {
+                    if let Curve::Line { start, .. } =
+                        sketch.entity(*id).map_err(sketch_error)?.curve
+                    {
+                        Ok(start)
                     } else {
-                        work.drawing.fields[index].clone()
-                    };
-                    let (start, end) = (sketch.points[offset].id, sketch.points[end].id);
-                    let kind = if index == 0 {
-                        ConstraintKind::DeltaX {
-                            a: start,
-                            b: end,
-                            value,
-                        }
-                    } else {
-                        ConstraintKind::DeltaY {
-                            a: start,
-                            b: end,
-                            value,
-                        }
-                    };
-                    drive(sketch, kind, expression)?;
+                        Err(text(T::InvalidArc).to_owned())
+                    }
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            // O clique do modo central é o centro, nunca um dos cantos. Capturar
+            // esse clique como canto deslocaria o retângulo ao resolver restrições.
+            if work.rectangle_mode != RectangleMode::Center {
+                attach(sketch, point_ids[0], work.anchor_kinds[0], a)?;
+            }
+            let last = if inclined { 2 } else { 1 };
+            attach(sketch, point_ids[2], work.anchor_kinds[last], corners[2])?;
+            if inclined {
+                attach(sketch, point_ids[1], work.anchor_kinds[1], b)?;
+                if let Some((fields, locked)) = &work.drawing.side_fields {
+                    if locked[0] && work.line_type != LineType::Infinite {
+                        drive(
+                            sketch,
+                            ConstraintKind::Distance {
+                                a: point_ids[0],
+                                b: point_ids[1],
+                                value: nator_sketch::distance(a, b),
+                            },
+                            fields[0].clone(),
+                        )?;
+                    }
+                    if locked[1] {
+                        let direction = nator_sketch::sub(b, a);
+                        drive(
+                            sketch,
+                            ConstraintKind::Angle {
+                                a: point_ids[0],
+                                b: point_ids[1],
+                                value: direction[1].atan2(direction[0]),
+                            },
+                            fields[1].clone(),
+                        )?;
+                    }
+                }
+                if work.drawing.locked[0] && work.line_type != LineType::Infinite {
+                    drive(
+                        sketch,
+                        ConstraintKind::Distance {
+                            a: point_ids[1],
+                            b: point_ids[2],
+                            value: nator_sketch::distance(corners[1], corners[2]),
+                        },
+                        work.drawing.fields[0].clone(),
+                    )?;
+                }
+            } else {
+                for (index, end) in [(0, 1), (1, 3)] {
+                    if work.drawing.locked[index] && work.line_type != LineType::Infinite {
+                        let value = corners[2][index] - corners[0][index];
+                        let expression = if value < 0. {
+                            format!("-({})", work.drawing.fields[index])
+                        } else {
+                            work.drawing.fields[index].clone()
+                        };
+                        let kind = if index == 0 {
+                            ConstraintKind::DeltaX {
+                                a: point_ids[0],
+                                b: point_ids[end],
+                                value,
+                            }
+                        } else {
+                            ConstraintKind::DeltaY {
+                                a: point_ids[0],
+                                b: point_ids[end],
+                                value,
+                            }
+                        };
+                        drive(sketch, kind, expression)?;
+                    }
                 }
             }
         }
         Tool::Circle => {
+            let (center, radius) = match work.circle_mode {
+                CircleMode::Normal => (a, nator_sketch::distance(a, b)),
+                CircleMode::Diameter => (
+                    nator_sketch::scale(nator_sketch::add(a, b), 0.5),
+                    nator_sketch::distance(a, b) * 0.5,
+                ),
+                CircleMode::Tangent => {
+                    let center = work.anchors[3];
+                    let (line_start, line_end) =
+                        sketch.line(work.tangent_lines[0]).map_err(sketch_error)?;
+                    let radius = nator_sketch::cross(
+                        nator_sketch::sub(center, line_start),
+                        nator_sketch::sub(line_end, line_start),
+                    )
+                    .abs()
+                        / nator_sketch::distance(line_start, line_end);
+                    (center, radius)
+                }
+            };
             let id = sketch
-                .add_circle(a, nator_sketch::distance(a, b), false)
+                .add_circle(center, radius, work.line_type != LineType::Normal)
                 .map_err(sketch_error)?;
-            if let Curve::Circle { center, .. } = sketch.entity(id).map_err(sketch_error)?.curve {
-                attach(sketch, center, work.anchor_kinds[0], a)?;
+            if let Curve::Circle { center: point, .. } =
+                sketch.entity(id).map_err(sketch_error)?.curve
+            {
+                if work.circle_mode == CircleMode::Normal {
+                    attach(sketch, point, work.anchor_kinds[0], a)?;
+                } else if work.circle_mode == CircleMode::Tangent {
+                    for line in &work.tangent_lines {
+                        sketch
+                            .add_constraint(
+                                ConstraintKind::Tangent {
+                                    line: *line,
+                                    arc: id,
+                                    point,
+                                },
+                                false,
+                            )
+                            .map_err(sketch_error)?;
+                    }
+                }
             }
             if work.drawing.locked[0] {
+                let expression = if work.circle_mode == CircleMode::Diameter {
+                    format!("({}) / 2", work.drawing.fields[0])
+                } else {
+                    work.drawing.fields[0].clone()
+                };
                 drive(
                     sketch,
                     ConstraintKind::Radius {
                         circle: id,
-                        value: nator_sketch::distance(a, b),
+                        value: radius,
                     },
-                    work.drawing.fields[0].clone(),
+                    expression,
                 )?;
             }
         }
@@ -1074,7 +1401,7 @@ fn draw_entity(
                         end,
                         clockwise: false,
                     },
-                    false,
+                    work.line_type != LineType::Normal,
                 )
                 .map_err(sketch_error)?;
             attach(sketch, center, work.anchor_kinds[0], a)?;
@@ -1236,3 +1563,6 @@ fn bind_dimension(sketch: &mut Sketch, id: u64, work: &Workspace) {
             .insert(id, work.dimension_expression.clone());
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 18
+# Formato de projeto — versão interna 19
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 18; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 19; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -23,6 +23,10 @@ Cada peça contém:
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
 - histórico de operações (`features`), cada uma com nome, corpo resultante, operação e, desde a versão 12, `suppressed` opcional (operação suprimida, com parâmetros preservados);
 - desde a versão 12, `history_marker` opcional: quantidade de operações construídas a partir do início. As posteriores ficam inativas, com a última geometria oculta, e novas operações entram nessa posição. Ausente, todo o histórico é construído; o marcador nunca aponta para o fim (forma canônica).
+
+Desde a versão 19, `Tangent { line, arc, point }` também aceita um círculo completo em `arc`: `point` deve ser o identificador do centro, e a distância entre o centro e a reta suporte deve ser igual ao raio. Arcos conservam a regra anterior de extremidade compartilhada. A mudança de versão impede que leitores antigos interpretem esse vínculo como tangência de arco. Não é necessária transformação dos projetos anteriores.
+
+Os novos modos de construção são gravados como entidades e restrições comuns: duas linhas colineares de comprimentos iguais para a linha simétrica, quatro lados ortogonais para o retângulo e centro/raio para círculos. O modo e a cadeia de cliques são estado temporário da interface. Dimensões digitadas mantêm suas expressões; no círculo por dois pontos, a expressão de raio é metade do diâmetro informado.
 
 Desde a versão 18, entidades de rascunho aceitam `infinite` opcional, omitido quando `false`. Somente `Curve::Line` com `construction = true` pode usar `infinite = true`. Seus pontos `start`/`end` parametrizam posição e direção para o solver, sem limitar a reta nem fornecer capturas de extremos/ponto médio. Cópias rígidas e espelhamentos preservam o tipo; áreas/extrusões ignoram a entidade. Projetos anteriores mantêm segmentos finitos pelo valor padrão.
 

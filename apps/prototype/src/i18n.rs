@@ -355,9 +355,28 @@ pub enum Text {
     SketchSweep,
     SketchDynamicWidth,
     SketchDynamicHeight,
+    SketchMeasurements,
     SketchValueLocked,
     SketchDynamicHint,
-    SketchToolSettingsPending,
+    SketchLineMode,
+    SketchRectangleMode,
+    SketchCircleMode,
+    SketchRectangleCenter,
+    SketchRectangleInclined,
+    SketchCircleDiameter,
+    SketchCircleTangent,
+    SketchContinuousLineHint,
+    SketchSymmetricLineHint,
+    SketchRectangleNormalHint,
+    SketchRectangleCenterHint,
+    SketchRectangleInclinedHint,
+    SketchCircleNormalHint,
+    SketchCircleDiameterHint,
+    SketchCircleTangentHint,
+    SketchPickFirstTangent,
+    SketchPickSecondTangent,
+    SketchPickLine,
+    SketchTrimHint,
     SketchLineType,
     SketchLineNormal,
     SketchLineInfinite,
@@ -730,17 +749,46 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchSweep => "Abertura",
         Text::SketchDynamicWidth => "Largura",
         Text::SketchDynamicHeight => "Altura",
+        Text::SketchMeasurements => "Medidas",
         Text::SketchValueLocked => {
             "Medida travada pela digitação. Apague o campo para voltar a seguir o cursor."
         }
         Text::SketchDynamicHint => "Tab: alternar · Enter: confirmar · Esc: cancelar",
-        Text::SketchToolSettingsPending => "Configurações desta ferramenta a definir.",
-        Text::SketchLineType => "Tipo",
+        Text::SketchLineMode => "Tipo de linha",
+        Text::SketchRectangleMode => "Tipo de retângulo",
+        Text::SketchCircleMode => "Tipo de círculo",
+        Text::SketchRectangleCenter => "Do centro para fora",
+        Text::SketchRectangleInclined => "Inclinado",
+        Text::SketchCircleDiameter => "Dois pontos (diâmetro)",
+        Text::SketchCircleTangent => "Tangente",
+        Text::SketchContinuousLineHint => {
+            "Clique nos próximos vértices. Esc encerra a sequência; fechar uma área também encerra."
+        }
+        Text::SketchSymmetricLineHint => {
+            "O primeiro ponto é o centro: cada segmento cria outro de mesmo tamanho no lado oposto."
+        }
+        Text::SketchRectangleNormalHint => "Clique em dois cantos opostos.",
+        Text::SketchRectangleCenterHint => {
+            "Clique no centro e depois em um canto. As medidas indicam largura e altura totais."
+        }
+        Text::SketchRectangleInclinedHint => {
+            "Clique no início e no fim de um lado; depois defina a largura perpendicular."
+        }
+        Text::SketchCircleNormalHint => "Clique no centro e depois na borda para definir o raio.",
+        Text::SketchCircleDiameterHint => "Clique nos dois extremos do diâmetro.",
+        Text::SketchCircleTangentHint => {
+            "Selecione duas linhas perpendiculares. Mova o mouse para escolher o quadrante e o raio, ou digite o raio; clique ou Enter confirma. Usa as retas suporte."
+        }
+        Text::SketchPickFirstTangent => "Selecione a primeira linha de apoio.",
+        Text::SketchPickSecondTangent => "Selecione a segunda linha, perpendicular à primeira.",
+        Text::SketchPickLine => "Selecione uma linha do rascunho.",
+        Text::SketchTrimHint => "Clique no trecho que deseja aparar entre os encontros.",
+        Text::SketchLineType => "Traço",
         Text::SketchLineNormal => "Normal",
         Text::SketchLineInfinite => "Infinita",
-        Text::SketchLineNormalHint => "Linha de desenho; participa de áreas e extrusões.",
+        Text::SketchLineNormalHint => "Geometria de desenho; participa de áreas e extrusões.",
         Text::SketchLineConstructionHint => {
-            "Segmento tracejado laranja de referência; não define áreas nem extrusões."
+            "Geometria tracejada laranja de referência; não define áreas nem extrusões."
         }
         Text::SketchLineInfiniteHint => {
             "Reta tracejada laranja sem extremos; serve apenas de referência."

@@ -27,7 +27,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Projetos anteriores usam a cor neutra;
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
 /// Versão 18: retas infinitas de construção e cotas angulares relativas a linhas.
-pub const FORMAT_VERSION: u32 = 18;
+/// Versão 19: tangência de círculo completo com reta suporte (Tangent usa seu centro).
+pub const FORMAT_VERSION: u32 = 19;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

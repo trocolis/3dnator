@@ -46,10 +46,15 @@ pub(super) enum Icon {
     Check,
     Select,
     Line,
+    LineSymmetric,
     LineConstruction,
     LineInfinite,
     Rectangle,
+    RectangleCenter,
+    RectangleInclined,
     Circle,
+    CircleDiameter,
+    CircleTangent,
     Arc,
     Trim,
     SketchOffset,
@@ -176,8 +181,13 @@ pub(super) fn paint_with_ink(
     let sketch = matches!(
         icon,
         Icon::Line
+            | Icon::LineSymmetric
             | Icon::Rectangle
+            | Icon::RectangleCenter
+            | Icon::RectangleInclined
             | Icon::Circle
+            | Icon::CircleDiameter
+            | Icon::CircleTangent
             | Icon::Arc
             | Icon::Trim
             | Icon::SketchOffset
@@ -502,6 +512,13 @@ pub(super) fn paint_with_ink(
             p.circle(4., 19., 2., p.ink);
             p.circle(20., 4., 2., p.ink);
         }
+        Icon::LineSymmetric => {
+            // O apoio central separa duas metades iguais, com setas opostas.
+            p.arrow([12., 12.], [3., 20.]);
+            p.arrow([12., 12.], [21., 4.]);
+            p.circle(12., 12., 2., p.ink);
+            p.line(&[[8., 4.], [16., 20.]], p.ink);
+        }
         Icon::LineConstruction | Icon::LineInfinite => {
             let color = if enabled { theme::CONSTRUCTION } else { p.ink };
             for (a, b) in [(3., 7.), (10., 14.), (17., 21.)] {
@@ -516,10 +533,37 @@ pub(super) fn paint_with_ink(
             }
         }
         Icon::Rectangle => p.face(&[[3., 5.], [21., 5.], [21., 19.], [3., 19.]], p.fill),
+        Icon::RectangleCenter => {
+            p.face(&[[3., 5.], [21., 5.], [21., 19.], [3., 19.]], p.fill);
+            p.line(&[[3., 5.], [21., 19.]], p.accent);
+            p.line(&[[3., 19.], [21., 5.]], p.accent);
+            p.circle(12., 12., 2., p.ink);
+        }
+        Icon::RectangleInclined => {
+            p.face(&[[2., 11.], [16., 3.], [22., 13.], [8., 21.]], p.fill);
+            // O primeiro lado e o marcador de ângulo reto revelam a construção.
+            p.line(&[[2., 11.], [16., 3.]], p.accent);
+            p.line(&[[12.5, 5.], [14.5, 8.5], [18., 6.5]], p.ink);
+            p.circle(2., 11., 1.5, p.ink);
+            p.circle(16., 3., 1.5, p.ink);
+        }
         Icon::Circle => {
             p.circle(12., 12., 9., p.accent);
             p.line(&[[10., 12.], [14., 12.]], p.ink);
             p.line(&[[12., 10.], [12., 14.]], p.ink);
+        }
+        Icon::CircleDiameter => {
+            p.circle(12., 12., 9., p.accent);
+            p.line(&[[5.6, 18.4], [18.4, 5.6]], p.ink);
+            p.circle(5.6, 18.4, 1.7, p.ink);
+            p.circle(18.4, 5.6, 1.7, p.ink);
+        }
+        Icon::CircleTangent => {
+            // Duas retas perpendiculares e os dois pontos de tangência.
+            p.line(&[[3., 2.], [3., 21.], [22., 21.]], p.ink);
+            p.circle(11., 13., 8., p.accent);
+            p.circle(3., 13., 1.5, p.ink);
+            p.circle(11., 21., 1.5, p.ink);
         }
         Icon::Arc => {
             let points: Vec<_> = (0..=20)

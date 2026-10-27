@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Modos de desenho, ícones e seção Medidas — 27/10/2026
+
+- Linha Normal/Simétrica, continuidade pelo último ponto até Esc ou fechamento de área, retângulos normal/central/inclinado e círculos por centro/raio, diâmetro ou tangência a duas linhas perpendiculares. Traço aparece nas quatro ferramentas de criação; Infinita é restrita a Linha/Retângulo. Auxiliares não participam de áreas/extrusões.
+- Variações usam botões com desenhos vetoriais originais, seleção visível e ícone correspondente junto ao cursor. Painéis sem parágrafos explicativos; instruções somente em dicas. Medidas compartilha as expressões do canvas, permite digitar antes da origem e acompanha as etapas do retângulo inclinado e do arco. Campos flutuantes evitam cobrir o painel.
+- Dez regressões sem GPU cobrem prévias nos quadrantes, medidas totais, projeção perpendicular da largura, diâmetro, bases inclinadas/transladadas, seleção inválida e fechamento por cruzamentos ou por linhas já existentes; recálculo mantém simetria, ortogonalidade e tangências. Salvamento/reabertura, raio por expressão e desfazer/refazer são exercitados no círculo tangente. Formato 19 preserva leitura dos anteriores e impede interpretação antiga da nova semântica de tangência.
+- **262 testes do workspace com OCCT e 196 sem OCCT aprovados**. **15 ensaios gráficos da aplicação aprovados em série**, incluindo cliques nos novos botões, etapas de desenho, Esc, digitação de comprimento no painel antes do primeiro clique e ângulo no painel durante a prévia, confirmado por Enter. Os ensaios anteriores de Tab/Shift+Tab, campos livres/travados, projeção e histórico permanecem aprovados.
+- Formatação e Clippy do workspace com todos os alvos e avisos negados aprovados com/sem OCCT; compilação desktop com OCCT aprovada no Linux. Capturas reais via GL/llvmpipe em `target/codex-validation/drawing-modes-20261027/` conferem os painéis Linha, Retângulo e Círculo. Windows e janela nativa não foram exercitados localmente. Versão do aplicativo permanece 0.3.0 em desenvolvimento, sem release nem publicação remota.
+
 ## Tipos de linha, ângulo relativo, campos e ícone no cursor — 27/10/2026
 
 - Normal, Construção e Infinita têm ícones e seleção explícita no painel Linha. Segmentos de construção e retas infinitas são tracejados laranja, inclusive fora da edição. A reta infinita é recortada aos limites do canvas; apoios de parametrização não aparecem como extremos nem pontos médios, mas interseções e captura funcionam além deles. Offset, espelho e padrão preservam o tipo.
