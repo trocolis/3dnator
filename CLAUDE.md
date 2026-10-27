@@ -107,7 +107,7 @@ Regiões são identificadas pelas entidades do contorno; faces pelo nome de orig
 
 ## CI
 
-`.github/workflows/ci.yml` roda fmt, clippy, testes e ensaios de linha de comando em Ubuntu 24.04 e Windows 2025, e jobs `occt-linux` (apt, OCCT 7.6) e `occt-windows` (conda-forge) com testes `--features occt`, `--validate` e `--validate-part`. Ainda não foi executada: não há repositório remoto.
+`.github/workflows/ci.yml` roda fmt, clippy, testes e ensaios de linha de comando em Ubuntu 24.04 e Windows 2025, e jobs `occt-linux` (apt, OCCT 7.6) e `occt-windows` (conda-forge) com testes `--features occt`, `--validate` e `--validate-part`. O repositório público é `trocolis/3dnator` no GitHub; a CI roda a cada push e pull request.
 
 ## Dependências
 

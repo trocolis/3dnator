@@ -2,6 +2,10 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Repositório público
+
+- Código publicado em <https://github.com/trocolis/3dnator>, sob licença MIT. A CI do GitHub Actions passa a rodar a cada push e pull request.
+
 ### Cubo de vista compacto e giros pela face predominante
 
 - Removida a barra permanente acima da área de edição com vistas, enquadramento, seletor de projeção e indicação do contexto. A área 3D passa a ocupar esse espaço.
