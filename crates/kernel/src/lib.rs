@@ -83,7 +83,20 @@ pub struct FaceAnchors {
 pub struct EdgeAnchors {
     pub start: [f64; 3],
     pub end: [f64; 3],
-    pub circle_center: Option<[f64; 3]>,
+    pub circle: Option<CircleAnchor>,
+    /// Costura da parametrização ou polo degenerado, sem canto capturável.
+    pub seam: bool,
+}
+
+/// Círculo de apoio no referencial local do sólido, em mm. O centro fica no
+/// plano da borda, inclusive quando esse plano atravessa o vazio de um furo.
+#[derive(Debug, Clone, Copy)]
+pub struct CircleAnchor {
+    pub center: [f64; 3],
+    pub normal: [f64; 3],
+    pub radius_mm: f64,
+    /// Arcos oferecem o centro por proximidade, mas não uma região circular inteira.
+    pub closed: bool,
 }
 
 /// Nomes posicionais (`{dono}:f{i}`) para sólidos importados, que nunca são recalculados.

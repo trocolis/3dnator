@@ -280,6 +280,9 @@ pub(super) struct Hover {
     pub context: String,
     pub overlay: Overlay,
     pub label: String,
+    /// Cursor de captura desenhado no apoio; o ponteiro do sistema continua livre
+    /// para sair do raio sem saltos artificiais ou dependência do sistema operacional.
+    captured: Option<Point3>,
     computed: Instant,
 }
 
@@ -299,6 +302,7 @@ impl Hover {
             context: String::new(),
             overlay,
             label,
+            captured: None,
             computed: Instant::now(),
         }
     }
@@ -354,6 +358,59 @@ impl Editor {
         let tab = self.current().id;
         let revision = self.current().session.revision();
         let context = self.hover_context();
+        if self.alignment_pick_mode() == Some(navigation::PickMode::Vertex) {
+            let Some(bounds) = self.current().scene_bounds else {
+                return;
+            };
+            let document = self.current().session.document().clone();
+            let (overlay, label, captured) = if let Some((point, label)) =
+                self.alignment_reference_point(bounds, response.rect, position)
+            {
+                (
+                    Overlay {
+                        points: vec![point],
+                        ..Default::default()
+                    },
+                    label,
+                    Some(point),
+                )
+            } else if let Some(target) =
+                self.point_target(&document, response.rect, position, ui.ctx())
+            {
+                let label = if target.circle {
+                    text(T::VirtualCenter).into()
+                } else {
+                    document
+                        .body(target.pick.body)
+                        .map(|b| b.name.clone())
+                        .unwrap_or_default()
+                };
+                (
+                    Overlay {
+                        points: vec![target.pick.point],
+                        ..Default::default()
+                    },
+                    label,
+                    target.captured.then_some(target.pick.point),
+                )
+            } else {
+                (Overlay::default(), String::new(), None)
+            };
+            if captured.is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+            }
+            self.hover = Some(Hover {
+                tab,
+                revision,
+                position,
+                context,
+                overlay,
+                label,
+                captured,
+                computed: Instant::now(),
+            });
+            return;
+        }
         if let Some(hover) = &self.hover
             && hover.tab == tab
             && hover.revision == revision
@@ -395,6 +452,7 @@ impl Editor {
             context,
             overlay,
             label,
+            captured: None,
             computed: Instant::now(),
         });
     }
@@ -577,6 +635,18 @@ impl Editor {
             .filter(|h| h.tab == self.current().id && !h.overlay.is_empty())
         {
             draw(&painter, &camera, bounds, rect, &hover.overlay, Look::Hover);
+            if let Some(point) = hover.captured
+                && let Some(p) = sketch_scene::project(&camera, bounds, rect, point)
+            {
+                let stroke = egui::Stroke::new(1.5, theme::ACCENT);
+                for axis in [egui::vec2(11., 0.), egui::vec2(0., 11.)] {
+                    painter.line_segment(
+                        [p - axis, p + axis],
+                        egui::Stroke::new(3.5, egui::Color32::WHITE),
+                    );
+                    painter.line_segment([p - axis, p + axis], stroke);
+                }
+            }
             if !hover.label.is_empty() {
                 let galley = painter.layout_no_wrap(
                     hover.label.clone(),

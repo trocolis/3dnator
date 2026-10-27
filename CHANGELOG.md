@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Captura de centros no movimento ponto a ponto
+
+- Centros virtuais exatos de bordas circulares, inclusive no vazio de furos e arruelas, no plano de cada superfície. Costuras de cilindros deixam de aparecer como vértices artificiais.
+- Passar pela região circular revela o centro; aproximar o cursor captura o apoio com uma mira, em alcance constante na tela. Destaque e clique compartilham a mesma escolha na origem e no destino, incluindo vértices e referências de rascunhos.
+- Consultas geométricas em segundo plano, com cache por aba/revisão; captura respeita visibilidade, bloqueio, seção e oclusão, sem alterar o documento antes da confirmação.
+
 ### Extrusão pelo mouse e seleção automática de operação
 
 - Extrusão aceita áreas fechadas de rascunhos e faces planas de sólidos da peça. Áreas internas, bordas compartilhadas e interseções de linhas/círculos/arcos são reconhecidas sem alterar as entidades do rascunho; furos das faces são preservados.

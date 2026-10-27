@@ -872,6 +872,176 @@ mod tests {
     use nator_document::features::{Operation, RegionRef};
     use nator_sketch::{Plane, Sketch};
 
+    /// O clique usa o mesmo centro mostrado no vazio, na origem e no destino.
+    /// O resultado só entra no documento ao confirmar e mantém desfazer/refazer.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn point_to_point_captures_washer_holes_and_disk_centers() -> Result<(), Box<dyn Error>> {
+        use nator_geometry::{norm, sub};
+        use nator_kernel::Solid;
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Captura de centros")?)?;
+        let washer =
+            Solid::cylinder([0.; 3], 20., 4.)?.cut(&Solid::cylinder([0., 0., -1.], 10., 6.)?)?;
+        let disk = Solid::cylinder([0.; 3], 16., 8.)?;
+        for (name, mut solid) in [("Arruela", washer), ("Disco", disk)] {
+            let (mesh, triangle_faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+            session.execute(Command::ImportSolid {
+                destination: None,
+                name: name.into(),
+                geometry: Arc::new(MeshAsset::with_faces(mesh, triangle_faces)?),
+                brep: Arc::new(solid.to_brep()?),
+                faces: solid.face_count()?,
+            })?;
+        }
+        let document = session.document().clone();
+        let from_instance = document.instances()[0].id;
+        let to_instance = document.instances()[1].id;
+        let from = document
+            .instance(from_instance)
+            .ok_or("Origem ausente")?
+            .placement
+            .apply([0., 0., 4.]);
+        let to = document
+            .instance(to_instance)
+            .ok_or("Destino ausente")?
+            .placement
+            .apply([0., 0., 8.]);
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = None;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        settle(&mut editor, &context)?;
+        editor.open_align(navigation::PickMode::Vertex);
+        frame(&mut editor, &context, Vec::new())?;
+        let revision = editor.current().session.revision();
+        let bounds = editor.current().scene_bounds.ok_or("Limites ausentes")?;
+        let source_screen =
+            sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, from)
+                .ok_or("Origem fora da tela")?;
+        let discovery = source_screen + egui::vec2(30., 0.);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(discovery)],
+            )?;
+            if editor
+                .hover
+                .as_ref()
+                .is_some_and(|h| h.overlay.points.iter().any(|p| norm(sub(*p, from)) < 1e-9))
+            {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err(format!("Centro não realçado: {}; cursor={discovery:?}, canvas={:?}, from={from:?}, mode={:?}, hover={:?}", editor.status, editor.canvas_rect, editor.alignment_pick_mode(), editor.hover.as_ref().map(|h| (&h.label, &h.overlay.points))).into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            editor.hover.as_ref().ok_or("Realce ausente")?.label,
+            text(T::VirtualCenter)
+        );
+        let source_capture = source_screen + egui::vec2(8., 0.);
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 820.),
+                )),
+                events: vec![egui::Event::PointerMoved(source_capture)],
+                time: Some(context.input(|i| i.time) + 1. / 60.),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::None);
+        output.textures_delta.clear();
+        click(&mut editor, &context, source_capture)?;
+        let target_screen =
+            sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, to)
+                .ok_or("Destino fora da tela")?;
+        let target_capture = target_screen + egui::vec2(-8., 0.);
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(target_capture)],
+        )?;
+        assert!(
+            editor.hover.as_ref().is_some_and(|h| h
+                .overlay
+                .points
+                .iter()
+                .any(|p| norm(sub(*p, to)) < 1e-9))
+        );
+        click(&mut editor, &context, target_capture)?;
+        assert_eq!(editor.current().session.revision(), revision);
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        settle(&mut editor, &context)?;
+        assert!(editor.assembly_panel.is_none(), "{}", editor.status);
+        let moved = editor
+            .current()
+            .session
+            .document()
+            .instance(from_instance)
+            .ok_or("Origem movida ausente")?
+            .placement;
+        assert!(norm(sub(moved.apply([0., 0., 4.]), to)) < 1e-9);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .instance(to_instance)
+                .ok_or("Destino ausente")?
+                .placement
+                .translation_mm(),
+            [to[0], to[1], 0.]
+        );
+        assert!(editor.current_mut().session.undo());
+        assert!(
+            norm(sub(
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .instance(from_instance)
+                    .ok_or("Origem ausente")?
+                    .placement
+                    .apply([0., 0., 4.]),
+                from
+            )) < 1e-9
+        );
+        assert!(editor.current_mut().session.redo());
+        assert!(
+            norm(sub(
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .instance(from_instance)
+                    .ok_or("Origem ausente")?
+                    .placement
+                    .apply([0., 0., 4.]),
+                to
+            )) < 1e-9
+        );
+        Ok(())
+    }
+
     /// Ensaio optativo porque precisa de adaptador wgpu. Usa eventos reais egui
     /// sobre o canvas completo; não exige compositor nem janela nativa.
     #[test]

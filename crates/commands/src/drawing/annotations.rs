@@ -200,7 +200,7 @@ fn resolve(
                     let measure = s.edge_measure(i).map_err(error)?;
                     let anchors = s.edge_anchors(i).map_err(error)?;
                     (
-                        anchors.circle_center.ok_or_else(|| {
+                        anchors.circle.map(|c| c.center).ok_or_else(|| {
                             DocumentError("Escolha uma aresta circular para a cota de raio.".into())
                         })?,
                         anchors.start,

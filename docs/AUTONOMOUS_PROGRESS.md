@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Centros circulares e captura no movimento ponto a ponto — 27/10/2026
+
+- Acrescentados centros virtuais exatos das bordas circulares, no plano de cada superfície, inclusive no vazio de furos. A região revela o centro e a proximidade captura a mira em alcance constante na tela; realce e clique compartilham a escolha na origem e no destino.
+- Consultas do B-rep fora da interface, com cache por aba/revisão e descarte de entregas antigas. Costuras dos cilindros não competem como vértices artificiais. Captura considera poses, visibilidade, bloqueio, isolamento, seção e oclusão; referências dos rascunhos permanecem prioritárias no destino.
+- Aprovados 155 testes sem OCCT, 208 com OCCT e os oito ensaios gráficos em série, incluindo alinhamento arruela/disco por eventos reais egui e desfazer/refazer. Formatação, Clippy nas duas configurações e compilação desktop com OCCT aprovados. Sem release, alteração de formato ou publicação remota; Windows e janela nativa não exercitados.
+
 ## Extrusão interativa e modos automáticos — 27/10/2026
 
 - Perfil pode ser uma célula fechada do rascunho ou uma face plana do sólido, sem criar rascunhos auxiliares. Arraste da seta define a distância; clicar em face após o perfil define Até face automaticamente, com recorte exato em planos inclinados. Mantidos um/dois lados, simetria, deslocamento inicial, expressões e substituição manual da operação.

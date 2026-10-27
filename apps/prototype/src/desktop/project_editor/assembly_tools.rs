@@ -500,6 +500,49 @@ impl MoveDraft {
 }
 
 impl Editor {
+    /// O painel determina o tipo real de captura, inclusive ao trocar o tipo no
+    /// próprio painel; não depende do modo geral de inspeção do viewport.
+    pub(super) fn alignment_pick_mode(&self) -> Option<navigation::PickMode> {
+        match &self.assembly_panel {
+            Some(Panel::Align(d)) if d.tab == self.current().id && d.field.is_some() => {
+                Some(d.kind)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn alignment_source_part(&self) -> Option<PartId> {
+        match &self.assembly_panel {
+            Some(Panel::Align(d)) if d.field == Some(AlignField::From) => {
+                self.current().active_part
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn alignment_reference_point(
+        &self,
+        bounds: nator_geometry::Bounds,
+        rect: egui::Rect,
+        position: egui::Pos2,
+    ) -> Option<(Point3, String)> {
+        let Some(Panel::Align(d)) = &self.assembly_panel else {
+            return None;
+        };
+        if d.field != Some(AlignField::To) {
+            return None;
+        }
+        reference_anchor(
+            self.current().session.document(),
+            &self.viewport.camera,
+            bounds,
+            rect,
+            position,
+            d.kind,
+        )
+        .map(|anchor| (anchor.point, anchor.label))
+    }
+
     /// Elementos posicionáveis da seleção atual: instâncias na montagem, corpos da peça ativa
     /// na construção.
     fn movable_selection(&self) -> Vec<Selection> {
@@ -712,13 +755,18 @@ impl Editor {
             f64::from(rect.aspect_ratio()),
         );
         let view = self.current().view.clone();
-        let model = self
-            .current()
-            .session
-            .document()
-            .pick_all_with(ray, |o| view.pickable(o))
-            .ok()
-            .and_then(|picks| section::first_visible(picks, self.current().section));
+        let model = if self.alignment_pick_mode() == Some(navigation::PickMode::Vertex) {
+            let document = self.current().session.document().clone();
+            self.point_target(&document, rect, position, &response.ctx)
+                .map(|target| target.pick)
+        } else {
+            self.current()
+                .session
+                .document()
+                .pick_all_with(ray, |o| view.pickable(o))
+                .ok()
+                .and_then(|picks| section::first_visible(picks, self.current().section))
+        };
         // Destino do alinhamento: pontos e linhas de rascunhos de referência têm prioridade
         // (são encaixes precisos); para faces, o plano do rascunho vale quando o clique não
         // atinge o modelo.

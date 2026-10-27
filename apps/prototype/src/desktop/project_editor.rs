@@ -12,6 +12,7 @@ mod live_preview;
 mod mesh_import;
 mod navigation;
 mod parameter_editor;
+mod point_snap;
 mod profile_pick;
 mod project_tree;
 mod section;
@@ -449,6 +450,7 @@ pub struct Editor {
     hover: Option<highlight::Hover>,
     highlight_cache: highlight::Cache,
     profile_cache: profile_pick::Cache,
+    point_cache: point_snap::Cache,
     /// Janela de seleção, pressão longa e lista de sobrepostos.
     gestures: selection_tools::SelectionGestures,
     /// Painel de montagem ou posicionamento aberto.
@@ -624,6 +626,7 @@ impl Editor {
             canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.)),
             hover: None,
             highlight_cache: highlight::Cache::default(),
+            point_cache: point_snap::Cache::default(),
             profile_cache: profile_pick::Cache::default(),
             gestures: selection_tools::SelectionGestures::default(),
             assembly_panel: None,

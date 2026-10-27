@@ -254,13 +254,18 @@ impl Solid {
         Ok(count)
     }
 
-    /// Para cada aresta, as faces adjacentes (base 0; -1 quando ausente).
-    fn adjacency(&self) -> Result<Vec<[i32; 2]>, KernelError> {
+    pub fn edge_count(&self) -> Result<usize, KernelError> {
         // SAFETY: objeto vivo nesta thread; apenas consulta.
         let count = unsafe { nator_edge_count(self.pointer.as_ptr()) };
         if count > MAX_TOPOLOGY {
             return Err(KernelError("Sólido com arestas demais.".into()));
         }
+        Ok(count)
+    }
+
+    /// Para cada aresta, as faces adjacentes (base 0; -1 quando ausente).
+    fn adjacency(&self) -> Result<Vec<[i32; 2]>, KernelError> {
+        let count = self.edge_count()?;
         let mut flat = vec![0_i32; count * 2];
         // SAFETY: buffer exclusivo com o comprimento exato verificado pela ponte.
         if !unsafe { nator_edge_faces(self.pointer.as_ptr(), flat.as_mut_ptr(), flat.len()) } {

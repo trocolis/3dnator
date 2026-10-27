@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Centros virtuais no movimento ponto a ponto — 27/10/2026
+
+- Centros exatos de bordas circulares são consultados no B-rep em segundo plano, em coordenadas locais. A projeção compõe corpo e ocorrência, e escolhe a borda frontal quando os centros das duas superfícies ocupam o mesmo pixel. Costuras cilíndricas não geram falsos vértices.
+- A região circular descobre o apoio mesmo no vazio do furo; a captura ocorre a até 14 pontos de tela, com mira no centro. Realce e clique usam a mesma consulta, incluindo prioridade dos rascunhos de referência no destino. Ocultação, bloqueio, isolamento, seção e material à frente são respeitados.
+- **155 testes sem OCCT e 208 com OCCT aprovados.** As regressões novas verificam alturas e raios de uma arruela, ausência de costuras, descoberta sem interseção com a malha, frente/verso, zoom, vista oblíqua, poses compostas, oclusão, seção, bloqueio, vértices de malha e descarte de consultas de revisão antiga. Os **oito ensaios gráficos passaram em série**; o novo usa eventos egui para escolher origem no furo e destino num disco, verifica a captura do cursor, confirma e desfaz/refaz.
+- Formatação, Clippy com todos os alvos e avisos negados nas configurações com/sem OCCT, e compilação desktop com OCCT aprovados. Versão de desenvolvimento 0.3.0 e formato 17 preservados. A validação local usa Linux; Windows e janela nativa não foram exercitados.
+
 ## Extrusão por mouse, faces e áreas fechadas — 27/10/2026
 
 - Extrusão direta de face plana preserva contornos e furos, sem rascunho auxiliar. Arraste muda distância e sentido; clique em outra face define o limite automaticamente. Modo automático consulta contato no início e direção de entrada no material: Novo corpo, Unir ou Remover; escolha manual permanece disponível. Remoção mostra a interseção efetiva em vermelho translúcido, sem pintar o trecho do prisma no vazio.
