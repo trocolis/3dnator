@@ -51,7 +51,6 @@ pub(super) enum Icon {
     Arc,
     Trim,
     Folder,
-    Panel,
     First,
     Previous,
     Next,
@@ -457,10 +456,6 @@ pub(super) fn paint_with_ink(
             p.circle(18., 18., 3., p.ink);
             p.line(&[[7., 15.], [19., 3.]], p.accent);
             p.line(&[[17., 15.], [5., 3.]], p.accent);
-        }
-        Icon::Panel => {
-            p.face(&[[2., 4.], [22., 4.], [22., 20.], [2., 20.]], p.fill);
-            p.line(&[[15., 4.], [15., 20.]], p.ink);
         }
         // Controles de reprodução da linha do tempo: barra indica o limite do histórico.
         Icon::First | Icon::Last => {

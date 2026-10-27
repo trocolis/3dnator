@@ -183,9 +183,6 @@ struct Tab {
     sketch_edit: Option<sketch_editor::Workspace>,
     plane_pick: Option<sketch_scene::PlanePicker>,
     camera_transition: Option<sketch_scene::CameraTransition>,
-    name_input: String,
-    position_input: Point3,
-    rotation_input: Point3,
     changed_at: Instant,
     recovery_path: PathBuf,
     recovery_source: Option<PathBuf>,
@@ -236,9 +233,6 @@ impl Tab {
             sketch_edit: None,
             plane_pick: None,
             camera_transition: None,
-            name_input: String::new(),
-            position_input: [0.; 3],
-            rotation_input: [0.; 3],
             changed_at: Instant::now(),
             recovery_path,
             recovery_source: recovered,
@@ -294,27 +288,6 @@ impl Tab {
             self.selection = self.selected.last().copied();
         }
         self.view.set_selection(&self.selected);
-        let selection = self.selection;
-        let values = match selection {
-            Some(Selection::Body { id, .. }) => self
-                .session
-                .document()
-                .body(id)
-                .map(|b| (b.name.clone(), b.placement)),
-            Some(Selection::Instance(id)) => self
-                .session
-                .document()
-                .instance(id)
-                .map(|i| (i.name.clone(), i.placement)),
-            None => None,
-        };
-        if let Some((name, placement)) = values {
-            self.name_input = name;
-            self.position_input = placement.translation_mm();
-            self.rotation_input = placement.rotation_rad().map(f64::to_degrees);
-        } else {
-            self.selection = None;
-        }
     }
     fn changed(&mut self) {
         self.picked = None;
@@ -634,6 +607,7 @@ impl Editor {
         }
         self.current_mut().camera = self.viewport.camera.clone();
         self.active = index;
+        self.shell.measure_open = false;
         self.viewport.clear(&self.gpu.device);
         self.scene = None;
         self.viewport.camera = self.current().camera.clone();
@@ -1506,10 +1480,9 @@ impl Editor {
         if self.shell.browser_visible {
             self.tree(ui);
         }
-        if self.shell.properties_visible {
-            self.properties(ui);
-        }
         self.canvas(ui);
+        self.sketch_tools_window(ui.ctx());
+        self.measure_window(ui.ctx());
         self.dialogs(ui.ctx());
         self.feature_dialog(ui.ctx());
         self.assembly_panel(ui.ctx());

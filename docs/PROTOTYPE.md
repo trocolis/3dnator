@@ -14,7 +14,7 @@ cargo run -p nator-prototype --features occt --locked
 
 A janela começa com um projeto vazio. Use **Inserir suporte em L** ou **Importar STL** para criar uma peça com um corpo. Na árvore, selecione a peça/corpo e use **Construir nesta peça**: importações seguintes acrescentam corpos à definição ativa. **Voltar à montagem** faz a próxima importação criar outra peça.
 
-A árvore permite selecionar, mostrar/ocultar peças e corpos. As propriedades oferecem cor sólida, renomeação, posicionamento X/Y/Z em milímetros, rotação em graus e exclusão de corpos. Posições de corpos são locais à peça; posições de instâncias são relativas à montagem. Corpos só podem ser editados na peça ativa em construção; instâncias são posicionadas na montagem. A área 3D permite selecionar geometria, medir e capturar referências de faces e arestas para operações.
+A árvore permite selecionar, mostrar/ocultar peças e corpos. O menu de contexto dos corpos oferece cor sólida, renomeação e exclusão. Os painéis Mover e Copiar oferecem translação em milímetros e rotação em graus; Medir seleção abre uma janela de medições e informações da malha. O painel lateral Propriedades foi removido. Posições de corpos são locais à peça; posições de instâncias são relativas à montagem. Corpos só podem ser editados na peça ativa em construção; instâncias são posicionadas na montagem. A área 3D permite selecionar geometria, medir e capturar referências de faces e arestas para operações.
 
 Projetos abrem em abas. Cada aba mantém documento, seleção, câmera, contexto e sequência de desfazer/refazer próprios. Há um único conjunto de buffers GPU para a aba ativa. A representação da cena ainda combina malhas das instâncias, sem instanciamento gráfico otimizado.
 

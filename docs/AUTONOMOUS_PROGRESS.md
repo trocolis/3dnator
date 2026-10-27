@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Área de edição sem Propriedades lateral — 26/10/2026
+
+- Eliminado o painel lateral Propriedades, seu botão na faixa, sua ação na busca e os campos legados de nome/posição da seleção. O viewport agora ocupa todo o espaço à direita da árvore.
+- Preservados os controles de rascunho em janela contextual, a medição em janela própria e a edição de cor no menu de contexto dos corpos. Dimensões e informações da malha ficam na janela Medir seleção; renomear, mover, exportar e excluir continuam nos comandos existentes.
+- Aprovados 140 testes sem OCCT, 182 com OCCT, os quatro ensaios gráficos em série, formatação e Clippy nas duas configurações e compilação desktop com OCCT. Capturas de modelo, rascunho e medição inspecionadas em `target/codex-validation/remove-properties-20261026/`. Sem release, migração ou publicação remota.
+
 ## Subopções de Mover na aba Peça — 26/10/2026
 
 - Mover na Peça agora abre o mesmo menu da Montagem: Livre, Face a face, Aresta a aresta e Vértice a vértice. As opções compartilham uma definição; Livre mantém a distinção entre corpos e componentes. O grupo Modificar conserva Copiar, Combinar e Dividir ao lado do menu.

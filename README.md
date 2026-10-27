@@ -92,7 +92,7 @@ As seções seguintes descrevem o escopo completo aprovado.
 - Ferramenta Medir informa distância entre vértices e componentes X/Y/Z, comprimento de arestas, raio/diâmetro e comprimento de arcos, ângulo e distância entre faces paralelas, menor distância entre corpos/peças, área, volume e centro de massa.
 - Medições não alteram a geometria. Coordenadas seguem a origem da peça na construção e a origem da montagem nesse contexto.
 - Milímetros são a unidade padrão; campos aceitam unidades explícitas como mm, cm e in. Casas decimais de exibição são configuráveis e não definem a precisão interna.
-- Sem materiais definidos, o centro de massa assume densidade uniforme; essa hipótese deve ser indicada nas propriedades.
+- Sem materiais definidos, o centro de massa assume densidade uniforme; essa hipótese deve ser indicada nas medições.
 - Ferramentas de cotagem desenham medidas lineares, angulares, raios e diâmetros, com linhas auxiliares, setas e texto reposicionável. Distinguir cotas que controlam o rascunho das anotações de medição e documentação.
 - Corte de visualização por plano deslocável, com inversão do lado visível, preserva os corpos. Nas folhas, vistas em corte possuem identificação, como A–A, e hachuras nas regiões seccionadas.
 - Espaço de desenho técnico com folhas A4/A3, orientação e escala configuráveis; vistas frontal, superior, lateral, isométrica e cortes; legenda com nome da peça, revisão, data e unidade.
@@ -171,7 +171,7 @@ As seções seguintes descrevem o escopo completo aprovado.
 - Abrir vários projetos em abas na mesma janela. Cada projeto mantém câmera, seleção e sequência de desfazer/refazer próprias; painéis e ferramentas exibem o projeto ativo.
 - Indicar alterações não salvas nas abas. Ao fechar um projeto modificado, oferecer Salvar, Descartar ou Cancelar.
 - Permitir importar peças de outra aba como cópias independentes, sem criar vínculos entre os arquivos.
-- Ferramentas no topo, árvore à esquerda, propriedades à direita e histórico da peça ativa embaixo; painéis recolhíveis.
+- Ferramentas no topo, árvore recolhível à esquerda e histórico da peça ativa embaixo; o viewport ocupa o restante da largura. Controles de rascunho e medições ficam em janelas contextuais, sem painel lateral de propriedades.
 - Ferramentas com prévia, confirmação e cancelamento; Esc cancela a operação atual.
 - Cor neutra padrão, cores sólidas editáveis e iluminação simples com arestas visíveis.
 - Sombras opcionais e desligadas por padrão; transparência sob demanda. Texturas e reflexos elaborados ficam para avaliação posterior.

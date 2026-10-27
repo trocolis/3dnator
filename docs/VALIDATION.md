@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Remoção do painel lateral Propriedades — 26/10/2026
+
+- Removidos o painel fixo à direita, o botão/ação que o exibia e os campos de edição associados. A árvore continua recolhível, e o viewport ocupa a largura restante. Controles do rascunho foram transferidos para janela contextual arrastável/recolhível; Medir seleção abre janela própria. O menu de corpo ganhou edição de cor; renomeação, movimento, exportação e exclusão continuam nos comandos existentes.
+- **140 testes sem OCCT e 182 com OCCT aprovados**, com os quatro ensaios gráficos optativos executados em série e aprovados, incluindo edição de rascunho, movimentação/alinhamento, cópia e cancelamento. Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados.
+- Capturas reais de modelo (1440 × 900), rascunho (1280 × 820) e medição (1440 × 900) inspecionadas, pelo egui/wgpu/GL llvmpipe, sem erros de validação. O cenário `measure` calcula medições do B-rep e mostra dimensões locais e informações da malha na nova janela.
+- Evidências em `target/codex-validation/remove-properties-20261026/`. Versão 0.3.0 e formato 15 preservados; Windows e janela nativa não foram exercitados.
+
 ## Menu Mover compartilhado por Peça e Montagem — 26/10/2026
 
 - Aba Peça passa a abrir Mover como menu no mesmo grupo Modificar. As opções e suas descrições são compartilhadas com Montagem: Livre, Face a face, Aresta a aresta e Vértice a vértice. O alvo de Livre é corpo na Peça e componente na Montagem. Alinhamentos recusam origens externas durante a edição de uma peça, tanto na seleção quanto na geração do comando.

@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Área 3D sem painel Propriedades
+
+- Eliminados o painel lateral Propriedades, seu botão na faixa e sua entrada na busca. A área 3D ocupa todo o espaço à direita da árvore.
+- Controles de rascunho passam a uma janela contextual arrastável e recolhível; Medir seleção abre sua própria janela com medições, dimensões e informações da malha. A cor do corpo fica no menu de contexto da árvore, junto aos comandos existentes de renomear, mover, exportar e excluir.
+
 ### Menu Mover na aba Peça
 
 - Mover passa a abrir o mesmo menu de opções da Montagem: **Livre**, **Face a face**, **Aresta a aresta** e **Vértice a vértice**, com ícones e descrições.

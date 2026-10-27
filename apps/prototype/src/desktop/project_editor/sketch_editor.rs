@@ -275,7 +275,9 @@ impl Editor {
                 .map(|r| r.sketch.clone())
         })
     }
-    pub(super) fn sketch_properties(&mut self, ui: &mut egui::Ui) {
+    /// Controles contextuais do rascunho sobre o viewport, sem reservar uma coluna
+    /// lateral. A janela acompanha a edição e pode ser movida ou recolhida.
+    pub(super) fn sketch_tools_window(&mut self, context: &egui::Context) {
         let Some(mut sketch) = self.working_sketch() else {
             return;
         };
@@ -296,15 +298,14 @@ impl Editor {
         let mut submit = false;
         let mut issue = None;
         let mut open_repair = false;
-        egui::Panel::right("properties")
-            .default_size(285.)
-            .min_size(250.)
-            .max_size(420.)
-            .frame(theme::panel_frame())
-            .show(ui, |ui| {
-                ui.label(egui::RichText::new(text(T::Sketch)).strong().size(14.));
+        egui::Window::new(text(T::SketchTools))
+            .id(egui::Id::new("sketch_tools"))
+            .default_width(285.)
+            .default_pos(command_panel::default_position(self.canvas_rect))
+            .show(context, |ui| {
                 egui::ScrollArea::vertical()
-                    .id_salt("sketch_property_scroll")
+                    .id_salt("sketch_tools_scroll")
+                    .max_height((self.canvas_rect.height() - 120.).max(180.))
                     .show(ui, |ui| {
                         ui.label(&sketch.name);
                         let work = self.current_mut().sketch_edit.as_mut();
@@ -669,7 +670,7 @@ impl Editor {
         if let Some(issue) = issue {
             self.status = issue;
         } else if submit {
-            self.solve_sketch(ui.ctx(), sketch);
+            self.solve_sketch(context, sketch);
         }
         if open_repair {
             self.open_sketch_repair();

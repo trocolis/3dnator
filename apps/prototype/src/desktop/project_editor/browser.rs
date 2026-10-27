@@ -198,6 +198,7 @@ pub(super) fn body_menu(
     let mut action = None;
     let target = Selection::Body { part, id: body.id };
     let editable = context.active == Some(part);
+    let mut editing_color = false;
     if !editable && item(ui, Icon::Cube, T::EditPart) {
         action = Some(MenuAction::Activate(part));
     }
@@ -225,6 +226,27 @@ pub(super) fn body_menu(
     }
     ui.separator();
     ui.add_enabled_ui(editable, |ui| {
+        ui.menu_button(text(T::BodyColor), |ui| {
+            // A cor continua sendo um comando reversível. Manter o menu aberto
+            // durante a escolha permite ajustar os canais sem um painel lateral.
+            let mut channels = body
+                .color
+                .unwrap_or(nator_geometry::RgbColor::NEUTRAL)
+                .channels();
+            if ui.color_edit_button_srgb(&mut channels).changed() {
+                editing_color = true;
+                action = Some(MenuAction::Command(Box::new(Command::SetBodyColor {
+                    id: body.id,
+                    color: Some(nator_geometry::RgbColor::new(channels)),
+                })));
+            }
+            if body.color.is_some() && ui.button(text(T::NeutralColor)).clicked() {
+                action = Some(MenuAction::Command(Box::new(Command::SetBodyColor {
+                    id: body.id,
+                    color: None,
+                })));
+            }
+        });
         if item(ui, Icon::Sketch, T::RenameFeature) {
             action = Some(MenuAction::Rename(
                 RenameTarget::Body(body.id),
@@ -237,7 +259,7 @@ pub(super) fn body_menu(
             })));
         }
     });
-    if action.is_some() {
+    if action.is_some() && !editing_color {
         ui.close();
     }
     action

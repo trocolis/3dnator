@@ -31,8 +31,7 @@ impl RibbonTab {
 pub(super) struct ShellState {
     pub tab: RibbonTab,
     pub browser_visible: bool,
-    pub properties_visible: bool,
-    pub measure_requested: bool,
+    pub measure_open: bool,
     pub search_open: bool,
     query: String,
     pub search_focus: bool,
@@ -48,7 +47,6 @@ impl ShellState {
     pub fn new() -> Self {
         Self {
             browser_visible: true,
-            properties_visible: true,
             ..Default::default()
         }
     }
@@ -103,7 +101,6 @@ enum Action {
     Shadows,
     Triangles,
     Browser,
-    Properties,
     SketchTool(sketch_editor::Tool),
     FinishSketch,
 }
@@ -158,7 +155,6 @@ impl Action {
             Self::Shadows => T::Shadows,
             Self::Triangles => T::Triangulation,
             Self::Browser => T::Project,
-            Self::Properties => T::Properties,
             Self::FinishSketch => T::FinishSketch,
             Self::SketchTool(tool) => tool.label(),
         }
@@ -234,7 +230,6 @@ impl Action {
             Self::Shadows => Icon::Eye,
             Self::Triangles => Icon::Pattern,
             Self::Browser => Icon::Folder,
-            Self::Properties => Icon::Panel,
             Self::FinishSketch => Icon::Check,
             Self::SketchTool(tool) => tool.icon(),
         }
@@ -330,7 +325,6 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Shadows,
     Action::Triangles,
     Action::Browser,
-    Action::Properties,
     Action::SketchTool(sketch_editor::Tool::Select),
     Action::SketchTool(sketch_editor::Tool::Line),
     Action::SketchTool(sketch_editor::Tool::Rectangle),
@@ -352,7 +346,7 @@ impl Editor {
             | Action::Perspective
             | Action::Shadows
             | Action::Triangles => true,
-            Action::Browser | Action::Properties => true,
+            Action::Browser => true,
             Action::Undo => editable && self.current().session.undo_label().is_some(),
             Action::Redo => editable && self.current().session.redo_label().is_some(),
             Action::Solid(_) => {
@@ -439,7 +433,6 @@ impl Editor {
             Action::Triangles => self.viewport.show_triangles,
             Action::Browser => self.shell.browser_visible,
             Action::Section => self.current().section.is_some_and(|s| s.visible),
-            Action::Properties => self.shell.properties_visible,
             Action::SketchTool(tool) => self
                 .current()
                 .sketch_edit
@@ -568,8 +561,8 @@ impl Editor {
             Action::Ungroup => self.ungroup_selection(context),
             Action::Parameters => self.open_parameters(),
             Action::Measure => {
-                self.shell.properties_visible = true;
-                self.shell.measure_requested = true;
+                self.shell.measure_open = true;
+                self.measure_report.clear();
                 self.measure_current_selection(context);
             }
             Action::Drawing => self.open_drawing(None),
@@ -613,7 +606,6 @@ impl Editor {
             Action::Shadows => self.viewport.show_shadows = !self.viewport.show_shadows,
             Action::Triangles => self.viewport.show_triangles = !self.viewport.show_triangles,
             Action::Browser => self.shell.browser_visible = !self.shell.browser_visible,
-            Action::Properties => self.shell.properties_visible = !self.shell.properties_visible,
             Action::SketchTool(tool) => {
                 if let Some(work) = &mut self.current_mut().sketch_edit {
                     work.select_tool(tool);
@@ -764,7 +756,6 @@ impl Editor {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        self.action_button(ui, Action::Properties, false);
                         self.action_button(ui, Action::Browser, false);
                     });
                 });

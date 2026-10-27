@@ -56,6 +56,27 @@ fn measure_lines(
     let decimals = usize::from(doc.settings().display_decimals);
     let mm = |value: f64| nator_drawing::format_fixed(value, decimals);
     let mut lines = Vec::new();
+    if let Some(body) = doc.body(pick.body) {
+        let size = body.geometry.mesh().bounds().size().map(mm);
+        lines.push(format!(
+            "{}: {} × {} × {}",
+            text(T::Dimensions),
+            size[0],
+            size[1],
+            size[2]
+        ));
+        lines.push(format!(
+            "{}: {}",
+            text(T::Triangles),
+            body.geometry.mesh().triangles().len()
+        ));
+        lines.push(format!(
+            "{}: {}",
+            text(T::BoundaryEdges),
+            body.geometry.topology().boundary_edges
+        ));
+        lines.push(text(T::VolumeNotice).into());
+    }
     match measure::body_properties(doc, pick.body) {
         Ok(p) => {
             // Na montagem, o centro vai para a origem da montagem; na construção, da peça.
@@ -157,46 +178,26 @@ fn measure_lines(
 }
 
 impl Editor {
-    /// Isolamento, transparência e bloqueio de seleção da instância selecionada. São controles
-    /// visuais da aba: não alteram geometria, histórico nem a visibilidade gravada.
-    pub(super) fn visual_controls(&mut self, ui: &mut egui::Ui, selection: Option<Selection>) {
-        ui.separator();
-        ui.label(text(T::VisualControls));
-        let view = &mut self.current_mut().view;
-        if let Some(Selection::Instance(id)) = selection {
-            ui.horizontal(|ui| {
-                if ui.button(text(T::Isolate)).clicked() {
-                    view.isolated = Some(HashSet::from([id]));
-                    view.touched();
-                }
-                let mut transparent = view.transparent.contains(&id);
-                if ui
-                    .checkbox(&mut transparent, text(T::TransparentToggle))
-                    .changed()
-                {
-                    if transparent {
-                        view.transparent.insert(id);
-                    } else {
-                        view.transparent.remove(&id);
-                    }
-                    view.touched();
-                }
-                let mut locked = view.locked.contains(&id);
-                if ui.checkbox(&mut locked, text(T::LockSelection)).changed() {
-                    if locked {
-                        view.locked.insert(id);
-                    } else {
-                        view.locked.remove(&id);
-                    }
-                    view.touched();
-                }
+    /// Medições têm uma janela própria, aberta pela ferramenta Inspecionar → Medir.
+    /// O viewport conserva toda a largura e os controles existentes continuam disponíveis.
+    pub(super) fn measure_window(&mut self, context: &egui::Context) {
+        if !self.shell.measure_open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new(text(T::MeasureSelection))
+            .id(egui::Id::new("measure_selection"))
+            .default_width(330.)
+            .default_pos(command_panel::default_position(self.canvas_rect))
+            .open(&mut open)
+            .show(context, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height((self.canvas_rect.height() - 120.).max(180.))
+                    .show(ui, |ui| self.measure_controls(ui));
             });
-        }
-        if view.isolated.is_some() && ui.button(text(T::ExitIsolation)).clicked() {
-            view.isolated = None;
-            view.touched();
-        }
+        self.shell.measure_open = open;
     }
+
     pub(super) fn viewport_actions(&mut self, ui: &egui::Ui, response: &egui::Response) {
         let cube_rect = view_cube::rect(response.rect);
         let starts_on_cube = ui

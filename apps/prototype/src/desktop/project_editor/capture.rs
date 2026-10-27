@@ -40,11 +40,11 @@ pub(crate) fn render_ui_scenario(
         | "hover-edge" | "select-body" | "window" | "assembly-select" | "move" | "align"
         | "assembly-ribbon" | "section" | "repair" | "recovery" | "insert" | "mesh-import"
         | "menu-new-part" | "menu-move" | "menu-copy" | "reference-align" | "reference-sketch"
-        | "copy-beside" | "tree-folders" | "part-menu-move" => {}
+        | "copy-beside" | "tree-folders" | "part-menu-move" | "measure" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move."
+                 hover-edge, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure."
                     .into(),
             );
         }
@@ -196,6 +196,48 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
         .map(|p| p.features.clone())
         .unwrap_or_default();
     match scenario {
+        "measure" => {
+            // A primeira face da malha fornece uma seleção real, inclusive nos
+            // sólidos com mapa triângulo → face do B-rep para medição exata.
+            let document = editor.current().session.document();
+            let occurrence = document
+                .occurrences()?
+                .into_iter()
+                .find(|o| {
+                    document
+                        .instance(o.instance)
+                        .is_some_and(|i| i.part == part)
+                })
+                .ok_or("Peça sem ocorrência visível")?;
+            let body = document
+                .part(part)
+                .and_then(|p| p.shown_bodies().next())
+                .ok_or("Peça sem corpo visível")?;
+            let mesh = body.geometry.mesh();
+            let triangle = *mesh.triangles().first().ok_or("Corpo sem triângulos")?;
+            let pose = occurrence.placement.compose(body.placement)?;
+            let vertices = mesh.triangle_points(triangle).map(|p| pose.apply(p));
+            let normal = nator_geometry::cross(
+                nator_geometry::sub(vertices[1], vertices[0]),
+                nator_geometry::sub(vertices[2], vertices[0]),
+            );
+            let length = nator_geometry::norm(normal);
+            editor.current_mut().picked = Some(nator_document::assembly::Pick {
+                instance: occurrence.instance,
+                part,
+                body: body.id,
+                triangle: 0,
+                point: std::array::from_fn(|i| {
+                    (vertices[0][i] + vertices[1][i] + vertices[2][i]) / 3.
+                }),
+                normal: normal.map(|v| v / length),
+                vertices,
+                placement: occurrence.placement,
+            });
+            editor.pick_mode = navigation::PickMode::Face;
+            editor.shell.measure_open = true;
+            editor.measure_current_selection(&egui::Context::default());
+        }
         "timeline" | "timeline-menu" => {
             // Marcador antes da última operação e a segunda suprimida, se houver.
             if features.len() >= 2 {

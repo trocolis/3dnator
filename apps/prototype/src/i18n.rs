@@ -61,6 +61,8 @@ pub enum Text {
     UnitsMm,
     BrowserEmpty,
     StartSketch,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     SelectionHint,
     SolidBodies,
     SketchesGroup,
@@ -84,12 +86,16 @@ pub enum Text {
     Angle,
     TopologyIndex,
     KeptReference,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     VisualControls,
     BodyColor,
     NeutralColor,
     Isolate,
     ExitIsolation,
     TransparentToggle,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     LockSelection,
     NewBody,
     ExportStl,
@@ -237,6 +243,8 @@ pub enum Text {
     Project,
     Untitled,
     MeshBody,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     Properties,
     Dimensions,
     Triangles,
@@ -266,10 +274,20 @@ pub enum Text {
     Construction,
     EditPart,
     LeavePart,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     Rename,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     Apply,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     Position,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     Rotation,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     DeleteBody,
     Close,
     Unsaved,
@@ -284,8 +302,14 @@ pub enum Text {
     FileFilter,
     StlFilter,
     RecoveryNotice,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     History,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     NoHistory,
+    /// Reservado do antigo painel Propriedades.
+    #[allow(dead_code)]
     BodyPosition,
     FileAlreadyOpen,
     StaleResult,
