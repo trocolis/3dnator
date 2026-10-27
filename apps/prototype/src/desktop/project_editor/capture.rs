@@ -2309,6 +2309,150 @@ mod tests {
         Ok(())
     }
 
+    /// Apoios vêm dos sólidos fora do plano editado: capturar os mesmos pontos do
+    /// próprio rascunho não exercitaria a projeção que faltava na interface.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_captures_projected_model_midpoints_and_polygon_centers() -> Result<(), Box<dyn Error>>
+    {
+        let mut document = Document::new("Apoios projetados")?;
+        let mut import = |mut solid: nator_kernel::Solid| -> Result<BodyId, Box<dyn Error>> {
+            let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+            let (_, body) = document.add_mesh(
+                None,
+                "Fonte".into(),
+                Arc::new(MeshAsset::with_faces(mesh, faces)?),
+            )?;
+            document.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+            document.body_mut(body)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+                &nator_document::features::body_owner(body),
+                solid.face_count()?,
+            ));
+            Ok(body)
+        };
+        let rectangle = import(nator_kernel::Solid::cuboid(
+            [-30., -5., 0.],
+            [20., 10., 4.],
+        )?)?;
+        let mut triangle = Sketch::new("Triângulo", Plane::xy());
+        for (a, b) in [
+            ([20., -5.], [38., -5.]),
+            ([38., -5.], [20., 13.]),
+            ([20., 13.], [20., -5.]),
+        ] {
+            triangle.add_line(a, b, false)?;
+        }
+        let region = nator_sketch::areas::regions(&triangle)?.remove(0);
+        import(nator_kernel::Solid::extrude(
+            &triangle, &region, 0., 6., "triangle",
+        )?)?;
+        let plane = Plane {
+            origin: [0., 0., 20.],
+            ..Plane::xy()
+        };
+        let mut sketch = Sketch::new("Projeção", plane);
+        sketch.add_line([-100., -80.], [100., -80.], true)?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let context = egui::Context::default();
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let wait_projection = |editor: &mut Editor,
+                               expected: [f64; 2]|
+         -> Result<(), Box<dyn Error>> {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                frame(editor, &context, Vec::new())?;
+                if editor
+                    .current()
+                    .sketch_edit
+                    .as_ref()
+                    .and_then(|w| w.projected_points())
+                    .is_some_and(|points| {
+                        points
+                            .iter()
+                            .any(|p| nator_sketch::distance(*p, expected) < 1e-8)
+                    })
+                {
+                    break;
+                }
+                if Instant::now() > deadline {
+                    return Err(format!("Projeção ausente {expected:?}: {}", editor.status).into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(())
+        };
+        let position = |editor: &Editor, point| -> Result<egui::Pos2, Box<dyn Error>> {
+            sketch_scene::Frame {
+                camera: editor.viewport.camera.clone(),
+                bounds: editor.display_bounds(),
+                rect: editor.canvas_rect,
+                placement: Placement::default(),
+                plane,
+            }
+            .screen(point)
+            .ok_or_else(|| "Projeção sem posição de tela".into())
+        };
+        // Centro do retângulo, meio da aresta e baricentro da face triangular.
+        for expected in [[-20., 0.], [-20., -5.], [26., 1.]] {
+            wait_projection(&mut editor, expected)?;
+            editor
+                .current_mut()
+                .sketch_edit
+                .as_mut()
+                .ok_or("Editor ausente")?
+                .select_tool(sketch_editor::Tool::Line);
+            let first = position(&editor, expected)? + egui::vec2(2., 2.);
+            click(&mut editor, &context, first)?;
+            let last = position(&editor, [expected[0] + 8., expected[1] + 15.])?;
+            click(&mut editor, &context, last)?;
+            settle(&mut editor, &context)?;
+            let sketch = &editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch;
+            assert!(
+                sketch.entities.iter().filter(|e| !e.construction).any(|e| {
+                    sketch
+                        .line(e.id)
+                        .is_ok_and(|(a, _)| nator_sketch::distance(a, expected) < 1e-8)
+                }),
+                "Ponto inicial não capturado: {expected:?}"
+            );
+            assert_eq!(sketch.plane.world(expected)[2], 20.);
+        }
+        assert!(editor.current_mut().session.undo());
+        assert!(editor.current_mut().session.redo());
+        editor.execute(Command::MoveBody {
+            id: rectangle,
+            placement: Placement::new([10., 3., 0.], [0.; 3])?,
+        });
+        settle(&mut editor, &context)?;
+        wait_projection(&mut editor, [-10., 3.])?;
+        let points = editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .and_then(|w| w.projected_points())
+            .ok_or("Projeções ausentes")?;
+        assert!(
+            !points
+                .iter()
+                .any(|p| nator_sketch::distance(*p, [-20., 0.]) < 1e-8),
+            "A projeção antiga ficou em cache"
+        );
+        assert!(!editor.status.has_pending());
+        Ok(())
+    }
+
     /// Fluxo real: referências virtuais criam círculos nos centros dos polígonos;
     /// o aparador remove apenas os trechos entre os encontros, com desfazer/refazer.
     #[test]

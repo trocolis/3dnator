@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Apoios do modelo projetados no rascunho — 27/10/2026
+
+- Identificada a lacuna: ao abrir um rascunho, a interface projetava somente uma amostra de até 64 vértices da malha por corpo, limitada às primeiras oito ocorrências. Os centros e pontos médios geométricos do movimento ponto a ponto não alimentavam essa lista.
+- `commands::sketch_projection` passa a consultar os mesmos apoios de corpos e outros rascunhos visíveis, compor as posições do corpo/ocorrência/referencial editado e projetar no plano. O resultado exclui o rascunho ativo e unifica apoios sobrepostos, sem inserir entidades nem vínculos externos. O trabalhador usa chave da cena, plano e posição editada; mudanças descartam entregas anteriores.
+- Quatro regressões dos comandos verificam centros de triângulos/retângulos e pontos médios em planos deslocados, projeção inclinada com três posições compostas, a décima segunda ocorrência, visibilidade, fontes auxiliares e geometria CAD exata com alturas sobrepostas. O teste de cache troca plano e bloqueio da ocorrência, rejeitando uma entrega antiga já enfileirada.
+- Novo ensaio gráfico usa sólidos em z = 0…6 e rascunho em z = 20: cliques próximos aos apoios criam linhas exatamente no centro retangular, ponto médio da aresta e baricentro triangular projetados. Verifica desfazer/refazer e, ao mover o corpo de origem, recebe o centro novo e remove o anterior do cache.
+- **177 testes sem OCCT e 240 com OCCT aprovados**, mais os doze ensaios gráficos em série (59 testes da aplicação com os ignorados habilitados). Formatação, Clippy com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Windows não exercitado localmente. Versão 0.3.0 em desenvolvimento e formato 17 preservados.
+
 ## Aparador entre encontros e referências de polígonos — 27/10/2026
 
 - `curve_geometry` reúne as consultas analíticas antes internas às áreas e compartilha encontros finitos, parâmetros orientados e projeção entre áreas, capturas e aparador. Linhas que só se encontram quando prolongadas não geram vértices; tangências não duplicam nós e círculos coincidentes não inventam um vértice na costura.

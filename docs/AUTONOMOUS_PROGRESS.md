@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Captura dos apoios projetados no plano do rascunho — 27/10/2026
+
+- Substituída a projeção inicial de vértices amostrados pela consulta dos apoios geométricos completos, incluindo pontos médios de arestas e centros triangulares/retangulares. Composição de posições antes da projeção ortogonal; sem limite às primeiras oito ocorrências ou 64 vértices.
+- Consulta no trabalhador, com cache por cena, plano e posição editada, respeitando fontes visíveis e ocorrências permitidas. Outros rascunhos fornecem apoios; o rascunho ativo mantém sua captura local. Resultados antigos são descartados após mudanças.
+- Regressões geométricas, cache e novo ensaio gráfico validam a captura de sólidos em outro plano e a atualização após mover a origem. Aprovados 177 testes sem OCCT, 240 com OCCT, doze ensaios gráficos, formatação, Clippy nas duas configurações e compilação desktop no Linux. Sem migração, release ou publicação remota.
+
 ## Vértices de encontro, aparador e centros de polígonos — 27/10/2026
 
 - Encontros finitos de linhas, círculos e arcos viram vértices visíveis e capturáveis. Aparar realça/remove o trecho entre encontros/extremos, trata periodicidade e sentido dos arcos e materializa os extremos com aplicação atômica e histórico de comandos.

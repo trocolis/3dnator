@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Projeção dos apoios do modelo no rascunho
+
+- Corrigida a captura no plano do rascunho dos pontos médios das arestas e centros de faces triangulares/retangulares. A projeção passa a usar os mesmos apoios geométricos do movimento ponto a ponto, incluindo centros circulares e quadrantes.
+- Removida a amostragem de até 64 vértices por corpo e das primeiras oito ocorrências. As posições do corpo, da ocorrência e do rascunho são compostas antes da projeção ortogonal; apoios coincidentes em alturas distintas são unificados no plano.
+- Consulta em segundo plano, com cache atualizado após mudanças do modelo, plano ou estado de seleção/visibilidade. Outros rascunhos visíveis também fornecem seus apoios; o rascunho editado usa sua própria captura local.
+
 ### Aparador entre vértices e centros de polígonos
 
 - Cruzamentos e encontros de linhas, círculos e arcos aparecem como vértices de captura no rascunho. São referências derivadas enquanto as curvas permanecem inteiras; aparar materializa os extremos novos.

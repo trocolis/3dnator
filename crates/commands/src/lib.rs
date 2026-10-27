@@ -6,6 +6,7 @@ pub mod extrusion;
 mod features;
 pub mod measure;
 pub mod point_snap;
+pub mod sketch_projection;
 use nator_document::{
     BodyId, Document, DocumentError, InstanceId, MeshAsset, PartId, SketchId, validate_name,
 };

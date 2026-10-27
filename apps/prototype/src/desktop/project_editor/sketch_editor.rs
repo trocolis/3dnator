@@ -7,6 +7,7 @@ use nator_sketch::{
 };
 mod actions;
 mod dynamic_input;
+mod projection;
 mod references;
 pub(super) use actions::{edit_icon, edit_label};
 use nator_sketch::edit::Action as EditAction;
@@ -56,7 +57,7 @@ pub(super) struct Workspace {
     pub(super) previous_camera: Camera,
     pub(super) fit_requested: bool,
     tracker: Tracker,
-    projected: Vec<Point2>,
+    projection: projection::Cache,
     dimension: f64,
     dimension_expression: String,
     reference: bool,
@@ -68,6 +69,12 @@ pub(super) struct Workspace {
     references: references::Cache,
 }
 impl Workspace {
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn projected_points(&self) -> Option<&[Point2]> {
+        self.projection
+            .ready()
+            .then_some(self.projection.points.as_slice())
+    }
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn reference_points(&self) -> &nator_sketch::topology::References {
         &self.references.points
@@ -109,7 +116,7 @@ impl Workspace {
             previous_camera: Camera::default(),
             fit_requested: true,
             tracker: Tracker::default(),
-            projected: vec![[0., 0.]],
+            projection: projection::Cache::default(),
             dimension: 10.,
             dimension_expression: "10 mm".into(),
             pattern_count: 3,
@@ -205,30 +212,10 @@ impl Editor {
             .as_ref()
             .map(|w| w.previous_camera.clone())
             .unwrap_or_else(|| self.viewport.camera.clone());
-        let plane = record.sketch.plane;
         let mut work = Workspace::new(id);
         work.placement = target;
         work.previous_camera = previous;
         work.fit_requested = false;
-        let document = self.current().session.document();
-        if let Ok(occurrences) = document.occurrences() {
-            for occurrence in occurrences.iter().take(8) {
-                if let Some(piece) = document
-                    .instance(occurrence.instance)
-                    .and_then(|i| document.part(i.part))
-                {
-                    for body in piece.shown_bodies() {
-                        let vertices = body.geometry.mesh().vertices();
-                        let stride = (vertices.len() / 64).max(1);
-                        for p in vertices.iter().step_by(stride).take(64) {
-                            let world = occurrence.placement.apply(body.placement.apply(*p));
-                            work.projected
-                                .push(plane.project(target.inverse_apply(world)));
-                        }
-                    }
-                }
-            }
-        }
         // Rascunhos de referência pertencem à montagem: nenhuma peça entra em construção.
         self.current_mut().active_part = owner;
         self.current_mut().plane_pick = None;
@@ -438,6 +425,12 @@ impl Editor {
             return;
         };
         let placement = work.placement;
+        let projection_key = projection::Key {
+            scene: self.scene_key(),
+            sketch: work.id,
+            plane: sketch.plane,
+            placement,
+        };
         let frame = sketch_scene::Frame {
             camera: self.viewport.camera.clone(),
             bounds: self.display_bounds(),
@@ -468,6 +461,17 @@ impl Editor {
             .map(|p| p.parameters.clone())
             .unwrap_or_default();
         let mut submit = false;
+        let projection_error = {
+            let tab = self.current_mut();
+            tab.sketch_edit.as_mut().and_then(|work| {
+                work.projection
+                    .prepare(projection_key, tab.session.document(), &tab.view, ui.ctx())
+                    .err()
+            })
+        };
+        if let Some(error) = projection_error {
+            self.status.error(error);
+        }
         if let Some(work) = self.current_mut().sketch_edit.as_mut()
             && let Err(error) = work.references.prepare(&sketch, ui.ctx())
         {
@@ -596,7 +600,7 @@ impl Editor {
                     point,
                     8. / pixels_per_mm,
                     &work.tracker,
-                    &work.projected,
+                    &work.projection.points,
                     &work.references.points,
                 )
                 .ok()
