@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## AJUSTE.md: Dimencionar e Projetar — 28/10/2026
+
+- Regressões da preferência de resolução verificam os dois sentidos da seleção entre pontos, primeiro elemento preservado, segundo elemento já fixado e linha/círculo. Não são criadas travas temporárias no documento nem alterada a contagem real dos graus de liberdade.
+- Projeção testada com vértices, arestas vivas sem diagonais de malha, arcos e faces planas com furos; posições de corpo/ocorrência/destino compostas antes da projeção. Arcos preservam raio e sentido relativo à normal. Projeções inclinadas são polilinhas com desvio máximo de 0,01 mm. Referências densas não consomem variáveis livres; entradas inválidas não deixam geometria parcial, e capturas repetidas não duplicam entidades. Verificados salvamento/reabertura, formato legado sem `projected` e desfazer/refazer em uma transação.
+- **290 testes do workspace com OCCT e 221 sem OCCT aprovados**. Os ensaios gráficos de Projetar e Dimencionar também passaram com GL/llvmpipe: clique no canvas, traço/preenchimento lilás, fechamento da área, Esc e histórico. Captura visual conferida em `target/codex-validation/ajuste-20261028/final/projected-sketch.png`; logs no diretório pai.
+- Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Windows e janela nativa não exercitados localmente. Aplicativo 0.3.0 em desenvolvimento, formato interno 23, sem release ou publicação remota.
+
 ## Selecionar nas abas e alvos automáticos — 28/10/2026
 
 - Selecionar ocupa o primeiro grupo de Montagem, Peça e Rascunho, com ícone de cursor e sem ícone adicional junto ao ponteiro. Esc cancela a ferramenta e suas prévias, preserva a seleção e retorna a esse estado; o cancelamento de seção restaura a seção anterior.

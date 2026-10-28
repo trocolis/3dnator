@@ -7,6 +7,13 @@
 - A ferramenta Cota passa a se chamar **Dimencionar** na faixa, na busca e no painel, mantendo o atalho D.
 - Ao dimensionar dois elementos livres, o primeiro escolhido permanece no lugar e o segundo se ajusta. A preferência considera todos os apoios do elemento e o raio dos círculos, sem gravar travas adicionais; restrições existentes continuam prevalecendo quando o segundo elemento já está fixado.
 
+### Projetar componentes no rascunho
+
+- Nova ferramenta **Projetar** no grupo Criar da aba Rascunho e na busca, com filtros para faces planas, arestas/arcos e vértices. A prévia realça a referência sob o cursor; um clique captura sua projeção ortogonal no plano local, respeitando as posições do corpo, da ocorrência e da peça editada. Fontes ocultas ou bloqueadas não são oferecidas.
+- Referências persistentes com traço lilás e preenchimento lilás claro nos contornos fechados, preservando furos. Pontos e raios capturados ficam fixos, disponíveis para captura, cotas e perfis; repetir a projeção não duplica a geometria. Cada captura oferece desfazer/refazer; Esc encerra a ferramenta.
+- A consulta do B-rep e o cálculo das áreas rodam fora da interface. Círculos e arcos paralelos ao plano conservam sua geometria exata; curvas inclinadas e outras curvas usam polilinhas com desvio máximo de 0,01 mm. Malhas fornecem vértices e arestas vivas, sem diagonais de triangulação. As referências são capturas fixas, sem vínculo de atualização com o componente.
+- Formato interno 23 grava `projected` nos pontos e entidades, lendo projetos anteriores sem essas marcas. Referências fixas não consomem o limite de variáveis livres do solver. Mantida a versão 0.3.0 em desenvolvimento.
+
 ### Selecionar nas abas e alvos pela seleção atual
 
 - Selecionar passa a ser o primeiro item de Montagem, Peça e Rascunho, com ícone de cursor e destaque enquanto o modo está ativo. Seu ícone não acompanha o ponteiro na área de edição. Esc, ao cancelar uma ferramenta, retorna à seleção; prévias e gestos pendentes são descartados, preservando o documento e os elementos já selecionados.

@@ -4974,6 +4974,173 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn project_tool_clicks_create_lilac_references_with_undo_and_escape()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut solid = nator_kernel::Solid::cuboid([-20., -10., 0.], [40., 20., 5.])?;
+        let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+        let mut document = Document::new("Projetar na interface")?;
+        let (part, body) = document.add_mesh(
+            None,
+            "Bloco".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        document.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+        let plane = Plane {
+            origin: [0., 0., 20.],
+            ..Plane::xy()
+        };
+        document.body_mut(body)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+            &nator_document::features::body_owner(body),
+            solid.face_count()?,
+        ));
+        let (_, id) = document.add_sketch(Some(part), Sketch::new("Destino", plane))?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let tool = label_position(&mut editor, &context, text(T::SketchProject))?;
+        click(&mut editor, &context, tool)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .is_some_and(|w| w.projection_ready())
+        {
+            if Instant::now() > deadline {
+                return Err("Projetar não terminou a consulta".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [0., 0., 20.],
+        )
+        .ok_or("Ponto sem projeção")?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert_eq!(sketch.entities.len(), 4);
+        assert!(sketch.entities.iter().all(|e| e.projected));
+        while editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .is_none_or(|w| w.projected_region_count() != 1)
+        {
+            if Instant::now() > deadline {
+                return Err("Preenchimento projetado não apareceu".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 820.),
+                )),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        let primitives =
+            context.tessellate(std::mem::take(&mut output.shapes), output.pixels_per_point);
+        let colors = primitives
+            .iter()
+            .filter_map(|p| match &p.primitive {
+                egui::epaint::Primitive::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .flat_map(|m| &m.vertices)
+            .map(|v| v.color)
+            .collect::<Vec<_>>();
+        assert!(colors.contains(&theme::PROJECTED));
+        assert!(colors.contains(&theme::PROJECTED_FILL));
+        output.textures_delta.clear();
+        let revision = editor.current().session.revision();
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        assert!(editor.selection_active());
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(editor.current_mut().session.undo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .is_empty()
+        );
+        assert!(editor.current_mut().session.redo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            4
+        );
+        // Artefato opcional para revisar o mesmo traço/preenchimento que o ensaio
+        // verificou. O caminho vem do executor; a rotina normal não grava imagens.
+        if let Some(directory) = std::env::var_os("NATOR_TEST_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory)?;
+            let project = directory.join("projected-sketch.3dnator");
+            write_project(&project, editor.current().session.document())?;
+            render_with(
+                &project,
+                &directory.join("projected-sketch.png"),
+                [1280, 820],
+                |editor| {
+                    open_first_sketch(editor)?;
+                    editor.select_sketch_tool(sketch_editor::Tool::Project);
+                    Ok(())
+                },
+                |_, _| vec![],
+                |editor| {
+                    editor
+                        .current()
+                        .sketch_edit
+                        .as_ref()
+                        .is_some_and(|w| w.projected_region_count() == 1)
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     fn wait_feature_preview(
         editor: &mut Editor,
         context: &egui::Context,

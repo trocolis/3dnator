@@ -76,6 +76,7 @@ pub(super) fn settings(ui: &mut egui::Ui, work: &mut Workspace) {
         ui.separator();
     }
     match work.tool {
+        Tool::Project => work.projector.settings(ui),
         Tool::Line => {
             ui.label(text(T::SketchLineMode));
             ui.horizontal(|ui| {

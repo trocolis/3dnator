@@ -10,6 +10,7 @@ mod actions;
 mod dimension_tool;
 mod dynamic_input;
 mod line_tools;
+mod project_tool;
 mod projection;
 mod references;
 pub(super) use actions::{edit_icon, edit_label};
@@ -23,6 +24,7 @@ pub(super) enum Tool {
     Circle,
     Arc,
     Trim,
+    Project,
     /// Cota no modelo da Dimension do SolidCraft (`dimension_tool`).
     Dimension,
 }
@@ -35,6 +37,7 @@ impl Tool {
             Self::Circle => T::Circle,
             Self::Arc => T::Arc,
             Self::Trim => T::Trim,
+            Self::Project => T::SketchProject,
             Self::Dimension => T::SketchDimension,
         }
     }
@@ -48,6 +51,7 @@ impl Tool {
             Self::Circle => "sketch_circle",
             Self::Arc => "sketch_arc",
             Self::Trim => "sketch_trim",
+            Self::Project => "sketch_project",
             Self::Dimension => "sketch_dimension",
         }
     }
@@ -59,6 +63,7 @@ impl Tool {
             Self::Circle => icons::Icon::Circle,
             Self::Arc => icons::Icon::Arc,
             Self::Trim => icons::Icon::Trim,
+            Self::Project => icons::Icon::SketchProject,
             Self::Dimension => icons::Icon::Dimension,
         }
     }
@@ -113,6 +118,7 @@ pub(super) struct Workspace {
     pub(super) fit_requested: bool,
     tracker: Tracker,
     projection: projection::Cache,
+    projector: project_tool::Cache,
     dimension: f64,
     dimension_expression: String,
     reference: bool,
@@ -126,6 +132,14 @@ pub(super) struct Workspace {
     dimension_draft: dimension_tool::Draft,
 }
 impl Workspace {
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn projection_ready(&self) -> bool {
+        self.projector.ready()
+    }
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn projected_region_count(&self) -> usize {
+        self.references.projected_regions.len()
+    }
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn projected_points(&self) -> Option<&[Point2]> {
         self.projection
@@ -274,6 +288,7 @@ impl Workspace {
             fit_requested: true,
             tracker: Tracker::default(),
             projection: projection::Cache::default(),
+            projector: project_tool::Cache::default(),
             dimension: 10.,
             dimension_expression: "10 mm".into(),
             pattern_count: 3,
@@ -400,6 +415,9 @@ impl Editor {
                     work.dimension_draft.seed(sketch, &work.selected);
                 }
                 self.status.set(text(T::DimensionPickHint));
+            }
+            if tool == Tool::Project {
+                self.status.set(text(T::SketchProjectHint));
             }
         }
     }
@@ -687,6 +705,20 @@ impl Editor {
         if let Some(error) = projection_error {
             self.status.error(error);
         }
+        let project_error = {
+            let tab = self.current_mut();
+            tab.sketch_edit
+                .as_mut()
+                .filter(|work| work.tool == Tool::Project)
+                .and_then(|work| {
+                    work.projector
+                        .prepare(projection_key, tab.session.document(), &tab.view, ui.ctx())
+                        .err()
+                })
+        };
+        if let Some(error) = project_error {
+            self.status.error(error);
+        }
         if let Some(work) = self.current_mut().sketch_edit.as_mut()
             && let Err(error) = work.references.prepare(&sketch, ui.ctx())
         {
@@ -725,6 +757,7 @@ impl Editor {
                 );
             }
         }
+        project_tool::paint_regions(&frame, &painter, &work.references.projected_regions);
         let base = match work.status {
             Status::FullyConstrained => theme::GREEN,
             Status::Conflict => theme::DANGER,
@@ -732,7 +765,15 @@ impl Editor {
         };
         for point in sketch.visible_points() {
             if let Some(p) = frame.screen(point.position) {
-                painter.circle_filled(p, 2.5, base);
+                painter.circle_filled(
+                    p,
+                    2.5,
+                    if point.projected {
+                        theme::PROJECTED
+                    } else {
+                        base
+                    },
+                );
             }
         }
         // Encontros são vértices virtuais enquanto as curvas estão inteiras. Assim
@@ -746,6 +787,8 @@ impl Editor {
             if let Ok(segment) = profiles::segment(&sketch, entity) {
                 let color = if work.selected.contains(&entity.id) {
                     egui::Color32::from_rgb(183, 106, 17)
+                } else if entity.projected {
+                    theme::PROJECTED
                 } else if entity.construction {
                     theme::CONSTRUCTION
                 } else {
@@ -963,11 +1006,27 @@ impl Editor {
                 &parameters,
             )
         });
+        let projection_result = if work.tool == Tool::Project && !escape && !animating {
+            hover.map(|cursor| {
+                work.projector.update(
+                    &frame,
+                    &painter,
+                    cursor,
+                    !busy && response.clicked_by(egui::PointerButton::Primary),
+                    &mut sketch,
+                )
+            })
+        } else {
+            None
+        };
+        if matches!(projection_result, Some(Ok(true))) {
+            submit = true;
+        }
         if !busy
             && !animating
             && !escape
             && valid
-            && work.tool != Tool::Dimension
+            && !matches!(work.tool, Tool::Dimension | Tool::Project)
             && !(work.tool == Tool::Rectangle
                 && work.rectangle_mode == RectangleMode::Inclined
                 && work.anchors.len() == 1
@@ -1151,6 +1210,9 @@ impl Editor {
         }
         if submit {
             self.solve_sketch(ui.ctx(), sketch);
+        }
+        if let Some(Err(error)) = projection_result {
+            self.status.warning(error);
         }
         if let Some(update) = dimension {
             if let Some(hint) = update.hint {

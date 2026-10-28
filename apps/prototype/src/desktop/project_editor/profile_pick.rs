@@ -86,7 +86,7 @@ const BAND: f32 = 2.;
 
 /// Preenche um contorno com furos por varredura horizontal (regra par-ímpar), que serve
 /// para regiões côncavas sem triangulação.
-fn fill(painter: &egui::Painter, polygons: &[Vec<egui::Pos2>], color: egui::Color32) {
+pub(super) fn fill(painter: &egui::Painter, polygons: &[Vec<egui::Pos2>], color: egui::Color32) {
     let (top, bottom) = polygons
         .iter()
         .flatten()

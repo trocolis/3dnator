@@ -4,6 +4,8 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 
 ## Módulos
 
+`commands::sketch_projection::elements` prepara as referências de Projetar a partir do B-rep, compondo as posições do corpo, da ocorrência e do destino antes de projetar no plano local. A fronteira `kernel` fornece contornos por índices transitórios e amostragem de curvas com desvio explícito; nenhum índice é persistido. `sketch::projection::insert` materializa a seleção de forma atômica, compartilha apoios e elimina repetições. Pontos/entidades com `projected` são capturas fixas: o solver não usa seus apoios/raios como variáveis livres, mas confere também os resíduos das travas explícitas. O cache da interface descarta respostas de outra cena/plano/posição; consulta e áreas rodam em trabalhadores. A publicação usa `UpdateSketch`, com revisão, recálculo e desfazer/refazer existentes. Lilás e preenchimento são decisões da apresentação.
+
 | Módulo | Responsabilidade |
 | --- | --- |
 | `geometry` | Coordenadas, unidades, transformações, identificadores e tipos geométricos compartilhados |

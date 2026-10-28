@@ -18,6 +18,13 @@ pub enum Text {
     PointLineDistance,
     LineCircleDistance,
     DimensionPickHint,
+    SketchProject,
+    SketchProjectHint,
+    SketchProjectAll,
+    SketchProjectPlanes,
+    SketchProjectEdges,
+    SketchProjectVertices,
+    SketchProjectSnapshot,
     DimensionPickSecond,
     DimensionUnsupported,
     DimensionValueTitle,
@@ -856,6 +863,17 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchPatternGroup => "Padrão",
         Text::ConstrainGroup => "Restringir",
         Text::SketchExitGroup => "Sair",
+        Text::SketchProject => "Projetar",
+        Text::SketchProjectHint => {
+            "Clique em uma face plana, aresta, arco ou vértice do componente; Esc encerra"
+        }
+        Text::SketchProjectAll => "Todos os elementos",
+        Text::SketchProjectPlanes => "Faces planas",
+        Text::SketchProjectEdges => "Arestas e arcos",
+        Text::SketchProjectVertices => "Vértices",
+        Text::SketchProjectSnapshot => {
+            "Captura a geometria no plano do rascunho. As referências ficam fixas na posição projetada."
+        }
         Text::SketchDimension => "Dimencionar",
         Text::HorizontalVertical => "Horizontal/vertical",
         Text::SketchExtendShort => "Estender",

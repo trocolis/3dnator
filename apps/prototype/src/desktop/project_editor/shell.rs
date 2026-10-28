@@ -357,6 +357,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::SketchTool(sketch_editor::Tool::Circle),
     Action::SketchTool(sketch_editor::Tool::Arc),
     Action::SketchTool(sketch_editor::Tool::Trim),
+    Action::SketchTool(sketch_editor::Tool::Project),
     Action::SketchEdit(SketchEdit::Offset),
     Action::SketchEdit(SketchEdit::Fillet),
     Action::SketchEdit(SketchEdit::Chamfer),
@@ -1426,6 +1427,7 @@ impl Editor {
                         Action::SketchTool(sketch_editor::Tool::Rectangle),
                         Action::SketchTool(sketch_editor::Tool::Circle),
                         Action::SketchTool(sketch_editor::Tool::Arc),
+                        Action::SketchTool(sketch_editor::Tool::Project),
                     ],
                     &[
                         Action::SketchTool(sketch_editor::Tool::Select),
@@ -1433,6 +1435,7 @@ impl Editor {
                         Action::SketchTool(sketch_editor::Tool::Rectangle),
                         Action::SketchTool(sketch_editor::Tool::Circle),
                         Action::SketchTool(sketch_editor::Tool::Arc),
+                        Action::SketchTool(sketch_editor::Tool::Project),
                     ],
                 );
                 self.sketch_section(

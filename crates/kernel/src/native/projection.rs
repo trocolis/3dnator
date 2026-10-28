@@ -4,6 +4,7 @@ use super::{KernelError, Solid, last_error, unit};
 use nator_geometry::{Point3, ProjectedSegment, dot};
 use std::{ffi::c_void, ptr::NonNull};
 unsafe extern "C" {
+    fn nator_edge_polyline(body: *const c_void, index: usize, tolerance: f64) -> *mut c_void;
     fn nator_project(
         bodies: *const *const c_void,
         count: usize,
@@ -14,6 +15,42 @@ unsafe extern "C" {
     fn nator_projection_size(projection: *const c_void) -> usize;
     fn nator_projection_copy(projection: *const c_void, output: *mut f64, count: usize) -> bool;
     fn nator_projection_release(projection: *mut c_void);
+}
+impl Solid {
+    /// Polilinha com desvio máximo em mm no B-rep, independente da tesselação.
+    /// Usada quando a projeção não cabe nos tipos analíticos do rascunho.
+    pub fn edge_polyline(
+        &self,
+        index: usize,
+        tolerance_mm: f64,
+    ) -> Result<Vec<Point3>, KernelError> {
+        if index >= self.edge_count()?
+            || !tolerance_mm.is_finite()
+            || !(1e-6..=1.).contains(&tolerance_mm)
+        {
+            return Err(KernelError("Parâmetros de curva inválidos.".into()));
+        }
+        // SAFETY: sólido vivo nesta thread; o retorno transfere propriedade exclusiva.
+        let result = NonNull::new(unsafe {
+            nator_edge_polyline(self.pointer.as_ptr(), index, tolerance_mm)
+        })
+        .map(Projection)
+        .ok_or_else(last_error)?;
+        // SAFETY: consulta e cópia de um resultado vivo para buffer do tamanho informado.
+        let count = unsafe { nator_projection_size(result.0.as_ptr()) };
+        if count > 500000 * 3 || count % 3 != 0 {
+            return Err(KernelError("Contagem de pontos da curva inválida.".into()));
+        }
+        let mut values = vec![0.; count];
+        // SAFETY: buffer exclusivo dimensionado conforme o contrato da ponte.
+        if !unsafe { nator_projection_copy(result.0.as_ptr(), values.as_mut_ptr(), count) } {
+            return Err(last_error());
+        }
+        if values.iter().any(|v| !v.is_finite()) {
+            return Err(KernelError("Curva contém coordenadas inválidas.".into()));
+        }
+        Ok(values.as_chunks::<3>().0.to_vec())
+    }
 }
 struct Projection(NonNull<c_void>);
 impl Drop for Projection {

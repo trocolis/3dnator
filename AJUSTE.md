@@ -7,4 +7,4 @@
 
 ## Novo
 
-- [ ] Em rascunho, adicionar uma nova ferramenta chama 'Projetar', ele deve projetar Panos, Arestas, Arcos e Vertices de componentes, As linhas devem ser Litaz e prenchimento claro em tom lias também.
+- [x] Em rascunho, adicionar uma nova ferramenta chama 'Projetar', ele deve projetar Panos, Arestas, Arcos e Vertices de componentes, As linhas devem ser Litaz e prenchimento claro em tom lias também.

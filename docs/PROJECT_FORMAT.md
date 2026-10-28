@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 22
+# Formato de projeto — versão interna 23
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 22; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 23; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -12,6 +12,8 @@ faces/<body_id>.bin       (somente corpos sólidos CAD, opcional)
 ```
 
 ## Manifesto
+
+Desde a versão 23, pontos e entidades de rascunho aceitam `projected`, omitido quando falso. Projetar captura coordenadas no plano local do rascunho, sem vínculo posterior com o componente de origem. Os apoios projetados e raios dos círculos projetados são constantes do solver e recebem também restrições explícitas `Fixed`/`Radius`. A marca distingue o traço lilás e o preenchimento claro das regiões fechadas. A geometria continua disponível para captura, dimensionamento e perfis. Círculos/arcos paralelos ao plano são analíticos; curvas inclinadas e outras curvas usam polilinhas com desvio máximo de 0,01 mm. Projetos anteriores abrem sem marcas de projeção.
 
 O manifesto registra `format = "3dnator"`, `schema_version`, versão do aplicativo que gravou, UUID do documento, nome, contador de identificadores, peças, instâncias, grupos e folhas técnicas. O campo opcional `recovery` distingue uma cópia automática de um projeto normal; quando ausente, vale `false`.
 

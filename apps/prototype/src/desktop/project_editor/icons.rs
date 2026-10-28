@@ -14,6 +14,7 @@ pub(super) enum Icon {
     Import,
     Export,
     Sketch,
+    SketchProject,
     Extrude,
     Revolve,
     Hole,
@@ -205,6 +206,7 @@ fn paint_styled(
             | Icon::Arc
             | Icon::Trim
             | Icon::SketchOffset
+            | Icon::SketchProject
             | Icon::SketchFillet
             | Icon::SketchMirror
             | Icon::CircularPattern
@@ -358,6 +360,13 @@ fn paint_styled(
                 p.fill,
             );
             p.line(&[[9., 10.], [13., 14.]], p.accent);
+        }
+        Icon::SketchProject => {
+            p.face(&[[2., 16.], [15., 16.], [22., 22.], [9., 22.]], p.fill);
+            p.line(&[[5., 3.], [17., 3.], [17., 9.]], p.ink);
+            p.arrow([5., 7.], [9., 18.]);
+            p.arrow([17., 10.], [19., 18.]);
+            p.line(&[[9., 18.], [19., 18.]], p.accent);
         }
         Icon::Revolve => {
             p.line(&[[12., 2.], [12., 22.]], p.ink);

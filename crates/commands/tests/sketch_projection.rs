@@ -216,3 +216,194 @@ fn cad_face_centers_and_true_edge_midpoints_reach_the_sketch_without_mesh_sampli
     );
     Ok(())
 }
+
+#[test]
+fn project_tool_picks_vertices_before_edges_and_skips_mesh_diagonals() -> Result<()> {
+    use sketch_projection::{Kind, elements, pick};
+    let mut document = Document::new("Elementos")?;
+    let (_, body) = document.add_mesh(None, "Retângulo".into(), rectangle()?)?;
+    let occurrences = document.occurrences()?;
+    let projected = elements(&document, &occurrences, Plane::xy(), Placement::default())?;
+    let selected = pick(&projected, [0., 0.], 0.1, None).ok_or("Vértice ausente")?;
+    assert_eq!(projected[selected].kind, Kind::Vertex);
+    let selected = pick(&projected, [10., 0.], 0.1, None).ok_or("Aresta ausente")?;
+    assert_eq!(projected[selected].kind, Kind::Edge);
+    assert!(pick(&projected, [10., 5.], 0.1, Some(Kind::Edge)).is_none());
+    document.body_mut(body)?.visible = false;
+    assert!(elements(&document, &occurrences, Plane::xy(), Placement::default())?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn projected_geometry_round_trips_and_undoes_as_one_sketch_command() -> Result<()> {
+    use nator_commands::{Command, Session};
+    use nator_sketch::{profiles::Segment, projection, solver};
+    let mut document = Document::new("Referências persistentes")?;
+    let (_, id) = document.add_sketch(None, Sketch::new("Destino", Plane::xz()))?;
+    let mut session = Session::new(document)?;
+    let mut sketch = session
+        .document()
+        .sketch(id)
+        .ok_or("Rascunho ausente")?
+        .sketch
+        .clone();
+    projection::insert(
+        &mut sketch,
+        &[
+            Segment::Circle {
+                center: [10., 20.],
+                radius: 3.,
+            },
+            Segment::Arc {
+                center: [30., 20.],
+                a: [35., 20.],
+                b: [30., 25.],
+                clockwise: false,
+            },
+        ],
+        &[[50., 40.]],
+    )?;
+    session.execute(Command::UpdateSketch { id, sketch })?;
+    assert!(session.undo());
+    assert!(
+        session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch
+            .points
+            .is_empty()
+    );
+    assert!(session.redo());
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("projecao.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let reopened = nator_project_io::read_project(&path)?;
+    let loaded = &reopened.sketch(id).ok_or("Rascunho ausente")?.sketch;
+    assert!(loaded.points.iter().all(|p| p.projected));
+    assert!(loaded.entities.iter().all(|e| e.projected));
+    let report = solver::solve(loaded)?;
+    assert_eq!(report.status, solver::Status::FullyConstrained);
+    assert!(!report.redundant);
+    Ok(())
+}
+
+#[cfg(feature = "occt")]
+fn cad_document(mut solid: nator_kernel::Solid) -> Result<Document> {
+    let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+    let mut document = Document::new("Projetar CAD")?;
+    let (_, body) = document.add_mesh(
+        None,
+        "Componente".into(),
+        Arc::new(MeshAsset::with_faces(mesh, faces)?),
+    )?;
+    document.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+    document.body_mut(body)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+        &nator_document::features::body_owner(body),
+        solid.face_count()?,
+    ));
+    Ok(document)
+}
+
+#[cfg(feature = "occt")]
+#[test]
+fn planar_faces_project_exact_boundaries_with_holes_and_component_placements() -> Result<()> {
+    use nator_sketch::profiles::Segment;
+    use sketch_projection::{Kind, elements, pick};
+    let outer = nator_kernel::Solid::cylinder([0.; 3], 10., 5.)?;
+    let inner = nator_kernel::Solid::cylinder([0., 0., -1.], 3., 7.)?;
+    let mut document = cad_document(outer.cut(&inner)?)?;
+    let body = document.parts()[0].bodies[0].id;
+    let body_pose = Placement::new([4., -3., 9.], [0.3, 0.2, -0.4])?;
+    let occurrence = Placement::new([100., -50., 30.], [-0.5, 0.6, 0.8])?;
+    let target = occurrence.compose(body_pose)?;
+    document.body_mut(body)?.placement = body_pose;
+    let instance = document.instances()[0].id;
+    document.instance_mut(instance)?.placement = occurrence;
+    let plane = Plane {
+        origin: [0., 0., 40.],
+        ..Plane::xy()
+    };
+    let projected = elements(&document, &document.occurrences()?, plane, target)?;
+    let index = pick(&projected, [7., 0.], 0.01, Some(Kind::Plane)).ok_or("Face ausente")?;
+    let face = &projected[index];
+    assert_eq!(face.curves.len(), 2);
+    assert!(
+        face.curves
+            .iter()
+            .all(|s| matches!(s, Segment::Circle { .. }))
+    );
+    assert!(
+        pick(&projected, [0., 0.], 0.01, Some(Kind::Plane)).is_none(),
+        "O furo não é face"
+    );
+    let mut sketch = Sketch::new("Face", plane);
+    nator_sketch::projection::insert(&mut sketch, &face.curves, &[])?;
+    let regions = nator_sketch::profiles::regions(&sketch)?;
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].holes.len(), 1);
+    // Inclinada, a mesma borda vira uma polilinha em vez de um círculo falso.
+    let inclined = elements(&document, &document.occurrences()?, Plane::xz(), target)?;
+    assert!(
+        inclined
+            .iter()
+            .any(|e| e.kind == Kind::Edge && e.curves.len() > 2)
+    );
+    assert!(
+        !inclined
+            .iter()
+            .flat_map(|e| &e.curves)
+            .any(|s| matches!(s, Segment::Circle { .. }))
+    );
+    Ok(())
+}
+
+#[cfg(feature = "occt")]
+#[test]
+fn cad_arcs_keep_their_radius_and_reverse_direction_with_the_target_normal() -> Result<()> {
+    use nator_sketch::{Curve, profiles::Segment};
+    let mut profile = Sketch::new("Semicírculo", Plane::xy());
+    let center = profile.add_point([0., 0.])?;
+    let start = profile.add_point([10., 0.])?;
+    let end = profile.add_point([-10., 0.])?;
+    profile.add_curve(
+        Curve::Arc {
+            center,
+            start,
+            end,
+            clockwise: false,
+        },
+        false,
+    )?;
+    profile.add_curve(
+        Curve::Line {
+            start: end,
+            end: start,
+        },
+        false,
+    )?;
+    let region = nator_sketch::areas::regions(&profile)?.remove(0);
+    let document = cad_document(nator_kernel::Solid::extrude(
+        &profile, &region, 0., 5., "arc",
+    )?)?;
+    for (plane, clockwise) in [
+        (Plane::xy(), false),
+        (
+            Plane {
+                v: [0., -1., 0.],
+                ..Plane::xy()
+            },
+            true,
+        ),
+    ] {
+        let elements = sketch_projection::elements(
+            &document,
+            &document.occurrences()?,
+            plane,
+            Placement::default(),
+        )?;
+        assert!(elements.iter().flat_map(|e| &e.curves).any(|c| matches!(c,
+            Segment::Arc { center, a, clockwise: c, .. } if *c == clockwise && nator_sketch::distance(*center,*a) > 9.999)));
+    }
+    Ok(())
+}

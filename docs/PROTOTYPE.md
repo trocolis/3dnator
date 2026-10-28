@@ -1,5 +1,9 @@
 # Protótipo 0.3.0 — CAD paramétrico
 
+Na aba Rascunho, **Dimencionar** (D) substitui o nome Cota e conserva o primeiro elemento escolhido ao ajustar a medida entre dois elementos livres. Restrições já existentes prevalecem sobre essa preferência; ela não cria travas permanentes.
+
+**Projetar**, no grupo Criar, captura faces planas, arestas, arcos e vértices dos componentes no plano do rascunho. Passe o cursor para ver a prévia lilás e clique para confirmar; o painel filtra o tipo de referência. Contornos fechados recebem preenchimento lilás claro, com furos preservados. As referências ficam fixas e podem ser usadas para captura, cotas e perfis; cada captura tem desfazer/refazer, e Esc retorna à seleção. Não há atualização associativa posterior ao componente. Círculos/arcos paralelos são exatos; curvas inclinadas usam polilinhas com desvio de 0,01 mm. Malhas oferecem apenas vértices e arestas vivas. O projeto usa o formato interno 23, com leitura dos formatos anteriores.
+
 Rascunhos agora são editados sobre o próprio modelo no viewport CAD, com alinhamento da câmera ao plano, seleção de origem/face e visibilidade na árvore. O refinamento atual organiza a interface por tarefas, com ícones vetoriais, busca por S e painéis padronizados abaixo do controle de vista. Veja [INTERFACE.md](INTERFACE.md) para navegar na nova disposição e gerar capturas de modelo/rascunho.
 
 Este incremento oferece rascunhos com restrições e parâmetros, histórico paramétrico, montagem, folhas técnicas e exportação STEP/STL. Operações de sólidos exigem a feature `occt` e o SDK externo. O histórico paramétrico é salvo no projeto; desfazer/refazer registra as edições da sessão. Pendências conhecidas estão em [ROADMAP.md](../ROADMAP.md).

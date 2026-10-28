@@ -3,8 +3,276 @@
 use crate::point_snap::{body_anchors, reference_points};
 use nator_document::{Document, DocumentError, SketchId, assembly::Occurrence};
 use nator_geometry::Placement;
+use nator_sketch::profiles::Segment;
 use nator_sketch::{Plane, Point2};
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Vertex,
+    Edge,
+    Plane,
+}
+
+/// Geometria já no plano local de destino. Triângulos servem apenas para captura
+/// e prévia de faces (incluindo furos); as curvas inseridas vêm do B-rep exato.
+#[derive(Debug, Clone)]
+pub struct Element {
+    pub kind: Kind,
+    pub curves: Vec<Segment>,
+    pub vertices: Vec<Point2>,
+    pub triangles: Vec<[Point2; 3]>,
+}
+
+/// Prepara a seleção de Projetar fora da thread gráfica. Nenhum índice de origem
+/// é persistido: confirmar captura as coordenadas nesta revisão do documento.
+pub fn elements(
+    document: &Document,
+    occurrences: &[Occurrence],
+    plane: Plane,
+    target: Placement,
+) -> Result<Vec<Element>, DocumentError> {
+    plane.validate().map_err(|e| DocumentError(e.to_string()))?;
+    let mut result = Vec::new();
+    for occurrence in occurrences {
+        let part = document
+            .instance(occurrence.instance)
+            .and_then(|i| document.part(i.part))
+            .ok_or_else(|| DocumentError("Ocorrência de projeção inexistente.".into()))?;
+        for body in part.shown_bodies() {
+            let source = occurrence
+                .placement
+                .compose(body.placement)
+                .map_err(|e| DocumentError(e.to_string()))?;
+            let project = |point| plane.project(target.inverse_apply(source.apply(point)));
+            if let Some(bytes) = &body.brep {
+                #[cfg(feature = "occt")]
+                {
+                    let query = || -> Result<Vec<Element>, nator_kernel::KernelError> {
+                        let mut result = Vec::new();
+                        let solid = nator_kernel::Solid::from_brep(bytes, None)?;
+                        let mut edges = Vec::new();
+                        for index in 0..solid.edge_count()? {
+                            let anchors = solid.edge_anchors(index)?;
+                            if anchors.seam {
+                                edges.push(Vec::new());
+                                continue;
+                            }
+                            if !anchors.circle.is_some_and(|c| c.closed) {
+                                for p in [anchors.start, anchors.end] {
+                                    result.push(Element {
+                                        kind: Kind::Vertex,
+                                        curves: vec![],
+                                        vertices: vec![project(p)],
+                                        triangles: vec![],
+                                    });
+                                }
+                            }
+                            let curves =
+                                edge_curves(&solid, index, anchors, plane, source, target)?;
+                            result.push(Element {
+                                kind: Kind::Edge,
+                                curves: curves.clone(),
+                                vertices: vec![],
+                                triangles: vec![],
+                            });
+                            edges.push(curves);
+                        }
+                        let mesh = body.geometry.mesh();
+                        let mut faces = Vec::new();
+                        for face in 0..solid.face_count()? {
+                            if !matches!(
+                                solid.face_measure(face)?.kind,
+                                nator_kernel::FaceKind::Plane { .. }
+                            ) {
+                                continue;
+                            }
+                            let curves = solid
+                                .face_edges(face)?
+                                .into_iter()
+                                .flat_map(|i| edges[i].clone())
+                                .collect::<Vec<_>>();
+                            let triangles = mesh
+                                .triangles()
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    body.geometry
+                                        .triangle_faces()
+                                        .is_some_and(|f| f[*i] as usize == face)
+                                })
+                                .map(|(_, t)| mesh.triangle_points(*t).map(project))
+                                .collect();
+                            if !curves.is_empty() {
+                                faces.push(Element {
+                                    kind: Kind::Plane,
+                                    curves,
+                                    vertices: vec![],
+                                    triangles,
+                                });
+                            }
+                        }
+                        result.extend(faces);
+                        Ok(result)
+                    };
+                    result.extend(query().map_err(|e| DocumentError(e.to_string()))?);
+                    continue;
+                }
+                #[cfg(not(feature = "occt"))]
+                {
+                    let _ = bytes;
+                    return Err(DocumentError(
+                        "Projetar geometria CAD exige o núcleo OCCT.".into(),
+                    ));
+                }
+            }
+            // Malhas conservam apenas vértices e arestas vivas; diagonais internas
+            // de triangulação não são apresentadas como arestas do componente.
+            let mesh = body.geometry.mesh();
+            for p in mesh.vertices() {
+                result.push(Element {
+                    kind: Kind::Vertex,
+                    curves: vec![],
+                    vertices: vec![project(*p)],
+                    triangles: vec![],
+                });
+            }
+            for (triangle, mask) in mesh.triangles().iter().zip(body.geometry.creases()) {
+                let points = mesh.triangle_points(*triangle).map(project);
+                for i in 0..3 {
+                    if mask & (1 << i) != 0 {
+                        result.push(Element {
+                            kind: Kind::Edge,
+                            curves: vec![Segment::Line {
+                                a: points[(i + 1) % 3],
+                                b: points[(i + 2) % 3],
+                            }],
+                            vertices: vec![],
+                            triangles: vec![],
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(feature = "occt")]
+fn edge_curves(
+    solid: &nator_kernel::Solid,
+    index: usize,
+    anchors: nator_kernel::EdgeAnchors,
+    plane: Plane,
+    source: Placement,
+    target: Placement,
+) -> Result<Vec<Segment>, nator_kernel::KernelError> {
+    let project = |p| plane.project(target.inverse_apply(source.apply(p)));
+    let a = project(anchors.start);
+    let b = project(anchors.end);
+    if solid.edge_measure(index)?.straight {
+        return Ok(if nator_sketch::distance(a, b) < 1e-8 {
+            vec![]
+        } else {
+            vec![Segment::Line { a, b }]
+        });
+    }
+    if let Some(circle) = anchors.circle {
+        // Normais são vetores: não recebem a translação dos referenciais.
+        let normal = target.inverse_vector(source.apply_vector(circle.normal));
+        let alignment = nator_geometry::dot(normal, plane.normal());
+        if alignment.abs() > 1. - 1e-9 {
+            let center = project(circle.center);
+            return Ok(vec![if circle.closed {
+                Segment::Circle {
+                    center,
+                    radius: circle.radius_mm,
+                }
+            } else {
+                Segment::Arc {
+                    center,
+                    a,
+                    b,
+                    clockwise: alignment < 0.,
+                }
+            }]);
+        }
+    }
+    // Círculos inclinados viram elipses. O rascunho ainda não tem esse tipo:
+    // aproximação explícita com desvio de 0,01 mm, sem inventar um raio circular.
+    Ok(solid
+        .edge_polyline(index, 0.01)?
+        .windows(2)
+        .filter_map(|pair| {
+            let a = project(pair[0]);
+            let b = project(pair[1]);
+            (nator_sketch::distance(a, b) >= 1e-8).then_some(Segment::Line { a, b })
+        })
+        .collect())
+}
+
+/// Captura no plano, em mm: vértices precedem curvas e curvas precedem faces.
+/// O filtro permite alcançar um contorno inteiro mesmo perto das suas arestas.
+pub fn pick(
+    elements: &[Element],
+    cursor: Point2,
+    tolerance: f64,
+    filter: Option<Kind>,
+) -> Option<usize> {
+    let mut best: Option<(usize, u8, f64)> = None;
+    for (index, element) in elements
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| filter.is_none_or(|k| e.kind == k))
+    {
+        let (priority, distance) = match element.kind {
+            Kind::Vertex => (
+                0,
+                element
+                    .vertices
+                    .iter()
+                    .map(|p| nator_sketch::distance(*p, cursor))
+                    .fold(f64::INFINITY, f64::min),
+            ),
+            Kind::Edge => (
+                1,
+                element
+                    .curves
+                    .iter()
+                    .map(|c| nator_sketch::projection::distance_to(c, cursor))
+                    .fold(f64::INFINITY, f64::min),
+            ),
+            Kind::Plane => {
+                if !element.triangles.iter().any(|t| {
+                    let sides = (0..3)
+                        .map(|i| {
+                            nator_sketch::cross(
+                                nator_sketch::sub(t[(i + 1) % 3], t[i]),
+                                nator_sketch::sub(cursor, t[i]),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let area = nator_sketch::cross(
+                        nator_sketch::sub(t[1], t[0]),
+                        nator_sketch::sub(t[2], t[0]),
+                    )
+                    .abs();
+                    area > 1e-12
+                        && (sides.iter().all(|s| *s >= -1e-9) || sides.iter().all(|s| *s <= 1e-9))
+                }) {
+                    continue;
+                }
+                (2, 0.)
+            }
+        };
+        if distance <= tolerance
+            && best.is_none_or(|(_, p, d)| priority < p || (priority == p && distance < d))
+        {
+            best = Some((index, priority, distance));
+        }
+    }
+    best.map(|(i, _, _)| i)
+}
 
 /// O chamador fornece as ocorrências permitidas pelo isolamento/bloqueio da interface.
 /// Visibilidade de corpos e rascunhos continua sendo consultada no documento. O plano

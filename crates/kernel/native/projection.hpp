@@ -9,6 +9,21 @@ namespace {
 struct Projection { std::vector<double> segments; };
 }
 extern "C" {
+// Mantém os pontos da curva 3D em um resultado de propriedade exclusiva, com
+// o mesmo ciclo de cópia/liberação das projeções de desenho técnico.
+Projection* nator_edge_polyline(const Shape* body, std::size_t index, double tolerance) noexcept {
+    auto result = std::make_unique<Projection>();
+    const bool ok = guarded([&] {
+        if (!std::isfinite(tolerance) || tolerance < 1e-6 || tolerance > 1.)
+            throw std::runtime_error("Tolerância de curva inválida.");
+        sample_edges(edge_at(body,index),tolerance,[&](const gp_Pnt& a,const gp_Pnt& b){
+            if (result->segments.empty()) result->segments.insert(result->segments.end(),{a.X(),a.Y(),a.Z()});
+            if (result->segments.size()/3>=500000) throw std::runtime_error("Curva complexa demais.");
+            result->segments.insert(result->segments.end(),{b.X(),b.Y(),b.Z()});
+        });
+    });
+    return ok ? result.release() : nullptr;
+}
 Projection* nator_project(const Shape* const* bodies, std::size_t count, const double* right, const double* direction, double tolerance) noexcept {
     auto result = std::make_unique<Projection>();
     const bool ok = guarded([&] {

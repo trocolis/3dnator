@@ -8,6 +8,7 @@ pub mod drafting;
 pub mod edit;
 pub mod lines;
 pub mod profiles;
+pub mod projection;
 pub mod repair;
 pub mod snapping;
 pub mod solver;
@@ -125,6 +126,9 @@ impl Plane {
 pub struct Point {
     pub id: u64,
     pub position: Point2,
+    /// Apoio capturado por Projetar, em coordenadas locais do rascunho.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub projected: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Curve {
@@ -148,6 +152,10 @@ pub struct Entity {
     pub id: u64,
     pub curve: Curve,
     pub construction: bool,
+    /// Distingue a referência projetada para apresentação e edição. A posição
+    /// capturada é mantida por restrições explícitas, persistidas com o rascunho.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub projected: bool,
     /// Dois pontos parametrizam posição/direção, mas não limitam a reta. Somente
     /// linhas de construção podem ser infinitas; os apoios não são extremos.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -504,7 +512,11 @@ impl Sketch {
             ));
         }
         let id = self.allocate()?;
-        self.points.push(Point { id, position });
+        self.points.push(Point {
+            id,
+            position,
+            projected: false,
+        });
         Ok(id)
     }
     pub fn add_curve(&mut self, curve: Curve, construction: bool) -> Result<u64> {
@@ -516,6 +528,7 @@ impl Sketch {
             id,
             curve,
             construction,
+            projected: false,
             infinite: false,
         });
         Ok(id)

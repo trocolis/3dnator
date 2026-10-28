@@ -274,6 +274,20 @@ impl Solid {
         Ok(flat.as_chunks::<2>().0.to_vec())
     }
 
+    /// Arestas de todos os contornos da face, incluindo os furos. Os índices são
+    /// transitórios e só podem ser usados com este sólido, durante a consulta.
+    pub fn face_edges(&self, face: usize) -> Result<Vec<usize>, KernelError> {
+        if face >= self.face_count()? {
+            return Err(KernelError("Face de projeção inexistente.".into()));
+        }
+        Ok(self
+            .adjacency()?
+            .iter()
+            .enumerate()
+            .filter_map(|(edge, adjacent)| adjacent.contains(&(face as i32)).then_some(edge))
+            .collect())
+    }
+
     /// Origens das faces registradas pela última operação da ponte.
     fn origins(&self) -> Result<Vec<Origin>, KernelError> {
         // SAFETY: objeto vivo nesta thread; apenas consulta.

@@ -181,7 +181,9 @@ impl Frame {
         };
         let stroke = egui::Stroke::new(
             1.5,
-            if entity.construction {
+            if entity.projected {
+                theme::PROJECTED
+            } else if entity.construction {
                 theme::CONSTRUCTION
             } else {
                 color

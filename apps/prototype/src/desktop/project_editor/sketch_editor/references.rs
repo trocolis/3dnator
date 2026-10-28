@@ -2,12 +2,14 @@
 //! for a mesma, inclusive em prévias conflitantes que não avançam a revisão do documento.
 use super::*;
 use nator_sketch::topology::{self, References};
+type Answer = Result<(References, Vec<profiles::Region>), String>;
 
 #[derive(Default)]
 pub(super) struct Cache {
     key: Vec<u64>,
     pub points: References,
-    running: Option<Receiver<Result<References, String>>>,
+    pub projected_regions: Vec<profiles::Region>,
+    running: Option<Receiver<Answer>>,
 }
 
 fn key(sketch: &Sketch) -> Vec<u64> {
@@ -24,6 +26,7 @@ fn key(sketch: &Sketch) -> Vec<u64> {
             entity.id,
             u64::from(entity.construction),
             u64::from(entity.infinite),
+            u64::from(entity.projected),
         ]);
         match entity.curve {
             Curve::Line { start, end } => result.extend([0, start, end]),
@@ -45,6 +48,7 @@ impl Cache {
         if self.key != key {
             self.key = key;
             self.points = References::default();
+            self.projected_regions.clear();
             self.running = None;
             let sketch = sketch.clone();
             let context = context.clone();
@@ -52,7 +56,22 @@ impl Cache {
             std::thread::Builder::new()
                 .name("sketch-references".into())
                 .spawn(move || {
-                    let _ = sender.send(topology::references(&sketch).map_err(|e| e.to_string()));
+                    let result = topology::references(&sketch)
+                        .map(|points| {
+                            // Somente contornos projetados recebem lilás. O arranjo e
+                            // os furos são resolvidos fora da thread da interface.
+                            let mut projected = sketch.clone();
+                            projected.entities.retain(|e| e.projected);
+                            projected.constraints.clear();
+                            projected.dimension_expressions.clear();
+                            projected.dimension_labels.clear();
+                            let regions = profiles::regions(&projected).unwrap_or_else(|_| {
+                                nator_sketch::areas::regions(&projected).unwrap_or_default()
+                            });
+                            (points, regions)
+                        })
+                        .map_err(|e| e.to_string());
+                    let _ = sender.send(result);
                     context.request_repaint();
                 })
                 .map_err(|e| e.to_string())?;
@@ -62,7 +81,7 @@ impl Cache {
             match receiver.try_recv() {
                 Ok(result) => {
                     self.running = None;
-                    self.points = result?;
+                    (self.points, self.projected_regions) = result?;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.running = None;

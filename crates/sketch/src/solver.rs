@@ -204,9 +204,12 @@ pub fn max_error(s: &Sketch) -> Result<f64> {
 fn variables(s: &Sketch) -> Vec<f64> {
     s.points
         .iter()
+        .filter(|p| !p.projected)
         .flat_map(|p| p.position)
         .chain(s.entities.iter().filter_map(|e| {
-            if let Curve::Circle { radius, .. } = e.curve {
+            if let Curve::Circle { radius, .. } = e.curve
+                && !e.projected
+            {
                 Some(radius)
             } else {
                 None
@@ -215,12 +218,14 @@ fn variables(s: &Sketch) -> Vec<f64> {
         .collect()
 }
 fn assign(s: &mut Sketch, x: &[f64]) {
-    for (i, p) in s.points.iter_mut().enumerate() {
+    for (i, p) in s.points.iter_mut().filter(|p| !p.projected).enumerate() {
         p.position = [x[i * 2], x[i * 2 + 1]];
     }
-    let mut offset = s.points.len() * 2;
+    let mut offset = s.points.iter().filter(|p| !p.projected).count() * 2;
     for e in &mut s.entities {
-        if let Curve::Circle { radius, .. } = &mut e.curve {
+        if let Curve::Circle { radius, .. } = &mut e.curve
+            && !e.projected
+        {
             *radius = x[offset];
             offset += 1;
         }
@@ -328,17 +333,21 @@ pub fn solve(source: &Sketch) -> Result<Report> {
 pub fn solve_preserving(source: &Sketch, points: &[u64], circles: &[u64]) -> Result<Report> {
     let mut stationary = vec![false; variables(source).len()];
     for id in points {
+        if source.points.iter().any(|p| p.id == *id && p.projected) {
+            continue;
+        }
         let index = source
             .points
             .iter()
+            .filter(|p| !p.projected)
             .position(|p| p.id == *id)
             .ok_or_else(|| SketchError(format!("Ponto {id} inexistente.")))?;
         stationary[index * 2] = true;
         stationary[index * 2 + 1] = true;
     }
-    let mut offset = source.points.len() * 2;
+    let mut offset = source.points.iter().filter(|p| !p.projected).count() * 2;
     for entity in &source.entities {
-        if matches!(entity.curve, Curve::Circle { .. }) {
+        if matches!(entity.curve, Curve::Circle { .. }) && !entity.projected {
             stationary[offset] = circles.contains(&entity.id);
             offset += 1;
         }
@@ -440,11 +449,37 @@ fn solve_internal(source: &Sketch, stationary: &[bool]) -> Result<Report> {
         })
         .collect();
     sketch.refresh_reference_dimensions()?;
+    // Referências projetadas são constantes da resolução, portanto seus apoios
+    // não consomem o limite de variáveis livres. As travas continuam no arquivo e
+    // são verificadas nos resíduos, mas não contam como equações redundantes.
+    let projected_locks = sketch
+        .constraints
+        .iter()
+        .filter(|c| !c.reference)
+        .map(|c| match c.kind {
+            ConstraintKind::Fixed { point, .. }
+                if sketch.points.iter().any(|p| p.id == point && p.projected) =>
+            {
+                2
+            }
+            ConstraintKind::Radius { circle, .. }
+                if sketch.entity(circle).is_ok_and(|e| e.projected) =>
+            {
+                1
+            }
+            _ => 0,
+        })
+        .sum::<usize>()
+        + sketch
+            .entities
+            .iter()
+            .filter(|e| e.projected && matches!(e.curve, Curve::Arc { .. }))
+            .count();
     Ok(Report {
         sketch,
         status,
         max_error,
-        redundant: r.len() > rank,
+        redundant: r.len().saturating_sub(projected_locks) > rank,
         conflicting,
     })
 }

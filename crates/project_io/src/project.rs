@@ -35,7 +35,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 22: cotas de diâmetro, ponto–linha e linha–círculo, lados do `LineAngle`
 /// (`flip_line`/`flip_reference`) e posição do texto das cotas (`dimension_labels`).
 /// Ausentes, os lados seguem o sentido das linhas e o texto fica no lugar padrão.
-pub const FORMAT_VERSION: u32 = 22;
+/// Versão 23: pontos e entidades com `projected`, omitido quando falso. Referências
+/// capturadas são constantes do solver e conservam as travas explícitas no arquivo.
+pub const FORMAT_VERSION: u32 = 23;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -1123,6 +1125,18 @@ mod tests {
         assert!(reopened.folder_visible(Folder::PartOrigin(part))?);
         assert!(!reopened.folder_visible(Folder::ReferenceSketches)?);
         assert!(reopened.folder_visible(Folder::Parts)?);
+        Ok(())
+    }
+
+    #[test]
+    fn older_sketches_default_to_regular_points_and_entities() -> Result<(), Box<dyn Error>> {
+        let mut sketch = nator_sketch::Sketch::new("Anterior", nator_sketch::Plane::xy());
+        sketch.add_line([0., 0.], [10., 0.], false)?;
+        let value = serde_json::to_value(&sketch)?;
+        assert!(!serde_json::to_string(&value)?.contains("projected"));
+        let loaded: nator_sketch::Sketch = serde_json::from_value(value)?;
+        assert!(loaded.points.iter().all(|p| !p.projected));
+        assert!(loaded.entities.iter().all(|e| !e.projected));
         Ok(())
     }
 

@@ -15,6 +15,9 @@ pub(super) const WARNING: egui::Color32 = egui::Color32::from_rgb(157, 93, 15);
 pub(super) const DANGER: egui::Color32 = egui::Color32::from_rgb(189, 63, 68);
 /// Rascunhos de referência da montagem, distintos dos rascunhos de peça.
 pub(super) const REFERENCE: egui::Color32 = egui::Color32::from_rgb(124, 82, 196);
+/// Referências capturadas por Projetar e suas áreas fechadas.
+pub(super) const PROJECTED: egui::Color32 = egui::Color32::from_rgb(158, 95, 205);
+pub(super) const PROJECTED_FILL: egui::Color32 = egui::Color32::from_rgb(237, 224, 248);
 /// Geometria auxiliar, excluída das áreas: segmentos de construção e retas infinitas.
 pub(super) const CONSTRUCTION: egui::Color32 = egui::Color32::from_rgb(224, 123, 31);
 /// Planos de trabalho da peça e a prévia do plano deslocado.
