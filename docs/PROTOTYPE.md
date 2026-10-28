@@ -12,23 +12,27 @@ Com Selecionar ou Dimencionar sem escolhas pendentes, clique no texto de uma cot
 
 **Deslocamento** oferece Normal, Dupla e Simétrica, além do mesmo seletor de traço. Normal aceita distância assinada; Dupla recebe uma distância positiva para cada lado; Simétrica aplica a distância informada igualmente em cada lado. A opção Contorno conectado escolhe a cadeia inteira de linhas/arcos, parando em ramificações; desative-a para copiar somente uma aresta. Nos caminhos, o lado positivo é a esquerda da orientação ordenada; nos círculos/arcos isolados, aumenta o raio. Os cantos da cópia são unidos nos encontros dos suportes deslocados. Se algum lado produzir um raio inválido, nada é criado. OK publica toda a cópia em uma ação de desfazer; Cancelar não altera o documento.
 
-Ao escolher Deslocamento, mova o mouse para definir a distância e clique ou use Enter para confirmar. O valor acompanha o cursor num campo flutuante: digitar trava a distância; Tab libera novamente o controle pelo mouse. No modo Dupla, confirme primeiro um lado e depois o outro; ambos entram juntos no histórico. Espelhar, Deslocamento, Arredondar e Chanfrar mostram linhas translúcidas antes da confirmação.
+Em Deslocamento, Arredondar e Chanfrar, pressione a ponta da seta e arraste para ajustar a medida. O valor aparece num campo flutuante e também aceita expressões. Mover o cursor sem pressionar não altera a distância; Enter ou OK confirma e Esc cancela. Dupla mostra duas setas, uma por lado. A extrusão usa o mesmo padrão visual e de arraste.
 
-**Mover**, em Modificar, recebe vários elementos e deslocamento X/Y em milímetros. Também é possível escolher origem e destino no desenho. Restrições existentes continuam valendo: um movimento incompatível é recusado. Duplo clique em uma entidade seleciona os elementos ligados por apoios compartilhados e restrições dirigentes; ligações fracas e cruzamentos virtuais não ampliam a seleção. Del exclui os elementos selecionados ou a cota selecionada. X alterna Normal/Referência na seleção ou no traço da ferramenta ativa.
+Arredondar e Chanfrar aceitam vários segmentos: todos os cantos entre eles recebem a mesma medida. Encontros colineares e cruzamentos interiores não são cantos. Ramificações ambíguas e cortes que consumiriam um segmento inteiro recusam a operação completa.
 
-Modificar reúne Aparar, Deslocamento, Arredondar, Chanfrar, Espelhar, Mover e Dimencionar. Padrão e Restringir ficam temporariamente ocultos. As restrições dos projetos continuam sendo respeitadas e podem ser inspecionadas em Selecionar. Os atalhos só atuam no contexto do rascunho e fora da edição de texto:
+A movimentação ocorre na seleção livre: segure e arraste um vértice para deformar o contorno, ou uma aresta para transladá-la. Se a aresta pertence à seleção múltipla, todo o conjunto escolhido se move. A prévia respeita as restrições; apoios fixos impedem movimentos incompatíveis. Soltar confirma numa única ação de desfazer e Esc cancela. A ferramenta Mover e o atalho M foram retirados do rascunho.
+
+Duplo clique em uma entidade seleciona os elementos ligados por apoios compartilhados e restrições dirigentes; ligações fracas e cruzamentos virtuais não ampliam a seleção. Del exclui os elementos selecionados ou a cota selecionada. X alterna Normal/Referência na seleção ou no traço da ferramenta ativa.
+
+Modificar reúne Aparar, Deslocamento, Arredondar, Chanfrar, Espelhar e Dimencionar. Padrão e Restringir ficam temporariamente ocultos. As restrições dos projetos continuam sendo respeitadas e podem ser inspecionadas em Selecionar. Os atalhos só atuam no contexto do rascunho e fora da edição de texto:
 
 | Tecla | Ferramenta |
 | --- | --- |
 | L / R / C / A | Linha / Retângulo / Círculo / Arco |
 | P / G / S | Projetar / Aparar (apagar trecho) / Deslocamento |
 | O / H / E | Arredondar / Chanfrar / Espelhar |
-| M / D | Mover / Dimencionar |
+| D | Dimencionar |
 | X / Del | Alternar Normal/Referência / Excluir seleção |
 
 Fora do rascunho, S continua abrindo a busca. O símbolo de centro do círculo exige um vínculo efetivo ao centro; raio e tangência à borda, isoladamente, não o exibem. As linhas auxiliares das cotas usam o vértice mais próximo do texto para evitar extensões longas.
 
-Ícones pequenos junto à geometria indicam perpendicularidade, tangência, ponto médio e centro, incluindo as capturas/prévias correspondentes. Passe o mouse sobre o símbolo para ver seu significado. Os indicadores não modificam as restrições e ficam separados dos cadeados das junções.
+F alterna a força da junção do vértice selecionado, com a mesma ação do cadeado. Ícones pequenos em preto e verde, visíveis durante o desenho ou no apoio selecionado, indicam perpendicularidade, tangência, ponto médio e centro, incluindo as capturas/prévias correspondentes. Passe o mouse sobre o símbolo para ver seu significado. Os indicadores não modificam as restrições e ficam separados dos cadeados das junções.
 
 **Projetar**, no grupo Criar, captura faces planas, arestas, arcos e vértices dos componentes no plano do rascunho. Passe o cursor para ver a prévia lilás e clique para confirmar; o painel filtra o tipo de referência. Contornos fechados recebem preenchimento lilás claro, com furos preservados. As referências ficam fixas e podem ser usadas para captura, cotas e perfis; cada captura tem desfazer/refazer, e Esc retorna à seleção. Não há atualização associativa posterior ao componente. Círculos/arcos paralelos são exatos; curvas inclinadas usam polilinhas com desvio de 0,01 mm. Malhas oferecem apenas vértices e arestas vivas. O projeto usa o formato interno 25, com leitura dos formatos anteriores.
 

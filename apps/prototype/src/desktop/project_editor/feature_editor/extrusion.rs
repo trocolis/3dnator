@@ -9,10 +9,7 @@ pub(super) struct Interaction {
     drag: Option<Drag>,
 }
 struct Drag {
-    pointer: egui::Pos2,
-    axis: egui::Vec2,
-    pixels_per_mm: f32,
-    initial: f64,
+    motion: distance_arrow::Drag,
     start: bool,
 }
 impl ExtrudeDraft {
@@ -168,28 +165,14 @@ impl Editor {
                     .clamp(response.rect.top() + 18., response.rect.bottom() - 18.),
             );
             let over = pointer.is_some_and(|p| p.distance(position) < 16.);
-            let pressed_here = ui
-                .input(|i| i.pointer.press_origin())
-                .is_some_and(|p| p.distance(position) < 16.);
             hovered |= over;
-            painter.line_segment([origin, position], egui::Stroke::new(2., theme::ACCENT));
-            painter.circle_filled(
-                position,
-                7.,
-                if over { theme::GREEN } else { theme::ACCENT },
-            );
             let sign = if distance < 0. { -1. } else { 1. };
-            let tip = position + axis * (12. * sign);
-            let side = egui::vec2(-axis.y, axis.x) * 5.;
-            painter.add(egui::Shape::convex_polygon(
-                vec![
-                    tip,
-                    position - axis * (4. * sign) + side,
-                    position - axis * (4. * sign) - side,
-                ],
-                theme::ACCENT,
-                egui::Stroke::NONE,
-            ));
+            let arrow = distance_arrow::Arrow {
+                origin,
+                tip: position,
+                direction: axis * sign,
+            };
+            arrow.paint(&painter, over || d.interaction.drag.is_some());
             painter.text(
                 position + egui::vec2(16., -12.),
                 egui::Align2::LEFT_BOTTOM,
@@ -197,7 +180,7 @@ impl Editor {
                 egui::FontId::proportional(13.),
                 theme::INK,
             );
-            if pressed_here && response.drag_started_by(egui::PointerButton::Primary) {
+            if arrow.started(ui, response) {
                 active_handle = Some((distance, start));
             }
         }
@@ -206,10 +189,12 @@ impl Editor {
         }
         if let Some((initial, start)) = active_handle {
             d.interaction.drag = ui.input(|i| i.pointer.press_origin()).map(|pointer| Drag {
-                pointer,
-                axis,
-                pixels_per_mm: scale.max(1e-5),
-                initial,
+                motion: distance_arrow::Drag {
+                    pointer,
+                    axis,
+                    pixels_per_unit: scale,
+                    initial,
+                },
                 start,
             });
         }
@@ -217,8 +202,7 @@ impl Editor {
         if let Some(drag) = &d.interaction.drag {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             if let Some(pointer) = pointer {
-                let value = drag.initial
-                    + f64::from((pointer - drag.pointer).dot(drag.axis) / drag.pixels_per_mm);
+                let value = drag.motion.value(pointer);
                 if value.is_finite() && value.abs() <= 1e7 {
                     d.extrude.set_mouse_endpoint(value, drag.start, from);
                     ui.ctx().request_repaint();

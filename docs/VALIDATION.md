@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Arraste, setas e múltiplos cantos — 28/10/2026
+
+- **315 testes com OCCT e 246 sem OCCT aprovados**. Novas regressões cobrem os quatro cantos de um retângulo, raio/área exatos, cantos desconectados e exclusão de cruzamentos; cortes sobrepostos recusam a edição inteira. Arrastar um extremo de arco preserva sua validade e transmite coincidências fortes sem persistir travas transitórias; fixações impedem movimentos incompatíveis. A normal da seta segue a orientação do caminho aberto e a convenção radial dos arcos isolados.
+- **33 ensaios gráficos aprovados em execução serial GL/llvmpipe**. Os dois novos verificam indicadores apenas no desenho/apoio selecionado, F no vértice com histórico, arraste de vértice, conflito de apoio fixo, Esc durante um gesto e remoção do atalho M; também os quatro cantos por Arredondar/Chanfrar, seta de medida, confirmação única e desfazer. Os testes anteriores foram atualizados para arraste direto de arestas e setas independentes nos dois lados de Deslocamento. A extrusão continua passando com a seta compartilhada.
+- Formatação, Clippy com todos os alvos/avisos negados com e sem OCCT e compilação desktop com OCCT aprovados no Linux. Logs e capturas em `target/codex-validation/sketch-handles-20261028/`: `offset-arrow.png` e `fillet-corners.png` para faixa sem Mover, indicadores ocultos, ícones preto/verde, setas e campo flutuante.
+- Nove itens iniciais concluídos; os oito acrescentados durante esta implementação continuam indicados no AJUSTE.md para a próxima etapa do trabalho. Aplicativo 0.3.0 em desenvolvimento e formato 25 mantidos; Windows e janela nativa não exercitados localmente. Sem publicação remota.
+
 ## Refinamento de rascunho: 16 novos itens do AJUSTE.md — 28/10/2026
 
 - **311 testes com OCCT e 242 sem OCCT aprovados**. Regressões cobrem seleção por ligações fortes/cotas, exclusão de ligações fracas e cruzamentos virtuais, centro vinculado, movimento obrigatório e conflito com fixação, deslocamento fechado com cantos compartilhados, caminho misto linha/arco e rejeição atômica de colapso. Extensões de cotas escolhem o apoio mais próximo, inclusive em retas infinitas; respostas antigas da prévia não são reutilizadas.

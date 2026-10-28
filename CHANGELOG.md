@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Arraste direto, setas de medida e múltiplos cantos
+
+- Retirada de Mover da faixa/busca do rascunho e do atalho M: arestas e vértices são arrastados diretamente na seleção livre, com prévia resolvida em segundo plano, cancelamento por Esc e uma ação de desfazer ao soltar. Ligações fortes transmitem o movimento; apoios fixos recusam destinos incompatíveis.
+- Setas com ponta arrastável para Deslocamento, Arredondar, Chanfrar e Extrusão. O simples movimento do cursor não altera distâncias. Os dois lados de Deslocamento têm setas independentes; Enter/OK confirma a operação inteira. Campos numéricos e expressões continuam disponíveis.
+- Arredondar e Chanfrar atuam em todos os cantos entre os segmentos selecionados, inclusive em contornos fechados e cantos desconectados. Cortes sobrepostos e ramificações ambíguas recusam a edição inteira.
+- Indicadores de centro, ângulo reto, tangência e ponto médio aparecem durante o desenho ou no apoio selecionado. F também alterna a junção do vértice selecionado. Ícones de ferramentas e indicadores usam preto/verde; Arredondar segue o desenho de canto do Chanfrar.
+
 ### Refinamento das ferramentas de rascunho
 
 - Mover no rascunho por deslocamento X/Y ou dois pontos, com resolução obrigatória da posição solicitada e erro quando as restrições impedem o movimento. Duplo clique seleciona os elementos ligados por apoios e relações dirigentes; Del exclui a seleção e desfazer limpa alvos que deixaram de existir.

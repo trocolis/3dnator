@@ -187,8 +187,8 @@ fn paint_styled(
     ink: egui::Color32,
     dark: bool,
 ) {
-    // Geometria de rascunho em verde e restrições em vermelho permitem distinguir
-    // rapidamente criação e intenção geométrica, inclusive na galeria compacta.
+    // Ferramentas e indicadores do rascunho compartilham contorno preto e ação
+    // verde. O mesmo desenho/paleta aparece na faixa, nos painéis e no canvas.
     let constraint = matches!(
         icon,
         Icon::ConstraintHorizontalVertical
@@ -202,6 +202,8 @@ fn paint_styled(
         icon,
         Icon::Line
             | Icon::LineSymmetric
+            | Icon::LineConstruction
+            | Icon::LineInfinite
             | Icon::Rectangle
             | Icon::RectangleCenter
             | Icon::RectangleInclined
@@ -213,30 +215,39 @@ fn paint_styled(
             | Icon::SketchOffset
             | Icon::SketchProject
             | Icon::SketchFillet
+            | Icon::SketchChamfer
             | Icon::SketchMirror
             | Icon::CircularPattern
             | Icon::RectangularPattern
             | Icon::Dimension
+            | Icon::SnapMidpoint
+            | Icon::SnapCenter
+            | Icon::LockClosed
+            | Icon::LockOpen
     );
-    let accent = match (constraint, sketch, dark) {
-        (true, _, false) => theme::DANGER,
-        (true, _, true) => egui::Color32::from_rgb(242, 128, 132),
-        (_, true, false) => theme::GREEN,
-        (_, true, true) => egui::Color32::from_rgb(110, 204, 154),
-        (_, _, false) => theme::ACCENT,
-        (_, _, true) => egui::Color32::from_rgb(124, 188, 248),
+    let sketch = sketch || constraint;
+    let accent = match (sketch, dark) {
+        (true, false) => theme::GREEN,
+        (true, true) => egui::Color32::from_rgb(110, 204, 154),
+        (false, false) => theme::ACCENT,
+        (false, true) => egui::Color32::from_rgb(124, 188, 248),
     };
     let disabled = egui::Color32::from_gray(if dark { 112 } else { 165 });
     let pen = Pen {
         painter,
         rect,
         ink: if enabled {
-            if constraint { accent } else { ink }
+            if sketch && !dark {
+                egui::Color32::BLACK
+            } else {
+                ink
+            }
         } else {
             disabled
         },
         accent: if enabled { accent } else { disabled },
         fill: match (enabled, dark) {
+            (true, false) if sketch => egui::Color32::from_rgb(225, 244, 232),
             (true, false) => egui::Color32::from_rgb(204, 225, 243),
             (true, true) => egui::Color32::from_rgb(70, 104, 146),
             (false, false) => egui::Color32::from_gray(226),
@@ -575,7 +586,7 @@ fn paint_styled(
             p.line(&[[8., 4.], [16., 20.]], p.ink);
         }
         Icon::LineConstruction | Icon::LineInfinite => {
-            let color = if enabled { theme::CONSTRUCTION } else { p.ink };
+            let color = p.accent;
             for (a, b) in [(3., 7.), (10., 14.), (17., 21.)] {
                 p.line(&[[a, 24. - a], [b, 24. - b]], color);
             }
@@ -647,19 +658,17 @@ fn paint_styled(
             p.line(&[[4., 14.], [10., 20.]], p.accent);
         }
         Icon::SketchFillet => {
-            p.line(
-                &[[3., 22.], [3., 3.], [22., 3.]],
-                egui::Color32::from_gray(175),
-            );
-            p.line(&[[7., 22.], [7., 14.]], p.accent);
+            // Mesmo canto inferior esquerdo do Chanfrar; somente o trecho
+            // transformado é verde, seguindo a referência visual do usuário.
+            p.line(&[[4., 3.], [4., 14.]], p.ink);
+            p.line(&[[10., 20.], [21., 20.]], p.ink);
             let points: Vec<_> = (0..=12)
                 .map(|i| {
-                    let angle = std::f32::consts::PI + i as f32 / 12. * std::f32::consts::FRAC_PI_2;
-                    [14. + 7. * angle.cos(), 14. + 7. * angle.sin()]
+                    let angle = std::f32::consts::PI - i as f32 / 12. * std::f32::consts::FRAC_PI_2;
+                    [10. + 6. * angle.cos(), 14. + 6. * angle.sin()]
                 })
                 .collect();
             p.line(&points, p.accent);
-            p.line(&[[14., 7.], [22., 7.]], p.accent);
         }
         Icon::SketchMirror => {
             p.line(&[[12., 2.], [12., 22.]], p.ink);

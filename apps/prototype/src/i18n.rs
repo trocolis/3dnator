@@ -25,16 +25,12 @@ pub enum Text {
     SketchOffsetSecond,
     SketchOffsetPerSide,
     SketchChamfer,
-    SketchMoveX,
-    SketchMoveY,
-    SketchPickOrigin,
     SketchWholeChain,
     SketchOffsetMouseHint,
-    SketchMoveValueHint,
+    SketchDragHint,
+    SketchCornersHint,
     SketchPreviewPreparing,
-    SketchMoveBlocked,
     SketchOffsetSelectHint,
-    SketchMoveSelectHint,
     SketchCenterIndicator,
     SketchProject,
     JunctionStrong,
@@ -905,22 +901,14 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchDimension => "Dimencionar",
         Text::SketchChamfer => "Chanfrar",
         Text::SketchOffsetSelectHint => "Selecione uma aresta ou um contorno conectado.",
-        Text::SketchMoveSelectHint => {
-            "Selecione os elementos; informe X/Y ou escolha origem e destino no desenho."
-        }
-        Text::SketchMoveBlocked => {
-            "As restrições existentes impedem esse movimento. Libere o apoio correspondente e tente novamente."
-        }
         Text::SketchPreviewPreparing => "Preparando prévia…",
-        Text::SketchMoveValueHint => {
-            "Informe um deslocamento X/Y ou escolha a origem e o destino na área de desenho."
+        Text::SketchCornersHint => {
+            "Selecione os segmentos; todos os cantos entre eles serão transformados."
         }
-        Text::SketchMoveX => "Deslocamento X",
-        Text::SketchMoveY => "Deslocamento Y",
-        Text::SketchPickOrigin => "Escolher origem",
+        Text::SketchDragHint => "Arraste uma aresta ou vértice para mover a geometria.",
         Text::SketchWholeChain => "Contorno conectado",
         Text::SketchOffsetMouseHint => {
-            "Mouse: distância · Tab: liberar medida · Enter/clique: confirmar · Esc: cancelar"
+            "Arraste a ponta da seta para ajustar a medida · Enter/OK: aplicar · Esc: cancelar"
         }
         Text::SketchCenterIndicator => "Centro",
         Text::SketchMirrorAxis => "Eixo de espelhamento",

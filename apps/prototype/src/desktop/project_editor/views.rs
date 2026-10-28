@@ -117,7 +117,6 @@ impl Editor {
                 (egui::Key::O, Edit::Fillet),
                 (egui::Key::H, Edit::Chamfer),
                 (egui::Key::E, Edit::Mirror),
-                (egui::Key::M, Edit::Move),
             ] {
                 if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
                     self.open_sketch_action(context, action);

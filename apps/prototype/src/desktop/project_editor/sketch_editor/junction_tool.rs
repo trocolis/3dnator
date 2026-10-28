@@ -125,7 +125,16 @@ pub(super) fn button(
         blocked: response.hovered(),
         ..Default::default()
     };
-    if enabled && response.clicked() {
+    let keyboard = enabled
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F));
+    if keyboard {
+        ui.input_mut(|i| {
+            i.events
+                .retain(|e| !matches!(e, egui::Event::Text(s) if s.eq_ignore_ascii_case("f")))
+        });
+    }
+    if enabled && (response.clicked() || keyboard) {
         match junctions::set_strong(sketch, position, !junction.strong) {
             Ok(changed) => update.changed = changed,
             Err(error) => update.warning = Some(error.to_string()),

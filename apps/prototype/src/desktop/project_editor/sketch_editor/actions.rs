@@ -51,7 +51,8 @@ pub(in crate::desktop::project_editor) fn edit_icon(action: Action) -> Icon {
 fn hint(action: Action) -> T {
     match action {
         Action::Offset => T::SketchOffsetSelectHint,
-        Action::Move => T::SketchMoveSelectHint,
+        Action::Move => T::SketchSelectOne,
+        Action::Fillet | Action::Chamfer => T::SketchCornersHint,
         Action::Mirror => T::SketchMirrorSelectionHint,
         Action::CircularPattern => T::SketchCircularSelectionHint,
         Action::RectangularPattern => T::SketchRectangularSelectionHint,
@@ -241,7 +242,7 @@ impl Editor {
                     text(T::SketchEntities),
                     count,
                     None,
-                    if matches!(action, Action::Move | Action::Offset) {
+                    if action == Action::Offset {
                         work.operation.selecting
                     } else {
                         !work.mirror_axis_active
@@ -249,7 +250,7 @@ impl Editor {
                 );
                 if selection.activate {
                     work.mirror_axis_active = false;
-                    if matches!(action, Action::Move | Action::Offset) {
+                    if action == Action::Offset {
                         work.operation.selecting = true;
                     }
                 }
@@ -258,23 +259,6 @@ impl Editor {
                     work.constraint = None;
                     work.operation.selecting = true;
                     work.operation.seed = None;
-                }
-                if action == Action::Move {
-                    for (label, value) in [
-                        (T::SketchMoveX, &mut work.operation.x),
-                        (T::SketchMoveY, &mut work.operation.y),
-                    ] {
-                        panel::row(ui, text(label), |ui| {
-                            if panel::expression(ui, value).changed() {
-                                work.operation.locked = true;
-                            }
-                        });
-                    }
-                    if ui.button(text(T::SketchPickOrigin)).clicked() {
-                        work.operation.selecting = false;
-                        work.operation.origin = None;
-                        work.operation.locked = false;
-                    }
                 }
                 if action == Action::Mirror {
                     let description = work.mirror_axis.map(|id| format!("{} {id}", text(T::Line)));
@@ -315,6 +299,9 @@ impl Editor {
                         }
                     });
                 }
+                if matches!(action, Action::Fillet | Action::Chamfer) {
+                    ui.label(text(T::SketchOffsetMouseHint));
+                }
                 if action == Action::Offset {
                     ui.label(text(T::SketchOffsetMouseHint));
                     if ui
@@ -336,7 +323,13 @@ impl Editor {
                             (OffsetMode::Double, T::SketchOffsetDouble),
                             (OffsetMode::Symmetric, T::Symmetric),
                         ] {
-                            ui.selectable_value(&mut work.offset_mode, mode, text(label));
+                            if ui
+                                .selectable_value(&mut work.offset_mode, mode, text(label))
+                                .changed()
+                            {
+                                work.operation.second_side = false;
+                                work.operation.handle_drag = None;
+                            }
                         }
                     });
                 }
@@ -358,7 +351,7 @@ impl Editor {
                         }),
                         |ui| {
                             if panel::expression(ui, &mut work.dimension_expression).changed() {
-                                work.operation.locked = true;
+                                work.operation.confirm = false;
                             }
                         },
                     );
@@ -367,7 +360,7 @@ impl Editor {
                     if work.offset_mode == nator_sketch::modifications::OffsetMode::Double {
                         panel::row(ui, text(T::SketchOffsetSecond), |ui| {
                             if panel::expression(ui, &mut work.offset_second_expression).changed() {
-                                work.operation.locked = true;
+                                work.operation.confirm = false;
                             }
                         });
                     } else if work.offset_mode == nator_sketch::modifications::OffsetMode::Symmetric
@@ -427,12 +420,6 @@ impl Editor {
             } else {
                 candidate(&source, work, action, &parameters)
             };
-            let move_points = if action == Action::Move {
-                nator_sketch::movement::points(&source, &work.selected).unwrap_or_default()
-            } else {
-                vec![]
-            };
-            let move_circles = work.selected.clone();
             let edited_dimension = (action == Action::Dimension)
                 .then_some(work.constraint)
                 .flatten();
@@ -442,12 +429,6 @@ impl Editor {
                     work.selected.retain(|id| sketch.entity(*id).is_ok());
                     if let Some(id) = edited_dimension {
                         self.solve_sketch_with(context, sketch, SolveMode::Dimension(id, false));
-                    } else if action == Action::Move {
-                        self.solve_sketch_with(
-                            context,
-                            sketch,
-                            SolveMode::Move(move_points, move_circles),
-                        );
                     } else {
                         self.solve_sketch(context, sketch);
                     }

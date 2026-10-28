@@ -8,10 +8,12 @@ use nator_sketch::{
 };
 mod actions;
 mod dimension_tool;
+mod direct_drag;
 mod dynamic_input;
 mod indicators;
 mod junction_tool;
 mod line_tools;
+mod operation_handles;
 mod operation_preview;
 mod project_tool;
 mod projection;
@@ -94,7 +96,6 @@ enum CircleMode {
 enum SolveMode {
     Normal,
     Dimension(u64, bool),
-    Move(Vec<u64>, Vec<u64>),
 }
 pub(super) struct Workspace {
     pub id: SketchId,
@@ -144,6 +145,7 @@ pub(super) struct Workspace {
     offset_mode: nator_sketch::modifications::OffsetMode,
     offset_second_expression: String,
     operation: operation_preview::Interaction,
+    dragging: direct_drag::Interaction,
     drawing: dynamic_input::Input,
     references: references::Cache,
     /// Escolhas, texto e caixa de valor da ferramenta Cota.
@@ -154,6 +156,23 @@ impl Workspace {
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn selected_entities(&self) -> &[u64] {
         &self.selected
+    }
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn operation_handle_tips(&self) -> &[egui::Pos2] {
+        &self.operation.handle_tips
+    }
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn drag_pending(&self) -> bool {
+        self.dragging.active()
+    }
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn visible_indicator_count(&self) -> usize {
+        indicators::visible(
+            &self.references.indicators,
+            self.primitive().is_some(),
+            self.selected_vertex,
+        )
+        .len()
     }
     pub(super) fn operation_ready(&self) -> bool {
         self.operation.cache.ready()
@@ -171,13 +190,6 @@ impl Workspace {
         self.mirror_axis = axis;
         self.dimension_expression = "2 mm".into();
         self.offset_second_expression = "3 mm".into();
-        self.operation.locked = true;
-        self.operation.last = Some([10., -4.]);
-        self.operation.x = "3 mm".into();
-        self.operation.y = "2 mm".into();
-        if action == EditAction::Move {
-            self.operation.origin = Some([0., 0.]);
-        }
     }
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn operation_debug(&self) -> String {
@@ -254,6 +266,7 @@ impl Workspace {
     pub(super) fn select_tool(&mut self, tool: Tool) {
         self.active_action = None;
         self.operation = operation_preview::Interaction::default();
+        self.dragging = direct_drag::Interaction::default();
         self.mirror_axis = None;
         self.mirror_axis_active = false;
         self.tool = tool;
@@ -381,6 +394,7 @@ impl Workspace {
             offset_mode: nator_sketch::modifications::OffsetMode::Normal,
             offset_second_expression: "10 mm".into(),
             operation: operation_preview::Interaction::default(),
+            dragging: direct_drag::Interaction::default(),
             drawing: dynamic_input::Input::default(),
             references: references::Cache::default(),
             dimension_draft: dimension_tool::Draft::default(),
@@ -579,8 +593,7 @@ impl Editor {
             };
         }
     }
-    /// A intenção da edição define a resolução no trabalhador: cotas novas podem
-    /// virar referência; Mover exige a posição solicitada sem ignorar restrições.
+    /// Cotas novas podem virar referência; a intenção é resolvida no trabalhador.
     fn solve_sketch_with(&mut self, context: &egui::Context, sketch: Sketch, dimension: SolveMode) {
         if self.busy() {
             return;
@@ -612,15 +625,9 @@ impl Editor {
                 .map_err(sketch_error)?;
             let report = match dimension {
                 SolveMode::Dimension(id, _) => nator_sketch::dimensions::solve(&sketch, id),
-                SolveMode::Move(ref points, ref circles) => {
-                    solver::solve_required(&sketch, points, circles)
-                }
                 SolveMode::Normal => solver::solve(&sketch),
             }
             .map_err(sketch_error)?;
-            if matches!(dimension, SolveMode::Move(..)) && report.status == Status::Conflict {
-                return Err(text(T::SketchMoveBlocked).into());
-            }
             // O fechamento com linhas já existentes só é conhecido após resolver
             // a geometria. Esta consulta fica fora da thread da interface.
             let chain_closed = check_area
@@ -1014,6 +1021,7 @@ impl Editor {
             !busy && !animating,
         );
         let edit_existing = !operation_update.blocked
+            && !work.dragging.active()
             && !busy
             && !animating
             && (work.is_selecting()
@@ -1057,7 +1065,12 @@ impl Editor {
             work.dimension_existing.selected(),
         );
         junction_tool::paint(&frame, &painter, &work.references.junctions);
-        indicators::paint(ui, &frame, &painter, &work.references.indicators);
+        let visible_indicators = indicators::visible(
+            &work.references.indicators,
+            work.primitive().is_some(),
+            work.selected_vertex,
+        );
+        indicators::paint(ui, &frame, &painter, &visible_indicators);
         let junction_update = if work.is_selecting() {
             junction_tool::button(
                 ui,
@@ -1071,6 +1084,16 @@ impl Editor {
             junction_tool::Update::default()
         };
         submit |= junction_update.changed;
+        let drag_update = direct_drag::canvas(
+            ui,
+            response,
+            &frame,
+            &painter,
+            &sketch,
+            work,
+            projection_key.scene,
+            !busy && !animating && !existing_update.blocked && !junction_update.blocked,
+        );
 
         let suspended = ui.input(|i| i.modifiers.alt);
         let mut snap = hover.and_then(|point| {
@@ -1405,6 +1428,7 @@ impl Editor {
             && !junction_update.blocked
             && !existing_update.blocked
             && !operation_update.blocked
+            && !drag_update.blocked
             && valid
             && !matches!(work.tool, Tool::Dimension | Tool::Project)
             && !(work.tool == Tool::Rectangle
@@ -1417,12 +1441,16 @@ impl Editor {
         {
             if matches!(work.tool, Tool::Select | Tool::Trim) {
                 if work.is_selecting() {
-                    work.selected_vertex = junction_tool::vertex(
-                        &sketch,
-                        &work.references.points.vertices,
-                        cursor,
-                        8. / pixels_per_mm,
-                    );
+                    let supports = work
+                        .references
+                        .points
+                        .vertices
+                        .iter()
+                        .copied()
+                        .chain(work.references.indicators.iter().map(|m| m.point))
+                        .collect::<Vec<_>>();
+                    work.selected_vertex =
+                        junction_tool::vertex(&sketch, &supports, cursor, 8. / pixels_per_mm);
                 }
                 let entity = nator_sketch::tools::pick_entity(&sketch, cursor, 8. / pixels_per_mm)
                     .ok()
@@ -1622,7 +1650,7 @@ impl Editor {
                 true,
             );
         }
-        if let Some((candidate, mode)) = operation_update.commit {
+        if let Some((candidate, mode)) = drag_update.commit.or(operation_update.commit) {
             self.solve_sketch_with(ui.ctx(), candidate, mode);
         } else if let Some(id) = existing_update.changed {
             self.solve_sketch_with(ui.ctx(), sketch, SolveMode::Dimension(id, false));
@@ -1633,6 +1661,9 @@ impl Editor {
             self.status.warning(error);
         }
         if let Some(error) = operation_update.warning {
+            self.status.warning(error);
+        }
+        if let Some(error) = drag_update.warning {
             self.status.warning(error);
         }
         if let Some(Err(error)) = projection_result {

@@ -2,6 +2,20 @@
 use super::*;
 use nator_sketch::indicators::{Indicator, Kind as IndicatorKind};
 
+/// Na seleção livre só o apoio selecionado revela suas relações. Durante o
+/// desenho, as relações voltam a orientar as capturas e o fechamento do perfil.
+pub(super) fn visible(
+    markers: &[Indicator],
+    drawing: bool,
+    selected: Option<Point2>,
+) -> Vec<Indicator> {
+    markers
+        .iter()
+        .filter(|m| drawing || selected.is_some_and(|p| nator_sketch::distance(p, m.point) < 1e-6))
+        .cloned()
+        .collect()
+}
+
 pub(super) fn paint(
     ui: &egui::Ui,
     frame: &sketch_scene::Frame,

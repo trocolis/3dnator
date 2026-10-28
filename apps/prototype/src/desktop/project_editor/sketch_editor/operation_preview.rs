@@ -17,6 +17,7 @@ pub(super) struct Request {
     value: f64,
     second: f64,
     delta: Point2,
+    points: Option<Vec<u64>>,
 }
 impl Request {
     pub fn from(
@@ -31,6 +32,7 @@ impl Request {
         };
         Ok(Self {
             action,
+            points: None,
             selected: work.selected.clone(),
             axis: work.mirror_axis,
             stroke: work.operation_line_type,
@@ -48,12 +50,21 @@ impl Request {
             } else {
                 0.
             },
-            delta: if action == EditAction::Move {
-                [number(&work.operation.x)?, number(&work.operation.y)?]
-            } else {
-                [0., 0.]
-            },
+            delta: [0., 0.],
         })
+    }
+    pub fn dragged(points: Vec<u64>, circles: Vec<u64>, delta: Point2) -> Self {
+        Self {
+            action: EditAction::Move,
+            selected: circles,
+            axis: None,
+            stroke: LineType::Normal,
+            mode: OffsetMode::Normal,
+            value: 0.,
+            second: 0.,
+            delta,
+            points: Some(points),
+        }
     }
     fn build(&self, source: &Sketch) -> Result<Sketch, String> {
         let mut next = source.clone();
@@ -81,9 +92,15 @@ impl Request {
             }
             EditAction::Move => {
                 if nator_sketch::distance(self.delta, [0., 0.]) < 1e-9 {
-                    return Err(text(T::SketchMoveValueHint).into());
+                    return Err(text(T::SketchDragHint).into());
                 }
-                next = movement::translated(source, &self.selected, self.delta)
+                let points = self
+                    .points
+                    .clone()
+                    .map(Ok)
+                    .unwrap_or_else(|| movement::points(source, &self.selected))
+                    .map_err(sketch_error)?;
+                next = movement::dragged(source, &points, &self.selected, self.delta)
                     .map_err(sketch_error)?;
             }
             EditAction::Fillet | EditAction::Chamfer => {
@@ -107,11 +124,7 @@ impl Request {
 pub(super) fn supported(action: EditAction) -> bool {
     matches!(
         action,
-        EditAction::Move
-            | EditAction::Mirror
-            | EditAction::Offset
-            | EditAction::Fillet
-            | EditAction::Chamfer
+        EditAction::Mirror | EditAction::Offset | EditAction::Fillet | EditAction::Chamfer
     )
 }
 
@@ -240,14 +253,12 @@ pub(super) struct Interaction {
     pub selecting: bool,
     pub whole_chain: bool,
     pub seed: Option<u64>,
-    pub origin: Option<Point2>,
-    pub x: String,
-    pub y: String,
-    pub locked: bool,
-    pub last: Option<Point2>,
+    pub handle_drag: Option<operation_handles::Drag>,
     pub focus: bool,
     pub second_side: bool,
     pub confirm: bool,
+    #[cfg(all(test, feature = "occt"))]
+    pub handle_tips: Vec<egui::Pos2>,
 }
 impl Default for Interaction {
     fn default() -> Self {
@@ -256,14 +267,12 @@ impl Default for Interaction {
             selecting: false,
             whole_chain: true,
             seed: None,
-            origin: None,
-            x: "0 mm".into(),
-            y: "0 mm".into(),
-            locked: false,
-            last: None,
+            handle_drag: None,
             focus: false,
             second_side: false,
             confirm: false,
+            #[cfg(all(test, feature = "occt"))]
+            handle_tips: vec![],
         }
     }
 }
@@ -275,7 +284,7 @@ pub(super) struct CanvasUpdate {
     pub warning: Option<String>,
 }
 
-fn floating(ui: &egui::Ui, position: egui::Pos2, work: &mut Workspace, action: EditAction) -> bool {
+fn floating(ui: &egui::Ui, position: egui::Pos2, work: &mut Workspace) -> bool {
     let mut confirm = false;
     let focus = std::mem::take(&mut work.operation.focus);
     egui::Area::new(egui::Id::new("sketch_operation_floating"))
@@ -302,7 +311,6 @@ fn floating(ui: &egui::Ui, position: egui::Pos2, work: &mut Workspace, action: E
                                 .font(egui::TextStyle::Monospace),
                         );
                         if response.changed() {
-                            work.operation.locked = true;
                             work.operation.confirm = false;
                         }
                         if request_focus {
@@ -322,16 +330,12 @@ fn floating(ui: &egui::Ui, position: egui::Pos2, work: &mut Workspace, action: E
                                 confirm = true;
                             }
                             if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                                work.operation.locked = false;
                                 response.surrender_focus();
                             }
                         }
                     };
                     ui.horizontal(|ui| {
-                        if action == EditAction::Move {
-                            field(ui, "X", &mut work.operation.x, "sketch_move_x", false);
-                            field(ui, "Y", &mut work.operation.y, "sketch_move_y", false);
-                        } else if work.operation.second_side {
+                        if work.operation.second_side {
                             field(
                                 ui,
                                 text(T::SketchOffsetSecond),
@@ -370,30 +374,26 @@ pub(super) fn canvas(
     let Some(action) = work.active_action.filter(|a| supported(*a)) else {
         return CanvasUpdate::default();
     };
-    let mouse_tool = matches!(action, EditAction::Move | EditAction::Offset);
     let mut result = CanvasUpdate {
-        blocked: mouse_tool,
+        blocked: action == EditAction::Offset,
         ..Default::default()
     };
     if !enabled {
         return result;
     }
-    let clicked = response.clicked_by(egui::PointerButton::Primary);
-    let mut picked_now = false;
-    if mouse_tool
+    if action == EditAction::Offset
         && work.operation.selecting
-        && clicked
+        && response.clicked_by(egui::PointerButton::Primary)
         && let Some(cursor) = hover
         && let Ok(Some(id)) =
             nator_sketch::tools::pick_entity(source, cursor, 8. / frame.pixels_per_mm(cursor))
     {
-        let control = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-        let chosen = if action == EditAction::Offset && work.operation.whole_chain {
+        let chosen = if work.operation.whole_chain {
             nator_sketch::connected::chain(source, id).unwrap_or_else(|_| vec![id])
         } else {
             vec![id]
         };
-        if control {
+        if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
             for id in chosen {
                 if let Some(index) = work.selected.iter().position(|p| *p == id) {
                     work.selected.remove(index);
@@ -406,81 +406,20 @@ pub(super) fn canvas(
             work.operation.selecting = false;
         }
         work.operation.seed = Some(id);
-        work.operation.focus = action == EditAction::Offset;
-        work.operation.last = Some(cursor);
-        work.operation.locked = false;
-        picked_now = true;
+        work.operation.focus = true;
     }
-    if mouse_tool && !work.operation.selecting && !work.selected.is_empty() {
-        if action == EditAction::Move && work.operation.origin.is_none() {
-            if clicked
-                && !picked_now
-                && let Some(cursor) = hover
-            {
-                work.operation.origin = Some(cursor);
-                work.operation.last = Some(cursor);
-                work.operation.locked = false;
-            }
-        } else {
-            if !work.operation.locked
-                && let Some(cursor) = hover
-            {
-                if work
-                    .operation
-                    .last
-                    .is_some_and(|last| nator_sketch::distance(last, cursor) > 1e-7)
-                {
-                    if action == EditAction::Move
-                        && let Some(origin) = work.operation.origin
-                    {
-                        let delta = nator_sketch::sub(cursor, origin);
-                        work.operation.x = format!("{} mm", delta[0]);
-                        work.operation.y = format!("{} mm", delta[1]);
-                    } else if action == EditAction::Offset
-                        && let Ok(entity) = source.entity(work.selected[0])
-                    {
-                        let value = if let Ok((a, b)) = source.line(entity.id) {
-                            nator_sketch::cross(
-                                nator_sketch::sub(b, a),
-                                nator_sketch::sub(cursor, a),
-                            ) / nator_sketch::distance(a, b)
-                        } else if let Ok((center, radius)) = source.radial(entity.id) {
-                            nator_sketch::distance(center, cursor) - radius
-                        } else {
-                            0.
-                        };
-                        let value = if work.offset_mode == OffsetMode::Normal {
-                            value
-                        } else {
-                            value.abs()
-                        };
-                        if work.operation.second_side {
-                            work.offset_second_expression = format!("{value} mm");
-                        } else {
-                            work.dimension_expression = format!("{value} mm");
-                        }
-                    }
-                }
-                work.operation.last = Some(cursor);
-            }
-            let position = response
-                .hover_pos()
-                .or_else(|| work.operation.last.and_then(|p| frame.screen(p)));
-            let enter = position.is_some_and(|p| floating(ui, p, work, action));
-            if (clicked && !picked_now && hover.is_some()) || enter {
-                if action == EditAction::Offset
-                    && work.offset_mode == OffsetMode::Double
-                    && !work.operation.second_side
-                {
-                    work.operation.second_side = true;
-                    work.operation.focus = true;
-                    work.operation.locked = false;
-                    work.operation.last = None;
-                } else {
-                    work.operation.confirm = true;
-                    work.operation.locked = true;
-                }
-            }
+    if matches!(
+        action,
+        EditAction::Offset | EditAction::Fillet | EditAction::Chamfer
+    ) {
+        let handles = operation_handles::update(
+            ui, response, frame, painter, source, work, parameters, action,
+        );
+        result.blocked |= handles.blocked;
+        if let Some(position) = handles.position
+            && floating(ui, position, work)
+        {
+            work.operation.confirm = true;
         }
     }
     match Request::from(work, action, parameters) {
@@ -505,16 +444,8 @@ pub(super) fn canvas(
                 work.operation.confirm = false;
                 match candidate {
                     Ok(candidate) => {
-                        let mode = if action == EditAction::Move {
-                            SolveMode::Move(
-                                movement::points(source, &work.selected).unwrap_or_default(),
-                                work.selected.clone(),
-                            )
-                        } else {
-                            SolveMode::Normal
-                        };
                         work.active_action = None;
-                        result.commit = Some((candidate, mode));
+                        result.commit = Some((candidate, SolveMode::Normal));
                     }
                     Err(error) => result.warning = Some(error),
                 }

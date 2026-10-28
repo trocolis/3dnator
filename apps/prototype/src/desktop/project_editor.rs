@@ -2,6 +2,7 @@ mod assembly_tools;
 mod browser;
 pub(crate) mod capture;
 mod command_panel;
+mod distance_arrow;
 mod drawing_editor;
 mod export_editor;
 mod feature_editor;
