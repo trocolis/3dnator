@@ -128,6 +128,9 @@ pub fn dependents(part: &Part, output: BodyId) -> Vec<BodyId> {
 /// Região de um rascunho escolhida para extrusão ou revolução.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RegionRef {
+    /// Seleção de várias células do mesmo rascunho, na ordem dos cliques.
+    /// Não aceita listas aninhadas, vazias ou duplicadas.
+    Multiple(Vec<RegionRef>),
     /// Célula do arranjo plano: ciclo canônico de entidades com orientação. Permite
     /// distinguir lentes/crescentes que usam as mesmas curvas em sentidos diferentes.
     Area(Vec<(u64, bool)>),
@@ -136,6 +139,14 @@ pub enum RegionRef {
     /// Formato até a versão 6: posição na lista de regiões ordenada por área. Mantida só
     /// para abrir projetos antigos; a próxima edição da operação a converte em `Boundary`.
     Index(usize),
+}
+impl RegionRef {
+    pub fn selections(&self) -> &[RegionRef] {
+        match self {
+            Self::Multiple(regions) => regions,
+            _ => std::slice::from_ref(self),
+        }
+    }
 }
 
 /// Aresta usada por arredondamento ou chanfro.
@@ -912,6 +923,22 @@ pub fn pattern_placements(
 }
 
 fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
+    if let RegionRef::Multiple(regions) = region {
+        if regions.is_empty()
+            || regions.len() > 1024
+            || regions.iter().any(|r| matches!(r, RegionRef::Multiple(_)))
+        {
+            return Err(DocumentError(
+                "Seleção de áreas vazia, aninhada ou excessiva.".into(),
+            ));
+        }
+        for (i, region) in regions.iter().enumerate() {
+            if regions[..i].contains(region) {
+                return Err(DocumentError("Área repetida na seleção.".into()));
+            }
+            validate_region(region)?;
+        }
+    }
     if let RegionRef::Area(edges) = region
         && (edges.is_empty() || edges.len() > 8192)
     {

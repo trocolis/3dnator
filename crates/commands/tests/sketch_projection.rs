@@ -6,6 +6,156 @@ use nator_sketch::{Plane, Sketch};
 use std::sync::Arc;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn visible_sketch_areas_edges_and_vertices_project_with_holes_and_exclude_the_target() -> Result<()>
+{
+    use sketch_projection::Kind;
+    let mut source = Sketch::new("Origem", Plane::xy());
+    source.add_rectangle([0., 0.], [20., 10.], false)?;
+    source.add_circle([10., 5.], 2., false)?;
+    let mut document = Document::new("Projetar rascunho")?;
+    let (part, _) = document.add_sketch(None, source)?;
+    let target = edited(
+        &mut document,
+        part,
+        Plane {
+            origin: [0., 0., 5.],
+            ..Plane::xy()
+        },
+    )?;
+    let elements = sketch_projection::elements_for_sketch(
+        &document,
+        &document.occurrences()?,
+        Plane::xy(),
+        Placement::default(),
+        Some(target),
+    )?;
+    let area = sketch_projection::pick(&elements, [3., 3.], 0.1, Some(Kind::Plane))
+        .ok_or("Área ausente")?;
+    assert!(elements[area].contours.len() > 1);
+    let vertex = sketch_projection::pick(&elements, [0., 0.], 0.1, Some(Kind::Vertex))
+        .ok_or("Vértice ausente")?;
+    assert!(!elements[vertex].vertices.is_empty());
+    assert!(sketch_projection::pick(&elements, [5., 0.], 0.1, Some(Kind::Edge)).is_some());
+    let mut projected = Sketch::new("Captura", Plane::xy());
+    nator_sketch::projection::insert(&mut projected, &elements[area].curves, &[])?;
+    assert!(
+        nator_sketch::areas::regions(&projected)?
+            .iter()
+            .any(|r| r.holes.len() == 1)
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "occt")]
+fn multiple_projected_areas_extrude_as_one_operation_and_survive_roundtrip() -> Result<()> {
+    use nator_commands::{Command, Effect, Session};
+    use nator_document::features::{Operation, RegionRef};
+    use nator_sketch::profiles::Segment;
+    let mut sketch = Sketch::new("Projetado", Plane::xy());
+    for (x, size) in [(0., 10.), (20., 5.)] {
+        let corners = [[x, 0.], [x + size, 0.], [x + size, size], [x, size]];
+        let curves = (0..4)
+            .map(|i| Segment::Line {
+                a: corners[i],
+                b: corners[(i + 1) % 4],
+            })
+            .collect::<Vec<_>>();
+        nator_sketch::projection::insert(&mut sketch, &curves, &[])?;
+    }
+    let regions = nator_sketch::areas::regions(&sketch)?;
+    assert_eq!(regions.len(), 2);
+    let selections = regions
+        .iter()
+        .map(|r| nator_sketch::areas::signature(&sketch, r).map(RegionRef::Area))
+        .collect::<nator_sketch::Result<Vec<_>>>()?;
+    let mut doc = Document::new("Áreas")?;
+    let (part, id) = doc.add_sketch(None, sketch)?;
+    let mut session = Session::new(doc)?;
+    let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+        part,
+        name: "Extrusão".into(),
+        operation: Operation::Extrude {
+            sketch: id,
+            region: RegionRef::Multiple(selections),
+            from: "0 mm".into(),
+            to: "4 mm".into(),
+            combine: None,
+            until: None,
+        },
+    })?
+    else {
+        return Err("Corpo ausente".into());
+    };
+    let solid = nator_kernel::Solid::from_brep(
+        session
+            .document()
+            .body(body)
+            .ok_or("Corpo ausente")?
+            .brep
+            .as_ref()
+            .ok_or("B-rep ausente")?,
+        None,
+    )?;
+    assert!((solid.volume()? - 500.).abs() < 1e-5);
+    let original_names = session
+        .document()
+        .body(body)
+        .ok_or("Corpo ausente")?
+        .face_names
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut operation = session
+        .document()
+        .part(part)
+        .ok_or("Peça ausente")?
+        .features[0]
+        .operation
+        .clone();
+    if let Operation::Extrude {
+        region: RegionRef::Multiple(regions),
+        ..
+    } = &mut operation
+    {
+        regions.reverse();
+    }
+    session.execute(Command::EditFeature {
+        part,
+        output: body,
+        operation,
+    })?;
+    let reordered_names = session
+        .document()
+        .body(body)
+        .ok_or("Corpo ausente")?
+        .face_names
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        original_names, reordered_names,
+        "Reordenar áreas não pode trocar a identidade das faces."
+    );
+    assert!(session.undo());
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("areas.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let reopened = nator_project_io::read_project(&path)?;
+    assert!(matches!(
+        reopened.part(part).ok_or("Peça ausente")?.features[0].operation,
+        Operation::Extrude {
+            region: RegionRef::Multiple(_),
+            ..
+        }
+    ));
+    assert!(session.undo());
+    assert!(session.document().body(body).is_none());
+    assert!(session.redo());
+    Ok(())
+}
+
 fn rectangle() -> Result<Arc<MeshAsset>> {
     Ok(Arc::new(MeshAsset::new(Mesh::new(
         vec![[0., 0., 7.], [20., 0., 7.], [20., 10., 7.], [0., 10., 7.]],
@@ -229,8 +379,54 @@ fn project_tool_picks_vertices_before_edges_and_skips_mesh_diagonals() -> Result
     let selected = pick(&projected, [10., 0.], 0.1, None).ok_or("Aresta ausente")?;
     assert_eq!(projected[selected].kind, Kind::Edge);
     assert!(pick(&projected, [10., 5.], 0.1, Some(Kind::Edge)).is_none());
+    let face =
+        pick(&projected, [10., 5.], 0.1, Some(Kind::Plane)).ok_or("Área da malha ausente")?;
+    assert_eq!(
+        projected[face].curves.len(),
+        4,
+        "A diagonal de triangulação não pode virar contorno."
+    );
     document.body_mut(body)?.visible = false;
     assert!(elements(&document, &occurrences, Plane::xy(), Placement::default())?.is_empty());
+    Ok(())
+}
+
+#[test]
+fn disconnected_coplanar_mesh_patches_remain_separate_projection_choices() -> Result<()> {
+    let mut points = Vec::new();
+    let mut triangles = Vec::new();
+    for x in [0., 30.] {
+        let base = points.len() as u32;
+        points.extend([
+            [x, 0., 7.],
+            [x + 10., 0., 7.],
+            [x + 10., 10., 7.],
+            [x, 10., 7.],
+        ]);
+        triangles.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
+    }
+    let mut document = Document::new("Áreas da malha")?;
+    document.add_mesh(
+        None,
+        "Malha".into(),
+        Arc::new(MeshAsset::new(Mesh::new(points, triangles)?)),
+    )?;
+    let elements = sketch_projection::elements(
+        &document,
+        &document.occurrences()?,
+        Plane::xy(),
+        Placement::default(),
+    )?;
+    let areas = elements
+        .iter()
+        .filter(|e| e.kind == sketch_projection::Kind::Plane)
+        .collect::<Vec<_>>();
+    assert_eq!(areas.len(), 2);
+    assert!(
+        areas
+            .iter()
+            .all(|a| a.curves.len() == 4 && a.triangles.len() == 2)
+    );
     Ok(())
 }
 

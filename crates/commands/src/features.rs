@@ -113,7 +113,11 @@ pub(super) fn region(
     let index = match reference {
         RegionRef::Boundary(ids) => profiles::find_region(&regions, ids).map_err(error)?,
         RegionRef::Index(index) => *index,
-        RegionRef::Area(_) => return Err(DocumentError("Referência de área inválida.".into())),
+        RegionRef::Area(_) | RegionRef::Multiple(_) => {
+            return Err(DocumentError(
+                "Escolha uma única área para esta consulta.".into(),
+            ));
+        }
     };
     if index >= regions.len() {
         return Err(DocumentError("Região do rascunho inexistente.".into()));
@@ -122,7 +126,7 @@ pub(super) fn region(
 }
 
 #[cfg(feature = "occt")]
-fn boolean_mode(mode: BooleanMode) -> u32 {
+pub(super) fn boolean_mode(mode: BooleanMode) -> u32 {
     match mode {
         BooleanMode::Join => 0,
         BooleanMode::Cut => 1,
@@ -233,13 +237,25 @@ pub(super) fn normalize(
     part: PartId,
     operation: Operation,
 ) -> Result<Operation, DocumentError> {
-    let stable_region = |sketch, reference: RegionRef| -> Result<RegionRef, DocumentError> {
+    let stable_one = |sketch, reference: RegionRef| -> Result<RegionRef, DocumentError> {
         Ok(match reference {
             RegionRef::Index(_) => {
                 RegionRef::Boundary(region(sketch_of(doc, part, sketch)?, &reference)?.boundary())
             }
             stable => stable,
         })
+    };
+    let stable_region = |sketch, reference: RegionRef| -> Result<RegionRef, DocumentError> {
+        if let RegionRef::Multiple(regions) = reference {
+            Ok(RegionRef::Multiple(
+                regions
+                    .into_iter()
+                    .map(|r| stable_one(sketch, r))
+                    .collect::<Result<_, _>>()?,
+            ))
+        } else {
+            stable_one(sketch, reference)
+        }
     };
     Ok(match operation {
         Operation::ExtrudeFace {

@@ -41,7 +41,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// como restrições não dimensionais de referência (`reference = true`).
 /// Versão 25: ordem dos elementos de cotas (`dimension_targets`), usada pela
 /// política de preservar o elemento mais conectado e o segundo nos empates.
-pub const FORMAT_VERSION: u32 = 25;
+/// Versão 26: sequências de criação, imagens RGBA incorporadas e múltiplas áreas na extrusão.
+pub const FORMAT_VERSION: u32 = 26;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -61,6 +62,10 @@ struct Manifest {
     document_id: String,
     name: String,
     next_id: u64,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    name_counters: nator_document::NameCounters,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    images: Vec<ImageRecord>,
     parts: Vec<PartRecord>,
     instances: Vec<InstanceRecord>,
     #[serde(default)]
@@ -106,6 +111,20 @@ struct SketchRecordData {
     /// Plano de trabalho que apoia o rascunho (versão 21); ausente, o plano é fixo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     support: Option<u64>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImageRecord {
+    id: u64,
+    sketch: u64,
+    name: String,
+    width: u32,
+    height: u32,
+    pixel_path: String,
+    origin: nator_sketch::Point2,
+    size: nator_sketch::Point2,
+    transparency: f64,
+    visible: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -412,6 +431,54 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         });
     }
     // A miniatura é opcional e só é conferida quanto ao tamanho e à assinatura PNG.
+    let mut images = Vec::new();
+    if manifest.images.len() > 256 {
+        return Err(ImportError("Quantidade de imagens excessiva.".into()));
+    }
+    let mut image_bytes = 0_u64;
+    for image in manifest.images {
+        if image.width == 0 || image.height == 0 || image.width > 8192 || image.height > 8192 {
+            return Err(ImportError("Dimensões da imagem inválidas.".into()));
+        }
+        let expected = u64::from(image.width) * u64::from(image.height) * 4;
+        image_bytes += expected;
+        if expected > nator_document::images::MAX_IMAGE_BYTES as u64
+            || image_bytes > 128 * 1024 * 1024
+        {
+            return Err(ImportError("Limite de pixels das imagens excedido.".into()));
+        }
+        if image.pixel_path != format!("images/{}.rgba", image.id)
+            || !expected_names.insert(image.pixel_path.clone())
+        {
+            return Err(ImportError(
+                "Caminho de imagem inválido ou repetido.".into(),
+            ));
+        }
+        let rgba = read_entry(
+            &mut archive,
+            &image.pixel_path,
+            nator_document::images::MAX_IMAGE_BYTES as u64,
+        )?;
+        if rgba.len() as u64 != expected {
+            return Err(ImportError(
+                "Quantidade de pixels da imagem inválida.".into(),
+            ));
+        }
+        images.push(nator_document::ReferenceImage {
+            id: nator_document::ImageId(image.id),
+            sketch: SketchId(image.sketch),
+            name: image.name,
+            asset: Arc::new(nator_document::RasterAsset {
+                width: image.width,
+                height: image.height,
+                rgba: Arc::new(rgba),
+            }),
+            origin: image.origin,
+            size: image.size,
+            transparency: image.transparency,
+            visible: image.visible,
+        });
+    }
     if archive.index_for_name(super::thumbnail::PATH).is_some() {
         let bytes = read_entry(
             &mut archive,
@@ -486,6 +553,10 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         )
         .map_err(error)?;
     document.restore_folders(manifest.folders);
+    document.restore_images(images).map_err(error)?;
+    document
+        .restore_name_counters(manifest.name_counters)
+        .map_err(error)?;
     Ok(document)
 }
 
@@ -591,6 +662,23 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
         document_id: document.id().into(),
         name: document.name().into(),
         next_id: document.next_id(),
+        name_counters: document.name_counters().clone(),
+        images: document
+            .images()
+            .iter()
+            .map(|image| ImageRecord {
+                id: image.id.0,
+                sketch: image.sketch.0,
+                name: image.name.clone(),
+                width: image.asset.width,
+                height: image.asset.height,
+                pixel_path: format!("images/{}.rgba", image.id.0),
+                origin: image.origin,
+                size: image.size,
+                transparency: image.transparency,
+                visible: image.visible,
+            })
+            .collect(),
         parts: document
             .parts()
             .iter()
@@ -687,6 +775,12 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .start_file("manifest.json", options)
             .map_err(error)?;
         archive.write_all(&bytes)?;
+        for image in document.images() {
+            archive
+                .start_file(format!("images/{}.rgba", image.id.0), options)
+                .map_err(error)?;
+            archive.write_all(&image.asset.rgba)?;
+        }
         if let Some(png) = super::thumbnail::render(document)? {
             // PNG já é comprimido: armazenar sem nova compressão.
             archive

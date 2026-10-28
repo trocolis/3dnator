@@ -22,15 +22,255 @@ pub struct Element {
     pub curves: Vec<Segment>,
     pub vertices: Vec<Point2>,
     pub triangles: Vec<[Point2; 3]>,
+    /// Contornos externos/furos de áreas de outros rascunhos, pela regra par-ímpar.
+    pub contours: Vec<Vec<Point2>>,
 }
 
-/// Prepara a seleção de Projetar fora da thread gráfica. Nenhum índice de origem
-/// é persistido: confirmar captura as coordenadas nesta revisão do documento.
 pub fn elements(
     document: &Document,
     occurrences: &[Occurrence],
     plane: Plane,
     target: Placement,
+) -> Result<Vec<Element>, DocumentError> {
+    elements_for_sketch(document, occurrences, plane, target, None)
+}
+
+fn inside_contours(contours: &[Vec<Point2>], p: Point2) -> bool {
+    let mut inside = false;
+    for points in contours {
+        for (a, b) in points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .take(points.len())
+        {
+            if (a[1] > p[1]) != (b[1] > p[1])
+                && p[0] < a[0] + (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1])
+            {
+                inside = !inside;
+            }
+        }
+    }
+    inside
+}
+
+/// Faces planas da malha são agrupadas pelo suporte. A contagem de incidências
+/// elimina diagonais internas, inclusive quando o STL repete coordenadas. Furos
+/// permanecem vazios porque a captura usa os triângulos reais da superfície.
+fn mesh_areas(
+    mesh: &nator_geometry::Mesh,
+    project: impl Fn(nator_geometry::Point3) -> Point2,
+) -> Vec<Element> {
+    type Key = [u64; 3];
+    #[derive(Default)]
+    struct Face {
+        triangles: Vec<[Point2; 3]>,
+        edges: HashMap<(Key, Key), (usize, [nator_geometry::Point3; 2])>,
+    }
+    let key = |p: nator_geometry::Point3| p.map(|v| if v == 0. { 0 } else { v.to_bits() });
+    let mut groups: HashMap<[i64; 4], Vec<[nator_geometry::Point3; 3]>> = HashMap::new();
+    for triangle in mesh.triangles() {
+        let points = mesh.triangle_points(*triangle);
+        let normal = nator_geometry::cross(
+            nator_geometry::sub(points[1], points[0]),
+            nator_geometry::sub(points[2], points[0]),
+        );
+        let length = nator_geometry::norm(normal);
+        if length < 1e-12 {
+            continue;
+        }
+        let mut normal = normal.map(|v| v / length);
+        if normal
+            .iter()
+            .find(|v| v.abs() > 1e-9)
+            .is_some_and(|v| *v < 0.)
+        {
+            normal = normal.map(|v| -v);
+        }
+        let plane = [
+            (normal[0] * 1e8).round() as i64,
+            (normal[1] * 1e8).round() as i64,
+            (normal[2] * 1e8).round() as i64,
+            (nator_geometry::dot(normal, points[0]) * 1e6).round() as i64,
+        ];
+        groups.entry(plane).or_default().push(points);
+    }
+    let mut groups = groups.into_iter().collect::<Vec<_>>();
+    groups.sort_by_key(|(key, _)| *key);
+    fn root(parents: &mut [usize], mut index: usize) -> usize {
+        while parents[index] != index {
+            parents[index] = parents[parents[index]];
+            index = parents[index];
+        }
+        index
+    }
+    let mut result = Vec::new();
+    for (_, triangles) in groups {
+        // Superfícies desconectadas no mesmo plano continuam sendo escolhas
+        // independentes; compartilhar apenas um vértice não une suas áreas.
+        let mut parents = (0..triangles.len()).collect::<Vec<_>>();
+        let mut owners = HashMap::new();
+        for (index, points) in triangles.iter().enumerate() {
+            for i in 0..3 {
+                let (a, b) = (key(points[i]), key(points[(i + 1) % 3]));
+                let edge = if a < b { (a, b) } else { (b, a) };
+                if let Some(previous) = owners.insert(edge, index) {
+                    let a = root(&mut parents, index);
+                    let b = root(&mut parents, previous);
+                    parents[a.max(b)] = a.min(b);
+                }
+            }
+        }
+        let mut components: HashMap<usize, Face> = HashMap::new();
+        for (index, points) in triangles.into_iter().enumerate() {
+            let face = components.entry(root(&mut parents, index)).or_default();
+            face.triangles.push(points.map(&project));
+            for i in 0..3 {
+                let pair = [points[i], points[(i + 1) % 3]];
+                let (a, b) = (key(pair[0]), key(pair[1]));
+                let edge = if a < b { (a, b) } else { (b, a) };
+                face.edges
+                    .entry(edge)
+                    .and_modify(|(n, _)| *n += 1)
+                    .or_insert((1, pair));
+            }
+        }
+        let mut components = components.into_iter().collect::<Vec<_>>();
+        components.sort_by_key(|(key, _)| *key);
+        for (_, face) in components {
+            let mut edges = face
+                .edges
+                .into_iter()
+                .filter(|(_, (count, _))| *count == 1)
+                .collect::<Vec<_>>();
+            edges.sort_by_key(|(key, _)| *key);
+            let curves = edges
+                .into_iter()
+                .filter_map(|(_, (_, pair))| {
+                    let (a, b) = (project(pair[0]), project(pair[1]));
+                    (nator_sketch::distance(a, b) > 1e-8).then_some(Segment::Line { a, b })
+                })
+                .collect::<Vec<_>>();
+            if !curves.is_empty() {
+                result.push(Element {
+                    kind: Kind::Plane,
+                    curves,
+                    vertices: vec![],
+                    triangles: face.triangles,
+                    contours: vec![],
+                });
+            }
+        }
+    }
+    result
+}
+
+fn sketch_elements(
+    sketch: &nator_sketch::Sketch,
+    source: Placement,
+    plane: Plane,
+    target: Placement,
+) -> Result<Vec<Element>, DocumentError> {
+    let error = |e: nator_sketch::SketchError| DocumentError(e.to_string());
+    let project = |p| plane.project(target.inverse_apply(source.apply(sketch.plane.world(p))));
+    let alignment = nator_geometry::dot(
+        target.inverse_vector(source.apply_vector(sketch.plane.normal())),
+        plane.normal(),
+    );
+    let curves = |curve: &Segment| -> Vec<Segment> {
+        match *curve {
+            Segment::Line { a, b } => {
+                let (a, b) = (project(a), project(b));
+                if nator_sketch::distance(a, b) < 1e-8 {
+                    vec![]
+                } else {
+                    vec![Segment::Line { a, b }]
+                }
+            }
+            Segment::Circle { center, radius } if alignment.abs() > 1. - 1e-9 => {
+                vec![Segment::Circle {
+                    center: project(center),
+                    radius,
+                }]
+            }
+            Segment::Arc {
+                center,
+                a,
+                b,
+                clockwise,
+            } if alignment.abs() > 1. - 1e-9 => vec![Segment::Arc {
+                center: project(center),
+                a: project(a),
+                b: project(b),
+                clockwise: clockwise != (alignment < 0.),
+            }],
+            _ => {
+                let radius = match *curve {
+                    Segment::Circle { radius, .. } => radius,
+                    Segment::Arc { center, a, .. } => nator_sketch::distance(center, a),
+                    _ => 0.,
+                };
+                let steps = (std::f64::consts::TAU * (radius / 0.08).sqrt())
+                    .ceil()
+                    .clamp(16., 16384.) as usize;
+                curve
+                    .sample(steps)
+                    .windows(2)
+                    .filter_map(|p| {
+                        let (a, b) = (project(p[0]), project(p[1]));
+                        (nator_sketch::distance(a, b) >= 1e-8).then_some(Segment::Line { a, b })
+                    })
+                    .collect()
+            }
+        }
+    };
+    let mut result = Vec::new();
+    for point in sketch.visible_points() {
+        result.push(Element {
+            kind: Kind::Vertex,
+            vertices: vec![project(point.position)],
+            curves: vec![],
+            triangles: vec![],
+            contours: vec![],
+        });
+    }
+    for entity in sketch.entities.iter().filter(|e| !e.infinite) {
+        result.push(Element {
+            kind: Kind::Edge,
+            vertices: vec![],
+            curves: curves(&nator_sketch::profiles::segment(sketch, entity).map_err(error)?),
+            triangles: vec![],
+            contours: vec![],
+        });
+    }
+    for region in nator_sketch::areas::regions(sketch).map_err(error)? {
+        let mut edges = Vec::new();
+        let mut contours = Vec::new();
+        for wire in std::iter::once(&region.outer).chain(&region.holes) {
+            let projected = wire.segments.iter().flat_map(&curves).collect::<Vec<_>>();
+            contours.push(projected.iter().flat_map(|s| s.sample(128)).collect());
+            edges.extend(projected);
+        }
+        if !edges.is_empty() {
+            result.push(Element {
+                kind: Kind::Plane,
+                curves: edges,
+                vertices: vec![],
+                triangles: vec![],
+                contours,
+            });
+        }
+    }
+    Ok(result)
+}
+
+/// Prepara a seleção de Projetar fora da thread gráfica. Nenhum índice de origem
+/// é persistido: confirmar captura as coordenadas nesta revisão do documento.
+pub fn elements_for_sketch(
+    document: &Document,
+    occurrences: &[Occurrence],
+    plane: Plane,
+    target: Placement,
+    edited: Option<SketchId>,
 ) -> Result<Vec<Element>, DocumentError> {
     plane.validate().map_err(|e| DocumentError(e.to_string()))?;
     let mut result = Vec::new();
@@ -65,6 +305,7 @@ pub fn elements(
                                         curves: vec![],
                                         vertices: vec![project(p)],
                                         triangles: vec![],
+                                        contours: vec![],
                                     });
                                 }
                             }
@@ -75,18 +316,13 @@ pub fn elements(
                                 curves: curves.clone(),
                                 vertices: vec![],
                                 triangles: vec![],
+                                contours: vec![],
                             });
                             edges.push(curves);
                         }
                         let mesh = body.geometry.mesh();
                         let mut faces = Vec::new();
                         for face in 0..solid.face_count()? {
-                            if !matches!(
-                                solid.face_measure(face)?.kind,
-                                nator_kernel::FaceKind::Plane { .. }
-                            ) {
-                                continue;
-                            }
                             let curves = solid
                                 .face_edges(face)?
                                 .into_iter()
@@ -109,6 +345,7 @@ pub fn elements(
                                     curves,
                                     vertices: vec![],
                                     triangles,
+                                    contours: vec![],
                                 });
                             }
                         }
@@ -135,6 +372,7 @@ pub fn elements(
                     curves: vec![],
                     vertices: vec![project(*p)],
                     triangles: vec![],
+                    contours: vec![],
                 });
             }
             for (triangle, mask) in mesh.triangles().iter().zip(body.geometry.creases()) {
@@ -149,11 +387,44 @@ pub fn elements(
                             }],
                             vertices: vec![],
                             triangles: vec![],
+                            contours: vec![],
                         });
                     }
                 }
             }
+            result.extend(mesh_areas(mesh, project));
         }
+    }
+    for occurrence in occurrences {
+        if let Some(part) = document
+            .instance(occurrence.instance)
+            .and_then(|i| document.part(i.part))
+        {
+            for record in part
+                .sketches
+                .iter()
+                .filter(|s| Some(s.id) != edited && part.shows_sketch(s))
+            {
+                result.extend(sketch_elements(
+                    &record.sketch,
+                    occurrence.placement,
+                    plane,
+                    target,
+                )?);
+            }
+        }
+    }
+    for record in document
+        .reference_sketches()
+        .iter()
+        .filter(|s| Some(s.id) != edited && document.shows_reference_sketch(s))
+    {
+        result.extend(sketch_elements(
+            &record.sketch,
+            Placement::default(),
+            plane,
+            target,
+        )?);
     }
     Ok(result)
 }
@@ -243,23 +514,26 @@ pub fn pick(
                     .fold(f64::INFINITY, f64::min),
             ),
             Kind::Plane => {
-                if !element.triangles.iter().any(|t| {
-                    let sides = (0..3)
-                        .map(|i| {
-                            nator_sketch::cross(
-                                nator_sketch::sub(t[(i + 1) % 3], t[i]),
-                                nator_sketch::sub(cursor, t[i]),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let area = nator_sketch::cross(
-                        nator_sketch::sub(t[1], t[0]),
-                        nator_sketch::sub(t[2], t[0]),
-                    )
-                    .abs();
-                    area > 1e-12
-                        && (sides.iter().all(|s| *s >= -1e-9) || sides.iter().all(|s| *s <= 1e-9))
-                }) {
+                if !inside_contours(&element.contours, cursor)
+                    && !element.triangles.iter().any(|t| {
+                        let sides = (0..3)
+                            .map(|i| {
+                                nator_sketch::cross(
+                                    nator_sketch::sub(t[(i + 1) % 3], t[i]),
+                                    nator_sketch::sub(cursor, t[i]),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        let area = nator_sketch::cross(
+                            nator_sketch::sub(t[1], t[0]),
+                            nator_sketch::sub(t[2], t[0]),
+                        )
+                        .abs();
+                        area > 1e-12
+                            && (sides.iter().all(|s| *s >= -1e-9)
+                                || sides.iter().all(|s| *s <= 1e-9))
+                    })
+                {
                     continue;
                 }
                 (2, 0.)

@@ -16,6 +16,15 @@ use std::{collections::VecDeque, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    AddReferenceImage {
+        image: nator_document::ReferenceImage,
+    },
+    UpdateReferenceImage {
+        image: nator_document::ReferenceImage,
+    },
+    RemoveReferenceImage {
+        id: nator_document::ImageId,
+    },
     /// Escolhe o modo pelo contato geométrico antes de publicar uma operação concreta.
     /// A sugestão não é persistida como regra implícita: editar o histórico mantém o modo.
     AddSmartExtrusion {
@@ -216,6 +225,10 @@ pub enum Command {
     RemoveSketch {
         id: SketchId,
     },
+    RenameSketch {
+        id: SketchId,
+        name: String,
+    },
     /// Plano de trabalho na peça: um plano-base, em coordenadas da peça, deslocado ao
     /// longo da sua normal.
     AddWorkPlane {
@@ -246,6 +259,10 @@ pub enum Command {
     /// Peça nova e vazia, com uma instância na raiz da montagem, ao lado das existentes.
     CreatePart {
         name: String,
+    },
+    CreatePartIn {
+        name: String,
+        parent: Option<PartId>,
     },
     /// Configurações do documento (apresentação).
     SetSettings {
@@ -337,6 +354,9 @@ impl Rebuilds {
 impl Command {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::AddReferenceImage { .. } => "Adicionar imagem de referência",
+            Self::UpdateReferenceImage { .. } => "Editar imagem de referência",
+            Self::RemoveReferenceImage { .. } => "Excluir imagem de referência",
             Self::ImportStep { .. } => "Importar montagem STEP",
             Self::SetSheet { .. } => "Salvar folha técnica associada",
             Self::ImportSolid { .. } => "Importar sólido CAD",
@@ -384,17 +404,24 @@ impl Command {
             Self::SetSettings { .. } => "Alterar configurações do documento",
             Self::AddReferenceSketch { .. } => "Criar rascunho de referência",
             Self::RemoveSketch { .. } => "Excluir rascunho",
+            Self::RenameSketch { .. } => "Renomear rascunho",
             Self::AddWorkPlane { .. } => "Criar plano deslocado",
             Self::UpdateWorkPlane { .. } => "Editar plano deslocado",
             Self::SetWorkPlaneVisibility { .. } => "Alterar visibilidade do plano",
             Self::RemoveWorkPlane { .. } => "Excluir plano de trabalho",
             Self::AddSketchOnWorkPlane { .. } => "Criar rascunho no plano",
             Self::CreatePart { .. } => "Criar peça",
+            Self::CreatePartIn { .. } => "Criar peça na pasta",
             Self::InsertPart { .. } => "Inserir peça de outro projeto",
         }
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
         match self {
+            Self::AddReferenceImage { image } => {
+                doc.add_image(image)?;
+            }
+            Self::UpdateReferenceImage { image } => doc.update_image(image)?,
+            Self::RemoveReferenceImage { id } => doc.remove_image(id)?,
             Self::ImportStep {
                 path,
                 destination,
@@ -763,6 +790,10 @@ impl Command {
                 return Ok(Effect::ReferenceSketchCreated { sketch });
             }
             Self::RemoveSketch { id } => doc.remove_sketch(id)?,
+            Self::RenameSketch { id, name } => {
+                nator_document::validate_name(&name)?;
+                doc.sketch_mut(id)?.sketch.name = name;
+            }
             Self::AddWorkPlane { part, name, plane } => {
                 let plane = doc.add_work_plane(part, name, plane)?;
                 return Ok(Effect::WorkPlaneCreated { part, plane });
@@ -785,6 +816,20 @@ impl Command {
             Self::CreatePart { name } => {
                 let part = doc.create_part(name)?;
                 place_new_part(doc, None, part)?;
+                return Ok(Effect::PartCreated { part });
+            }
+            Self::CreatePartIn { name, parent } => {
+                let part = doc.create_part(name)?;
+                if let Some(parent) = parent {
+                    let instance = doc
+                        .instances()
+                        .iter()
+                        .find(|i| i.part == part && i.parent.is_none())
+                        .map(|i| i.id)
+                        .ok_or_else(|| DocumentError("Instância da peça nova ausente.".into()))?;
+                    doc.reparent(instance, Some(parent))?;
+                }
+                place_new_part(doc, parent, part)?;
                 return Ok(Effect::PartCreated { part });
             }
             Self::InsertPart {
@@ -855,9 +900,12 @@ fn add_feature(
     // operação pertence à linha do tempo; criações sem entrada ganham seu próprio nome.
     // Edições posteriores de nome/cor do resultado não são sobrescritas pelo recálculo.
     let source = operation.inputs().first().and_then(|id| doc.body(*id));
-    let body_name = source
-        .map(|b| b.name.clone())
-        .unwrap_or_else(|| name.clone());
+    let body_name = source.map(|b| b.name.clone()).unwrap_or_else(|| {
+        format!(
+            "Corpo {}",
+            doc.next_name_number(nator_document::ElementKind::Body) - 1
+        )
+    });
     let color = source.and_then(|b| b.color);
     doc.add_body(
         part,

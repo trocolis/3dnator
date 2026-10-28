@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 25
+# Formato de projeto — versão interna 26
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 25; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 26; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -9,9 +9,16 @@ manifest.json
 meshes/<body_id>.bin
 breps/<body_id>.brep      (somente corpos sólidos CAD)
 faces/<body_id>.bin       (somente corpos sólidos CAD, opcional)
+images/<image_id>.rgba    (imagens de referência, opcional)
 ```
 
 ## Manifesto
+
+Desde a versão 26, `name_counters` opcional no manifesto guarda a última sequência usada por tipo (`Part`, `Body`, `Sketch`, `WorkPlane`, `Image`). São contadores de criação independentes dos IDs globais e dos nomes editáveis. Renomear ou excluir não os reduz; desfazer/refazer restaura o estado correspondente. Na leitura de versões antigas, a sequência inicial usa a quantidade existente e os sufixos padrão ainda presentes. Nomes próprios e nomes importados são preservados.
+
+`images` opcional no manifesto contém `id`, `sketch`, `name`, `width`, `height`, `pixel_path`, `origin`, `size`, `transparency` e `visible`. `origin` é o canto inferior esquerdo, e `size` é largura/altura positivas, em mm no plano local do rascunho indicado. O plano/posicionamento desse rascunho fornece as coordenadas na peça/montagem. `transparency` varia de 0 a 1; 0,5 corresponde aos 50% iniciais da interface. O payload `images/<id>.rgba` contém exatamente `width × height × 4` bytes RGBA de 8 bits, com linhas de cima para baixo, comprimido pelo ZIP. Não há caminho externo nem cabeçalho de imagem a interpretar. O leitor confere caminho derivado do ID, existência do rascunho, dimensões, quantidade de pixels e limites: 256 imagens, até 8192 pixels por lado, 64 MiB por imagem e 128 MiB de pixels no documento. IDs pertencem ao espaço global. Excluir um rascunho remove suas imagens; copiar uma peça remapeia os rascunhos/IDs das imagens e compartilha os pixels em memória.
+
+Extrusão aceita `RegionRef::Multiple`, serializado como `{"Multiple": [referência, ...]}`, com referências do mesmo rascunho. A lista é plana, sem repetições, de uma a 1024 áreas. Cada referência mantém a representação `Area`, `Boundary` ou a compatibilidade antiga `Index`; novas edições normalizam os índices. O recálculo une os prismas, e os nomes das faces recebem uma chave derivada do contorno, independente da ordem da seleção. Revolução continua exigindo uma única região.
 
 Desde a versão 25, `dimension_targets` opcional no rascunho associa o ID de uma cota aos dois elementos na ordem em que foram escolhidos: `Point(id)` ou `Entity(id)`, serializados como objetos com esse nome e ID local. A chave deve identificar uma cota existente e os dois alvos devem existir no mesmo rascunho. O campo é omitido quando vazio. Editar o valor ou mover o texto preserva esses alvos, o ID da cota e `dimension_labels`.
 
@@ -111,6 +118,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 
 ## Migrações
 
+- 25 → 26: sequências opcionais de nomes e imagens incorporadas; ausências significam sequências inferidas e nenhuma imagem. Extrusões podem guardar múltiplas referências de áreas, sem alterar a interpretação das seleções antigas.
 - 17 → 18: `Entity::infinite` opcional e restrição `LineAngle`. Ausência do campo mantém todas as linhas antigas finitas; não há conversão de geometria nem alteração dos perfis existentes.
 - 16 → 17: `Operation::ExtrudeFace` registra corpo/face de origem, limites, combinação opcional e face limite opcional. A origem é referência mesmo quando Novo corpo não a consome. `RegionRef::Area` registra um ciclo canônico de pares (entidade, sentido invertido), distinguindo células que usam as mesmas curvas. Regiões antigas `Boundary`/`Index` preservam sua interpretação anterior; não há conversão implícita que altere sólidos existentes. O modo automático só é resolvido na criação do comando; o arquivo guarda Unir/Remover/Interseção ou Novo corpo concretos. Laterais de extrusão de face recebem nomes derivados dos papéis das faces adjacentes à aresta de origem, sem depender da ordem das arestas.
 - 15 → 16: rascunhos podem conter a restrição `Angle { a, b, value }`, orientação do vetor entre dois pontos em relação ao eixo X local. `value` usa radianos; expressões associadas são avaliadas como ângulo (números sem unidade usam graus). Referências angulares medem a geometria sem dirigi-la. Não há campos obrigatórios novos nos projetos anteriores.

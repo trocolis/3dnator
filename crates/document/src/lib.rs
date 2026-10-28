@@ -5,6 +5,10 @@ use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 pub mod assembly;
 pub mod drawing;
 pub mod features;
+pub mod images;
+pub use images::{RasterAsset, ReferenceImage};
+pub mod naming;
+pub use naming::{ElementKind, NameCounters};
 pub mod parameters;
 pub mod selection;
 pub mod work_planes;
@@ -26,6 +30,7 @@ identifier!(SketchId);
 identifier!(GroupId);
 identifier!(SheetId);
 identifier!(WorkPlaneId);
+identifier!(ImageId);
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SheetRecord {
     pub id: SheetId,
@@ -297,6 +302,8 @@ pub struct Document {
     id: String,
     name: String,
     next_id: u64,
+    name_counters: NameCounters,
+    images: Vec<ReferenceImage>,
     parts: Vec<Part>,
     instances: Vec<Instance>,
     groups: Vec<assembly::Group>,
@@ -327,6 +334,8 @@ impl Document {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             next_id: 1,
+            name_counters: NameCounters::default(),
+            images: vec![],
             parts: Vec::new(),
             instances: Vec::new(),
             groups: Vec::new(),
@@ -344,10 +353,12 @@ impl Document {
         parts: Vec<Part>,
         instances: Vec<Instance>,
     ) -> Result<Self, DocumentError> {
-        let document = Self {
+        let mut document = Self {
             id,
             name,
             next_id,
+            name_counters: NameCounters::default(),
+            images: vec![],
             parts,
             instances,
             groups: Vec::new(),
@@ -356,6 +367,7 @@ impl Document {
             reference_sketches: Vec::new(),
             folders: ProjectFolders::default(),
         };
+        document.restore_name_counters(NameCounters::default())?;
         document.validate()?;
         Ok(document)
     }
@@ -591,11 +603,15 @@ impl Document {
     /// Rascunho de referência novo, no plano dado em coordenadas da montagem.
     pub fn add_reference_sketch(
         &mut self,
-        sketch: nator_sketch::Sketch,
+        mut sketch: nator_sketch::Sketch,
     ) -> Result<SketchId, DocumentError> {
         sketch
             .validate()
             .map_err(|e| DocumentError(e.to_string()))?;
+        let number = self.record_creation(ElementKind::Sketch)?;
+        if matches!(sketch.name.as_str(), "Rascunho" | "Rascunho de referência") {
+            sketch.name = format!("{} {number}", sketch.name);
+        }
         let id = SketchId(self.allocate_id()?);
         self.reference_sketches.push(SketchRecord {
             id,
@@ -620,6 +636,7 @@ impl Document {
     pub fn remove_sketch(&mut self, id: SketchId) -> Result<(), DocumentError> {
         if self.is_reference_sketch(id) {
             self.reference_sketches.retain(|s| s.id != id);
+            self.images.retain(|i| i.sketch != id);
             return Ok(());
         }
         let part = self
@@ -637,10 +654,15 @@ impl Document {
             ));
         }
         part.sketches.retain(|s| s.id != id);
+        self.images.retain(|i| i.sketch != id);
         Ok(())
     }
-    pub fn create_part(&mut self, name: String) -> Result<PartId, DocumentError> {
+    pub fn create_part(&mut self, mut name: String) -> Result<PartId, DocumentError> {
         validate_name(&name)?;
+        let number = self.record_creation(ElementKind::Part)?;
+        if name == "Peça" {
+            name = format!("{name} {number}");
+        }
         let id = PartId(self.allocate_id()?);
         let instance = InstanceId(self.allocate_id()?);
         self.parts.push(Part {
@@ -668,7 +690,7 @@ impl Document {
     pub fn add_sketch(
         &mut self,
         destination: Option<PartId>,
-        sketch: nator_sketch::Sketch,
+        mut sketch: nator_sketch::Sketch,
     ) -> Result<(PartId, SketchId), DocumentError> {
         sketch
             .validate()
@@ -680,6 +702,10 @@ impl Document {
             self.create_part("Peça".into())?
         };
         let id = SketchId(self.allocate_id()?);
+        let number = self.record_creation(ElementKind::Sketch)?;
+        if sketch.name == "Rascunho" {
+            sketch.name = format!("{} {number}", sketch.name);
+        }
         self.part_mut(part)?.sketches.push(SketchRecord {
             id,
             sketch,
@@ -738,31 +764,7 @@ impl Document {
         }
         let part = match destination {
             Some(id) => id,
-            None => {
-                let id = PartId(self.allocate_id()?);
-                let instance = InstanceId(self.allocate_id()?);
-                self.parts.push(Part {
-                    id,
-                    name: name.clone(),
-                    bodies: Vec::new(),
-                    sketches: Vec::new(),
-                    work_planes: Vec::new(),
-                    parameters: parameters::Parameters::default(),
-                    features: Vec::new(),
-                    history_marker: None,
-                    folders: PartFolders::default(),
-                });
-                self.instances.push(Instance {
-                    parent: None,
-                    id: instance,
-                    part: id,
-                    name: name.clone(),
-                    placement: Placement::default(),
-                    visible: true,
-                    color: None,
-                });
-                id
-            }
+            None => self.create_part(name.clone())?,
         };
         let body = self.allocate_body_id()?;
         self.part_mut(part)?.bodies.push(Body {
@@ -780,6 +782,7 @@ impl Document {
     /// Reserva o identificador do próximo corpo. Operações paramétricas precisam dele antes
     /// de construir o sólido, porque os nomes das faces levam o dono (`b{id}`).
     pub fn allocate_body_id(&mut self) -> Result<BodyId, DocumentError> {
+        self.record_creation(ElementKind::Body)?;
         Ok(BodyId(self.allocate_id()?))
     }
     /// Insere um corpo com identificador já reservado por `allocate_body_id`.
@@ -804,6 +807,7 @@ impl Document {
     }
 
     pub fn validate(&self) -> Result<(), DocumentError> {
+        self.validate_images()?;
         validate_name(&self.name)?;
         if self.next_id == 0 {
             return Err(DocumentError(
@@ -813,6 +817,7 @@ impl Document {
         uuid::Uuid::parse_str(&self.id)
             .map_err(|_| DocumentError("Identificador do projeto inválido.".into()))?;
         let count = self.parts.len()
+            + self.images.len()
             + self.instances.len()
             + self.groups.len()
             + self

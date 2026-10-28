@@ -54,6 +54,14 @@ mod precise {
                     .find(|s| s.id == *sketch)
                     .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))?
                     .sketch;
+                let reference =
+                    if let nator_document::features::RegionRef::Multiple(regions) = reference {
+                        regions
+                            .first()
+                            .ok_or_else(|| error("Selecione uma área."))?
+                    } else {
+                        reference
+                    };
                 let region = region(sketch, reference)?;
                 let points = region.outer.sample(48);
                 let center = points.iter().fold([0.; 2], |a, p| nator_sketch::add(a, *p));
@@ -204,8 +212,45 @@ mod precise {
                     .sketch;
                 // O início do prisma de rascunho é relativo ao plano, e o centro da
                 // guia pertence a esse mesmo plano, independentemente da origem local.
-                Solid::extrude(sketch, &region(sketch, reference)?, from, to, owner)
-                    .map_err(error)?
+                let references =
+                    if let nator_document::features::RegionRef::Multiple(regions) = reference {
+                        regions.as_slice()
+                    } else {
+                        std::slice::from_ref(reference)
+                    };
+                let mut result: Option<Solid> = None;
+                for reference in references {
+                    let area = region(sketch, reference)?;
+                    let mut prism =
+                        Solid::extrude(sketch, &area, from, to, owner).map_err(error)?;
+                    // Todas as células pertencem ao mesmo corpo; o sufixo evita
+                    // tampas homônimas e mantém faces selecionáveis no histórico.
+                    if references.len() > 1 {
+                        let signature =
+                            nator_sketch::areas::signature(sketch, &area).map_err(error)?;
+                        let bytes = signature
+                            .iter()
+                            .flat_map(|(id, reverse)| {
+                                id.to_le_bytes().into_iter().chain([u8::from(*reverse)])
+                            })
+                            .collect::<Vec<_>>();
+                        let key = nator_document::features::signature(&bytes);
+                        // A identidade vem do contorno, nunca da ordem dos
+                        // cliques: reordenar a seleção não troca a face referida.
+                        prism.map_face_names(|name| format!("{name}:area{key:x}"));
+                    }
+                    result = Some(match result {
+                        None => prism,
+                        Some(previous) => previous
+                            .boolean(
+                                &prism,
+                                crate::features::boolean_mode(BooleanMode::Join),
+                                owner,
+                            )
+                            .map_err(error)?,
+                    });
+                }
+                result.ok_or_else(|| error("Selecione pelo menos uma área."))?
             }
             Operation::ExtrudeFace { base, face, .. } => {
                 let (solid, bytes) = source(doc, part, *base)?;

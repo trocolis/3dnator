@@ -139,7 +139,10 @@ impl Document {
             part,
             Body {
                 id: copy,
-                name: format!("{} (cópia)", source.name),
+                name: format!(
+                    "Corpo {}",
+                    self.next_name_number(crate::ElementKind::Body) - 1
+                ),
                 face_names,
                 placement,
                 visible: true,
@@ -202,6 +205,7 @@ impl Document {
             .part(source)
             .ok_or_else(|| DocumentError("Peça inexistente.".into()))?
             .clone();
+        self.record_creation(crate::ElementKind::Part)?;
         let id = PartId(self.allocate_id()?);
         map.insert(source, id);
         part.id = id;
@@ -209,7 +213,7 @@ impl Document {
         let mut sketch_map = HashMap::new();
         for body in &mut part.bodies {
             let old = body.id;
-            body.id = BodyId(self.allocate_id()?);
+            body.id = self.allocate_body_id()?;
             body_map.insert(old, body.id);
         }
         // Os nomes de faces levam o corpo dono; no clone, passam aos novos corpos.
@@ -224,6 +228,7 @@ impl Document {
             }
         }
         for sketch in &mut part.sketches {
+            self.record_creation(crate::ElementKind::Sketch)?;
             let old = sketch.id;
             sketch.id = SketchId(self.allocate_id()?);
             sketch_map.insert(old, sketch.id);
@@ -232,6 +237,7 @@ impl Document {
         // neles passam a apontar para as cópias.
         let mut plane_map = HashMap::new();
         for plane in &mut part.work_planes {
+            self.record_creation(crate::ElementKind::WorkPlane)?;
             let old = plane.id;
             plane.id = WorkPlaneId(self.allocate_id()?);
             plane_map.insert(old, plane.id);
@@ -243,6 +249,17 @@ impl Document {
             feature.remap(&body_map, &sketch_map)?;
         }
         self.parts.push(part);
+        for image in from
+            .images
+            .iter()
+            .filter(|i| sketch_map.contains_key(&i.sketch))
+        {
+            let mut image = image.clone();
+            if let Some(sketch) = sketch_map.get(&image.sketch) {
+                image.sketch = *sketch;
+            }
+            self.add_image(image)?;
+        }
         let children = from
             .instances
             .iter()

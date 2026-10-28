@@ -55,16 +55,6 @@ impl Draft {
     }
 }
 
-/// "Plano N" com o primeiro número livre na peça. Entre `len + 1` candidatos sempre há um
-/// nome que nenhum plano usa.
-fn next_name(part: &nator_document::Part) -> String {
-    let prefix = text(T::WorkPlaneName);
-    (1..=part.work_planes.len() + 1)
-        .map(|n| format!("{prefix} {n}"))
-        .find(|name| !part.work_planes.iter().any(|w| &w.name == name))
-        .unwrap_or_else(|| prefix.to_owned())
-}
-
 impl Editor {
     pub(super) fn open_offset_plane(&mut self) {
         if self.busy() || self.current().sketch_edit.is_some() {
@@ -344,9 +334,16 @@ impl Editor {
         }
         if outcome.ok
             && let Some(plane) = draft.work_plane()
-            && let Some(part) = self.current().session.document().part(draft.part)
+            && self.current().session.document().part(draft.part).is_some()
         {
-            let name = next_name(part);
+            let name = format!(
+                "{} {}",
+                text(T::WorkPlaneName),
+                self.current()
+                    .session
+                    .document()
+                    .next_name_number(nator_document::ElementKind::WorkPlane)
+            );
             let command = Command::AddWorkPlane {
                 part: draft.part,
                 name: name.clone(),
@@ -516,19 +513,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_planes_take_the_first_free_number() -> Result<(), Box<dyn std::error::Error>> {
+    fn plane_creation_numbers_survive_renaming_and_deletion()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut document = Document::new("Nomes")?;
         let part = document.create_part("Peça".into())?;
-        let name = |document: &Document| document.part(part).map(next_name).ok_or("Peça ausente");
-        assert_eq!(name(&document)?, "Plano 1");
+        let name = |document: &Document| {
+            format!(
+                "{} {}",
+                text(T::WorkPlaneName),
+                document.next_name_number(nator_document::ElementKind::WorkPlane)
+            )
+        };
+        assert_eq!(name(&document), "Plano 1");
         let plane = WorkPlane {
             base: Plane::xy(),
             offset: 5.,
         };
-        document.add_work_plane(part, "Plano 2".into(), plane)?;
-        assert_eq!(name(&document)?, "Plano 1");
-        document.add_work_plane(part, "Plano 1".into(), plane)?;
-        assert_eq!(name(&document)?, "Plano 3");
+        let id = document.add_work_plane(part, name(&document), plane)?;
+        document.work_plane_mut(id)?.name = "Principal".into();
+        assert_eq!(name(&document), "Plano 2");
+        document.remove_work_plane(id)?;
+        assert_eq!(name(&document), "Plano 2");
+        document.add_work_plane(part, name(&document), plane)?;
+        assert_eq!(name(&document), "Plano 3");
         Ok(())
     }
 }

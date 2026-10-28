@@ -52,11 +52,12 @@ impl Cache {
             std::thread::Builder::new()
                 .name("sketch-project-elements".into())
                 .spawn(move || {
-                    let result = sketch_projection::elements(
+                    let result = sketch_projection::elements_for_sketch(
                         &document,
                         &occurrences,
                         key.plane,
                         key.placement,
+                        Some(key.sketch),
                     )
                     .map_err(|e| e.to_string());
                     let _ = sender.send(result);
@@ -98,6 +99,16 @@ impl Cache {
             return Ok(false);
         };
         let element = &self.elements[index];
+        let polygons = element
+            .contours
+            .iter()
+            .map(|c| {
+                c.iter()
+                    .filter_map(|p| frame.screen(*p))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        profile_pick::fill(painter, &polygons, theme::PROJECTED_FILL);
         for triangle in &element.triangles {
             let points = triangle
                 .iter()

@@ -159,7 +159,7 @@ fn refinements_keep_one_listed_body_and_editing_reuses_its_result() -> Result<()
             .len(),
         3
     );
-    assert_eq!(listed(session.document())?, [(c, "Placa".into())]);
+    assert_eq!(listed(session.document())?, [(c, "Corpo 1".into())]);
     assert_eq!(
         session
             .document()
@@ -197,11 +197,11 @@ fn refinements_keep_one_listed_body_and_editing_reuses_its_result() -> Result<()
         part,
         marker: Some(1),
     })?;
-    assert_eq!(listed(session.document())?, [(a, "Placa".into())]);
+    assert_eq!(listed(session.document())?, [(a, "Corpo 1".into())]);
     assert!(session.undo());
     assert_eq!(listed(session.document())?, [(c, "Chassi".into())]);
     assert!(session.redo());
-    assert_eq!(listed(session.document())?, [(a, "Placa".into())]);
+    assert_eq!(listed(session.document())?, [(a, "Corpo 1".into())]);
     Ok(())
 }
 

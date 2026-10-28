@@ -95,6 +95,7 @@ impl Document {
         validate_name(&name)?;
         plane.validate()?;
         self.part_mut(part)?;
+        self.record_creation(super::ElementKind::WorkPlane)?;
         let id = WorkPlaneId(self.allocate_id()?);
         self.part_mut(part)?.work_planes.push(WorkPlaneRecord {
             id,
