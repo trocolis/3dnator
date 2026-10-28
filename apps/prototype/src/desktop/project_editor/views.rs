@@ -74,6 +74,15 @@ impl Editor {
             self.activate_selection(context);
             return;
         }
+        if self.image_edit.is_some() {
+            if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.image_edit = None;
+            }
+            if !context.egui_wants_keyboard_input() {
+                self.history_shortcuts(context);
+            }
+            return;
+        }
         if context.egui_wants_keyboard_input()
             || self
                 .current()
@@ -137,6 +146,9 @@ impl Editor {
             self.select_sketch_tool(sketch_editor::Tool::Dimension);
             return;
         }
+        self.history_shortcuts(context);
+    }
+    fn history_shortcuts(&mut self, context: &egui::Context) {
         let redo = context.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
                 egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
@@ -164,6 +176,7 @@ impl Editor {
                 work.pending = None;
             }
             self.sanitize_sketch_selection();
+            self.refresh_reference_image();
             self.current_mut().changed();
             self.invalidate_scene();
         }
@@ -260,6 +273,113 @@ impl Editor {
                 self.finish_sketch();
                 self.current_mut().active_part = None;
                 self.begin_reference_sketch(id);
+            }
+            Intent::DeleteSketch(id) => {
+                self.execute(Command::RemoveSketch { id });
+                if self.current().session.document().sketch(id).is_none()
+                    && self
+                        .current()
+                        .sketch_edit
+                        .as_ref()
+                        .is_some_and(|w| w.id == id)
+                {
+                    if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                        work.pending = None;
+                    }
+                    self.finish_sketch();
+                }
+            }
+            Intent::NewInFolder(folder) => {
+                use nator_document::Folder;
+                match folder {
+                    Folder::Sketches(part) => {
+                        self.current_mut().active_part = Some(part);
+                        self.start_sketch_plane();
+                    }
+                    Folder::ReferenceSketches => self.start_reference_sketch_plane(),
+                    Folder::WorkPlanes(part) => {
+                        self.current_mut().active_part = Some(part);
+                        self.open_offset_plane();
+                    }
+                    Folder::Bodies(part) => {
+                        self.current_mut().active_part = Some(part);
+                        self.open_feature_tool(feature_editor::Tool::Extrude);
+                    }
+                    Folder::Parts | Folder::Subparts(_) => {
+                        let parent = if let Folder::Subparts(parent) = folder {
+                            Some(parent)
+                        } else {
+                            None
+                        };
+                        self.execute(Command::CreatePartIn {
+                            name: format!(
+                                "{} {}",
+                                text(T::NewPartName),
+                                self.current()
+                                    .session
+                                    .document()
+                                    .next_name_number(nator_document::ElementKind::Part)
+                            ),
+                            parent,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Intent::EditImage(id) => self.edit_reference_image(id),
+            Intent::NewImage(owner) => {
+                let current = self
+                    .current()
+                    .sketch_edit
+                    .as_ref()
+                    .map(|w| w.id)
+                    .filter(|id| self.current().session.document().sketch_part(*id) == owner);
+                let sketch = current
+                    .or_else(|| {
+                        owner.and_then(|part| {
+                            self.current()
+                                .session
+                                .document()
+                                .part(part)
+                                .and_then(|p| p.sketches.first())
+                                .map(|s| s.id)
+                        })
+                    })
+                    .or_else(|| {
+                        if owner.is_none() {
+                            self.current()
+                                .session
+                                .document()
+                                .reference_sketches()
+                                .first()
+                                .map(|s| s.id)
+                        } else {
+                            None
+                        }
+                    });
+                if let Some(sketch) = sketch {
+                    if let Some(part) = owner {
+                        self.begin_sketch(part, sketch);
+                    } else {
+                        self.begin_reference_sketch(sketch);
+                    }
+                } else if let Some(part) = owner {
+                    self.execute(Command::AddSketch {
+                        destination: Some(part),
+                        sketch: nator_sketch::Sketch::new(
+                            text(T::Sketch),
+                            nator_sketch::Plane::xy(),
+                        ),
+                    });
+                } else {
+                    self.execute(Command::AddReferenceSketch {
+                        sketch: nator_sketch::Sketch::new(
+                            text(T::ReferenceSketch),
+                            nator_sketch::Plane::xy(),
+                        ),
+                    });
+                }
+                self.load_reference_image(ui.ctx());
             }
             Intent::ToggleSection => {
                 if let Some(section) = &mut self.current_mut().section {
@@ -392,6 +512,7 @@ impl Editor {
                     self.choose_face_plane(ui.ctx(), ray);
                 }
                 let visible_sketches = self.visible_sketches(ui, response.rect);
+                self.reference_images_in_model(ui, response.rect);
                 self.sketch_overlay(ui, &response);
                 self.sketch_repair_overlay(ui, &response);
                 if self.scene.is_none()

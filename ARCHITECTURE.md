@@ -4,6 +4,16 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 
 ## Módulos
 
+`sketch::drafting::ArcSweep` desembrulha os incrementos angulares do cursor a partir do segundo clique. O campo mostra a magnitude positiva e a prévia aplica o sinal ao caminho; a confirmação conserva `clockwise` e o sinal das expressões. O estado do gesto é transitório, sem mudar o formato da geometria.
+
+`document::naming` guarda sequências de criação por tipo, separadas dos nomes e do alocador global. A persistência migra documentos antigos sem inventar a história dos nomes já apagados. Menus da árvore produzem comandos para renomear/excluir rascunhos ou iniciar as ferramentas de criação no proprietário correto; renomeações sincronizam a captura de cancelamento do rascunho também quando chegam de comandos preparados.
+
+`commands::sketch_projection` projeta corpos e outros rascunhos visíveis, excluindo o destino. Áreas de rascunhos mantêm contornos/furos para captura par-ímpar; malhas agrupam triângulos coplanares conectados por arestas e eliminam diagonais internas por incidência. Círculos/arcos paralelos continuam analíticos. Referências projetadas são geometria normal fixada e participam das áreas, sem uma regra paralela de extrusão.
+
+`RegionRef::Multiple` mantém várias referências estáveis do mesmo rascunho. `commands::extrusion` resolve cada área e une os prismas, também quando desconectados; a guia usa o primeiro perfil escolhido, e as distâncias são comuns a todos. O sufixo de face usa a assinatura do contorno, evitando referências que mudariam de alvo ao reordenar a seleção. A publicação permanece uma única transação.
+
+`document::images` guarda metadados e pixels RGBA compartilhados por `Arc`, sem dependência de interface/codec. `project_io` incorpora os pixels e valida IDs, referências, dimensões e limites de memória; nenhum caminho externo é seguido. `image_editor` decodifica PNG/JPEG no worker, cacheia texturas com a identidade do ativo e edita retângulos em mm no plano local. Criar/editar/remover usa comandos e histórico; imagens não criam curvas, restrições ou áreas de perfil. A visibilidade acompanha o rascunho e as ocorrências. Limites da câmera incluem os retângulos visíveis.
+
 `sketch::connected` separa duas consultas: seleção das entidades ligadas por apoios compartilhados/restrições dirigentes (ignorando relações de referência e cruzamentos virtuais) e cadeia geométrica de extremidades para Deslocamento, interrompida em ramificações. `sketch::path_offset` ordena cada caminho, desloca os suportes analíticos e recorta linhas/arcos nas interseções mais próximas dos cantos originais, compartilhando os apoios novos. Raios inválidos, trechos invertidos ou ramificações rejeitam a cópia inteira.
 
 `sketch::movement::dragged` resolve o arraste de apoios a partir da geometria válida, acrescentando destinos `Fixed` transitórios e raios preservados ao solver. A candidata perde essas travas e recupera seu contador de IDs antes de sair do worker; arcos podem deformar sem uma geometria intermediária inválida. `sketch_editor::direct_drag` invalida candidatas por revisão e deslocamento e só publica ao soltar.

@@ -8,6 +8,7 @@ mod export_editor;
 mod feature_editor;
 mod highlight;
 mod icons;
+mod image_editor;
 mod insert_part;
 mod live_preview;
 mod mesh_import;
@@ -318,6 +319,12 @@ impl Tab {
 }
 
 enum Outcome {
+    ImageLoaded {
+        tab: u64,
+        revision: u64,
+        sketch: SketchId,
+        asset: Arc<nator_document::RasterAsset>,
+    },
     Picked {
         tab: u64,
         revision: u64,
@@ -444,6 +451,8 @@ pub struct Editor {
     show_recovery: bool,
     parameters_edit: Option<parameter_editor::Draft>,
     feature_edit: Option<feature_editor::Draft>,
+    image_edit: Option<image_editor::Draft>,
+    image_cache: image_editor::Cache,
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
     pick_mode: navigation::PickMode,
@@ -629,6 +638,8 @@ impl Editor {
             recoveries,
             parameters_edit: None,
             feature_edit: None,
+            image_edit: None,
+            image_cache: image_editor::Cache::default(),
             drawing_edit: None,
             export_edit: None,
             pick_mode: navigation::PickMode::Face,
@@ -711,9 +722,29 @@ impl Editor {
         if self.busy() {
             return;
         }
+        let removed_image = if let Command::RemoveReferenceImage { id } = &command {
+            Some(*id)
+        } else {
+            None
+        };
+        let renamed = if let Command::RenameSketch { id, name } = &command {
+            Some((*id, name.clone()))
+        } else {
+            None
+        };
         match self.current_mut().session.execute(command) {
             Ok(effect) => {
+                if removed_image
+                    .is_some_and(|id| self.image_edit.as_ref().is_some_and(|d| d.image.id == id))
+                {
+                    self.image_edit = None;
+                }
                 let tab = self.current_mut();
+                if let Some((id, name)) = &renamed
+                    && let Some(work) = tab.sketch_edit.as_mut().filter(|w| w.id == *id)
+                {
+                    work.rename(name);
+                }
                 if let Effect::Imported { part, body } = effect {
                     tab.selection = Some(Selection::Body { part, id: body });
                 }
@@ -1004,6 +1035,12 @@ impl Editor {
                     draft.keep_reference(first, reference);
                 }
             }
+            Ok(Outcome::ImageLoaded {
+                tab,
+                revision,
+                sketch,
+                asset,
+            }) => self.receive_reference_image(tab, revision, sketch, asset),
             Ok(Outcome::Cancelled) => {}
             Ok(Outcome::Imported {
                 tab,
@@ -1119,6 +1156,11 @@ impl Editor {
         if let Some(target) = self.find_tab(tab) {
             match target.session.commit(command) {
                 Ok(effect) => {
+                    if let Some(work) = target.sketch_edit.as_mut()
+                        && let Some(record) = target.session.document().sketch(work.id)
+                    {
+                        work.rename(&record.sketch.name);
+                    }
                     if let Effect::SketchCreated { part, sketch } = effect {
                         target.active_part = Some(part);
                         let mut work = sketch_editor::Workspace::new(sketch);
@@ -1620,6 +1662,7 @@ impl Editor {
         self.canvas(ui);
         self.sketch_tools_window(ui.ctx());
         self.sketch_action_panel(ui.ctx());
+        self.reference_image_panel(ui.ctx());
         self.measure_window(ui.ctx());
         self.dialogs(ui.ctx());
         self.feature_dialog(ui.ctx());

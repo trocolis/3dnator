@@ -71,6 +71,7 @@ enum Action {
     Import,
     Reference,
     NewSketch,
+    SketchImage,
     SketchXY,
     SketchXZ,
     SketchYZ,
@@ -128,6 +129,7 @@ impl Action {
             Self::Import => T::Import,
             Self::Reference => T::Reference,
             Self::NewSketch => T::NewSketch,
+            Self::SketchImage => T::SketchImage,
             Self::SketchXY => T::SketchXY,
             Self::SketchXZ => T::SketchXZ,
             Self::SketchYZ => T::SketchYZ,
@@ -209,6 +211,7 @@ impl Action {
             | Self::SketchYZ
             | Self::SketchFace => Icon::Sketch,
             Self::OffsetPlane => Icon::OffsetPlane,
+            Self::SketchImage => Icon::Image,
             Self::Solid(tool) => match tool {
                 SolidTool::Extrude => Icon::Extrude,
                 SolidTool::Revolve => Icon::Revolve,
@@ -317,6 +320,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Import,
     Action::Reference,
     Action::NewSketch,
+    Action::SketchImage,
     Action::SketchXY,
     Action::SketchXZ,
     Action::SketchYZ,
@@ -396,6 +400,7 @@ impl Editor {
     fn action_enabled(&self, action: Action) -> bool {
         let editable = !self.busy() && self.pending_close.is_none();
         match action {
+            Action::SketchImage => editable && self.current().sketch_edit.is_some(),
             Action::Fit => true,
             Action::Iso
             | Action::Front
@@ -493,7 +498,8 @@ impl Editor {
     }
     fn action_selected(&self, action: Action) -> bool {
         match action {
-            Action::Select => self.selection_active(),
+            Action::SketchImage => self.image_edit.is_some(),
+            Action::Select => self.selection_active() && self.image_edit.is_none(),
             Action::Perspective => {
                 self.viewport.camera.projection == nator_renderer::Projection::Perspective
             }
@@ -637,7 +643,11 @@ impl Editor {
                 }
             }
             Action::NewEmptyPart => {
-                let count = self.current().session.document().parts().len() + 1;
+                let count = self
+                    .current()
+                    .session
+                    .document()
+                    .next_name_number(nator_document::ElementKind::Part);
                 self.execute(Command::CreatePart {
                     name: format!("{} {count}", text(T::NewPartName)),
                 });
@@ -647,6 +657,7 @@ impl Editor {
             Action::MoveFace => self.open_align(navigation::PickMode::Face),
             Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
             Action::MovePoint => self.open_align(navigation::PickMode::Vertex),
+            Action::SketchImage => self.load_reference_image(context),
             Action::NewSketch => {
                 let pick = (self.pick_mode == navigation::PickMode::Face)
                     .then(|| self.selected_pick().cloned())
@@ -1442,6 +1453,7 @@ impl Editor {
                         Action::SketchTool(sketch_editor::Tool::Circle),
                         Action::SketchTool(sketch_editor::Tool::Arc),
                         Action::SketchTool(sketch_editor::Tool::Project),
+                        Action::SketchImage,
                     ],
                     &[
                         Action::SketchTool(sketch_editor::Tool::Select),
@@ -1450,6 +1462,7 @@ impl Editor {
                         Action::SketchTool(sketch_editor::Tool::Circle),
                         Action::SketchTool(sketch_editor::Tool::Arc),
                         Action::SketchTool(sketch_editor::Tool::Project),
+                        Action::SketchImage,
                     ],
                 );
                 self.sketch_section(

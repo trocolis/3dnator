@@ -7,7 +7,7 @@ default-run = "nator-prototype"
 
 [features]
 default = ["desktop"]
-desktop = ["dep:eframe", "dep:nator-renderer", "dep:png", "dep:pollster", "dep:rfd"]
+desktop = ["dep:eframe", "dep:nator-renderer", "dep:png", "dep:pollster", "dep:rfd", "dep:image"]
 occt = ["nator-kernel/occt", "nator-commands/occt"]
 
 [dependencies]
@@ -25,6 +25,7 @@ serde_json.workspace = true
 png = { version = "0.18", optional = true }
 pollster = { version = "0.4", optional = true }
 rfd = { version = "0.17", optional = true }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"], optional = true }
 
 [lints]
 workspace = true

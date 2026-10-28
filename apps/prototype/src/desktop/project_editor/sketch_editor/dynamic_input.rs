@@ -18,6 +18,7 @@ pub(super) struct Input {
     had_focus: bool,
     pub(super) cursor: Option<Point2>,
     pub(super) arc_angle: Option<String>,
+    pub(super) arc_sweep: drafting::ArcSweep,
     /// Lado do retângulo inclinado já confirmado; largura usa um novo campo.
     pub(super) side_fields: Option<([String; 2], [bool; 2])>,
 }
@@ -57,6 +58,7 @@ impl Input {
         self.side_fields = side_fields;
     }
     pub(super) fn arc_next(&mut self) {
+        self.arc_sweep = drafting::ArcSweep::default();
         self.arc_angle = self.locked[1].then(|| self.fields[1].clone());
         self.locked[1] = false;
         self.active = 1;
@@ -153,12 +155,13 @@ impl Input {
         anchors: &[Point2],
         parameters: &Parameters,
     ) -> Result<Preview, String> {
-        drafting::preview_with_reference(
+        drafting::preview_with_sweep(
             primitive,
             anchors,
             self.cursor.unwrap_or(anchors[0]),
             self.values(parameters, primitive)?,
             self.reference_angle,
+            (primitive == Primitive::Arc && anchors.len() == 2).then(|| self.arc_sweep.value()),
         )
         .map_err(sketch_error)
     }
@@ -173,12 +176,16 @@ impl Input {
         enabled: bool,
     ) -> Output {
         let cursor = self.cursor.unwrap_or(anchors[0]);
-        let measured = drafting::preview_with_reference(
+        if primitive == Primitive::Arc && anchors.len() == 2 {
+            self.arc_sweep.update(anchors[0], anchors[1], cursor);
+        }
+        let measured = drafting::preview_with_sweep(
             primitive,
             anchors,
             cursor,
             [None, None],
             self.reference_angle,
+            (primitive == Primitive::Arc && anchors.len() == 2).then(|| self.arc_sweep.value()),
         )
         .ok();
         let width_only = primitive == Primitive::InclinedRectangle && anchors.len() == 2;

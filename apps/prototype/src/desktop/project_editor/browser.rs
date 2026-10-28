@@ -14,6 +14,7 @@ pub(super) enum RenameTarget {
     Part(PartId),
     Body(BodyId),
     Group(GroupId),
+    Sketch(SketchId),
 }
 
 pub(super) struct RenameDraft {
@@ -436,6 +437,7 @@ impl Editor {
                 RenameTarget::Part(id) => Command::RenamePart { id, name },
                 RenameTarget::Body(id) => Command::RenameBody { id, name },
                 RenameTarget::Group(id) => Command::RenameGroup { id, name },
+                RenameTarget::Sketch(id) => Command::RenameSketch { id, name },
             };
             self.prepare_command(context, draft.tab, command);
         } else if cancel {

@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Arcos, árvore, projeção, múltiplas áreas e imagens — 28/10/2026
+
+- **322 testes com OCCT e 252 sem OCCT aprovados**. Novas regressões verificam abertura horária/anti-horária contínua além de 180°, projeção de áreas com furos/arestas/vértices de outros rascunhos, áreas de malhas sem diagonais e componentes coplanares desconectados. Duas áreas projetadas são extrudadas numa operação de volume exato; reordenar a seleção conserva os nomes das faces, e as referências persistem no salvamento/reabertura.
+- Imagens e sequências de nomes verificadas por comandos, desfazer/refazer e formato 26: pixels RGBA, posição e transparência preservados, renomeação/exclusão sem reaproveitar a sequência, exclusão de imagens ao remover o rascunho e remapeamento ao clonar peças. Dimensões/pixels inválidos e transparência fora do intervalo são recusados, inclusive metadados numéricos extremos sem overflow. Decodificação PNG/JPEG aprovada.
+- **37 ensaios gráficos aprovados em execução serial GL/llvmpipe**. Os quatro novos exercitam sentido do arco e 270°, criação da imagem por dois cantos, nó da árvore, arraste/redimensionamento, persistência e Ctrl+Z/Y com propriedades abertas; seleção de múltiplas áreas projetadas com alternância por clique e confirmação única; menus reais de renomear/excluir/criar rascunhos e numeração após renomeação/exclusão.
+- Formatação, Clippy com todos os alvos e avisos negados com e sem OCCT e compilação desktop com OCCT aprovados no Linux. Logs e capturas em `target/codex-validation/sketch-areas-images-20261028/`. `image-properties-final.png` inspecionada: Imagens (1), Imagem 1, textura com transparência de 50%, tamanho, posição no plano/peça e alças; `fillet.png`: quatro cantos, seta e ícones preto/verde. Novo cenário de captura `sketch-image`.
+- Os oito itens acrescentados durante a implementação e os nove iniciais foram concluídos no AJUSTE.md. Aplicativo 0.3.0 em desenvolvimento; formato 26 com leitura dos anteriores. Windows e janela nativa não exercitados localmente; sem release ou publicação remota.
+
 ## Arraste, setas e múltiplos cantos — 28/10/2026
 
 - **315 testes com OCCT e 246 sem OCCT aprovados**. Novas regressões cobrem os quatro cantos de um retângulo, raio/área exatos, cantos desconectados e exclusão de cruzamentos; cortes sobrepostos recusam a edição inteira. Arrastar um extremo de arco preserva sua validade e transmite coincidências fortes sem persistir travas transitórias; fixações impedem movimentos incompatíveis. A normal da seta segue a orientação do caminho aberto e a convenção radial dos arcos isolados.

@@ -583,6 +583,7 @@ impl Editor {
         });
     }
     pub(super) fn finish_sketch(&mut self) {
+        self.image_edit = None;
         if self.busy()
             || self
                 .current()
@@ -627,7 +628,26 @@ impl Editor {
         let bounds = self.display_bounds();
         let mut center = [0., 0.];
         let mut extent = [40., 40.];
-        if let Some((min, max)) = sketch_limits(&sketch) {
+        let mut limits = sketch_limits(&sketch);
+        for point in self
+            .current()
+            .session
+            .document()
+            .images()
+            .iter()
+            .filter(|i| i.sketch == work.id && i.visible)
+            .flat_map(image_editor::corners)
+        {
+            if let Some((min, max)) = &mut limits {
+                for axis in 0..2 {
+                    min[axis] = min[axis].min(point[axis]);
+                    max[axis] = max[axis].max(point[axis]);
+                }
+            } else {
+                limits = Some((point, point));
+            }
+        }
+        if let Some((min, max)) = limits {
             center = std::array::from_fn(|i| min[i] * 0.5 + max[i] * 0.5);
             extent = std::array::from_fn(|i| (max[i] - min[i]).max(10.));
         }
@@ -996,6 +1016,14 @@ pub(super) fn document_bounds(document: &Document, view: &ViewState) -> Bounds {
             {
                 for record in part.sketches.iter().filter(|s| part.shows_sketch(s)) {
                     let sketch = &record.sketch;
+                    for point in document
+                        .images()
+                        .iter()
+                        .filter(|i| i.sketch == record.id && i.visible)
+                        .flat_map(image_editor::corners)
+                    {
+                        include(occurrence.placement.apply(sketch.plane.world(point)));
+                    }
                     for point in &sketch.points {
                         include(
                             occurrence
@@ -1021,6 +1049,14 @@ pub(super) fn document_bounds(document: &Document, view: &ViewState) -> Bounds {
         .filter(|s| document.shows_reference_sketch(s))
     {
         let sketch = &record.sketch;
+        for point in document
+            .images()
+            .iter()
+            .filter(|i| i.sketch == record.id && i.visible)
+            .flat_map(image_editor::corners)
+        {
+            include(sketch.plane.world(point));
+        }
         for point in &sketch.points {
             include(sketch.plane.world(point.position));
         }

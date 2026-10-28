@@ -49,6 +49,7 @@ of or is based on facilities provided by the Open CASCADE Technology software.
 | `zip` | 2.x | MIT | Leitura e gravação de pacotes comprimidos `.3dnator` | <https://github.com/zip-rs/zip2> |
 | `tempfile` | 3.x | MIT OR Apache-2.0 | Gravação atômica segura de arquivos de projeto | <https://github.com/Stebalien/tempfile> |
 | `rfd` | 0.17 | MIT | Diálogos nativos de seleção e salvamento de arquivos | <https://github.com/PolyMeilex/rfd> |
+| `image` | 0.25.10 | MIT OR Apache-2.0 | Decodificação limitada de PNG/JPEG para imagens de referência no rascunho | <https://github.com/image-rs/image> |
 | `png` | 0.18 | MIT OR Apache-2.0 | Decodificação e codificação de capturas de tela, folhas e miniaturas de projeto | <https://github.com/image-rs/image-png> |
 | `pollster` | 0.4 | MIT OR Apache-2.0 | Execução de tarefas assíncronas em contextos síncronos | <https://github.com/zesterer/pollster> |
 | `Open CASCADE Technology` | 7.x | LGPL-2.1 with Exception | Núcleo de modelagem B-rep, HLR, XCAF e intercâmbio STEP | <https://dev.opencascade.org> |

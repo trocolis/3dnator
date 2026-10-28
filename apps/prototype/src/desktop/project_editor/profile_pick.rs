@@ -236,12 +236,12 @@ impl Editor {
         for (index, candidate) in candidates.iter().enumerate() {
             let selected = chosen.as_ref().is_some_and(|(s, b)| {
                 *s == candidate.sketch
-                    && match b {
+                    && b.selections().iter().any(|b| match b {
                         nator_document::features::RegionRef::Boundary(ids) => {
                             *ids == candidate.boundary
                         }
                         _ => *b == candidate.reference,
-                    }
+                    })
             });
             let Some(polygons) = candidate.polygons() else {
                 continue;

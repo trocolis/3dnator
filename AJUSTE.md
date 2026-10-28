@@ -31,13 +31,13 @@
 - [x] Padronize a cor dos ícones de dentro em Rascunho com linhas Pretas e verde, o mesmo padrão já presente em alguns ícones.
 - [x] Com um vértice selecionado o tipo de junção deve ser alternado pela tecla F também.
 - [x] O mesmo padrão de cores deve ser adotado pelos ícones que flutuam ao redor do vértices.
-- [ ] A ferramenta Arco, o arco esta sendo criado no sentido ante-horário, o sentido deve sere escolido de forma inteligente, ele deve ir do segundo ponta em direção ao movimento do mouse, para dar a volta o mouse deve passeara por baicho do ponto central do arco.
-- [ ] Os racunhos devem pode ser excluido e renomeados peloa menu de contexto na Arvore.
-- [ ] A nomeação automática de elementos criados na arvore deve ser o Tipo de elemento seguido do número, exemplo: Corpo 1, Corpo 2, Rascunho 1, Rascunho 2, Palno 1, Peça 1, e o numero deve seguir a ordem de criação, mesmo se 'Rascunho 1' tenha sido renomeado para 'Principal', por exemplo o proximo deve ser 'Rascunho 2', mesmo o 1 não se chamando mais assim.
-- [ ] Nos nós da árvore, Rascunho, Planos e etc. Deve ser possívem adicionar um novo elemento pelo menu de contexto.
-- [ ] Os desenhos projetados devem ser levados em conta para formar área de extrusão.
-- [ ] Deve ser possível selecionar múltipas áreas no mesmo plano para extrusão.
-- [ ] A Ferramenta Projetar, deve ser possivel selecionar qualquer área, linha ou vertice, e a projeção dele deve ser gerado no plano do rascunho.
+- [x] A ferramenta Arco, o arco esta sendo criado no sentido ante-horário, o sentido deve sere escolido de forma inteligente, ele deve ir do segundo ponta em direção ao movimento do mouse, para dar a volta o mouse deve passeara por baicho do ponto central do arco.
+- [x] Os racunhos devem pode ser excluido e renomeados peloa menu de contexto na Arvore.
+- [x] A nomeação automática de elementos criados na arvore deve ser o Tipo de elemento seguido do número, exemplo: Corpo 1, Corpo 2, Rascunho 1, Rascunho 2, Palno 1, Peça 1, e o numero deve seguir a ordem de criação, mesmo se 'Rascunho 1' tenha sido renomeado para 'Principal', por exemplo o proximo deve ser 'Rascunho 2', mesmo o 1 não se chamando mais assim.
+- [x] Nos nós da árvore, Rascunho, Planos e etc. Deve ser possívem adicionar um novo elemento pelo menu de contexto.
+- [x] Os desenhos projetados devem ser levados em conta para formar área de extrusão.
+- [x] Deve ser possível selecionar múltipas áreas no mesmo plano para extrusão.
+- [x] A Ferramenta Projetar, deve ser possivel selecionar qualquer área, linha ou vertice, e a projeção dele deve ser gerado no plano do rascunho.
 
 ## Refinar
 
@@ -50,4 +50,4 @@
 - [x] Em rascunho, adicionar uma nova ferramenta chama 'Projetar', ele deve projetar Panos, Arestas, Arcos e Vertices de componentes, As linhas devem ser Litaz e prenchimento claro em tom lias também.
 - [x] Icones representaivos para desenho, quando um crisamento de linha gera altomativcamente um angulo de 90 graus, deve ter um pequeno icone representando ao lado da junção, o mesmo vale para tanjentes ponto médio e cento, para ilustra para o usuário oque esta ocorrendo.
 - [x] Implementar Atalhos, cada contexto de edição deve ter seu próprio grupo de atalhaos: Rascunho (Linha: L, Retangulo: R, Circulo: C, Arco: A, Projetar: P, Apagar: G, Deslocar: S, Aredondar: O, Chanfra: H, Epelhar: E, Mover: M, Dimencionar: D)
-- [ ] Criar uma nova ferramenta para o rascunho, Imagem, pode ser carragada uma imagem para ser usada de referencias, ela deve ser desenhada no Rascunho como o retangulo, ponto inicial e final, ele pode ser redimencionada em seu painel de proproedades, que deve conter tambem o nivel de transparencia, de 0 a 100%, por padrão deve ser 50%, a aposição em relação a origem da peça, e deve poder se arrastada e redimencionada pelo mouse. A imagem deve aparecer na Ravore da peça em um nó Imagens.
+- [x] Criar uma nova ferramenta para o rascunho, Imagem, pode ser carragada uma imagem para ser usada de referencias, ela deve ser desenhada no Rascunho como o retangulo, ponto inicial e final, ele pode ser redimencionada em seu painel de proproedades, que deve conter tambem o nivel de transparencia, de 0 a 100%, por padrão deve ser 50%, a aposição em relação a origem da peça, e deve poder se arrastada e redimencionada pelo mouse. A imagem deve aparecer na Ravore da peça em um nó Imagens.

@@ -43,6 +43,34 @@ pub struct Preview {
     pub arc_start: Option<Point2>,
 }
 
+/// Abertura contínua a partir do segundo clique. Desembrulhar cada passo do
+/// cursor evita trocar de sentido ao cruzar ±180°; uma volta exige percorrer
+/// os quadrantes, em vez de surgir ao passar poucos graus abaixo do início.
+#[derive(Debug, Default, Clone)]
+pub struct ArcSweep {
+    previous: Option<f64>,
+    value: f64,
+}
+impl ArcSweep {
+    pub fn update(&mut self, center: Point2, start: Point2, cursor: Point2) {
+        if distance(center, cursor) < 1e-7 {
+            return;
+        }
+        let angle = sub(cursor, center);
+        let angle = angle[1].atan2(angle[0]);
+        let from = sub(start, center);
+        let previous = self.previous.unwrap_or_else(|| from[1].atan2(from[0]));
+        self.value += crate::lines::relative_angle(angle, previous);
+        self.value = self
+            .value
+            .clamp(-std::f64::consts::TAU + 1e-7, std::f64::consts::TAU - 1e-7);
+        self.previous = Some(angle);
+    }
+    pub fn value(&self) -> f64 {
+        self.value
+    }
+}
+
 pub fn preview(
     primitive: Primitive,
     anchors: &[Point2],
@@ -60,6 +88,17 @@ pub fn preview_with_reference(
     cursor: Point2,
     locked: [Option<f64>; 2],
     reference: f64,
+) -> Result<Preview> {
+    preview_with_sweep(primitive, anchors, cursor, locked, reference, None)
+}
+
+pub fn preview_with_sweep(
+    primitive: Primitive,
+    anchors: &[Point2],
+    cursor: Point2,
+    locked: [Option<f64>; 2],
+    reference: f64,
+    sweep: Option<f64>,
 ) -> Result<Preview> {
     if !reference.is_finite() {
         return Err(SketchError("Referência angular inválida.".into()));
@@ -173,13 +212,12 @@ pub fn preview_with_reference(
         let d = sub(*p, first);
         d[1].atan2(d[0])
     });
+    let sweep =
+        sweep.unwrap_or_else(|| crate::lines::relative_angle(direction, start_angle.unwrap_or(0.)));
     let mut values = if primitive == Primitive::Rectangle {
         [delta[0].abs(), delta[1].abs()]
     } else if primitive == Primitive::Arc && anchors.len() == 2 {
-        [
-            distance(first, anchors[1]),
-            (direction - start_angle.unwrap_or(0.)).rem_euclid(std::f64::consts::TAU),
-        ]
+        [distance(first, anchors[1]), sweep.abs()]
     } else {
         [
             distance(first, cursor),
@@ -210,7 +248,7 @@ pub fn preview_with_reference(
         }
     }
     let angle = if primitive == Primitive::Arc && anchors.len() == 2 {
-        start_angle.unwrap_or(0.) + values[1]
+        start_angle.unwrap_or(0.) + values[1] * if sweep < 0. { -1. } else { 1. }
     } else if primitive == Primitive::Circle {
         direction
     } else if primitive == Primitive::Line {
@@ -247,11 +285,12 @@ pub fn preview_with_reference(
         }
         .sample(96),
         Primitive::Arc => match arc_start {
+            Some(start) if distance(start, point) < 1e-9 => vec![start],
             Some(start) => Segment::Arc {
                 center: first,
                 a: start,
                 b: point,
-                clockwise: false,
+                clockwise: sweep < 0.,
             }
             .sample(96),
             None => vec![first, point],
@@ -406,6 +445,38 @@ pub fn add_rectangle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn arc_follows_initial_motion_and_keeps_its_direction_across_half_turns() -> Result<()> {
+        for sign in [-1., 1.] {
+            let mut sweep = ArcSweep::default();
+            for degree in [10_f64, 90., 170., 190., 270.] {
+                let angle = sign * degree.to_radians();
+                let cursor = [10. * angle.cos(), 10. * angle.sin()];
+                sweep.update([0., 0.], [10., 0.], cursor);
+                assert!((sweep.value() - angle).abs() < 1e-9);
+                let p = preview_with_sweep(
+                    Primitive::Arc,
+                    &[[0., 0.], [10., 0.]],
+                    cursor,
+                    [None, None],
+                    0.,
+                    Some(sweep.value()),
+                )?;
+                assert!(distance(p.point, cursor) < 1e-9);
+                assert!((p.values[1] - angle.abs()).abs() < 1e-9);
+            }
+            let p = preview_with_sweep(
+                Primitive::Arc,
+                &[[0., 0.], [10., 0.]],
+                [0., sign * 10.],
+                [None, Some(std::f64::consts::FRAC_PI_2)],
+                0.,
+                Some(sign),
+            )?;
+            assert!(distance(p.point, [0., sign * 10.]) < 1e-9);
+        }
+        Ok(())
+    }
     #[test]
     fn derived_previews_keep_centers_quadrants_and_full_dimensions() -> Result<()> {
         let center = [10., 20.];

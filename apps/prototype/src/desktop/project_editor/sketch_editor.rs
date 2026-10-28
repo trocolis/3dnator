@@ -153,6 +153,20 @@ pub(super) struct Workspace {
     dimension_existing: dimension_tool::Existing,
 }
 impl Workspace {
+    pub(super) fn select_image(&mut self) {
+        self.select_tool(Tool::Select);
+        self.tool_panel_open = false;
+        self.selected.clear();
+        self.constraint = None;
+    }
+    pub(super) fn rename(&mut self, name: &str) {
+        if let Some(sketch) = &mut self.pending {
+            sketch.name = name.into();
+        }
+        if let Some(sketch) = &mut self.original_sketch {
+            sketch.name = name.into();
+        }
+    }
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn selected_entities(&self) -> &[u64] {
         &self.selected
@@ -484,6 +498,7 @@ impl Editor {
     }
     /// Ferramenta escolhida na faixa, na busca ou pelos atalhos do rascunho.
     pub(super) fn select_sketch_tool(&mut self, tool: Tool) {
+        self.image_edit = None;
         self.sanitize_sketch_selection();
         let sketch = (tool == Tool::Dimension)
             .then(|| self.working_sketch())
@@ -509,6 +524,7 @@ impl Editor {
             return;
         };
         if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+            work.rename(&sketch.name);
             work.selected.retain(|id| sketch.entity(*id).is_ok());
             work.constraint = work
                 .constraint
@@ -891,6 +907,8 @@ impl Editor {
         {
             self.status.error(error);
         }
+        let image_blocked =
+            self.reference_images_overlay(ui, response, &frame, &sketch, !busy && !animating);
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
         };
@@ -1021,6 +1039,7 @@ impl Editor {
             !busy && !animating,
         );
         let edit_existing = !operation_update.blocked
+            && !image_blocked
             && !work.dragging.active()
             && !busy
             && !animating
@@ -1078,7 +1097,7 @@ impl Editor {
                 &painter,
                 &mut sketch,
                 work.selected_vertex,
-                !busy && !animating,
+                !busy && !animating && !image_blocked,
             )
         } else {
             junction_tool::Update::default()
@@ -1092,7 +1111,11 @@ impl Editor {
             &sketch,
             work,
             projection_key.scene,
-            !busy && !animating && !existing_update.blocked && !junction_update.blocked,
+            !busy
+                && !animating
+                && !existing_update.blocked
+                && !junction_update.blocked
+                && !image_blocked,
         );
 
         let suspended = ui.input(|i| i.modifiers.alt);
@@ -1429,6 +1452,7 @@ impl Editor {
             && !existing_update.blocked
             && !operation_update.blocked
             && !drag_update.blocked
+            && !image_blocked
             && valid
             && !matches!(work.tool, Tool::Dimension | Tool::Project)
             && !(work.tool == Tool::Rectangle
@@ -2001,6 +2025,7 @@ fn draw_entity(
             }
         }
         Tool::Arc => {
+            let clockwise = work.drawing.arc_sweep.value() < 0.;
             let radius = nator_sketch::distance(a, b);
             let end = work.anchors[2];
             let length = nator_sketch::distance(a, end);
@@ -2014,13 +2039,20 @@ fn draw_entity(
             let center = sketch.add_point(a).map_err(sketch_error)?;
             let start = sketch.add_point(b).map_err(sketch_error)?;
             let end = sketch.add_point(end).map_err(sketch_error)?;
+            if nator_sketch::distance(
+                sketch.point(start).map_err(sketch_error)?,
+                sketch.point(end).map_err(sketch_error)?,
+            ) < 1e-9
+            {
+                return Err(text(T::InvalidArc).into());
+            }
             let id = sketch
                 .add_curve(
                     Curve::Arc {
                         center,
                         start,
                         end,
-                        clockwise: false,
+                        clockwise,
                     },
                     work.line_type != LineType::Normal,
                 )
@@ -2081,7 +2113,8 @@ fn draw_entity(
                         value: delta[1].atan2(delta[0]),
                     },
                     format!(
-                        "({start_expression}) + ({})",
+                        "({start_expression}) {} ({})",
+                        if clockwise { "-" } else { "+" },
                         angle_expression(&work.drawing.fields[1], parameters)
                     ),
                 )?;

@@ -2,6 +2,16 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Áreas, referências e organização da árvore
+
+- Arco acompanha o sentido inicial do mouse e conserva a abertura contínua ao percorrer os quadrantes, inclusive além de 180°. Medidas digitadas respeitam o sentido escolhido; o início não produz uma prévia de volta completa.
+- Menus dos rascunhos oferecem editar, renomear e excluir. As pastas Peças/Subpeças, Corpos, Rascunhos e Planos permitem criar elementos pelo contexto e permanecem acessíveis quando vazias. Rascunhos usados pelo histórico continuam protegidos contra exclusão que deixaria referências quebradas.
+- Nomes automáticos usam sequências por tipo, independentes de nomes editáveis, quantidade atual e identificadores globais. Novos sólidos recebem Corpo N; refinamentos conservam o nome do corpo de entrada. Contadores persistem após renomear/excluir e são restaurados por desfazer/refazer.
+- Projetar inclui áreas, curvas e vértices de outros rascunhos visíveis, faces CAD e áreas de malhas. Áreas coplanares desconectadas da malha são escolhas separadas e diagonais de triangulação não viram contorno. Furos são preservados; geometria projetada continua elegível como perfil de extrusão.
+- Extrusão permite alternar várias áreas do mesmo rascunho por cliques, com realce de todas, uma prévia e uma confirmação. Prismas são unidos numa operação, incluindo áreas desconectadas. Nomes de faces incluem uma chave do contorno, para que reordenar as áreas não troque referências do histórico.
+- Nova ferramenta Imagem no rascunho: carrega PNG/JPEG, posiciona por dois cantos, oferece largura/altura, posição no plano e leitura da posição na peça, transparência de 0 a 100% (inicial 50%), arraste e redimensionamento pelos cantos. As imagens aparecem no nó Imagens, com visibilidade, edição e exclusão; pixels ficam dentro do projeto e não participam dos perfis.
+- Formato interno 26 acrescenta sequências de nomes, imagens RGBA incorporadas e referências de múltiplas áreas, preservando leitura dos formatos anteriores. Aplicativo permanece em 0.3.0 em desenvolvimento.
+
 ### Arraste direto, setas de medida e múltiplos cantos
 
 - Retirada de Mover da faixa/busca do rascunho e do atalho M: arestas e vértices são arrastados diretamente na seleção livre, com prévia resolvida em segundo plano, cancelamento por Esc e uma ação de desfazer ao soltar. Ligações fortes transmitem o movimento; apoios fixos recusam destinos incompatíveis.

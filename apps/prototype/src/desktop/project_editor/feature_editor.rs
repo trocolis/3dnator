@@ -705,14 +705,36 @@ impl Draft {
     pub(super) fn choose_region(&mut self, sketch: SketchId, region: RegionRef) {
         self.face_profile = None;
         self.interaction = extrusion::Interaction::default();
+        if self.tool == Tool::Extrude && self.sketch == Some(sketch) {
+            let mut selected = self
+                .kept_region
+                .take()
+                .map(|r| r.selections().to_vec())
+                .unwrap_or_default();
+            if let Some(index) = selected.iter().position(|r| *r == region) {
+                selected.remove(index);
+            } else {
+                selected.push(region);
+            }
+            self.kept_region = match selected.len() {
+                0 => None,
+                1 => selected.pop(),
+                _ => Some(RegionRef::Multiple(selected)),
+            };
+        } else {
+            self.kept_region = Some(region);
+        }
         self.sketch = Some(sketch);
-        self.kept_region = Some(region);
         self.region = None;
         // Na revolução, o eixo gravado pertence ao rascunho anterior.
         if self.tool == Tool::Revolve {
             self.kept_axis = None;
         }
-        self.field = None;
+        self.field = if self.tool == Tool::Extrude {
+            Some(Field::Profile)
+        } else {
+            None
+        };
     }
     pub(super) fn region_reference(&self) -> Option<&RegionRef> {
         self.kept_region.as_ref()
@@ -1413,8 +1435,11 @@ fn profile_rows(
     part: &nator_document::Part,
     regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
 ) {
-    let chosen =
-        usize::from(d.face_profile.is_some() || d.kept_region.is_some() || d.region.is_some());
+    let chosen = d
+        .kept_region
+        .as_ref()
+        .map(|r| r.selections().len())
+        .unwrap_or_else(|| usize::from(d.face_profile.is_some() || d.region.is_some()));
     let sketch_name = d
         .sketch
         .and_then(|id| part.sketches.iter().find(|s| s.id == id))

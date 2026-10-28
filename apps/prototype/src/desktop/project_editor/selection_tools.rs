@@ -57,7 +57,8 @@ impl Editor {
     /// A seleção é o estado neutro: cancelar uma ferramenta não apaga os alvos
     /// escolhidos nem as alterações já confirmadas no documento.
     pub(super) fn selection_active(&self) -> bool {
-        self.feature_edit.is_none()
+        self.image_edit.is_none()
+            && self.feature_edit.is_none()
             && self.assembly_panel.is_none()
             && self.section_edit.is_none()
             && self.work_plane_edit.is_none()
@@ -78,6 +79,7 @@ impl Editor {
     }
 
     pub(super) fn activate_selection(&mut self, context: &egui::Context) {
+        self.image_edit = None;
         self.cancel_plane_pick();
         self.close_offset_plane();
         self.cancel_feature_tool();

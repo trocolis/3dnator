@@ -59,6 +59,7 @@ pub(crate) fn render_ui_scenario(
         | "sketch-offset"
         | "sketch-fillet"
         | "sketch-chamfer"
+        | "sketch-image"
         | "repair"
         | "recovery"
         | "insert"
@@ -83,7 +84,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -305,6 +306,18 @@ fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    if scenario == "sketch-image" {
+        let id = editor
+            .current()
+            .session
+            .document()
+            .images()
+            .first()
+            .ok_or("Projeto sem imagem")?
+            .id;
+        editor.edit_reference_image(id);
+        return Ok(());
+    }
     if matches!(
         scenario,
         "sketch-mirror" | "sketch-offset" | "sketch-fillet" | "sketch-chamfer"
@@ -4584,7 +4597,7 @@ mod tests {
         label_position(
             &mut editor,
             &context,
-            &format!("{} (Placa)", text(T::PickedFace)),
+            &format!("{} (Corpo 1)", text(T::PickedFace)),
         )?;
         // Com a normal voltada para a câmera, a alça fica acima do centro, a 10 mm.
         let start = project(&editor, [0., 0., 10.])?;
@@ -6482,6 +6495,400 @@ mod tests {
                 4
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn arc_mouse_motion_selects_clockwise_and_continues_beyond_half_a_turn()
+    -> Result<(), Box<dyn Error>> {
+        for angles in [vec![-15_f64, -90., -170., -190., -270.], vec![15_f64, 90.]] {
+            let context = egui::Context::default();
+            let mut document = Document::new("Sentido do arco")?;
+            let (part, id) = document.add_sketch(None, Sketch::new("Arco", Plane::xy()))?;
+            let mut editor =
+                Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+            editor.recoveries.clear();
+            editor.show_recovery = false;
+            editor.begin_sketch(part, id);
+            editor.align_sketch_camera(true, false);
+            settle(&mut editor, &context)?;
+            editor.select_sketch_tool(sketch_editor::Tool::Arc);
+            frame(&mut editor, &context, vec![])?;
+            let at = |e: &Editor, p| {
+                sketch_scene::project(&e.viewport.camera, e.display_bounds(), e.canvas_rect, p)
+                    .ok_or("Ponto sem projeção")
+            };
+            let center = at(&editor, [0., 0., 0.])?;
+            click(&mut editor, &context, center)?;
+            let start = at(&editor, [20., 0., 0.])?;
+            click(&mut editor, &context, start)?;
+            let mut end = start;
+            for angle in &angles {
+                let angle = angle.to_radians();
+                end = at(&editor, [20. * angle.cos(), 20. * angle.sin(), 0.])?;
+                frame(&mut editor, &context, vec![egui::Event::PointerMoved(end)])?;
+            }
+            click(&mut editor, &context, end)?;
+            settle(&mut editor, &context)?;
+            let sketch = &editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch;
+            assert_eq!(sketch.entities.len(), 1, "{}", editor.status);
+            let nator_sketch::Curve::Arc { clockwise, .. } = sketch.entities[0].curve else {
+                return Err("Arco ausente".into());
+            };
+            assert_eq!(clockwise, angles[0] < 0.);
+            let points = nator_sketch::profiles::segment(sketch, &sketch.entities[0])?.sample(96);
+            let length = points
+                .windows(2)
+                .map(|p| nator_sketch::distance(p[0], p[1]))
+                .sum::<f64>();
+            let expected = if clockwise {
+                30. * std::f64::consts::PI
+            } else {
+                10. * std::f64::consts::PI
+            };
+            assert!((length - expected).abs() < 0.1, "{length}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn image_reference_places_two_corners_drags_resizes_and_keeps_pixels_in_the_project()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Imagem no plano")?;
+        let (part, sketch) = document.add_sketch(None, Sketch::new("Rascunho", Plane::xy()))?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, sketch);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let asset = Arc::new(nator_document::RasterAsset {
+            width: 2,
+            height: 2,
+            rgba: Arc::new(vec![
+                180, 70, 20, 255, 40, 160, 90, 255, 80, 120, 200, 255, 240, 220, 140, 255,
+            ]),
+        });
+        editor.receive_reference_image(
+            editor.current().id,
+            editor.current().session.revision(),
+            sketch,
+            asset,
+        );
+        frame(&mut editor, &context, vec![])?;
+        assert_eq!(
+            editor
+                .image_edit
+                .as_ref()
+                .ok_or("Painel ausente")?
+                .image
+                .transparency,
+            0.5
+        );
+        let at = |e: &Editor, p| {
+            sketch_scene::project(&e.viewport.camera, e.display_bounds(), e.canvas_rect, p)
+                .ok_or("Ponto sem projeção")
+        };
+        let first = at(&editor, [0., 0., 0.])?;
+        let second = at(&editor, [20., 10., 0.])?;
+        click(&mut editor, &context, first)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(second)],
+        )?;
+        click(&mut editor, &context, second)?;
+        assert!(editor.current().session.document().images().is_empty());
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let image = editor
+            .current()
+            .session
+            .document()
+            .images()
+            .first()
+            .ok_or("Imagem ausente")?
+            .clone();
+        assert!(nator_sketch::distance(image.size, [20., 10.]) < 1e-4);
+        assert_eq!(image.name, "Imagem 1");
+        assert_eq!(image.transparency, 0.5);
+        let node = label_position(&mut editor, &context, "Imagem 1")?;
+        click(&mut editor, &context, node)?;
+        settle(&mut editor, &context)?;
+        let revision = editor.current().session.revision();
+        let from = at(&editor, [10., 5., 0.])?;
+        let to = at(&editor, [15., 7., 0.])?;
+        drag_between(&mut editor, &context, from, to)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor.current().session.revision(),
+            revision + 1,
+            "{}",
+            editor.status
+        );
+        let image = editor.current().session.document().images()[0].clone();
+        assert!(
+            nator_sketch::distance(image.origin, [5., 2.]) < 1e-4,
+            "{:?}",
+            image.origin
+        );
+        let from = at(&editor, [25., 12., 0.])?;
+        let to = at(&editor, [30., 15., 0.])?;
+        drag_between(&mut editor, &context, from, to)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), revision + 2);
+        assert!(
+            nator_sketch::distance(
+                editor.current().session.document().images()[0].size,
+                [25., 13.]
+            ) < 1e-4
+        );
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("imagem.3dnator");
+        write_project(&path, editor.current().session.document())?;
+        let reopened = read_project(&path)?;
+        assert_eq!(reopened.images()[0].asset.rgba.len(), 16);
+        assert!(nator_sketch::distance(reopened.images()[0].origin, [5., 2.]) < 1e-4);
+        if let Some(directory) = std::env::var_os("NATOR_IMAGE_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory)?;
+            write_project(
+                &directory.join("image.3dnator"),
+                editor.current().session.document(),
+            )?;
+        }
+        // Desfazer/refazer também funciona com as propriedades da imagem abertas.
+        for key in [egui::Key::Z, egui::Key::Y] {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                }],
+            )?;
+            settle(&mut editor, &context)?;
+            let expected = if key == egui::Key::Z {
+                [20., 10.]
+            } else {
+                [25., 13.]
+            };
+            assert!(
+                nator_sketch::distance(
+                    editor.current().session.document().images()[0].size,
+                    expected
+                ) < 1e-4
+            );
+            assert!(
+                nator_sketch::distance(
+                    editor
+                        .image_edit
+                        .as_ref()
+                        .ok_or("Painel ausente")?
+                        .image
+                        .size,
+                    expected
+                ) < 1e-4
+            );
+        }
+        let select = label_position(&mut editor, &context, text(T::Select))?;
+        click(&mut editor, &context, select)?;
+        assert!(editor.image_edit.is_none());
+        assert!(editor.selection_active());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn extrusion_clicks_toggle_multiple_projected_cells_in_one_profile()
+    -> Result<(), Box<dyn Error>> {
+        use nator_document::features::RegionRef;
+        let context = egui::Context::default();
+        let mut document = Document::new("Áreas projetadas")?;
+        let mut sketch = Sketch::new("Projetado", Plane::xy());
+        for x in [0., 25.] {
+            let points = [[x, 0.], [x + 10., 0.], [x + 10., 10.], [x, 10.]];
+            let curves = (0..4)
+                .map(|i| nator_sketch::profiles::Segment::Line {
+                    a: points[i],
+                    b: points[(i + 1) % 4],
+                })
+                .collect::<Vec<_>>();
+            nator_sketch::projection::insert(&mut sketch, &curves, &[])?;
+        }
+        let (part, _) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        settle(&mut editor, &context)?;
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        for _ in 0..15 {
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let at = |e: &Editor, p| {
+            sketch_scene::project(&e.viewport.camera, e.display_bounds(), e.canvas_rect, p)
+                .ok_or("Ponto sem projeção")
+        };
+        for p in [[5., 5., 0.], [30., 5., 0.]] {
+            let point = at(&editor, p)?;
+            click(&mut editor, &context, point)?;
+            wait_feature_preview(&mut editor, &context)?;
+        }
+        let reference = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.region_reference())
+            .ok_or("Perfil ausente")?;
+        assert!(
+            matches!(reference,RegionRef::Multiple(regions) if regions.len()==2),
+            "{reference:?}"
+        );
+        let point = at(&editor, [30., 5., 0.])?;
+        click(&mut editor, &context, point)?;
+        wait_feature_preview(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .feature_edit
+                .as_ref()
+                .and_then(|d| d.region_reference())
+                .ok_or("Perfil ausente")?
+                .selections()
+                .len(),
+            1
+        );
+        let point = at(&editor, [30., 5., 0.])?;
+        click(&mut editor, &context, point)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let part = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?;
+        assert_eq!(part.features.len(), 1);
+        assert_eq!(part.bodies.len(), 1);
+        assert!(
+            matches!(&part.features[0].operation,nator_document::features::Operation::Extrude{region:RegionRef::Multiple(regions),..} if regions.len()==2)
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_tree_menus_rename_delete_and_create_with_monotonic_names()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Árvore")?;
+        let (part, id) = document.add_sketch(None, Sketch::new("Rascunho", Plane::xy()))?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let right = |editor: &mut Editor, position| -> Result<(), Box<dyn Error>> {
+            for pressed in [true, false] {
+                frame(
+                    editor,
+                    &context,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Secondary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )?;
+            }
+            Ok(())
+        };
+        let node = label_position(&mut editor, &context, "Rascunho 1")?;
+        right(&mut editor, node)?;
+        let rename = label_position(&mut editor, &context, text(T::RenameFeature))?;
+        click(&mut editor, &context, rename)?;
+        assert!(editor.rename.is_some(), "Renomear não abriu");
+        frame(&mut editor, &context, vec![])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+                egui::Event::Text("Principal".into()),
+            ],
+        )?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .name,
+            "Principal"
+        );
+        let node = label_position(&mut editor, &context, "Principal")?;
+        right(&mut editor, node)?;
+        let delete = label_position(&mut editor, &context, text(T::DeleteFeature))?;
+        click(&mut editor, &context, delete)?;
+        assert!(editor.current().session.document().sketch(id).is_none());
+        assert!(editor.current().sketch_edit.is_none());
+        let folder = label_position(
+            &mut editor,
+            &context,
+            &format!("{} (0)", text(T::SketchesGroup)),
+        )?;
+        // Primeiro nó é o de referência; escolher o da peça pelo rótulo contextual
+        // usa o mesmo fluxo sem alterar geometria antes da escolha de suporte.
+        right(&mut editor, folder)?;
+        let new = label_position(&mut editor, &context, text(T::NewSketch))?;
+        click(&mut editor, &context, new)?;
+        assert!(editor.current().plane_pick.is_some());
+        editor.choose_origin_plane("XY", Plane::xy());
+        settle(&mut editor, &context)?;
+        let doc = editor.current().session.document();
+        let latest = doc
+            .reference_sketches()
+            .last()
+            .or_else(|| doc.part(part).and_then(|p| p.sketches.last()))
+            .ok_or("Rascunho novo ausente")?;
+        assert!(latest.sketch.name.ends_with(" 2"), "{}", latest.sketch.name);
         Ok(())
     }
 

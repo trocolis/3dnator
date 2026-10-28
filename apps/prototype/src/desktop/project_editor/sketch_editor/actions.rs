@@ -165,6 +165,7 @@ impl Editor {
         context: &egui::Context,
         action: Action,
     ) {
+        self.image_edit = None;
         self.sanitize_sketch_selection();
         let source = self.working_sketch();
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {

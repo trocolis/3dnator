@@ -2,7 +2,7 @@
 //! Corpos, Subpeças, Rascunhos, Planos e Origem (oculta por padrão). Descendentes têm visibilidade
 //! própria, gravada no documento e com desfazer; a efetiva combina a dos nós acima, e um
 //! nó oculto por um ancestral aparece esmaecido. O lápis de uma peça entra na edição dela.
-//! Pastas vazias dentro das peças não aparecem.
+//! Pastas vazias permanecem acessíveis para criar elementos pelo menu de contexto.
 //!
 //! Desenhar a árvore só colhe intenções; o editor as aplica depois (`Editor::tree`).
 use super::{
@@ -26,6 +26,10 @@ pub(super) enum Intent {
     /// Reabre o plano de trabalho no painel do plano deslocado.
     EditWorkPlane(WorkPlaneId),
     EditReference(SketchId),
+    DeleteSketch(SketchId),
+    NewInFolder(Folder),
+    EditImage(nator_document::ImageId),
+    NewImage(Option<PartId>),
     ToggleSection,
     OpenSection,
     RemoveSection,
@@ -43,6 +47,127 @@ pub(super) struct Tree<'a> {
 }
 
 impl<'a> Tree<'a> {
+    fn images(&mut self, ui: &mut egui::Ui, owner: Option<PartId>) {
+        let images = self
+            .document
+            .images()
+            .iter()
+            .filter(|i| self.document.sketch_part(i.sketch) == owner)
+            .collect::<Vec<_>>();
+        self.node(
+            ui,
+            self.id(("images", owner.map(|p| p.0))),
+            true,
+            |tree, ui| {
+                let response = icons::entry(
+                    ui,
+                    Icon::Image,
+                    &format!("{} ({})", text(T::ImagesFolder), images.len()),
+                    false,
+                );
+                response.context_menu(|ui| {
+                    if ui
+                        .add_enabled(!tree.busy, egui::Button::new(text(T::ImageLoad)))
+                        .clicked()
+                    {
+                        tree.intents.push(Intent::NewImage(owner));
+                        ui.close();
+                    }
+                });
+                response.clicked()
+            },
+            |tree, ui| {
+                for image in &images {
+                    tree.leaf(ui, |tree, ui| {
+                        if tree.eye(ui, image.visible, true) {
+                            let mut image = (*image).clone();
+                            image.visible = !image.visible;
+                            tree.intents.push(Intent::Command(Box::new(
+                                Command::UpdateReferenceImage { image },
+                            )));
+                        }
+                        let response = icons::entry_styled(
+                            ui,
+                            Icon::Image,
+                            &image.name,
+                            false,
+                            !image.visible,
+                        );
+                        if response.clicked() && !tree.busy {
+                            tree.intents.push(Intent::EditImage(image.id));
+                        }
+                        response.context_menu(|ui| {
+                            if ui
+                                .add_enabled(
+                                    !tree.busy,
+                                    egui::Button::new(text(T::EditFeatureShort)),
+                                )
+                                .clicked()
+                            {
+                                tree.intents.push(Intent::EditImage(image.id));
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(!tree.busy, egui::Button::new(text(T::DeleteFeature)))
+                                .clicked()
+                            {
+                                tree.intents.push(Intent::Command(Box::new(
+                                    Command::RemoveReferenceImage { id: image.id },
+                                )));
+                                ui.close();
+                            }
+                        });
+                    });
+                }
+            },
+        );
+    }
+    fn folder_menu(&mut self, response: &egui::Response, folder: Folder) {
+        let label = match folder {
+            Folder::Parts | Folder::Subparts(_) => T::NewPartMenu,
+            Folder::ReferenceSketches | Folder::Sketches(_) => T::NewSketch,
+            Folder::WorkPlanes(_) => T::OffsetPlane,
+            Folder::Bodies(_) => T::Extrude,
+            _ => return,
+        };
+        response.context_menu(|ui| {
+            if ui
+                .add_enabled(
+                    !self.busy && self.tab.sketch_edit.is_none(),
+                    egui::Button::new(text(label)),
+                )
+                .clicked()
+            {
+                self.intents.push(Intent::NewInFolder(folder));
+                ui.close();
+            }
+        });
+    }
+    fn sketch_menu(&mut self, response: &egui::Response, record: &nator_document::SketchRecord) {
+        response.context_menu(|ui| {
+            ui.add_enabled_ui(!self.busy, |ui| {
+                if ui.button(text(T::EditFeatureShort)).clicked() {
+                    if let Some(part) = self.document.sketch_part(record.id) {
+                        self.intents.push(Intent::EditSketch(part, record.id));
+                    } else {
+                        self.intents.push(Intent::EditReference(record.id));
+                    }
+                    ui.close();
+                }
+                if ui.button(text(T::RenameFeature)).clicked() {
+                    self.intents.push(Intent::Menu(browser::MenuAction::Rename(
+                        browser::RenameTarget::Sketch(record.id),
+                        record.sketch.name.clone(),
+                    )));
+                    ui.close();
+                }
+                if ui.button(text(T::DeleteFeature)).clicked() {
+                    self.intents.push(Intent::DeleteSketch(record.id));
+                    ui.close();
+                }
+            });
+        });
+    }
     pub fn new(
         document: &'a Document,
         tab: &'a Tab,
@@ -139,7 +264,8 @@ impl<'a> Tree<'a> {
                             visible: !visible,
                         })));
                 }
-                icons::entry_styled(ui, icon, &label, false, !shown);
+                let response = icons::entry_styled(ui, icon, &label, false, !shown);
+                tree.folder_menu(&response, folder);
             });
             return;
         }
@@ -155,7 +281,9 @@ impl<'a> Tree<'a> {
                             visible: !visible,
                         })));
                 }
-                icons::entry_styled(ui, icon, &label, false, !shown).clicked()
+                let response = icons::entry_styled(ui, icon, &label, false, !shown);
+                tree.folder_menu(&response, folder);
+                response.clicked()
             },
             |tree, ui| body(tree, ui, shown),
         );
@@ -255,6 +383,14 @@ impl<'a> Tree<'a> {
             },
         );
         self.origin(ui, Folder::Origin, shown);
+        if self
+            .document
+            .images()
+            .iter()
+            .any(|i| self.document.is_reference_sketch(i.sketch))
+        {
+            self.images(ui, None);
+        }
     }
 
     fn reference_sketch(
@@ -287,21 +423,7 @@ impl<'a> Tree<'a> {
             if response.clicked() && !tree.busy {
                 tree.intents.push(Intent::EditReference(record.id));
             }
-            response.context_menu(|ui| {
-                ui.add_enabled_ui(!tree.busy, |ui| {
-                    if ui.button(text(T::EditFeatureShort)).clicked() {
-                        tree.intents.push(Intent::EditReference(record.id));
-                        ui.close();
-                    }
-                    if ui.button(text(T::DeleteFeature)).clicked() {
-                        tree.intents
-                            .push(Intent::Command(Box::new(Command::RemoveSketch {
-                                id: record.id,
-                            })));
-                        ui.close();
-                    }
-                });
-            });
+            tree.sketch_menu(&response, record);
         });
     }
 
@@ -384,7 +506,7 @@ impl<'a> Tree<'a> {
                 // Resultados intermediários pertencem à linha do tempo. Listá-los aqui
                 // fazia cada modificação parecer uma cópia nova do corpo anterior.
                 let bodies = part.listed_bodies().collect::<Vec<_>>();
-                if !bodies.is_empty() {
+                {
                     tree.folder(
                         ui,
                         tree.id(("bodies", &path)),
@@ -392,7 +514,7 @@ impl<'a> Tree<'a> {
                         Icon::Folder,
                         format!("{} ({})", text(T::SolidBodies), bodies.len()),
                         shown,
-                        false,
+                        bodies.is_empty(),
                         |tree, ui, shown| {
                             for body in bodies {
                                 tree.body(ui, part.id, body, shown);
@@ -405,7 +527,7 @@ impl<'a> Tree<'a> {
                     .iter()
                     .filter(|i| i.parent == Some(part.id))
                     .collect::<Vec<_>>();
-                if !children.is_empty() {
+                {
                     tree.folder(
                         ui,
                         tree.id(("subparts", &path)),
@@ -413,7 +535,7 @@ impl<'a> Tree<'a> {
                         Icon::Folder,
                         format!("{} ({})", text(T::SubpartsFolder), children.len()),
                         shown,
-                        false,
+                        children.is_empty(),
                         |tree, ui, shown| {
                             for child in children {
                                 let mut nested = path.clone();
@@ -423,7 +545,7 @@ impl<'a> Tree<'a> {
                         },
                     );
                 }
-                if !part.sketches.is_empty() {
+                {
                     tree.folder(
                         ui,
                         tree.id(("sketches", &path)),
@@ -431,7 +553,7 @@ impl<'a> Tree<'a> {
                         Icon::Folder,
                         format!("{} ({})", text(T::SketchesGroup), part.sketches.len()),
                         shown,
-                        false,
+                        part.sketches.is_empty(),
                         |tree, ui, shown| {
                             for record in &part.sketches {
                                 tree.sketch(ui, part.id, record, shown);
@@ -439,7 +561,7 @@ impl<'a> Tree<'a> {
                         },
                     );
                 }
-                if !part.work_planes.is_empty() {
+                {
                     tree.folder(
                         ui,
                         tree.id(("planes", &path)),
@@ -447,7 +569,7 @@ impl<'a> Tree<'a> {
                         Icon::Folder,
                         format!("{} ({})", text(T::WorkPlanesFolder), part.work_planes.len()),
                         shown,
-                        false,
+                        part.work_planes.is_empty(),
                         |tree, ui, shown| {
                             for record in &part.work_planes {
                                 tree.work_plane(ui, record, shown);
@@ -456,6 +578,7 @@ impl<'a> Tree<'a> {
                     );
                 }
                 tree.origin(ui, Folder::PartOrigin(part.id), shown);
+                tree.images(ui, Some(part.id));
             },
         );
     }
@@ -583,18 +706,17 @@ impl<'a> Tree<'a> {
                         visible: !record.visible,
                     })));
             }
-            if icons::entry_styled(
+            let response = icons::entry_styled(
                 ui,
                 Icon::Sketch,
                 &record.sketch.name,
                 editing,
                 !(parent_shown && record.visible),
-            )
-            .clicked()
-                && !tree.busy
-            {
+            );
+            if response.clicked() && !tree.busy {
                 tree.intents.push(Intent::EditSketch(part, record.id));
             }
+            tree.sketch_menu(&response, record);
         });
     }
 

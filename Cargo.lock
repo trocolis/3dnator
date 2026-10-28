@@ -997,6 +997,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1354,6 +1356,7 @@ name = "nator-prototype"
 version = "0.3.0"
 dependencies = [
  "eframe",
+ "image",
  "nator-commands",
  "nator-document",
  "nator-drawing",

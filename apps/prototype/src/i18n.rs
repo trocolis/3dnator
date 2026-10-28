@@ -1,6 +1,14 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    SketchImage,
+    ImagesFolder,
+    ImageDrawHint,
+    ImageTransparency,
+    ImagePosition,
+    ImageLoad,
+    ImageLocalPosition,
+    ImageFileTooLarge,
     ChooseSketchPlane,
     AppName,
     ChooseOffsetBase,
@@ -697,6 +705,16 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::SketchImage => "Imagem",
+        Text::ImagesFolder => "Imagens",
+        Text::ImageDrawHint => {
+            "Escolha dois cantos no desenho. Depois ajuste as propriedades e confirme com OK."
+        }
+        Text::ImageTransparency => "Transparência (%)",
+        Text::ImagePosition => "Posição na peça (mm)",
+        Text::ImageLoad => "Carregar imagem PNG ou JPEG",
+        Text::ImageLocalPosition => "Posição no plano do rascunho",
+        Text::ImageFileTooLarge => "Use uma imagem de até 32 MiB.",
         Text::ChooseSketchPlane => {
             "Selecione um plano da origem, um plano de trabalho ou uma face plana do modelo"
         }
@@ -817,7 +835,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Sketch => "Rascunho",
         Text::AutomaticExtrusion => "Operação automática",
         Text::ExtrusionProfileHint => {
-            "Clique em qualquer área fechada de rascunho ou em uma face plana de um sólido da peça."
+            "Clique para adicionar/remover áreas do mesmo rascunho, incluindo contornos projetados; ou escolha uma face plana do sólido."
         }
         Text::ExtrusionMouseHint => {
             "Arraste a seta para definir a distância. Clique em uma face para terminar nela. Escolher uma operação desativa a sugestão automática."
@@ -892,7 +910,7 @@ pub fn text(key: Text) -> &'static str {
             "Clique em uma face plana, aresta, arco ou vértice do componente; Esc encerra"
         }
         Text::SketchProjectAll => "Todos os elementos",
-        Text::SketchProjectPlanes => "Faces planas",
+        Text::SketchProjectPlanes => "Faces e áreas",
         Text::SketchProjectEdges => "Arestas e arcos",
         Text::SketchProjectVertices => "Vértices",
         Text::SketchProjectSnapshot => {
