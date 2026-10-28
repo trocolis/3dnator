@@ -856,7 +856,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchPatternGroup => "Padrão",
         Text::ConstrainGroup => "Restringir",
         Text::SketchExitGroup => "Sair",
-        Text::SketchDimension => "Cota",
+        Text::SketchDimension => "Dimencionar",
         Text::HorizontalVertical => "Horizontal/vertical",
         Text::SketchExtendShort => "Estender",
         Text::SketchCircularShort => "Circular",

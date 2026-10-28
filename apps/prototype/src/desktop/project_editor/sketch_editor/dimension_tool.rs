@@ -126,7 +126,7 @@ impl Draft {
 pub(super) struct Update {
     /// Rascunho com a cota nova e o identificador dela, para decidir no trabalhador se ela
     /// dirige a geometria ou entra como referência.
-    pub commit: Option<(Sketch, u64)>,
+    pub commit: Option<(Sketch, u64, Option<Pick>)>,
     pub warning: Option<String>,
     /// Orientação da barra de estado, emitida só quando a etapa muda.
     pub hint: Option<T>,
@@ -890,8 +890,11 @@ pub(super) fn update(
     if commit && let Some(built) = &built {
         let typed = draft.typed.then_some(draft.text.as_str());
         match self::commit(sketch, built, typed, label, parameters) {
-            Ok(result) => {
-                update.commit = Some(result);
+            Ok((sketch, id)) => {
+                // A ordem dos cliques é preservada separadamente do tipo da cota:
+                // ponto–linha e linha–círculo normalizam seus campos ao combinar.
+                let first = (draft.picks.len() == 2).then(|| draft.picks[0]);
+                update.commit = Some((sketch, id, first));
                 update.hint = Some(T::DimensionPickHint);
                 draft.clear();
             }

@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Dimencionar e ordem dos elementos
+
+- A ferramenta Cota passa a se chamar **Dimencionar** na faixa, na busca e no painel, mantendo o atalho D.
+- Ao dimensionar dois elementos livres, o primeiro escolhido permanece no lugar e o segundo se ajusta. A preferência considera todos os apoios do elemento e o raio dos círculos, sem gravar travas adicionais; restrições existentes continuam prevalecendo quando o segundo elemento já está fixado.
+
 ### Selecionar nas abas e alvos pela seleção atual
 
 - Selecionar passa a ser o primeiro item de Montagem, Peça e Rascunho, com ícone de cursor e destaque enquanto o modo está ativo. Seu ícone não acompanha o ponteiro na área de edição. Esc, ao cancelar uma ferramenta, retorna à seleção; prévias e gestos pendentes são descartados, preservando o documento e os elementos já selecionados.

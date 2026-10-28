@@ -412,7 +412,7 @@ impl Editor {
         &mut self,
         context: &egui::Context,
         sketch: Sketch,
-        dimension: Option<u64>,
+        dimension: Option<(u64, Option<dimension_tool::Pick>)>,
     ) {
         if self.busy() {
             return;
@@ -437,12 +437,22 @@ impl Editor {
             .unwrap_or_default();
         self.start(context, None, move || {
             let mut sketch = sketch;
-            if let Some(id) = dimension {
+            if let Some((id, _)) = dimension {
                 dimension_tool::settle_driven(&mut sketch, id, &parameters)?;
             }
             nator_document::parameters::resolve_sketch(&mut sketch, &parameters)
                 .map_err(sketch_error)?;
-            let report = solver::solve(&sketch).map_err(sketch_error)?;
+            let first = dimension.and_then(|(_, first)| first);
+            let (points, circles) = match first {
+                Some(dimension_tool::Pick::Point(id)) => (vec![id], vec![]),
+                Some(dimension_tool::Pick::Line(id) | dimension_tool::Pick::Radial(id)) => {
+                    let entity = sketch.entity(id).map_err(sketch_error)?;
+                    (entity.point_ids(), vec![id])
+                }
+                None => (vec![], vec![]),
+            };
+            let report =
+                solver::solve_preserving(&sketch, &points, &circles).map_err(sketch_error)?;
             // O fechamento com linhas já existentes só é conhecido após resolver
             // a geometria. Esta consulta fica fora da thread da interface.
             let chain_closed = check_area
@@ -1149,8 +1159,8 @@ impl Editor {
             if let Some(warning) = update.warning {
                 self.status.warning(warning);
             }
-            if let Some((candidate, id)) = update.commit {
-                self.solve_sketch_with(ui.ctx(), candidate, Some(id));
+            if let Some((candidate, id, first)) = update.commit {
+                self.solve_sketch_with(ui.ctx(), candidate, Some((id, first)));
             }
         }
     }

@@ -317,6 +317,41 @@ fn rank(mut matrix: Vec<Vec<f64>>, columns: usize) -> usize {
     row
 }
 pub fn solve(source: &Sketch) -> Result<Report> {
+    solve_internal(source, &[])
+}
+
+/// Prefere manter os apoios do primeiro elemento escolhido na posição atual.
+/// A preferência vale somente nesta resolução: não cria restrições permanentes.
+/// Se o segundo elemento já estiver fixado, as restrições do documento prevalecem
+/// e a resolução comum pode mover o primeiro. Raios de círculos são variáveis
+/// independentes dos pontos; arcos são preservados pelos seus três apoios.
+pub fn solve_preserving(source: &Sketch, points: &[u64], circles: &[u64]) -> Result<Report> {
+    let mut stationary = vec![false; variables(source).len()];
+    for id in points {
+        let index = source
+            .points
+            .iter()
+            .position(|p| p.id == *id)
+            .ok_or_else(|| SketchError(format!("Ponto {id} inexistente.")))?;
+        stationary[index * 2] = true;
+        stationary[index * 2 + 1] = true;
+    }
+    let mut offset = source.points.len() * 2;
+    for entity in &source.entities {
+        if matches!(entity.curve, Curve::Circle { .. }) {
+            stationary[offset] = circles.contains(&entity.id);
+            offset += 1;
+        }
+    }
+    let preferred = solve_internal(source, &stationary)?;
+    if preferred.status == Status::Conflict {
+        solve(source)
+    } else {
+        Ok(preferred)
+    }
+}
+
+fn solve_internal(source: &Sketch, stationary: &[bool]) -> Result<Report> {
     source.validate()?;
     let mut sketch = source.clone();
     let mut x = variables(&sketch);
@@ -331,7 +366,17 @@ pub fn solve(source: &Sketch) -> Result<Report> {
         if r.iter().all(|v| v.abs() < 1e-8) {
             break;
         }
-        let j = jacobian(&sketch, &x, &r)?;
+        let mut j = jacobian(&sketch, &x, &r)?;
+        // Colunas nulas impedem deslocar esses apoios, inclusive por arredondamento.
+        // O posto final usa a jacobiana completa: a preferência não retira graus
+        // de liberdade do rascunho nem o deixa artificialmente fixado.
+        for row in &mut j {
+            for (value, fixed) in row.iter_mut().zip(stationary) {
+                if *fixed {
+                    *value = 0.;
+                }
+            }
+        }
         let n = x.len();
         let mut a = vec![vec![0.; n]; n];
         let mut b = vec![0.; n];
@@ -407,6 +452,73 @@ pub fn solve(source: &Sketch) -> Result<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordered_distance_moves_only_the_second_free_point_and_creates_no_locks() -> Result<()> {
+        let mut sketch = Sketch::new("Ordem", Plane::xy());
+        let a = sketch.add_point([0., 0.])?;
+        let b = sketch.add_point([10., 0.])?;
+        sketch.add_constraint(ConstraintKind::Distance { a, b, value: 30. }, false)?;
+        let report = solve_preserving(&sketch, &[a], &[])?;
+        assert_ne!(report.status, Status::Conflict);
+        assert_eq!(report.sketch.point(a)?, [0., 0.]);
+        assert!((distance(report.sketch.point(a)?, report.sketch.point(b)?) - 30.).abs() < 1e-6);
+        assert_eq!(report.sketch.constraints.len(), 1);
+        assert_eq!(
+            report.status,
+            Status::UnderConstrained {
+                degrees_of_freedom: 3
+            }
+        );
+        let reverse = solve_preserving(&sketch, &[b], &[])?;
+        assert_eq!(reverse.sketch.point(b)?, [10., 0.]);
+        assert!(reverse.sketch.point(a)?[0] < -19.999);
+        Ok(())
+    }
+
+    #[test]
+    fn ordered_distance_respects_a_second_point_already_fixed() -> Result<()> {
+        let mut sketch = Sketch::new("Fixo", Plane::xy());
+        let a = sketch.add_point([0., 0.])?;
+        let b = sketch.add_point([10., 0.])?;
+        sketch.add_constraint(
+            ConstraintKind::Fixed {
+                point: b,
+                position: [10., 0.],
+            },
+            false,
+        )?;
+        sketch.add_constraint(ConstraintKind::Distance { a, b, value: 30. }, false)?;
+        let report = solve_preserving(&sketch, &[a], &[])?;
+        assert_ne!(report.status, Status::Conflict);
+        assert!(distance(report.sketch.point(b)?, [10., 0.]) < 1e-6);
+        assert!(report.sketch.point(a)?[0] < -19.999);
+        Ok(())
+    }
+
+    #[test]
+    fn ordered_line_circle_distance_preserves_either_first_element() -> Result<()> {
+        let mut sketch = Sketch::new("Linha e círculo", Plane::xy());
+        let line = sketch.add_line([0., 0.], [20., 0.], false)?;
+        let circle = sketch.add_circle([10., 10.], 2., false)?;
+        sketch.add_constraint(
+            ConstraintKind::LineCircleDistance {
+                line,
+                circle,
+                value: 18., /* mede a folga à borda próxima */
+                crossing: false,
+            },
+            false,
+        )?;
+        let line_points = sketch.entity(line)?.point_ids();
+        let report = solve_preserving(&sketch, &line_points, &[])?;
+        assert_ne!(report.status, Status::Conflict);
+        assert_eq!(report.sketch.line(line)?, sketch.line(line)?);
+        let report = solve_preserving(&sketch, &sketch.entity(circle)?.point_ids(), &[circle])?;
+        assert_ne!(report.status, Status::Conflict);
+        assert_eq!(report.sketch.circle(circle)?, sketch.circle(circle)?);
+        Ok(())
+    }
     #[test]
     fn angular_dimensions_keep_direction_across_the_pi_boundary() -> Result<()> {
         for (initial, target) in [(179_f64, -179_f64), (0., 180.), (45., -30.)] {
