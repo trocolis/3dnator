@@ -18,7 +18,36 @@ pub fn offset_entity(sketch: &mut Sketch, id: u64, distance_mm: f64) -> Result<u
             radius + distance_mm,
             entity.construction,
         ),
-        Curve::Arc { .. } => Err(SketchError("Offset de arco ainda não disponível.".into())),
+        Curve::Arc {
+            center,
+            start,
+            end,
+            clockwise,
+        } => {
+            let center = sketch.point(center)?;
+            let a = sketch.point(start)?;
+            let b = sketch.point(end)?;
+            let radius = distance(center, a);
+            let offset_radius = radius + distance_mm;
+            if offset_radius <= 1e-9 || !offset_radius.is_finite() {
+                return Err(SketchError(
+                    "O deslocamento produziria um arco sem raio positivo.".into(),
+                ));
+            }
+            let factor = offset_radius / radius;
+            let center_id = sketch.add_point(center)?;
+            let start = sketch.add_point(add(center, scale(sub(a, center), factor)))?;
+            let end = sketch.add_point(add(center, scale(sub(b, center), factor)))?;
+            sketch.add_curve(
+                Curve::Arc {
+                    center: center_id,
+                    start,
+                    end,
+                    clockwise,
+                },
+                entity.construction,
+            )
+        }
     }
 }
 pub fn extend_line(sketch: &mut Sketch, line: u64, target: u64, near: Point2) -> Result<()> {

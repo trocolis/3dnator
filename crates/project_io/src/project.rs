@@ -39,7 +39,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// capturadas são constantes do solver e conservam as travas explícitas no arquivo.
 /// Versão 24: incidência `PointOnCurve` e ligações geométricas fracas, gravadas
 /// como restrições não dimensionais de referência (`reference = true`).
-pub const FORMAT_VERSION: u32 = 24;
+/// Versão 25: ordem dos elementos de cotas (`dimension_targets`), usada pela
+/// política de preservar o elemento mais conectado e o segundo nos empates.
+pub const FORMAT_VERSION: u32 = 25;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

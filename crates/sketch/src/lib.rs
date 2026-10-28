@@ -4,10 +4,13 @@ use std::{collections::HashSet, error::Error, fmt};
 
 pub mod areas;
 mod curve_geometry;
+pub mod dimensions;
 pub mod drafting;
 pub mod edit;
+pub mod indicators;
 pub mod junctions;
 pub mod lines;
+pub mod modifications;
 pub mod profiles;
 pub mod projection;
 pub mod repair;
@@ -369,6 +372,9 @@ pub struct Sketch {
     /// texto acompanhe a geometria. Ausente, a interface usa o lugar padrão.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub dimension_labels: std::collections::BTreeMap<u64, Point2>,
+    /// Ordem original dos dois elementos cotados, preservada para futuras edições.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub dimension_targets: std::collections::BTreeMap<u64, [dimensions::Target; 2]>,
 }
 impl Sketch {
     /// Apoios da parametrização de retas infinitas não viram extremos visíveis
@@ -404,6 +410,7 @@ impl Sketch {
             constraints: Vec::new(),
             dimension_expressions: std::collections::BTreeMap::new(),
             dimension_labels: std::collections::BTreeMap::new(),
+            dimension_targets: std::collections::BTreeMap::new(),
         }
     }
     fn allocate(&mut self) -> Result<u64> {
@@ -706,6 +713,18 @@ impl Sketch {
                 ));
             }
         }
+        for (id, pair) in &self.dimension_targets {
+            if !self
+                .constraints
+                .iter()
+                .any(|c| c.id == *id && c.kind.is_dimension())
+                || pair.iter().any(|target| target.points(self).is_err())
+            {
+                return Err(SketchError(
+                    "Ordem dos elementos sem cota ou alvo correspondente.".into(),
+                ));
+            }
+        }
         Ok(())
     }
     pub fn prune_unused_points(&mut self) {
@@ -732,6 +751,10 @@ impl Sketch {
             .retain(|id, _| self.constraints.iter().any(|c| c.id == *id));
         self.dimension_labels
             .retain(|id, _| self.constraints.iter().any(|c| c.id == *id));
+        self.dimension_targets.retain(|id, pair| {
+            self.constraints.iter().any(|c| c.id == *id)
+                && pair.iter().all(|t| t.points(&candidate).is_ok())
+        });
     }
 }
 pub fn sub(a: Point2, b: Point2) -> Point2 {

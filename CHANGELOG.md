@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Operações de rascunho e dimensionamento por conexões
+
+- Política de cotas centralizada no núcleo: o elemento mais conectado é preservado; no empate, o segundo escolhido fica no lugar e o primeiro se ajusta. Ligações fracas não contam como apoios, e a própria cota é excluída da contagem. Restrições existentes prevalecem sobre a preferência transitória.
+- Espelhamento de múltiplas entidades com eixo separado e traço Normal/Construção/Infinita, preservando apoios compartilhados e coincidências internas nas cópias. Deslocamento Normal, Duplo e Simétrico, com distâncias por lado e o mesmo seletor de traço. Arcos passam a aceitar deslocamento radial. Falha em qualquer entidade/lado descarta a operação inteira.
+- Indicadores geométricos calculados fora da interface para perpendicularidade, tangência, ponto médio e centro. Formato interno 25 registra a ordem dos dois elementos cotados em `dimension_targets`, lendo os formatos anteriores. Aplicativo permanece em 0.3.0 em desenvolvimento.
+
 ### Junções fortes/fracas e cadeados nos vértices
 
 - Captura em vértices cria ligação forte por padrão; cruzamentos e pontos no interior de curvas criam ligações fracas. **F** inverte a decisão do próximo clique durante o desenho, inclusive com as medidas flutuantes ativas. A prévia mostra cadeado e força selecionada; o clique grava essa decisão, e o próximo apoio volta ao padrão.

@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 24
+# Formato de projeto — versão interna 25
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 24; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 25; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -12,6 +12,12 @@ faces/<body_id>.bin       (somente corpos sólidos CAD, opcional)
 ```
 
 ## Manifesto
+
+Desde a versão 25, `dimension_targets` opcional no rascunho associa o ID de uma cota aos dois elementos na ordem em que foram escolhidos: `Point(id)` ou `Entity(id)`, serializados como objetos com esse nome e ID local. A chave deve identificar uma cota existente e os dois alvos devem existir no mesmo rascunho. O campo é omitido quando vazio. Editar o valor ou mover o texto preserva esses alvos, o ID da cota e `dimension_labels`.
+
+A política de resolução prefere preservar o elemento com mais conexões dirigentes; conta vizinhos distintos ligados por apoios compartilhados/restrições ativas e apoios de cotas/fixações, ignorando ligações fracas e a própria cota em edição. Em empate, prefere preservar o segundo escolhido. Essa preferência é transitória: não grava travas nem altera as restrições existentes. Sem o campo, a ordem é inferida dos campos da restrição quando possível; não é possível recuperar a ordem original de cliques de projetos anteriores. Cotas de uma única curva não recebem um par artificial.
+
+Modos de Espelhar e Deslocamento continuam sendo intenções de criação, gravadas como geometria comum. Espelhar conserva apoios compartilhados e coincidências internas nas cópias. Normal usa distância assinada; Dupla usa duas distâncias positivas, uma por lado; Simétrica usa a mesma distância positiva em cada lado. Em linhas, o lado positivo é a esquerda do sentido início→fim; em círculos/arcos, aumenta o raio. Não há novo vínculo associativo com a origem da cópia.
 
 Desde a versão 24, `PointOnCurve { point, curve }` liga um apoio à circunferência de um círculo/arco, acompanhando seu centro e raio no recálculo. `PointOnLine` continua sendo a incidência à reta suporte. Ligações geométricas `Coincident`, `Midpoint`, `PointOnLine` e `PointOnCurve` com `reference = true` são fracas: seus alvos são preservados, mas não acrescentam resíduos ao solver. Com `false`, são fortes. A força não equivale a uma restrição `Fixed` de posição absoluta.
 

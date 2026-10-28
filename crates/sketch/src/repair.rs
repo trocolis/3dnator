@@ -219,6 +219,9 @@ fn remove_entity(sketch: &mut Sketch, id: u64) -> Result<()> {
     sketch
         .dimension_labels
         .retain(|id, _| constraints.contains(id));
+    sketch.dimension_targets.retain(|id, pair| {
+        constraints.contains(id) && pair.iter().all(|t| t.points(&candidate).is_ok())
+    });
     Ok(())
 }
 
