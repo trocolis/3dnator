@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Faixas das abas uniformes e compactas — 27/10/2026
+
+- Identificada a diferença: os rodapés do Rascunho usavam botões de menu com altura mínima maior que os rótulos das outras abas. Um layout comum passa a reservar corpo, intervalo e rodapé para todos os grupos, incluindo a galeria de restrições.
+- Botões da faixa com 72 × 54 pontos, ícones de 24 pontos, legendas de até duas linhas, rodapé de 18 pontos e intervalo vertical de 2 pontos. Menores margens e espaçamentos da faixa; os controles dos painéis de opções conservam suas dimensões. Menus, dicas, nomes acessíveis e Concluir/Cancelar continuam disponíveis.
+- Novo ensaio gráfico alterna Montagem, Peça, Inspecionar e Rascunho em 1440 × 900 e 900 × 600, verifica igualdade da posição superior do canvas e exige altura menor que o cabeçalho anterior. A regressão de desenho ajusta apenas a tolerância do clique do centro do retângulo para 0,00002 mm, cobrindo a conversão f32 de coordenadas da tela após o redimensionamento; a verificação geométrica é preservada.
+- **263 testes do workspace com OCCT, 197 sem OCCT e 17 ensaios gráficos aprovados**. Formatação, Clippy com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Capturas GL/llvmpipe em `target/codex-validation/compact-ribbon-20261027/`: `assembly.png`, `sketch.png` e `sketch-compact.png`, inspecionadas para altura, legibilidade e alinhamento. Windows e janela nativa não exercitados localmente. Versão 0.3.0 em desenvolvimento e formato 19 preservados, sem release ou publicação remota.
+
 ## Grupo Sair do rascunho com Concluir e Cancelar — 27/10/2026
 
 - Sair usa a mesma seção dos outros grupos: botões Concluir/Cancelar com ícones e menu no rótulo. O grupo participa da rolagem horizontal da faixa; removida a área isolada de Concluir na borda direita. Legendas curtas na faixa e nomes completos na busca/dicas, centralizados em tradução.

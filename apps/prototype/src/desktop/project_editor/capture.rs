@@ -1506,6 +1506,56 @@ mod tests {
         Ok(())
     }
 
+    /// Trocar de aba não deve deslocar o início do canvas. A comparação inclui
+    /// a galeria de restrições e os menus do rascunho, em duas larguras de janela.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn ribbon_tabs_keep_the_same_compact_height_in_wide_and_narrow_windows()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Faixas uniformes")?;
+        let mut sketch = Sketch::new("Perfil", Plane::xy());
+        sketch.add_rectangle([-20., -10.], [20., 10.], false)?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, document)
+            .map_err(|error| error.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        settle(&mut editor, &context)?;
+        for size in [egui::vec2(1440., 900.), egui::vec2(900., 600.)] {
+            let mut tops = Vec::new();
+            for tab in [
+                shell::RibbonTab::Assembly,
+                shell::RibbonTab::Model,
+                shell::RibbonTab::Inspect,
+                shell::RibbonTab::Sketch,
+            ] {
+                editor.shell.tab = tab;
+                for _ in 0..3 {
+                    let mut output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                            time: Some(context.input(|input| input.time) + 0.1),
+                            ..Default::default()
+                        },
+                        |ui| editor.draw(ui),
+                    );
+                    output.textures_delta.clear();
+                }
+                tops.push(editor.canvas_rect.top());
+            }
+            assert!(
+                tops.iter().all(|top| (*top - tops[0]).abs() < 1.),
+                "{size:?}: {tops:?}"
+            );
+            // O cabeçalho anterior terminava em 188–206 pontos. A versão
+            // compacta precisa recuperar espaço para o canvas em todas as abas.
+            assert!(tops[0] < 180., "{size:?}: {tops:?}");
+        }
+        Ok(())
+    }
+
     /// Ensaio optativo porque precisa de adaptador wgpu. Usa eventos reais egui
     /// sobre o canvas completo; não exige compositor nem janela nativa.
     #[test]
@@ -3388,11 +3438,14 @@ mod tests {
             .iter()
             .map(|entity| rectangle.line(entity.id).map(|line| line.0))
             .collect::<nator_sketch::Result<Vec<_>>>()?;
+        // O clique passa por coordenadas f32 da tela. A tolerância de 0,00002 mm
+        // cobre esse arredondamento ao mudar a altura do canvas, sem folga geométrica.
         assert!(
             nator_sketch::distance(
                 nator_sketch::scale(nator_sketch::add(corners[0], corners[2]), 0.5),
                 [-25., -40.]
-            ) < 1e-5
+            ) < 2e-5,
+            "Cantos obtidos: {corners:?}"
         );
         choose(&mut editor, T::SketchRectangleInclined)?;
         point(&mut editor, [-70., 55.])?;

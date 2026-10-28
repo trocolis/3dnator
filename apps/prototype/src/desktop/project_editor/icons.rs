@@ -878,6 +878,16 @@ pub(super) fn paint_with_ink(
     }
 }
 
+/// A faixa usa medidas próprias; os botões maiores dos painéis de opções
+/// conservam sua dimensão para não alterar as ferramentas de desenho.
+pub(super) const RIBBON_BUTTON_SIZE: egui::Vec2 = egui::vec2(72., 54.);
+
+enum ButtonLayout {
+    Compact,
+    Large,
+    Ribbon,
+}
+
 /// Um botão desenhado continua sendo um botão para teclado e acessibilidade.
 /// O tooltip mantém o nome completo mesmo nos atalhos compactos sem texto.
 pub(super) fn button(
@@ -887,10 +897,39 @@ pub(super) fn button(
     large: bool,
     selected: bool,
 ) -> egui::Response {
-    let size = if large {
-        egui::vec2(76., 64.)
-    } else {
-        egui::vec2(30., 30.)
+    draw_button(
+        ui,
+        icon,
+        label,
+        if large {
+            ButtonLayout::Large
+        } else {
+            ButtonLayout::Compact
+        },
+        selected,
+    )
+}
+
+pub(super) fn ribbon_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    draw_button(ui, icon, label, ButtonLayout::Ribbon, selected)
+}
+
+fn draw_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    layout: ButtonLayout,
+    selected: bool,
+) -> egui::Response {
+    let (size, icon_size, icon_shift, label_top, font_size) = match layout {
+        ButtonLayout::Compact => (egui::vec2(30., 30.), 18., 0., None, 11.),
+        ButtonLayout::Large => (egui::vec2(76., 64.), 27., 10., Some(40.), 11.),
+        ButtonLayout::Ribbon => (RIBBON_BUTTON_SIZE, 24., 12., Some(29.), 10.5),
     };
     let response = ui.add(
         egui::Button::new("")
@@ -905,8 +944,7 @@ pub(super) fn button(
         if response.hovered() && ui.is_enabled() {
             ui.painter().rect_filled(response.rect, 5, theme::BLUE_FILL);
         }
-        let icon_size = if large { 27. } else { 18. };
-        let center = response.rect.center() - egui::vec2(0., if large { 10. } else { 0. });
+        let center = response.rect.center() - egui::vec2(0., icon_shift);
         paint_with_ink(
             ui.painter(),
             egui::Rect::from_center_size(center, egui::Vec2::splat(icon_size)),
@@ -918,28 +956,32 @@ pub(super) fn button(
                 theme::INK
             },
         );
-        if large {
-            // O rótulo pode ocupar duas linhas sem invadir o grupo vizinho.
-            let galley = ui.painter().layout(
+        if let Some(top) = label_top {
+            // Limitar a duas linhas impede que legendas extensas invadam o
+            // rodapé do grupo. O nome completo continua disponível na dica.
+            let mut job = egui::text::LayoutJob::simple(
                 label.to_owned(),
-                egui::FontId::proportional(11.),
+                egui::FontId::proportional(font_size),
                 if ui.is_enabled() {
                     theme::INK
                 } else {
                     theme::MUTED
                 },
-                72.,
+                size.x - 4.,
             );
+            job.wrap.max_rows = 2;
+            let galley = ui.painter().layout_job(job);
             ui.painter().galley(
                 egui::pos2(
                     response.rect.center().x - galley.size().x / 2.,
-                    response.rect.top() + 40.,
+                    response.rect.top() + top,
                 ),
                 galley,
                 theme::INK,
             );
         }
     }
+
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,

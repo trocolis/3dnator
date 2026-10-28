@@ -8,6 +8,12 @@ use super::{
 use feature_editor::Tool as SolidTool;
 use nator_sketch::edit::Action as SketchEdit;
 
+/// Todas as abas compartilham a mesma faixa: corpo dos botões, pequeno
+/// intervalo e rodapé reservado tanto para rótulos quanto para menus.
+const GROUP_CAPTION_HEIGHT: f32 = 18.;
+const GROUP_VERTICAL_GAP: f32 = 2.;
+const GROUP_HORIZONTAL_GAP: f32 = 3.;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(super) enum RibbonTab {
     /// Aba principal: o projeto começa pela montagem.
@@ -363,6 +369,11 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::CancelSketch,
 ];
 
+fn group_width(count: usize) -> f32 {
+    count as f32 * icons::RIBBON_BUTTON_SIZE.x
+        + count.saturating_sub(1) as f32 * GROUP_HORIZONTAL_GAP
+}
+
 impl Editor {
     fn action_enabled(&self, action: Action) -> bool {
         let editable = !self.busy() && self.pending_close.is_none();
@@ -483,17 +494,11 @@ impl Editor {
         let selected = self.action_selected(action);
         let response = ui
             .add_enabled_ui(enabled, |ui| {
-                icons::button(
-                    ui,
-                    action.icon(),
-                    text(if large {
-                        action.caption()
-                    } else {
-                        action.label()
-                    }),
-                    large,
-                    selected,
-                )
+                if large {
+                    icons::ribbon_button(ui, action.icon(), text(action.caption()), selected)
+                } else {
+                    icons::button(ui, action.icon(), text(action.label()), false, selected)
+                }
             })
             .inner;
         let hint = if let Some(shortcut) = action.shortcut() {
@@ -797,10 +802,11 @@ impl Editor {
             .frame(
                 egui::Frame::new()
                     .fill(egui::Color32::WHITE)
-                    .inner_margin(egui::Margin::symmetric(12, 5))
+                    .inner_margin(egui::Margin::symmetric(12, 3))
                     .stroke(egui::Stroke::new(1., theme::BORDER)),
             )
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.;
                     let mut previous_selected = None;
@@ -842,7 +848,7 @@ impl Editor {
                         self.action_button(ui, Action::Browser, false);
                     });
                 });
-                ui.separator();
+                ui.add(egui::Separator::default().spacing(4.));
                 self.ribbon_scroller(ui);
             });
         self.timeline(ui);
@@ -918,7 +924,7 @@ impl Editor {
             .id_salt("ribbon_scroll")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 3.;
+                    ui.spacing_mut().item_spacing.x = GROUP_HORIZONTAL_GAP;
                     self.ribbon_groups(ui);
                 });
             });
@@ -944,7 +950,7 @@ impl Editor {
                     .color(theme::MUTED),
             )
             .frame(false)
-            .min_size(egui::vec2(label_width + 26., 20.));
+            .min_size(egui::vec2(label_width + 26., GROUP_CAPTION_HEIGHT));
             let (response, _) =
                 egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
                     for action in actions {
@@ -989,30 +995,26 @@ impl Editor {
         promoted: &[Action],
         menu: &[Action],
     ) {
-        ui.vertical(|ui| {
-            let width = promoted.len() as f32 * 76. + promoted.len().saturating_sub(1) as f32 * 3.;
-            ui.set_width(width);
-            ui.horizontal(|ui| {
+        self.ribbon_group_layout(
+            ui,
+            group_width(promoted.len()),
+            |editor, ui| {
                 for action in promoted {
-                    self.action_button(ui, *action, true);
+                    editor.action_button(ui, *action, true);
                 }
-            });
-            if menu.is_empty() {
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.add_sized(
-                        [76., 20.],
-                        egui::Label::new(
-                            egui::RichText::new(text(label))
-                                .size(10.)
-                                .color(theme::MUTED),
-                        ),
+            },
+            |editor, ui| {
+                if menu.is_empty() {
+                    ui.label(
+                        egui::RichText::new(text(label))
+                            .size(10.)
+                            .color(theme::MUTED),
                     );
-                });
-            } else {
-                self.sketch_section_menu(ui, label, menu);
-            }
-        });
-        ui.separator();
+                } else {
+                    editor.sketch_section_menu(ui, label, menu);
+                }
+            },
+        );
     }
 
     fn sketch_constraints(&mut self, ui: &mut egui::Ui) {
@@ -1024,16 +1026,20 @@ impl Editor {
             SketchEdit::Parallel,
             SketchEdit::Perpendicular,
         ];
-        ui.vertical(|ui| {
-            ui.set_width(155.);
-            ui.horizontal(|ui| {
-                self.action_button(ui, Action::SketchEdit(SketchEdit::Dimension), true);
+        self.ribbon_group_layout(
+            ui,
+            group_width(1) + GROUP_HORIZONTAL_GAP + 80.,
+            |editor, ui| {
+                editor.action_button(ui, Action::SketchEdit(SketchEdit::Dimension), true);
                 // A grade precisa de layout vertical próprio: herdar o alinhamento
                 // central da linha deslocaria a primeira fileira e cortaria o rodapé.
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(80., 64.), egui::Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(80., icons::RIBBON_BUTTON_SIZE.y),
+                    egui::Sense::hover(),
+                );
                 let mut gallery = ui.new_child(
                     egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(egui::vec2(0., 6.)))
+                        .max_rect(rect.shrink2(egui::vec2(0., 1.)))
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 gallery.spacing_mut().interact_size.y = 24.;
@@ -1046,8 +1052,8 @@ impl Editor {
                         ui.spacing_mut().button_padding = egui::vec2(2., 2.);
                         for (index, kind) in GALLERY.into_iter().enumerate() {
                             let action = Action::SketchEdit(kind);
-                            let enabled = self.action_enabled(action);
-                            let selected = self.action_selected(action);
+                            let enabled = editor.action_enabled(action);
+                            let selected = editor.action_selected(action);
                             let response = ui
                                 .add_enabled_ui(enabled, |ui| {
                                     icons::tree_button(
@@ -1059,31 +1065,32 @@ impl Editor {
                                 })
                                 .inner;
                             if response.clicked() {
-                                self.activate_action(ui.ctx(), action);
+                                editor.activate_action(ui.ctx(), action);
                             }
                             if index % 3 == 2 {
                                 ui.end_row();
                             }
                         }
                     });
-            });
-            self.sketch_section_menu(
-                ui,
-                T::ConstrainGroup,
-                &[
-                    Action::SketchEdit(SketchEdit::Dimension),
-                    Action::SketchEdit(SketchEdit::HorizontalVertical),
-                    Action::SketchEdit(SketchEdit::Coincident),
-                    Action::SketchEdit(SketchEdit::Tangent),
-                    Action::SketchEdit(SketchEdit::Equal),
-                    Action::SketchEdit(SketchEdit::Parallel),
-                    Action::SketchEdit(SketchEdit::Perpendicular),
-                    Action::SketchEdit(SketchEdit::Construction),
-                    Action::SketchEdit(SketchEdit::FixPoint),
-                ],
-            );
-        });
-        ui.separator();
+            },
+            |editor, ui| {
+                editor.sketch_section_menu(
+                    ui,
+                    T::ConstrainGroup,
+                    &[
+                        Action::SketchEdit(SketchEdit::Dimension),
+                        Action::SketchEdit(SketchEdit::HorizontalVertical),
+                        Action::SketchEdit(SketchEdit::Coincident),
+                        Action::SketchEdit(SketchEdit::Tangent),
+                        Action::SketchEdit(SketchEdit::Equal),
+                        Action::SketchEdit(SketchEdit::Parallel),
+                        Action::SketchEdit(SketchEdit::Perpendicular),
+                        Action::SketchEdit(SketchEdit::Construction),
+                        Action::SketchEdit(SketchEdit::FixPoint),
+                    ],
+                );
+            },
+        );
     }
     fn ribbon_group(&mut self, ui: &mut egui::Ui, label: T, actions: &[Action]) {
         self.ribbon_group_with(ui, label, actions.len(), |editor, ui| {
@@ -1100,18 +1107,45 @@ impl Editor {
         count: usize,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
+        self.ribbon_group_layout(ui, group_width(count), body, |_, ui| {
+            ui.label(
+                egui::RichText::new(text(label))
+                    .size(10.)
+                    .color(theme::MUTED),
+            );
+        });
+    }
+
+    /// Rótulos simples e botões de menu ocupam a mesma altura. Reservar corpo e
+    /// rodapé evita que o mínimo de interação do egui aumente só algumas abas.
+    fn ribbon_group_layout(
+        &mut self,
+        ui: &mut egui::Ui,
+        width: f32,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+        caption: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) {
         ui.vertical(|ui| {
-            let width = count as f32 * 76. + count.saturating_sub(1) as f32 * 3.;
-            ui.set_min_width(width);
-            ui.set_max_width(width);
-            ui.horizontal(|ui| body(self, ui));
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(text(label))
-                        .size(10.)
-                        .color(theme::MUTED),
-                );
-            });
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing.y = GROUP_VERTICAL_GAP;
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, icons::RIBBON_BUTTON_SIZE.y),
+                egui::Layout::left_to_right(egui::Align::Min),
+                |ui| {
+                    ui.set_min_height(icons::RIBBON_BUTTON_SIZE.y);
+                    body(self, ui);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, GROUP_CAPTION_HEIGHT),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    ui.set_min_height(GROUP_CAPTION_HEIGHT);
+                    ui.spacing_mut().interact_size.y = GROUP_CAPTION_HEIGHT;
+                    ui.spacing_mut().button_padding = egui::vec2(4., 1.);
+                    caption(self, ui);
+                },
+            );
         });
         ui.separator();
     }
@@ -1126,7 +1160,7 @@ impl Editor {
         let enabled = ui.is_enabled() && menu.items.iter().any(|(a, _, _)| self.action_enabled(*a));
         let response = ui
             .add_enabled_ui(enabled, |ui| {
-                icons::button(ui, menu.icon, text(menu.label), true, false)
+                icons::ribbon_button(ui, menu.icon, text(menu.label), false)
             })
             .inner;
         self.shell.menu_rects.push(response.rect);

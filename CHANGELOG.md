@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Faixas de ferramentas uniformes e compactas
+
+- Montagem, Peça, Inspecionar e Rascunho compartilham a mesma composição e altura de grupos. Menus e rótulos simples reservam o mesmo rodapé, corrigindo a faixa mais alta no Rascunho.
+- Botões da faixa com 72 × 54 pontos, ícones de 24 pontos, legendas de até duas linhas e margens/intervalos verticais menores. A galeria de restrições conserva as duas fileiras dentro da altura comum; os botões dos painéis de opções mantêm suas dimensões.
+- A troca de aba não desloca o início do canvas, inclusive em janelas compactas com rolagem horizontal. Preservados menus, dicas, acessibilidade e as opções Concluir/Cancelar.
+
 ### Sair do rascunho com Concluir e Cancelar
 
 - Grupo Sair integrado à mesma faixa rolável dos demais grupos, com botões Concluir/Cancelar e menu de opções no rótulo. Removido o espaço isolado que mantinha somente Concluir na extremidade direita.
