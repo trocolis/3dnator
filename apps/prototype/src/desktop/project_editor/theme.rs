@@ -18,6 +18,8 @@ pub(super) const REFERENCE: egui::Color32 = egui::Color32::from_rgb(124, 82, 196
 /// Referências capturadas por Projetar e suas áreas fechadas.
 pub(super) const PROJECTED: egui::Color32 = egui::Color32::from_rgb(158, 95, 205);
 pub(super) const PROJECTED_FILL: egui::Color32 = egui::Color32::from_rgb(237, 224, 248);
+/// Junção dirigente: distinta da projeção lilás e do estado verde do solver.
+pub(super) const JUNCTION_STRONG: egui::Color32 = egui::Color32::from_rgb(0, 143, 151);
 /// Geometria auxiliar, excluída das áreas: segmentos de construção e retas infinitas.
 pub(super) const CONSTRUCTION: egui::Color32 = egui::Color32::from_rgb(224, 123, 31);
 /// Planos de trabalho da peça e a prévia do plano deslocado.

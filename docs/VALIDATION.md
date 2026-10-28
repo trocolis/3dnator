@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Junções fortes/fracas, F e cadeados — 28/10/2026
+
+- Regressões do núcleo verificam que uma ligação forte transmite a edição entre apoios, enquanto a fraca permite separá-los; cantos de retângulos compartilhados abrem sem deslocamento e fecham novamente. Cruzamentos começam fracos, recebem incidências ao fortalecer e voltam a ser virtuais ao liberar um apoio sem cotas próprias. Apoios de cruzamentos fortes sobrevivem à limpeza de pontos. Incidência circular acompanha mudanças do raio.
+- Persistência e comando verificados com ligações fracas/fortes, `PointOnCurve`, salvamento/reabertura e desfazer/refazer. O cache invalida indicadores também quando só muda `reference`, sem deslocamento nem alteração da quantidade de entidades. Formato interno 24; aplicativo 0.3.0 em desenvolvimento.
+- **296 testes com OCCT e 227 sem OCCT aprovados**. O novo ensaio gráfico percorre quatro casos com eventos reais: vértice forte, vértice com F fraco, cruzamento fraco e cruzamento com F forte; F funciona com medidas flutuantes ativas e não insere a letra na expressão. Clicar no cadeado alterna a força em uma revisão, com desfazer/refazer. Capturas dos cadeados aberto/fechado e indicadores conferidas em `target/codex-validation/junctions-20261028/final/`; logs no diretório pai, usando GL/llvmpipe.
+- Formatação, Clippy do workspace com todos os alvos/avisos negados, com e sem OCCT, e compilação desktop com OCCT aprovados no Linux. Windows e janela nativa não exercitados localmente. Alterações independentes do usuário em AJUSTE.md foram preservadas.
+
 ## AJUSTE.md: Dimencionar e Projetar — 28/10/2026
 
 - Regressões da preferência de resolução verificam os dois sentidos da seleção entre pontos, primeiro elemento preservado, segundo elemento já fixado e linha/círculo. Não são criadas travas temporárias no documento nem alterada a contagem real dos graus de liberdade.

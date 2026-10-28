@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Junções fortes/fracas e cadeados nos vértices
+
+- Captura em vértices cria ligação forte por padrão; cruzamentos e pontos no interior de curvas criam ligações fracas. **F** inverte a decisão do próximo clique durante o desenho, inclusive com as medidas flutuantes ativas. A prévia mostra cadeado e força selecionada; o clique grava essa decisão, e o próximo apoio volta ao padrão.
+- Selecionar um vértice com junção mostra um cadeado ao lado: fechado para fortalecer a ligação fraca e aberto para liberar a forte. Junções fortes têm ponto/anel verde-azulado; fracas têm círculo vazio. Abrir um vértice compartilhado separa os apoios sem deslocar a geometria. Cada alteração usa o comando do rascunho, com recálculo, desfazer/refazer e persistência.
+- Ligações fracas conservam seus alvos como restrições geométricas de referência, sem obrigar a geometria a acompanhá-los. Cotas e demais restrições das entidades continuam valendo. Uma tangência que exige extremo compartilhado é liberada junto desse extremo ao separá-lo. Cruzamentos fortes usam apoio de incidência sem partir as linhas; ao abrir um apoio sem cotas próprias, ele volta a ser virtual.
+- Formato interno 24 acrescenta `PointOnCurve`, para que ligações à borda acompanhem o raio de círculos/arcos, e documenta `reference` para ligações geométricas fracas. Projetos anteriores continuam legíveis; aplicativo permanece em 0.3.0 em desenvolvimento.
+
 ### Dimencionar e ordem dos elementos
 
 - A ferramenta Cota passa a se chamar **Dimencionar** na faixa, na busca e no painel, mantendo o atalho D.

@@ -45,6 +45,8 @@ pub(super) enum Icon {
     RotateCounterclockwise,
     Search,
     Check,
+    LockClosed,
+    LockOpen,
     Select,
     Line,
     LineSymmetric,
@@ -367,6 +369,23 @@ fn paint_styled(
             p.arrow([5., 7.], [9., 18.]);
             p.arrow([17., 10.], [19., 18.]);
             p.line(&[[9., 18.], [19., 18.]], p.accent);
+        }
+        Icon::LockClosed | Icon::LockOpen => {
+            let offset = if icon == Icon::LockOpen { 5. } else { 0. };
+            p.line(
+                &[
+                    [7. + offset, 12.],
+                    [7. + offset, 6.],
+                    [9. + offset, 3.],
+                    [15. + offset, 3.],
+                    [17. + offset, 6.],
+                    [17. + offset, 10.],
+                ],
+                p.ink,
+            );
+            p.face(&[[5., 11.], [19., 11.], [19., 22.], [5., 22.]], p.fill);
+            p.circle(12., 15., 1.3, p.accent);
+            p.line(&[[12., 16.], [12., 19.]], p.accent);
         }
         Icon::Revolve => {
             p.line(&[[12., 2.], [12., 22.]], p.ink);

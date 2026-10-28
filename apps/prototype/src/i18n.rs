@@ -19,6 +19,12 @@ pub enum Text {
     LineCircleDistance,
     DimensionPickHint,
     SketchProject,
+    JunctionStrong,
+    JunctionWeak,
+    JunctionStrengthen,
+    JunctionWeaken,
+    JunctionToggleHint,
+    PointOnCurve,
     SketchProjectHint,
     SketchProjectAll,
     SketchProjectPlanes,
@@ -864,6 +870,12 @@ pub fn text(key: Text) -> &'static str {
         Text::ConstrainGroup => "Restringir",
         Text::SketchExitGroup => "Sair",
         Text::SketchProject => "Projetar",
+        Text::JunctionStrong => "Junção forte",
+        Text::JunctionWeak => "Junção fraca",
+        Text::JunctionStrengthen => "Fortalecer ligação",
+        Text::JunctionWeaken => "Liberar ligação",
+        Text::JunctionToggleHint => "F: alternar junção forte/fraca antes do clique",
+        Text::PointOnCurve => "Ponto sobre curva",
         Text::SketchProjectHint => {
             "Clique em uma face plana, aresta, arco ou vértice do componente; Esc encerra"
         }

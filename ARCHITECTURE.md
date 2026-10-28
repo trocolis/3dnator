@@ -4,6 +4,8 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 
 ## Módulos
 
+`sketch::junctions` centraliza as ligações fortes/fracas, a captura por tipo de apoio e a abertura de pontos compartilhados. A força usa restrições comuns: não dimensional com `reference = true` é uma ligação fraca; com `false`, dirige o solver. `PointOnCurve` acompanha o centro/raio da curva de origem. Fortalecer um cruzamento cria incidências em um apoio auxiliar, sem alterar as entidades; liberar um vértice compartilhado separa seus apoios e libera tangências que exigiam o ID comum. A edição é atômica e a interface publica por `UpdateSketch`. O cache de referências calcula indicadores no trabalhador e inclui IDs/estado das restrições na chave, pois uma troca de força pode não mudar coordenadas. Cadeados e o atalho F são apresentação; não há dependência geométrica de egui.
+
 `commands::sketch_projection::elements` prepara as referências de Projetar a partir do B-rep, compondo as posições do corpo, da ocorrência e do destino antes de projetar no plano local. A fronteira `kernel` fornece contornos por índices transitórios e amostragem de curvas com desvio explícito; nenhum índice é persistido. `sketch::projection::insert` materializa a seleção de forma atômica, compartilha apoios e elimina repetições. Pontos/entidades com `projected` são capturas fixas: o solver não usa seus apoios/raios como variáveis livres, mas confere também os resíduos das travas explícitas. O cache da interface descarta respostas de outra cena/plano/posição; consulta e áreas rodam em trabalhadores. A publicação usa `UpdateSketch`, com revisão, recálculo e desfazer/refazer existentes. Lilás e preenchimento são decisões da apresentação.
 
 | Módulo | Responsabilidade |

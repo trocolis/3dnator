@@ -9,6 +9,7 @@ use nator_sketch::{
 mod actions;
 mod dimension_tool;
 mod dynamic_input;
+mod junction_tool;
 mod line_tools;
 mod project_tool;
 mod projection;
@@ -111,6 +112,10 @@ pub(super) struct Workspace {
     perpendicular: Option<u64>,
     anchors: Vec<Point2>,
     anchor_kinds: Vec<Option<Kind>>,
+    /// Decisão capturada em cada clique; F afeta somente o próximo apoio.
+    anchor_strengths: Vec<bool>,
+    junction_override: Option<bool>,
+    selected_vertex: Option<Point2>,
     selected: Vec<u64>,
     constraint: Option<u64>,
     pub(super) placement: Placement,
@@ -132,6 +137,20 @@ pub(super) struct Workspace {
     dimension_draft: dimension_tool::Draft,
 }
 impl Workspace {
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn select_vertex_for_capture(&mut self, position: Point2) {
+        self.selected_vertex = Some(position);
+    }
+    fn anchor_strong(&self, index: usize) -> bool {
+        self.anchor_strengths
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| {
+                nator_sketch::junctions::default_strong(
+                    self.anchor_kinds.get(index).copied().flatten(),
+                )
+            })
+    }
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn projection_ready(&self) -> bool {
         self.projector.ready()
@@ -189,6 +208,9 @@ impl Workspace {
         self.tool_panel_open = true;
         self.anchors.clear();
         self.anchor_kinds.clear();
+        self.anchor_strengths.clear();
+        self.junction_override = None;
+        self.selected_vertex = None;
         self.line_reference = None;
         self.perpendicular = None;
         self.chain_points.clear();
@@ -216,6 +238,8 @@ impl Workspace {
     pub(super) fn reset_drawing(&mut self, context: &egui::Context) {
         self.anchors.clear();
         self.anchor_kinds.clear();
+        self.anchor_strengths.clear();
+        self.junction_override = None;
         self.chain_points.clear();
         self.tangent_lines.clear();
         self.line_reference = None;
@@ -250,6 +274,7 @@ impl Workspace {
         });
         self.anchors = vec![end];
         self.anchor_kinds = vec![endpoint.map(Kind::Endpoint)];
+        self.anchor_strengths = vec![true];
         self.drawing.clear(context);
         self.drawing.start(end);
         self.line_reference = last.map(|entity| entity.id);
@@ -281,6 +306,9 @@ impl Workspace {
             perpendicular: None,
             anchors: Vec::new(),
             anchor_kinds: Vec::new(),
+            anchor_strengths: Vec::new(),
+            junction_override: None,
+            selected_vertex: None,
             selected: Vec::new(),
             constraint: None,
             placement: Placement::default(),
@@ -308,32 +336,9 @@ fn attach(
     point: u64,
     kind: Option<Kind>,
     position: Point2,
+    strong: bool,
 ) -> Result<(), String> {
-    let constraint = match kind {
-        Some(Kind::Endpoint(target) | Kind::Center(target)) if target != point => {
-            Some(ConstraintKind::Coincident {
-                a: point,
-                b: target,
-            })
-        }
-        Some(Kind::Midpoint(line)) => Some(ConstraintKind::Midpoint { point, line }),
-        Some(Kind::OnCurve(line)) if sketch.line(line).is_ok() => {
-            Some(ConstraintKind::PointOnLine { point, line })
-        }
-        Some(Kind::Projected) if nator_sketch::distance(position, [0., 0.]) < 1e-8 => {
-            Some(ConstraintKind::Fixed {
-                point,
-                position: [0., 0.],
-            })
-        }
-        _ => None,
-    };
-    if let Some(constraint) = constraint {
-        sketch
-            .add_constraint(constraint, false)
-            .map_err(sketch_error)?;
-    }
-    Ok(())
+    nator_sketch::junctions::attach(sketch, point, kind, position, strong).map_err(sketch_error)
 }
 impl Editor {
     pub(super) fn begin_sketch(&mut self, part: PartId, id: SketchId) {
@@ -588,7 +593,15 @@ impl Editor {
                         if ui
                             .selectable_label(
                                 work.constraint == Some(constraint.id),
-                                constraint_label(&constraint.kind),
+                                if constraint.reference && !constraint.kind.is_dimension() {
+                                    format!(
+                                        "{} · {}",
+                                        constraint_label(&constraint.kind),
+                                        text(T::JunctionWeak)
+                                    )
+                                } else {
+                                    constraint_label(&constraint.kind)
+                                },
                             )
                             .clicked()
                         {
@@ -815,6 +828,20 @@ impl Editor {
         }
         // Cotas como cotas: extensões, linha com setas e valor (R/Ø, graus, parênteses).
         dimension_tool::paint_all(&frame, &painter, &sketch);
+        junction_tool::paint(&frame, &painter, &work.references.junctions);
+        let junction_update = if work.is_selecting() {
+            junction_tool::button(
+                ui,
+                &frame,
+                &painter,
+                &mut sketch,
+                work.selected_vertex,
+                !busy && !animating,
+            )
+        } else {
+            junction_tool::Update::default()
+        };
+        submit |= junction_update.changed;
 
         let suspended = ui.input(|i| i.modifiers.alt);
         let mut snap = hover.and_then(|point| {
@@ -862,6 +889,24 @@ impl Editor {
                 guides: vec![(start, perpendicular.foot)],
             });
         }
+        if work.primitive().is_some()
+            && hover.is_some()
+            && !busy
+            && !animating
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F))
+        {
+            let current = work.junction_override.unwrap_or_else(|| {
+                nator_sketch::junctions::default_strong(snap.as_ref().map(|s| s.kind))
+            });
+            work.junction_override = Some(!current);
+            // F é uma ação de desenho, mesmo com o campo numérico ativo. Seu
+            // evento de texto não deve virar parte da expressão da medida.
+            ui.input_mut(|i| {
+                i.events.retain(
+                    |event| !matches!(event, egui::Event::Text(s) if s.eq_ignore_ascii_case("f")),
+                )
+            });
+        }
         if let Some(snap) = &snap {
             if matches!(
                 snap.kind,
@@ -877,6 +922,35 @@ impl Editor {
             }
             if let Some(position) = frame.screen(snap.point) {
                 painter.circle_stroke(position, 5., egui::Stroke::new(1.5, theme::WARNING));
+                if work.primitive().is_some() {
+                    let strong = work.junction_override.unwrap_or_else(|| {
+                        nator_sketch::junctions::default_strong(Some(snap.kind))
+                    });
+                    icons::paint(
+                        &painter,
+                        egui::Rect::from_min_size(
+                            position + egui::vec2(-30., -30.),
+                            egui::Vec2::splat(20.),
+                        ),
+                        if strong {
+                            icons::Icon::LockClosed
+                        } else {
+                            icons::Icon::LockOpen
+                        },
+                        true,
+                    );
+                    painter.text(
+                        position + egui::vec2(12., 12.),
+                        egui::Align2::LEFT_TOP,
+                        text(if strong {
+                            T::JunctionStrong
+                        } else {
+                            T::JunctionWeak
+                        }),
+                        egui::FontId::proportional(11.),
+                        theme::INK,
+                    );
+                }
             }
             for (a, b) in &snap.guides {
                 frame.path(
@@ -1025,6 +1099,7 @@ impl Editor {
         if !busy
             && !animating
             && !escape
+            && !junction_update.blocked
             && valid
             && !matches!(work.tool, Tool::Dimension | Tool::Project)
             && !(work.tool == Tool::Rectangle
@@ -1036,6 +1111,14 @@ impl Editor {
             && let Some(cursor) = cursor
         {
             if matches!(work.tool, Tool::Select | Tool::Trim) {
+                if work.is_selecting() {
+                    work.selected_vertex = junction_tool::vertex(
+                        &sketch,
+                        &work.references.points.vertices,
+                        cursor,
+                        8. / pixels_per_mm,
+                    );
+                }
                 let entity = nator_sketch::tools::pick_entity(&sketch, cursor, 8. / pixels_per_mm)
                     .ok()
                     .flatten();
@@ -1127,6 +1210,12 @@ impl Editor {
                 } else {
                     snap.as_ref().map(|s| s.kind)
                 });
+                let kind = work.anchor_kinds.last().copied().flatten();
+                work.anchor_strengths.push(
+                    work.junction_override
+                        .take()
+                        .unwrap_or_else(|| nator_sketch::junctions::default_strong(kind)),
+                );
                 work.tracker.capture(cursor);
                 let needed = match work.primitive() {
                     Some(Primitive::Arc | Primitive::InclinedRectangle) => 3,
@@ -1187,6 +1276,7 @@ impl Editor {
                             );
                             work.anchors.pop();
                             work.anchor_kinds.pop();
+                            work.anchor_strengths.pop();
                         }
                     }
                 }
@@ -1212,6 +1302,9 @@ impl Editor {
             self.solve_sketch(ui.ctx(), sketch);
         }
         if let Some(Err(error)) = projection_result {
+            self.status.warning(error);
+        }
+        if let Some(error) = junction_update.warning {
             self.status.warning(error);
         }
         if let Some(update) = dimension {
@@ -1241,8 +1334,14 @@ fn draw_entity(
                 .add_line_with_type(a, b, work.line_type)
                 .map_err(sketch_error)?;
             if let Curve::Line { start, end } = sketch.entity(id).map_err(sketch_error)?.curve {
-                attach(sketch, start, work.anchor_kinds[0], a)?;
-                attach(sketch, end, work.anchor_kinds[1], b)?;
+                attach(
+                    sketch,
+                    start,
+                    work.anchor_kinds[0],
+                    a,
+                    work.anchor_strong(0),
+                )?;
+                attach(sketch, end, work.anchor_kinds[1], b, work.anchor_strong(1))?;
                 let perpendicular = work.perpendicular.filter(|reference| {
                     sketch.line(*reference).is_ok_and(|(c, d)| {
                         let u = nator_sketch::sub(b, a);
@@ -1384,12 +1483,30 @@ fn draw_entity(
             // O clique do modo central é o centro, nunca um dos cantos. Capturar
             // esse clique como canto deslocaria o retângulo ao resolver restrições.
             if work.rectangle_mode != RectangleMode::Center {
-                attach(sketch, point_ids[0], work.anchor_kinds[0], a)?;
+                attach(
+                    sketch,
+                    point_ids[0],
+                    work.anchor_kinds[0],
+                    a,
+                    work.anchor_strong(0),
+                )?;
             }
             let last = if inclined { 2 } else { 1 };
-            attach(sketch, point_ids[2], work.anchor_kinds[last], corners[2])?;
+            attach(
+                sketch,
+                point_ids[2],
+                work.anchor_kinds[last],
+                corners[2],
+                work.anchor_strong(last),
+            )?;
             if inclined {
-                attach(sketch, point_ids[1], work.anchor_kinds[1], b)?;
+                attach(
+                    sketch,
+                    point_ids[1],
+                    work.anchor_kinds[1],
+                    b,
+                    work.anchor_strong(1),
+                )?;
                 if let Some((fields, locked)) = &work.drawing.side_fields {
                     if locked[0] && work.line_type != LineType::Infinite {
                         drive(
@@ -1480,7 +1597,13 @@ fn draw_entity(
                 sketch.entity(id).map_err(sketch_error)?.curve
             {
                 if work.circle_mode == CircleMode::Normal {
-                    attach(sketch, point, work.anchor_kinds[0], a)?;
+                    attach(
+                        sketch,
+                        point,
+                        work.anchor_kinds[0],
+                        a,
+                        work.anchor_strong(0),
+                    )?;
                 } else if work.circle_mode == CircleMode::Tangent {
                     for line in &work.tangent_lines {
                         sketch
@@ -1537,13 +1660,20 @@ fn draw_entity(
                     work.line_type != LineType::Normal,
                 )
                 .map_err(sketch_error)?;
-            attach(sketch, center, work.anchor_kinds[0], a)?;
+            attach(
+                sketch,
+                center,
+                work.anchor_kinds[0],
+                a,
+                work.anchor_strong(0),
+            )?;
             // A ponta inicial só mantém a captura se ainda estiver no raio original.
             attach(
                 sketch,
                 start,
                 work.anchor_kinds[1].filter(|_| !work.drawing.locked[0]),
                 b,
+                work.anchor_strong(1),
             )?;
             if work.drawing.locked[0] {
                 drive(
@@ -1651,6 +1781,7 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::EqualLength { .. } => T::EqualLength,
         ConstraintKind::Midpoint { .. } => T::Midpoint,
         ConstraintKind::PointOnLine { .. } => T::PointOnLine,
+        ConstraintKind::PointOnCurve { .. } => T::PointOnCurve,
         ConstraintKind::Concentric { .. } => T::Concentric,
         ConstraintKind::Tangent { .. } => T::Tangent,
     };

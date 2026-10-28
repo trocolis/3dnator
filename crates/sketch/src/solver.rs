@@ -165,6 +165,10 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
             let (a, _) = s.line(line)?;
             vec![cross(sub(s.point(point)?, a), direction(line)?)]
         }
+        ConstraintKind::PointOnCurve { point, curve } => {
+            let (center, radius) = s.radial(curve)?;
+            vec![distance(s.point(point)?, center) - radius]
+        }
         ConstraintKind::Concentric { a, b } => {
             let d = sub(s.circle(a)?.0, s.circle(b)?.0);
             vec![d[0], d[1]]

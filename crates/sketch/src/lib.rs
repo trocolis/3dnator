@@ -6,6 +6,7 @@ pub mod areas;
 mod curve_geometry;
 pub mod drafting;
 pub mod edit;
+pub mod junctions;
 pub mod lines;
 pub mod profiles;
 pub mod projection;
@@ -292,6 +293,12 @@ pub enum ConstraintKind {
         point: u64,
         line: u64,
     },
+    /// Apoio ligado à borda circular. O raio acompanha a entidade de origem,
+    /// inclusive em arcos; não é uma distância congelada ao centro.
+    PointOnCurve {
+        point: u64,
+        curve: u64,
+    },
     Concentric {
         a: u64,
         b: u64,
@@ -342,6 +349,8 @@ impl ConstraintKind {
 pub struct Constraint {
     pub id: u64,
     pub kind: ConstraintKind,
+    /// Em cotas, somente mede. Em ligações geométricas, guarda uma ligação
+    /// fraca: preserva os alvos, mas não impõe resíduos ao solver.
     pub reference: bool,
 }
 
@@ -700,7 +709,20 @@ impl Sketch {
         Ok(())
     }
     pub fn prune_unused_points(&mut self) {
-        let used: HashSet<_> = self.entities.iter().flat_map(Entity::point_ids).collect();
+        let mut used: HashSet<_> = self.entities.iter().flat_map(Entity::point_ids).collect();
+        // Um cruzamento forte pode ter um apoio próprio sem partir as curvas.
+        // Ele sobrevive ao aparo de outra entidade enquanto seu suporte existir.
+        for constraint in &self.constraints {
+            match constraint.kind {
+                ConstraintKind::PointOnLine { point, line } if self.entity(line).is_ok() => {
+                    used.insert(point);
+                }
+                ConstraintKind::PointOnCurve { point, curve } if self.entity(curve).is_ok() => {
+                    used.insert(point);
+                }
+                _ => {}
+            }
+        }
         self.points.retain(|p| used.contains(&p.id));
         // Restrições que perderam suas entidades/pontos são removidas apenas nesta ferramenta explícita.
         let candidate = self.clone();

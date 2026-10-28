@@ -116,15 +116,17 @@ pub fn find_with_references(
             }
         }
     }
-    for p in projected {
-        candidates.push((*p, Kind::Projected, 0));
-    }
     candidates.extend(
         references
             .vertices
             .iter()
             .map(|p| (*p, Kind::Intersection, 0)),
     );
+    // Um cruzamento local tem precedência sobre a origem/apoios externos no
+    // mesmo lugar; assim a intenção fraca do cruzamento não vira uma fixação.
+    for p in projected {
+        candidates.push((*p, Kind::Projected, 0));
+    }
     candidates.extend(
         references
             .centers

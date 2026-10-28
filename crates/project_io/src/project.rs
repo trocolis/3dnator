@@ -37,7 +37,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Ausentes, os lados seguem o sentido das linhas e o texto fica no lugar padrão.
 /// Versão 23: pontos e entidades com `projected`, omitido quando falso. Referências
 /// capturadas são constantes do solver e conservam as travas explícitas no arquivo.
-pub const FORMAT_VERSION: u32 = 23;
+/// Versão 24: incidência `PointOnCurve` e ligações geométricas fracas, gravadas
+/// como restrições não dimensionais de referência (`reference = true`).
+pub const FORMAT_VERSION: u32 = 24;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

@@ -5141,6 +5141,162 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn junction_f_key_and_vertex_padlocks_publish_the_selected_strength()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{Curve, junctions};
+        let gpu = gpu_state()?;
+        // F também precisa funcionar quando as medidas flutuantes têm teclado.
+        for (crossing, toggle, expected) in [
+            (false, false, true),
+            (false, true, false),
+            (true, false, false),
+            (true, true, true),
+        ] {
+            let context = egui::Context::default();
+            let mut sketch = Sketch::new("Junções", Plane::xy());
+            let horizontal = sketch.add_line([-30., 8.], [30., 8.], false)?;
+            sketch.add_line([10., -30.], [10., 30.], false)?;
+            let Curve::Line { start: target, .. } = sketch.entity(horizontal)?.curve else {
+                return Err("Linha ausente".into());
+            };
+            let mut document = Document::new("Força das junções")?;
+            let (part, id) = document.add_sketch(None, sketch)?;
+            let mut editor =
+                Editor::from_gpu(gpu.clone(), &context, document).map_err(|e| e.to_string())?;
+            editor.recoveries.clear();
+            editor.show_recovery = false;
+            editor.begin_sketch(part, id);
+            editor.align_sketch_camera(true, false);
+            settle(&mut editor, &context)?;
+            editor.select_sketch_tool(sketch_editor::Tool::Line);
+            frame(&mut editor, &context, vec![])?;
+            let screen = |editor: &Editor, p: [f64; 2]| {
+                sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    editor.canvas_rect,
+                    [p[0], p[1], 0.],
+                )
+                .ok_or("Ponto sem projeção")
+            };
+            let first = screen(&editor, [-20., 25.])?;
+            click(&mut editor, &context, first)?;
+            let position = if crossing { [10., 8.] } else { [-30., 8.] };
+            let end = screen(&editor, position)?;
+            frame(&mut editor, &context, vec![egui::Event::PointerMoved(end)])?;
+            if toggle {
+                frame(
+                    &mut editor,
+                    &context,
+                    vec![
+                        egui::Event::Key {
+                            key: egui::Key::F,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                        egui::Event::Text("f".into()),
+                    ],
+                )?;
+            }
+            click(&mut editor, &context, end)?;
+            settle(&mut editor, &context)?;
+            let current = || -> Result<Sketch, Box<dyn Error>> {
+                Ok(editor
+                    .current()
+                    .session
+                    .document()
+                    .sketch(id)
+                    .ok_or("Rascunho ausente")?
+                    .sketch
+                    .clone())
+            };
+            let sketch = current()?;
+            assert_eq!(sketch.entities.len(), 3, "{}", editor.status);
+            let created = sketch.entities.last().ok_or("Linha ausente")?;
+            let Curve::Line { end: endpoint, .. } = created.curve else {
+                return Err("Linha ausente".into());
+            };
+            let link = sketch.constraints.iter().find(|c| if crossing { matches!(c.kind, nator_sketch::ConstraintKind::PointOnLine { point,.. } if point == endpoint) }
+                else { matches!(c.kind,nator_sketch::ConstraintKind::Coincident { a,b } if (a == endpoint && b == target) || (b == endpoint && a == target)) }).ok_or("Ligação não foi criada")?;
+            assert_eq!(!link.reference, expected);
+            assert!(editor.current().sketch_edit.as_ref().is_some_and(|w| {
+                w.drawing_fields()
+                    .iter()
+                    .all(|(text, _)| !text.eq_ignore_ascii_case("f"))
+            }));
+            editor.activate_selection(&context);
+            frame(&mut editor, &context, vec![])?;
+            let at = screen(&editor, position)?;
+            click(&mut editor, &context, at)?;
+            frame(&mut editor, &context, vec![])?;
+            let before = editor.current().session.revision();
+            if !crossing && let Some(directory) = std::env::var_os("NATOR_JUNCTION_CAPTURE_DIR") {
+                let directory = std::path::PathBuf::from(directory);
+                std::fs::create_dir_all(&directory)?;
+                let name = if expected {
+                    "strong-junction"
+                } else {
+                    "weak-junction"
+                };
+                let project = directory.join(format!("{name}.3dnator"));
+                write_project(&project, editor.current().session.document())?;
+                render_with(
+                    &project,
+                    &directory.join(format!("{name}.png")),
+                    [1280, 820],
+                    |editor| {
+                        open_first_sketch(editor)?;
+                        if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
+                            work.select_vertex_for_capture(position);
+                        }
+                        Ok(())
+                    },
+                    |_, _| vec![],
+                    |_| true,
+                )?;
+            }
+            // O botão mostra a ação oposta ao estado: abrir o forte, fechar o fraco.
+            let button = at + egui::vec2(26., -18.);
+            click(&mut editor, &context, button)?;
+            settle(&mut editor, &context)?;
+            let sketch = editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .clone();
+            assert_eq!(editor.current().session.revision(), before + 1);
+            assert_eq!(
+                junctions::at(&sketch, position)?
+                    .ok_or("Junção ausente")?
+                    .strong,
+                !expected
+            );
+            assert!(editor.current_mut().session.undo());
+            let sketch = &editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch;
+            assert_eq!(
+                junctions::at(sketch, position)?
+                    .ok_or("Junção ausente")?
+                    .strong,
+                expected
+            );
+            assert!(editor.current_mut().session.redo());
+        }
+        Ok(())
+    }
+
     fn wait_feature_preview(
         editor: &mut Editor,
         context: &egui::Context,

@@ -174,6 +174,8 @@ pub(super) fn settings(ui: &mut egui::Ui, work: &mut Workspace) {
     }
     if let Some(primitive) = work.primitive() {
         ui.separator();
+        ui.label(text(T::JunctionToggleHint));
+        ui.separator();
         ui.label(text(T::SketchMeasurements));
         work.drawing.infinite = work.tool == Tool::Line && work.line_type == LineType::Infinite;
         work.drawing.panel(ui, primitive, work.anchors.len());
