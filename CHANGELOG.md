@@ -2,6 +2,11 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Sair do rascunho com Concluir e Cancelar
+
+- Grupo Sair integrado à mesma faixa rolável dos demais grupos, com botões Concluir/Cancelar e menu de opções no rótulo. Removido o espaço isolado que mantinha somente Concluir na extremidade direita.
+- Concluir conserva o desenho. Cancelar descarta a prévia e restaura o conteúdo do rascunho como estava ao entrar na edição, inclusive quando há uma alteração pendente. A restauração passa por comando em segundo plano, recalcula dependências e admite desfazer/refazer, preservando outras alterações do projeto. Sem mudanças publicadas, cancelar não cria uma entrada no histórico.
+
 ### Painéis de ferramentas no padrão de Mover
 
 - Cabeçalho com ícone, título em maiúsculas e fechar, espaçamento, bordas arredondadas e sombra do painel Mover passam a ser o padrão dos painéis de opções. Rascunho, medição, parâmetros, folha técnica, exportação e renomeação de operações usam o mesmo componente das ferramentas de montagem e construção.

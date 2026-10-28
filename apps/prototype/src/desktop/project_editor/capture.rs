@@ -2514,29 +2514,220 @@ mod tests {
             3
         );
 
-        // Em 900 px, Concluir precisa continuar à direita, mesmo com rolagem dos grupos.
-        let mut output = context.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900., 600.),
-                )),
-                ..Default::default()
-            },
-            |ui| editor.draw(ui),
+        // Sair participa da mesma faixa rolável dos demais grupos. Em uma
+        // janela compacta, rolar até o fim mantém as duas opções acessíveis.
+        let mut exits = Vec::new();
+        for index in 0..4 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900., 600.),
+                    )),
+                    events: if index == 1 {
+                        vec![
+                            egui::Event::PointerMoved(egui::pos2(450., 140.)),
+                            egui::Event::MouseWheel {
+                                unit: egui::MouseWheelUnit::Point,
+                                delta: egui::vec2(-2000., 0.),
+                                phase: egui::TouchPhase::Move,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ]
+                    } else {
+                        Vec::new()
+                    },
+                    time: Some(context.input(|input| input.time) + 0.1),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            exits = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(t)
+                        if [text(T::FinishSketchShort), text(T::Cancel)]
+                            .contains(&t.galley.job.text.as_str()) =>
+                    {
+                        let rect = t.visual_bounding_rect();
+                        (rect.top() < 198. && clipped.clip_rect.contains_rect(rect))
+                            .then_some(t.galley.job.text.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+        }
+        assert!(
+            exits
+                .iter()
+                .any(|label| label == text(T::FinishSketchShort)),
+            "{exits:?}"
         );
-        let finish = output
-            .shapes
-            .iter()
-            .find_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(t) if t.galley.job.text == text(T::FinishSketch) => {
-                    Some(t.visual_bounding_rect())
-                }
-                _ => None,
-            })
-            .ok_or("Concluir escondido na janela compacta")?;
-        assert!(finish.left() > 800. && finish.right() <= 900., "{finish:?}");
-        output.textures_delta.clear();
+        assert!(
+            exits.iter().any(|label| label == text(T::Cancel)),
+            "{exits:?}"
+        );
+        Ok(())
+    }
+
+    /// Concluir aceita o estado publicado; Cancelar restaura somente o rascunho
+    /// e também funciona quando uma geometria inválida está pendente na interface.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_exit_group_confirms_or_restores_edits_without_losing_other_changes()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Saída", Plane::xy());
+        sketch.add_line([0., 0.], [20., 0.], false)?;
+        let mut document = Document::new("Saída do rascunho")?;
+        let (part, id) = document.add_sketch(None, sketch.clone())?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, document)
+            .map_err(|error| error.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.begin_sketch(part, id);
+        settle(&mut editor, &context)?;
+        let initial = serde_json::to_value(&sketch)?;
+        sketch.add_line([20., 0.], [20., 10.], false)?;
+        editor.execute(Command::UpdateSketch {
+            id,
+            sketch: sketch.clone(),
+        });
+        editor.execute(Command::RenamePart {
+            id: part,
+            name: "Nome preservado".into(),
+        });
+        settle(&mut editor, &context)?;
+        // Um rascunho pendente bloqueia Concluir, mas não pode bloquear Cancelar.
+        editor
+            .current_mut()
+            .sketch_edit
+            .as_mut()
+            .ok_or("Editor ausente")?
+            .pending = Some(sketch.clone());
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.current().sketch_edit.is_none());
+        assert_eq!(
+            serde_json::to_value(
+                &editor
+                    .current()
+                    .session
+                    .document()
+                    .sketch(id)
+                    .ok_or("Rascunho ausente")?
+                    .sketch
+            )?,
+            initial
+        );
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça ausente")?
+                .name,
+            "Nome preservado"
+        );
+        frame(&mut editor, &context, Vec::new())?;
+        assert_eq!(editor.shell.tab, shell::RibbonTab::Model);
+        assert!(editor.current_mut().session.undo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            2
+        );
+        assert!(editor.current_mut().session.redo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            1
+        );
+
+        editor.begin_sketch(part, id);
+        settle(&mut editor, &context)?;
+        let mut accepted = editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch
+            .clone();
+        accepted.add_circle([30., 10.], 5., false)?;
+        editor.execute(Command::UpdateSketch {
+            id,
+            sketch: accepted,
+        });
+        settle(&mut editor, &context)?;
+        let finish = label_position(&mut editor, &context, text(T::FinishSketchShort))?;
+        click(&mut editor, &context, finish)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.current().sketch_edit.is_none());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            2
+        );
+
+        // Cancelar sem alterações, inclusive em um rascunho de referência, não
+        // cria uma entrada artificial no histórico nem remove o rascunho existente.
+        let reference = editor
+            .current_mut()
+            .session
+            .document()
+            .reference_sketches()
+            .first()
+            .map(|record| record.id);
+        assert!(reference.is_none());
+        editor.execute(Command::AddReferenceSketch {
+            sketch: Sketch::new("Referência", Plane::xy()),
+        });
+        settle(&mut editor, &context)?;
+        let reference = editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .ok_or("Referência não aberta")?
+            .id;
+        let revision = editor.current().session.revision();
+        editor.cancel_sketch(&context);
+        assert!(editor.current().sketch_edit.is_none());
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(reference)
+                .is_some()
+        );
         Ok(())
     }
 
@@ -3870,15 +4061,17 @@ mod tests {
             },
             |ui| editor.draw(ui),
         );
-        let position = output
-            .shapes
-            .iter()
-            .find_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(t) if t.galley.job.text == label => {
-                    Some(t.visual_bounding_rect().center())
-                }
-                _ => None,
-            });
+        let position_for = |clipped: &egui::epaint::ClippedShape| match &clipped.shape {
+            egui::Shape::Text(t) if t.galley.job.text == label => {
+                Some(t.visual_bounding_rect().center())
+            }
+            _ => None,
+        };
+        let position = if label == text(T::Cancel) {
+            output.shapes.iter().rev().find_map(position_for)
+        } else {
+            output.shapes.iter().find_map(position_for)
+        };
         output.textures_delta.clear();
         position.ok_or_else(|| format!("Rótulo ausente: {label}").into())
     }

@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Grupo Sair do rascunho com Concluir e Cancelar — 27/10/2026
+
+- Sair usa a mesma seção dos outros grupos: botões Concluir/Cancelar com ícones e menu no rótulo. O grupo participa da rolagem horizontal da faixa; removida a área isolada de Concluir na borda direita. Legendas curtas na faixa e nomes completos na busca/dicas, centralizados em tradução.
+- Cancelar conserva uma cópia do conteúdo ao entrar na edição e o restaura por `UpdateSketch` preparado em segundo plano, sem desfazer alterações independentes. Também descarta geometria pendente e encerra com retorno da aba/orientação anteriores. A restauração é atômica e desfazível; sem mudanças, apenas encerra a edição. Rascunhos existentes, inclusive referências e recém-criados vazios, são preservados.
+- Ensaio gráfico verifica Cancelar com uma edição pendente, restauração da geometria, preservação de renomeação da peça, desfazer/refazer e Concluir mantendo as curvas. Cancelar uma referência sem mudanças não altera a revisão. A regressão de janela compacta rola a faixa até Sair e confirma as duas opções visíveis em 900 × 600.
+- **263 testes do workspace com OCCT, 197 sem OCCT e 16 ensaios gráficos aprovados**. Formatação, Clippy com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Captura real GL/llvmpipe conferida em `target/codex-validation/sketch-exit-20261027/sketch-exit.png`. Windows e janela nativa não exercitados localmente. Versão 0.3.0 em desenvolvimento e formato 19 preservados, sem release ou publicação remota.
+
 ## Painéis padronizados abaixo do controle de vista — 27/10/2026
 
 - `command_panel` centraliza o cabeçalho, ícone, título em maiúsculas, fechar, margens, sombra e cantos usados por Mover. Rascunho/Seleção, Medir, Parâmetros, Folha técnica, Exportar e Renomear operação foram migrados; construção, montagem, corte de seção, importação/inserção e reparo já usam o mesmo componente.

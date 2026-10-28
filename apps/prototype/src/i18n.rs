@@ -459,6 +459,8 @@ pub enum Text {
     EqualLength,
     Constraints,
     FinishSketch,
+    FinishSketchShort,
+    CancelSketch,
     InvalidArc,
     PendingEdit,
     TimelineFirst,
@@ -854,6 +856,8 @@ pub fn text(key: Text) -> &'static str {
         Text::EqualLength => "Comprimentos iguais",
         Text::Constraints => "Cotas e restrições",
         Text::FinishSketch => "Concluir rascunho",
+        Text::FinishSketchShort => "Concluir",
+        Text::CancelSketch => "Cancelar rascunho",
         Text::InvalidArc => "Arco inválido: escolha centro e extremos distintos.",
         Text::PendingEdit => "Conclua ou cancele a alteração pendente antes de salvar.",
 

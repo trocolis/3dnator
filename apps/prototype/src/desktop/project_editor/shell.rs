@@ -105,6 +105,7 @@ enum Action {
     SketchTool(sketch_editor::Tool),
     SketchEdit(SketchEdit),
     FinishSketch,
+    CancelSketch,
 }
 impl Action {
     fn label(self) -> T {
@@ -158,12 +159,15 @@ impl Action {
             Self::Triangles => T::Triangulation,
             Self::Browser => T::Project,
             Self::FinishSketch => T::FinishSketch,
+            Self::CancelSketch => T::CancelSketch,
             Self::SketchTool(tool) => tool.label(),
             Self::SketchEdit(action) => sketch_editor::edit_label(action),
         }
     }
     fn caption(self) -> T {
         match self {
+            Self::FinishSketch => T::FinishSketchShort,
+            Self::CancelSketch => T::Cancel,
             Self::Solid(SolidTool::Fillet) => T::FilletShort,
             Self::Solid(SolidTool::Mirror) => T::MirrorShort,
             Self::Solid(SolidTool::Split) => T::SplitShort,
@@ -236,6 +240,7 @@ impl Action {
             Self::Triangles => Icon::Pattern,
             Self::Browser => Icon::Folder,
             Self::FinishSketch => Icon::Check,
+            Self::CancelSketch => Icon::Close,
             Self::SketchTool(tool) => tool.icon(),
             Self::SketchEdit(action) => sketch_editor::edit_icon(action),
         }
@@ -355,6 +360,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::SketchEdit(SketchEdit::FixPoint),
     Action::SketchEdit(SketchEdit::Delete),
     Action::FinishSketch,
+    Action::CancelSketch,
 ];
 
 impl Editor {
@@ -437,6 +443,7 @@ impl Editor {
             Action::SketchTool(_) | Action::SketchEdit(_) => {
                 editable && self.current().sketch_edit.is_some()
             }
+            Action::CancelSketch => editable && self.current().sketch_edit.is_some(),
             Action::FinishSketch => {
                 editable
                     && self
@@ -646,6 +653,7 @@ impl Editor {
             }
             Action::SketchEdit(action) => self.open_sketch_action(context, action),
             Action::FinishSketch => self.finish_sketch(),
+            Action::CancelSketch => self.cancel_sketch(context),
         }
     }
     fn sketch_on_selected_face(&mut self, context: &egui::Context) {
@@ -835,24 +843,7 @@ impl Editor {
                     });
                 });
                 ui.separator();
-                if self.shell.tab == RibbonTab::Sketch {
-                    // Concluir permanece à direita mesmo quando as ferramentas precisam
-                    // rolar em uma janela menor: sair do rascunho nunca fica escondido.
-                    ui.horizontal(|ui| {
-                        let width = (ui.available_width() - 88.).max(76.);
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(width, 88.), egui::Sense::hover());
-                        let mut groups = ui.new_child(
-                            egui::UiBuilder::new()
-                                .max_rect(rect)
-                                .layout(egui::Layout::left_to_right(egui::Align::Min)),
-                        );
-                        self.ribbon_scroller(&mut groups);
-                        self.sketch_section(ui, T::SketchExitGroup, &[Action::FinishSketch], &[]);
-                    });
-                } else {
-                    self.ribbon_scroller(ui);
-                }
+                self.ribbon_scroller(ui);
             });
         self.timeline(ui);
     }
@@ -1352,6 +1343,8 @@ impl Editor {
                 ];
                 self.sketch_section(ui, T::SketchPatternGroup, &patterns, &patterns);
                 self.sketch_constraints(ui);
+                let exit = [Action::FinishSketch, Action::CancelSketch];
+                self.sketch_section(ui, T::SketchExitGroup, &exit, &exit);
             }
         }
     }

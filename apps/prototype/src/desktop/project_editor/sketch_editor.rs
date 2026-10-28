@@ -80,6 +80,9 @@ enum CircleMode {
 pub(super) struct Workspace {
     pub id: SketchId,
     pub pending: Option<Sketch>,
+    /// Estado anterior à edição: Cancelar restaura apenas este rascunho, sem
+    /// desfazer alterações independentes feitas no restante do documento.
+    pub(super) original_sketch: Option<Sketch>,
     pub status: Status,
     pub redundant: bool,
     tool: Tool,
@@ -217,6 +220,7 @@ impl Workspace {
         Self {
             id,
             pending: None,
+            original_sketch: None,
             status: Status::UnderConstrained {
                 degrees_of_freedom: 0,
             },
@@ -335,7 +339,15 @@ impl Editor {
             .as_ref()
             .map(|w| w.previous_camera.clone())
             .unwrap_or_else(|| self.viewport.camera.clone());
+        let original = self
+            .current()
+            .sketch_edit
+            .as_ref()
+            .filter(|work| work.id == id)
+            .and_then(|work| work.original_sketch.clone())
+            .unwrap_or_else(|| record.sketch.clone());
         let mut work = Workspace::new(id);
+        work.original_sketch = Some(original);
         work.placement = target;
         work.previous_camera = previous;
         work.fit_requested = false;

@@ -347,6 +347,11 @@ enum Outcome {
         command: Command,
         error: nator_commands::CommandError,
     },
+    SketchCanceled {
+        tab: u64,
+        id: SketchId,
+        command: PreparedCommand,
+    },
     SketchSolved {
         tab: u64,
         revision: u64,
@@ -847,6 +852,40 @@ impl Editor {
                 command,
                 error,
             }) => self.reject_command(tab, command, error),
+            Ok(Outcome::SketchCanceled { tab, id, command }) => {
+                let active = self.current().id == tab;
+                let mut restored = false;
+                if let Some(target) = self.find_tab(tab)
+                    && target
+                        .sketch_edit
+                        .as_ref()
+                        .is_some_and(|work| work.id == id)
+                {
+                    match target.session.commit(command) {
+                        Ok(_) => {
+                            if let Some(work) = target.sketch_edit.as_mut() {
+                                work.pending = None;
+                                work.reset_drawing(context);
+                            }
+                            if !active && let Some(work) = target.sketch_edit.take() {
+                                target.camera.copy_orientation(&work.previous_camera);
+                                target.camera_transition = None;
+                            }
+                            target.changed();
+                            self.requested = None;
+                            restored = true;
+                        }
+                        Err(error) => self.status.error(error.to_string()),
+                    }
+                }
+                if restored {
+                    self.pending_failure
+                        .take_if(|failure| failure.tab == tab && failure.sketch == Some(id));
+                    if active {
+                        self.finish_sketch();
+                    }
+                }
+            }
             Ok(Outcome::SketchSolved {
                 tab,
                 revision,
@@ -1065,6 +1104,11 @@ impl Editor {
                     if let Effect::SketchCreated { part, sketch } = effect {
                         target.active_part = Some(part);
                         let mut work = sketch_editor::Workspace::new(sketch);
+                        work.original_sketch = target
+                            .session
+                            .document()
+                            .sketch(sketch)
+                            .map(|record| record.sketch.clone());
                         work.previous_camera = target.camera.clone();
                         work.placement = target
                             .plane_pick

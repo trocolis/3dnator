@@ -361,6 +361,61 @@ impl Editor {
             Ok(Outcome::Prepared { tab, command })
         });
     }
+    pub(super) fn cancel_sketch(&mut self, context: &egui::Context) {
+        if self.busy() {
+            return;
+        }
+        let Some(work) = self.current().sketch_edit.as_ref() else {
+            return;
+        };
+        let id = work.id;
+        let original = work.original_sketch.clone();
+        let current = self
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .map(|record| &record.sketch);
+        // Comparação estrutural inclui restrições e expressões, não só entidades.
+        // Uma edição sem mudanças fecha sem acrescentar um comando ao histórico.
+        let changed = match (original.as_ref(), current) {
+            (Some(original), Some(current)) => serde_json::to_value(original)
+                .and_then(|before| serde_json::to_value(current).map(|after| before != after)),
+            _ => Ok(false),
+        };
+        let changed = match changed {
+            Ok(changed) => changed,
+            Err(error) => {
+                self.status.error(error.to_string());
+                return;
+            }
+        };
+        if !changed {
+            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                work.pending = None;
+                work.reset_drawing(context);
+            }
+            let tab = self.current().id;
+            self.pending_failure
+                .take_if(|failure| failure.tab == tab && failure.sketch == Some(id));
+            self.finish_sketch();
+            return;
+        }
+        let Some(sketch) = original else {
+            return;
+        };
+        let tab = self.current().id;
+        let revision = self.current().session.revision();
+        let document = self.current().session.document().clone();
+        // Restaurar por comando mantém desfazer/refazer e recalcula operações
+        // dependentes no trabalhador. Uma falha conserva a edição e o documento.
+        self.start(context, None, move || {
+            let command =
+                PreparedCommand::new(document, revision, Command::UpdateSketch { id, sketch })
+                    .map_err(|error| error.to_string())?;
+            Ok(Outcome::SketchCanceled { tab, id, command })
+        });
+    }
     pub(super) fn finish_sketch(&mut self) {
         if self.busy()
             || self
