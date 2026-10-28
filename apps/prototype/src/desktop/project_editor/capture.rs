@@ -164,7 +164,9 @@ pub(crate) fn render_ui_scenario(
                 ];
             }
             match pointer.as_str() {
-                "hover-face" | "hover-edge" | "sketch-plane-hover" if frame >= 2 => {
+                "hover-face" | "hover-edge" | "sketch-plane-hover" | "work-plane-pick"
+                    if frame >= 2 =>
+                {
                     return vec![egui::Event::PointerMoved(target)];
                 }
                 // Janela da direita para a esquerda, mantida aberta para a captura.

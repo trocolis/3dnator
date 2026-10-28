@@ -169,6 +169,18 @@ pub(super) fn paint_with_ink(
     enabled: bool,
     ink: egui::Color32,
 ) {
+    paint_styled(painter, rect, icon, enabled, ink, false);
+}
+/// `dark` adapta destaque, preenchimento e estado desabilitado à barra escura da janela,
+/// onde os tons pensados para o fundo claro perdem contraste.
+fn paint_styled(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    icon: Icon,
+    enabled: bool,
+    ink: egui::Color32,
+    dark: bool,
+) {
     // Geometria de rascunho em verde e restrições em vermelho permitem distinguir
     // rapidamente criação e intenção geométrica, inclusive na galeria compacta.
     let constraint = matches!(
@@ -199,30 +211,29 @@ pub(super) fn paint_with_ink(
             | Icon::RectangularPattern
             | Icon::Dimension
     );
-    let accent = if constraint {
-        theme::DANGER
-    } else if sketch {
-        theme::GREEN
-    } else {
-        theme::ACCENT
+    let accent = match (constraint, sketch, dark) {
+        (true, _, false) => theme::DANGER,
+        (true, _, true) => egui::Color32::from_rgb(242, 128, 132),
+        (_, true, false) => theme::GREEN,
+        (_, true, true) => egui::Color32::from_rgb(110, 204, 154),
+        (_, _, false) => theme::ACCENT,
+        (_, _, true) => egui::Color32::from_rgb(124, 188, 248),
     };
+    let disabled = egui::Color32::from_gray(if dark { 112 } else { 165 });
     let pen = Pen {
         painter,
         rect,
         ink: if enabled {
             if constraint { accent } else { ink }
         } else {
-            egui::Color32::from_gray(165)
+            disabled
         },
-        accent: if enabled {
-            accent
-        } else {
-            egui::Color32::from_gray(165)
-        },
-        fill: if enabled {
-            egui::Color32::from_rgb(204, 225, 243)
-        } else {
-            egui::Color32::from_gray(226)
+        accent: if enabled { accent } else { disabled },
+        fill: match (enabled, dark) {
+            (true, false) => egui::Color32::from_rgb(204, 225, 243),
+            (true, true) => egui::Color32::from_rgb(70, 104, 146),
+            (false, false) => egui::Color32::from_gray(226),
+            (false, true) => egui::Color32::from_gray(72),
         },
     };
     let p = &pen;
@@ -956,20 +967,28 @@ fn draw_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if ui.is_rect_visible(response.rect) {
+        let dark = ui.visuals().dark_mode;
         if response.hovered() && ui.is_enabled() {
-            ui.painter().rect_filled(response.rect, 5, theme::BLUE_FILL);
+            // O azul-claro do fundo claro apagaria o traço claro da barra escura.
+            let hover = if dark {
+                egui::Color32::from_rgb(69, 82, 101)
+            } else {
+                theme::BLUE_FILL
+            };
+            ui.painter().rect_filled(response.rect, 5, hover);
         }
         let center = response.rect.center() - egui::vec2(0., icon_shift);
-        paint_with_ink(
+        paint_styled(
             ui.painter(),
             egui::Rect::from_center_size(center, egui::Vec2::splat(icon_size)),
             icon,
             ui.is_enabled(),
-            if ui.visuals().dark_mode {
-                egui::Color32::from_rgb(220, 230, 242)
+            if dark {
+                egui::Color32::from_rgb(238, 243, 250)
             } else {
                 theme::INK
             },
+            dark,
         );
         if let Some(top) = label_top {
             // Limitar a duas linhas impede que legendas extensas invadam o

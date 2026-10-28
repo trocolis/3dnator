@@ -1,5 +1,10 @@
 # Validação local do protótipo
 
+## Barra superior, faixa e escolha de plano — 28/10/2026
+
+- Captura GL/llvmpipe em `target/claude-validation/ui-tweaks-20261028/work-plane-pick.png` (cenário `work-plane-pick`, agora com o ponteiro sobre a área 3D), inspecionada: nome 3Dnator, Novo e Salvar visíveis após Arquivo, busca no fim da linha das abas, Construção como último grupo da Peça, área 3D sem faixa de instruções e ícone do Novo rascunho junto ao cursor.
+- **78 testes do protótipo com OCCT, incluindo os 19 ensaios gráficos**, e Clippy sem OCCT aprovados; os ensaios que escolhem planos continuam usando os planos da área 3D, a árvore e as faces. Windows e janela nativa não exercitados localmente.
+
 ## Edição da distância dos planos de trabalho — 28/10/2026
 
 - Regressões sem GPU cobrem rascunhos apoiados acompanhando a nova distância com a geometria U/V preservada, rascunhos sem apoio inalterados, recusa de distância inválida, exclusão que desfaz o vínculo sem mover o rascunho, clonagem com vínculo remapeado, desfazer/refazer de `UpdateWorkPlane` e ida e volta do formato 21 com o campo `support`.

@@ -873,6 +873,21 @@ impl Editor {
             painter.circle_filled(origin, 3., theme::INK);
             painter.circle_stroke(origin, 6., egui::Stroke::new(1., theme::INK));
         }
+        // Como nas ferramentas de desenho, o ícone da ferramenta acompanha o cursor sobre
+        // a área 3D, sem substituir o ponteiro nem cobrir a ponta usada no clique.
+        if let (Some(picker), Some(position)) = (self.current().plane_pick.as_ref(), hover) {
+            let icon = match picker.purpose {
+                PlanePurpose::Sketch if picker.reference => icons::Icon::ReferenceSketch,
+                PlanePurpose::Sketch => icons::Icon::Sketch,
+                PlanePurpose::OffsetBase => icons::Icon::OffsetPlane,
+            };
+            icons::paint(
+                &painter,
+                egui::Rect::from_min_size(position + egui::vec2(16., -28.), egui::Vec2::splat(22.)),
+                icon,
+                true,
+            );
+        }
         if let Some(picker) = self.current_mut().plane_pick.as_mut() {
             picker.origin_hovered = selected.is_some();
         }

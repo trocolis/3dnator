@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Barra superior, faixa e escolha de plano
+
+- Barra de título com o nome 3Dnator (também no título da janela e no filtro de arquivos), Novo e Salvar logo após Arquivo e sem a busca. Ícones da barra escura com traço claro, destaque azul-claro, preenchimento escuro e realce de passagem escuro, legíveis inclusive ao passar o mouse.
+- Busca de ferramentas à direita da linha das abas, no lugar do botão de mostrar/ocultar a árvore, que continua disponível na busca (S).
+- Plano deslocado passa a ser o último grupo da aba Peça.
+- Novo rascunho e Plano deslocado não mostram mais a faixa de instruções e botões XY/XZ/YZ/Cancelar sobre a área 3D. O ícone da ferramenta acompanha o cursor durante a escolha, como nas ferramentas de desenho; a barra de estado indica o que escolher e Esc cancela.
+
 ### Edição da distância dos planos de trabalho
 
 - Duplo clique num plano da pasta Planos, ou **Editar** no menu, reabre o painel do Plano deslocado com o nome do plano, o plano-base atual e a distância gravada, mesmo com o plano oculto. Seta, campo e inversão funcionam como na criação; o campo Plano também permite trocar o plano-base. A prévia ocupa o lugar do plano gravado até o OK; OK sem mudanças não cria ação no desfazer.

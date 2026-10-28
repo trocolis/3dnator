@@ -725,7 +725,7 @@ impl Editor {
                     let (rect, _) =
                         ui.allocate_exact_size(egui::vec2(25., 27.), egui::Sense::hover());
                     icons::paint(ui.painter(), rect, Icon::Cube, true);
-                    ui.label(egui::RichText::new("3dnator").strong().size(18.));
+                    ui.label(egui::RichText::new(text(T::AppName)).strong().size(18.));
                     ui.separator();
                     ui.menu_button(text(T::FileMenu), |ui| {
                         for action in [
@@ -783,10 +783,12 @@ impl Editor {
                             ui.label(text(T::DisplayDecimalsHint));
                         });
                     });
+                    // Novo e Salvar logo depois de Arquivo; a busca fica na linha das abas.
+                    self.action_button(ui, Action::New, false);
                     self.action_button(ui, Action::Save, false);
                     ui.separator();
                     let width =
-                        (ui.available_width() - 90. - window_frame::CONTROLS_WIDTH).max(110.);
+                        (ui.available_width() - 20. - window_frame::CONTROLS_WIDTH).max(110.);
                     let (tabs_rect, _) =
                         ui.allocate_exact_size(egui::vec2(width, 32.), egui::Sense::hover());
                     // O espaço reservado precisa permanecer ocupado mesmo quando há
@@ -798,12 +800,6 @@ impl Editor {
                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     );
                     self.document_tabs(&mut tabs_ui);
-                    self.action_button(ui, Action::New, false);
-                    if icons::button(ui, Icon::Search, text(T::SearchTools), false, false).clicked()
-                    {
-                        self.shell.search_open = true;
-                        self.shell.search_focus = true;
-                    }
                     ui.separator();
                     if window_frame::controls(ui).close.clicked() {
                         // Percorrer o mesmo fluxo de fechamento usado pela decoração
@@ -859,8 +855,14 @@ impl Editor {
                             self.shell.tab = tab;
                         }
                     }
+                    // Mostrar/ocultar a árvore continua na busca (S), como as demais vistas.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        self.action_button(ui, Action::Browser, false);
+                        if icons::button(ui, Icon::Search, text(T::SearchTools), false, false)
+                            .clicked()
+                        {
+                            self.shell.search_open = true;
+                            self.shell.search_focus = true;
+                        }
                     });
                 });
                 ui.add(egui::Separator::default().spacing(4.));
@@ -1257,7 +1259,6 @@ impl Editor {
         match self.shell.tab {
             RibbonTab::Model => {
                 self.ribbon_group(ui, T::Sketch, &[Action::NewSketch]);
-                self.ribbon_group(ui, T::ConstructionGroup, &[Action::OffsetPlane]);
                 self.ribbon_group(
                     ui,
                     T::CreateGroupLabel,
@@ -1296,6 +1297,8 @@ impl Editor {
                         editor.action_button(ui, action, true);
                     }
                 });
+                // Geometria de construção fecha a aba.
+                self.ribbon_group(ui, T::ConstructionGroup, &[Action::OffsetPlane]);
             }
             // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
             // posicionamento, cópias e organização.

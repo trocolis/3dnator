@@ -2,6 +2,7 @@
 #[derive(Clone, Copy)]
 pub enum Text {
     ChooseSketchPlane,
+    AppName,
     ChooseOffsetBase,
     OffsetPlane,
     ConstructionGroup,
@@ -665,6 +666,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ChooseSketchPlane => {
             "Selecione um plano da origem, um plano de trabalho ou uma face plana do modelo"
         }
+        Text::AppName => "3Dnator",
         Text::ChooseOffsetBase => {
             "Selecione o plano a deslocar: plano da origem, plano de trabalho ou face plana"
         }
@@ -1073,7 +1075,7 @@ pub fn text(key: Text) -> &'static str {
         Text::RotatePivot => "Rotacionar seleção",
         Text::RotateAngle => "Ângulo em graus",
         Text::MeshSelectionNotice => "Seleção e medições na malha de apresentação.",
-        Text::Title => "3dnator · Projetos",
+        Text::Title => "3Dnator · Projetos",
         Text::NewProject => "Novo",
         Text::OpenProject => "Abrir projeto",
         Text::Save => "Salvar",
@@ -1129,7 +1131,7 @@ pub fn text(key: Text) -> &'static str {
         Text::RecoverySaved => "Recuperação automática atualizada",
         Text::RecoveryFailed => "Não foi possível atualizar a recuperação",
         Text::EmptyScene => "Crie um rascunho ou importe um modelo para começar.",
-        Text::FileFilter => "Projeto 3dnator",
+        Text::FileFilter => "Projeto 3Dnator",
         Text::StlFilter => "Corpo STL",
         Text::RecoveryNotice => {
             "Existem cópias de recuperação. Abra uma cópia para conferir e salvar o projeto."

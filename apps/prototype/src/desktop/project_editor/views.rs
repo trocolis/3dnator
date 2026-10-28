@@ -226,32 +226,6 @@ impl Editor {
             .frame(egui::Frame::new().fill(theme::CANVAS).inner_margin(8))
             .show(ui, |ui| {
                 self.animate_camera(ui.ctx());
-                if let Some(purpose) = self.current().plane_pick.as_ref().map(|p| p.purpose) {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(text(match purpose {
-                            sketch_scene::PlanePurpose::Sketch => T::ChooseSketchPlane,
-                            sketch_scene::PlanePurpose::OffsetBase => T::ChooseOffsetBase,
-                        }));
-                        for (label, plane) in [
-                            ("XY", nator_sketch::Plane::xy()),
-                            ("XZ", nator_sketch::Plane::xz()),
-                            ("YZ", nator_sketch::Plane::yz()),
-                        ] {
-                            if ui
-                                .add_enabled(!self.busy(), egui::Button::new(label))
-                                .clicked()
-                            {
-                                self.choose_origin_plane(label, plane);
-                            }
-                        }
-                        if ui
-                            .add_enabled(!self.busy(), egui::Button::new(text(T::Cancel)))
-                            .clicked()
-                        {
-                            self.cancel_plane_pick();
-                        }
-                    });
-                }
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let pixels = ui.ctx().pixels_per_point();
                 if self.viewport.resize(
