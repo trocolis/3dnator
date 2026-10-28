@@ -127,11 +127,18 @@ impl Editor {
             .body
             .and_then(|b| document.body(b))
             .is_some_and(|b| b.brep.is_some());
-        let mut open = true;
         let mut action = None;
-        egui::Window::new(text(T::ExportStl))
-            .open(&mut open)
-            .show(ctx, |ui| {
+        let title = text(T::ExportStl);
+        let outcome = command_panel::options(
+            ctx,
+            command_panel::Header {
+                id: "export",
+                icon: icons::Icon::Export,
+                title,
+            },
+            self.canvas_rect,
+            command_panel::WIDTH,
+            |ui| {
                 ui.label(text(T::ExportScope));
                 for (i, label) in SCOPES.iter().enumerate() {
                     let available = match i {
@@ -211,7 +218,9 @@ impl Editor {
                         }
                     });
                 });
-            });
+            },
+        );
+        let open = !outcome.cancel;
         if let (Some(write), Some(scope)) = (action, draft.scope()) {
             let quality = draft.quality();
             let tab = draft.tab;

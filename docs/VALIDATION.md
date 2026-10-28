@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Painéis padronizados abaixo do controle de vista — 27/10/2026
+
+- `command_panel` centraliza o cabeçalho, ícone, título em maiúsculas, fechar, margens, sombra e cantos usados por Mover. Rascunho/Seleção, Medir, Parâmetros, Folha técnica, Exportar e Renomear operação foram migrados; construção, montagem, corte de seção, importação/inserção e reparo já usam o mesmo componente.
+- Posição fixa à direita, 12 pontos abaixo de todo o controle de vista. A âncora acompanha o tamanho do canvas e substitui posições lembradas de janelas antigas. Conteúdo longo rola na altura disponível e linhas/tabelas largas rolam horizontalmente sem alargar o painel além do canvas. Campos flutuantes de rascunho consultam a nova identificação do painel para continuar evitando seus controles.
+- Regressão sem GPU abre um painel sobre uma posição antiga, alterna 1440 × 900 e 900 × 600, usa conteúdo maior que a área disponível nos dois eixos e verifica posição, limites e rodapé. Os cinco testes anteriores de digitação/validação do Mover continuam aprovados. Ensaios de desenho usam pontos livres no canvas após a mudança de largura, mantendo as verificações de geometria e histórico.
+- **263 testes com OCCT, 197 sem OCCT e 15 ensaios gráficos aprovados**; formatação, Clippy com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Capturas GL/llvmpipe em `target/codex-validation/tool-panels-20261027/` conferem Mover, Linha, Extrusão e Medir. Windows e janela nativa não exercitados localmente. Sem alteração da versão 0.3.0 em desenvolvimento ou do formato 19, sem release ou publicação remota.
+
 ## Modos de desenho, ícones e seção Medidas — 27/10/2026
 
 - Linha Normal/Simétrica, continuidade pelo último ponto até Esc ou fechamento de área, retângulos normal/central/inclinado e círculos por centro/raio, diâmetro ou tangência a duas linhas perpendiculares. Traço aparece nas quatro ferramentas de criação; Infinita é restrita a Linha/Retângulo. Auxiliares não participam de áreas/extrusões.

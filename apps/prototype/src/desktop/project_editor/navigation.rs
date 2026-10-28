@@ -184,18 +184,18 @@ impl Editor {
         if !self.shell.measure_open {
             return;
         }
-        let mut open = true;
-        egui::Window::new(text(T::MeasureSelection))
-            .id(egui::Id::new("measure_selection"))
-            .default_width(330.)
-            .default_pos(command_panel::default_position(self.canvas_rect))
-            .open(&mut open)
-            .show(context, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height((self.canvas_rect.height() - 120.).max(180.))
-                    .show(ui, |ui| self.measure_controls(ui));
-            });
-        self.shell.measure_open = open;
+        let outcome = command_panel::options(
+            context,
+            command_panel::Header {
+                id: "measure_selection",
+                icon: icons::Icon::Measure,
+                title: text(T::MeasureSelection),
+            },
+            self.canvas_rect,
+            command_panel::WIDTH,
+            |ui| self.measure_controls(ui),
+        );
+        self.shell.measure_open = !outcome.cancel;
     }
 
     pub(super) fn viewport_actions(&mut self, ui: &egui::Ui, response: &egui::Response) {

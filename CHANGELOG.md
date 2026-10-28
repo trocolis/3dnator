@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Painéis de ferramentas no padrão de Mover
+
+- Cabeçalho com ícone, título em maiúsculas e fechar, espaçamento, bordas arredondadas e sombra do painel Mover passam a ser o padrão dos painéis de opções. Rascunho, medição, parâmetros, folha técnica, exportação e renomeação de operações usam o mesmo componente das ferramentas de montagem e construção.
+- Painéis ancorados à direita, sempre abaixo do controle de vista completo. Reabrir ou redimensionar a janela reposiciona o painel, sem reaproveitar posições antigas. Conteúdo longo rola dentro da altura disponível, preservando o cabeçalho e o rodapé de confirmação.
+- Opções de desenho conservam ícones, Medidas e confirmação pelo canvas; ferramentas que exigem confirmação mantêm estado da prévia, OK e Cancelar.
+
 ### Modos de construção e Traço nas ferramentas de desenho
 
 - Linha com modos Normal e Simétrica: a segunda opção acrescenta um segmento de mesmo tamanho no lado oposto ao primeiro clique, mantendo colinearidade e igualdade no recálculo. Desenho contínuo a partir do último vértice, até Esc ou fechar uma área; cruzar um trecho anterior ou completar um contorno com linhas já existentes também encerra a cadeia.

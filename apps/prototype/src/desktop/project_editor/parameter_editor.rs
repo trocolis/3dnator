@@ -73,13 +73,18 @@ impl Editor {
         else {
             return;
         };
-        let mut open = true;
         let mut command = None;
-        egui::Window::new(format!("{} · {}", text(T::Parameters), part.name))
-            .id(egui::Id::new("parameters"))
-            .open(&mut open)
-            .default_width(540.)
-            .show(context, |ui| {
+        let title = format!("{} · {}", text(T::Parameters), part.name);
+        let outcome = command_panel::options(
+            context,
+            command_panel::Header {
+                id: "parameters",
+                icon: icons::Icon::Parameters,
+                title: &title,
+            },
+            self.canvas_rect,
+            540.,
+            |ui| {
                 egui::Grid::new("parameters_table")
                     .striped(true)
                     .show(ui, |ui| {
@@ -160,7 +165,9 @@ impl Editor {
                         }
                     });
                 });
-            });
+            },
+        );
+        let open = !outcome.cancel;
         if let Some(command) = command {
             self.prepare_command(context, draft.tab, command);
         }

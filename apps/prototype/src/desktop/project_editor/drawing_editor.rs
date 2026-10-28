@@ -73,16 +73,21 @@ impl Editor {
         let revision = tab.session.revision();
         let picked = tab.picked.clone();
         let view = tab.view.clone();
-        let mut open = true;
         let mut action = None;
         let mut capture = None;
         let previous_spec = draft.spec.clone();
         let previous_annotations = draft.annotations.clone();
-        egui::Window::new(text(T::Drawing))
-            .open(&mut open)
-            .default_width(720.)
-            .vscroll(true)
-            .show(ctx, |ui| {
+        let title = text(T::Drawing);
+        let outcome = command_panel::options(
+            ctx,
+            command_panel::Header {
+                id: "drawing",
+                icon: icons::Icon::Drawing,
+                title,
+            },
+            self.canvas_rect,
+            720.,
+            |ui| {
                 ui.label(text(T::MeshDrawingNotice));
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     ui.label(text(T::DrawingTitle));
@@ -253,7 +258,9 @@ impl Editor {
                         self.status.error(error);
                     }
                 }
-            });
+            },
+        );
+        let open = !outcome.cancel;
         if let (Some((first, edge)), Some(pick)) = (capture, picked) {
             let tab = draft.tab;
             let target = draft.target;

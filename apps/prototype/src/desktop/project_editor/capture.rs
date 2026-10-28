@@ -3007,8 +3007,8 @@ mod tests {
             (
                 LineType::Infinite,
                 T::SketchLineInfinite,
-                [25., 5.],
-                [55., 15.],
+                [-50., 35.],
+                [-25., 45.],
             ),
         ] {
             let choice = label_position(&mut editor, &context, text(label))?;
@@ -3282,7 +3282,7 @@ mod tests {
             &context,
             vec![egui::Event::Text("12 mm".into())],
         )?;
-        point(&mut editor, [60., -60.])?;
+        point(&mut editor, [-75., -75.])?;
         assert_eq!(
             editor
                 .current()
@@ -3296,7 +3296,7 @@ mod tests {
             &editor.viewport.camera,
             editor.display_bounds(),
             editor.canvas_rect,
-            [80., -50., 0.],
+            [-55., -65., 0.],
         )
         .ok_or("Ponto sem projeção")?;
         frame(
@@ -3342,8 +3342,8 @@ mod tests {
         // A área pode se apoiar nas retas anteriores, sem voltar a um ponto da
         // cadeia recém-iniciada. A resposta do trabalhador também deve encerrá-la.
         select(&mut editor, Tool::Line)?;
-        point(&mut editor, [35., 35.])?;
-        point(&mut editor, [50., 20.])?;
+        point(&mut editor, [-60., 0.])?;
+        point(&mut editor, [-60., 10.])?;
         assert!(!drawing(&editor));
 
         Ok(())

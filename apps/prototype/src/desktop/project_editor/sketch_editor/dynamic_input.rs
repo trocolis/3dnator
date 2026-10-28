@@ -298,7 +298,7 @@ impl Input {
             }
             Primitive::Arc => Tool::Arc,
         };
-        let panel = egui::AreaState::load(context, egui::Id::new(("sketch_tool_settings", tool)))
+        let panel = egui::AreaState::load(context, command_panel::id(tool.panel_key()))
             .map(|area| area.rect().expand(8.));
         let clamp = |position: egui::Pos2| {
             let position = clamp_canvas(position);

@@ -458,33 +458,30 @@ impl Editor {
         let Some(rename) = &mut self.timeline.rename else {
             return;
         };
-        let mut open = true;
         let mut apply = false;
-        let mut cancel = false;
-        egui::Window::new(text(T::RenameFeatureTitle))
-            .id(egui::Id::new("rename_feature"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_BOTTOM, [0., -110.])
-            .open(&mut open)
-            .show(context, |ui| {
+        let outcome = command_panel::show_validated(
+            context,
+            command_panel::Header {
+                id: "rename_feature",
+                icon: icons::Icon::Edit,
+                title: text(T::RenameFeatureTitle),
+            },
+            self.canvas_rect,
+            command_panel::Footer::None,
+            true,
+            |ui| {
                 let field = ui.text_edit_singleline(&mut rename.name);
                 if rename.focus {
                     field.request_focus();
                     rename.focus = false;
                 }
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    apply = true;
+                    apply = !rename.name.trim().is_empty();
                 }
-                ui.horizontal(|ui| {
-                    if ui.button(text(T::Ok)).clicked() {
-                        apply = true;
-                    }
-                    if ui.button(text(T::Cancel)).clicked() {
-                        cancel = true;
-                    }
-                });
-            });
+                !rename.name.trim().is_empty()
+            },
+        );
+        apply |= outcome.ok;
         if apply && let Some(rename) = self.timeline.rename.take() {
             self.prepare_command(
                 context,
@@ -495,7 +492,7 @@ impl Editor {
                     name: rename.name.trim().into(),
                 },
             );
-        } else if !open || cancel {
+        } else if outcome.cancel {
             self.timeline.rename = None;
         }
     }

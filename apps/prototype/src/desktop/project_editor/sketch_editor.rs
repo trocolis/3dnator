@@ -34,6 +34,18 @@ impl Tool {
             Self::Trim => T::Trim,
         }
     }
+    /// Chave estável de memória, compartilhada com os campos flutuantes para
+    /// evitar que se posicionem sobre o painel de opções.
+    pub(super) fn panel_key(self) -> &'static str {
+        match self {
+            Self::Select => "sketch_select",
+            Self::Line => "sketch_line",
+            Self::Rectangle => "sketch_rectangle",
+            Self::Circle => "sketch_circle",
+            Self::Arc => "sketch_arc",
+            Self::Trim => "sketch_trim",
+        }
+    }
     pub(super) fn icon(self) -> icons::Icon {
         match self {
             Self::Select => icons::Icon::Select,
@@ -415,120 +427,114 @@ impl Editor {
         let Some(mut sketch) = self.working_sketch() else {
             return;
         };
-        let mut open = true;
         let busy = self.busy();
         let mut submit = false;
         let mut open_repair = false;
         let mut edit_dimension = false;
-        // O painel começa abaixo do navegador, sem cobrir cantos/setas.
-        // Cada ferramenta conserva sua posição; nunca nasce recolhida, para que
-        // a escolha explícita sempre apresente seu conteúdo ao usuário.
-        let tools_top =
-            (view_cube::rect(self.canvas_rect).bottom() + 12.).max(self.canvas_rect.top() + 170.);
-        egui::Window::new(text(tool.label()))
-            .id(egui::Id::new(("sketch_tool_settings", tool)))
-            .open(&mut open)
-            .default_width(245.)
-            .collapsible(false)
-            .default_pos(egui::pos2(self.canvas_rect.right() - 265., tools_top))
-            .show(context, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height((self.canvas_rect.height() - 230.).max(120.))
-                    .show(ui, |ui| {
-                        if tool != Tool::Select {
-                            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
-                                ui.add_enabled_ui(!busy, |ui| line_tools::settings(ui, work));
+        let outcome = command_panel::options(
+            context,
+            command_panel::Header {
+                id: tool.panel_key(),
+                icon: tool.icon(),
+                title: text(tool.label()),
+            },
+            self.canvas_rect,
+            command_panel::WIDTH,
+            |ui| {
+                if tool != Tool::Select {
+                    if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                        ui.add_enabled_ui(!busy, |ui| line_tools::settings(ui, work));
+                    }
+                    return;
+                }
+                ui.label(&sketch.name);
+                let Some(work) = self.current_mut().sketch_edit.as_mut() else {
+                    return;
+                };
+                let (label, color) = match work.status {
+                    Status::Conflict => (text(T::SketchConflict), theme::DANGER),
+                    Status::FullyConstrained => (text(T::FullyConstrained), theme::GREEN),
+                    Status::UnderConstrained { .. } => (text(T::UnderConstrained), theme::ACCENT),
+                };
+                ui.colored_label(color, label);
+                if let Status::UnderConstrained { degrees_of_freedom } = work.status {
+                    ui.label(format!(
+                        "{}: {degrees_of_freedom}",
+                        text(T::DegreesOfFreedom)
+                    ));
+                }
+                if work.redundant {
+                    ui.colored_label(theme::WARNING, text(T::Redundant));
+                }
+                if work.pending.is_some() && ui.button(text(T::Cancel)).clicked() {
+                    work.pending = None;
+                    work.anchors.clear();
+                    work.status = Status::UnderConstrained {
+                        degrees_of_freedom: 0,
+                    };
+                }
+                if ui
+                    .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
+                    .on_hover_text(text(T::RepairHint))
+                    .clicked()
+                {
+                    open_repair = true;
+                }
+                ui.separator();
+                ui.label(text(T::Constraints));
+                let mut remove = None;
+                for constraint in &sketch.constraints {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(
+                                work.constraint == Some(constraint.id),
+                                constraint_label(&constraint.kind),
+                            )
+                            .clicked()
+                        {
+                            work.constraint = Some(constraint.id);
+                            if let Some(value) = dimension_value(&constraint.kind) {
+                                work.dimension = value;
+                                work.dimension_expression = sketch
+                                    .dimension_expressions
+                                    .get(&constraint.id)
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        dimension_expression(&constraint.kind, value)
+                                    });
+                                work.reference = constraint.reference;
                             }
-                            return;
-                        }
-                        ui.label(&sketch.name);
-                        let Some(work) = self.current_mut().sketch_edit.as_mut() else {
-                            return;
-                        };
-                        let (label, color) = match work.status {
-                            Status::Conflict => (text(T::SketchConflict), theme::DANGER),
-                            Status::FullyConstrained => (text(T::FullyConstrained), theme::GREEN),
-                            Status::UnderConstrained { .. } => {
-                                (text(T::UnderConstrained), theme::ACCENT)
-                            }
-                        };
-                        ui.colored_label(color, label);
-                        if let Status::UnderConstrained { degrees_of_freedom } = work.status {
-                            ui.label(format!(
-                                "{}: {degrees_of_freedom}",
-                                text(T::DegreesOfFreedom)
-                            ));
-                        }
-                        if work.redundant {
-                            ui.colored_label(theme::WARNING, text(T::Redundant));
-                        }
-                        if work.pending.is_some() && ui.button(text(T::Cancel)).clicked() {
-                            work.pending = None;
-                            work.anchors.clear();
-                            work.status = Status::UnderConstrained {
-                                degrees_of_freedom: 0,
-                            };
                         }
                         if ui
-                            .add_enabled(!busy, egui::Button::new(text(T::RepairSketch)))
-                            .on_hover_text(text(T::RepairHint))
+                            .add_enabled(!busy, egui::Button::new("×").small())
                             .clicked()
                         {
-                            open_repair = true;
-                        }
-                        ui.separator();
-                        ui.label(text(T::Constraints));
-                        let mut remove = None;
-                        for constraint in &sketch.constraints {
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .selectable_label(
-                                        work.constraint == Some(constraint.id),
-                                        constraint_label(&constraint.kind),
-                                    )
-                                    .clicked()
-                                {
-                                    work.constraint = Some(constraint.id);
-                                    if let Some(value) = dimension_value(&constraint.kind) {
-                                        work.dimension = value;
-                                        work.dimension_expression = sketch
-                                            .dimension_expressions
-                                            .get(&constraint.id)
-                                            .cloned()
-                                            .unwrap_or_else(|| {
-                                                dimension_expression(&constraint.kind, value)
-                                            });
-                                        work.reference = constraint.reference;
-                                    }
-                                }
-                                if ui
-                                    .add_enabled(!busy, egui::Button::new("×").small())
-                                    .clicked()
-                                {
-                                    remove = Some(constraint.id);
-                                }
-                            });
-                        }
-                        if let Some(id) = remove {
-                            sketch.constraints.retain(|c| c.id != id);
-                            sketch.dimension_expressions.remove(&id);
-                            work.constraint = None;
-                            submit = true;
-                        }
-                        if work.constraint.is_some_and(|id| {
-                            sketch
-                                .constraints
-                                .iter()
-                                .any(|c| c.id == id && dimension_value(&c.kind).is_some())
-                        }) && ui
-                            .add_enabled(!busy, egui::Button::new(text(T::EditDimension)))
-                            .clicked()
-                        {
-                            edit_dimension = true;
+                            remove = Some(constraint.id);
                         }
                     });
-            });
-        if !open && let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                }
+                if let Some(id) = remove {
+                    sketch.constraints.retain(|c| c.id != id);
+                    sketch.dimension_expressions.remove(&id);
+                    work.constraint = None;
+                    submit = true;
+                }
+                if work.constraint.is_some_and(|id| {
+                    sketch
+                        .constraints
+                        .iter()
+                        .any(|c| c.id == id && dimension_value(&c.kind).is_some())
+                }) && ui
+                    .add_enabled(!busy, egui::Button::new(text(T::EditDimension)))
+                    .clicked()
+                {
+                    edit_dimension = true;
+                }
+            },
+        );
+        if outcome.cancel
+            && let Some(work) = self.current_mut().sketch_edit.as_mut()
+        {
             work.drawing.clear(context);
             work.tracker.clear();
             work.select_tool(Tool::Select);

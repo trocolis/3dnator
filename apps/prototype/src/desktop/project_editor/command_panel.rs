@@ -28,17 +28,145 @@ pub(super) struct Outcome {
     pub cancel: bool,
 }
 
-/// Posição inicial: canto superior esquerdo da área 3D, abaixo da faixa de câmera. Deixa
-/// livres o centro, onde o modelo costuma estar enquadrado, e o cubo de orientação.
-pub(super) fn default_position(canvas: egui::Rect) -> egui::Pos2 {
-    egui::pos2(canvas.left() + 10., canvas.top() + 44.)
+/// A posição usa o controle inteiro, incluindo Home/Enquadrar e setas. O painel
+/// fica alinhado à direita do canvas; memória de janelas antigas não muda a âncora.
+fn position(canvas: egui::Rect, width: f32) -> egui::Pos2 {
+    let cube = view_cube::rect(canvas);
+    egui::pos2(
+        (canvas.right() - width - 10.).max(canvas.left() + 10.),
+        if cube.is_positive() {
+            cube.bottom() + 12.
+        } else {
+            canvas.top() + 10.
+        },
+    )
+}
+pub(super) fn id(key: &str) -> egui::Id {
+    egui::Id::new(("command_panel", key))
+}
+fn panel_width(canvas: egui::Rect, requested: f32) -> f32 {
+    requested.min((canvas.width() - 20.).max(1.))
 }
 
-/// Identificação do painel: chave de memória, ícone e nome da ferramenta.
+/// Identificação estável compartilhada pelos painéis de opções e de confirmação.
+#[derive(Clone, Copy)]
 pub(super) struct Header<'a> {
     pub id: &'a str,
     pub icon: Icon,
     pub title: &'a str,
+}
+
+fn window(
+    context: &egui::Context,
+    header: Header<'_>,
+    canvas: egui::Rect,
+    width: f32,
+) -> egui::Window<'static> {
+    egui::Window::new(header.title)
+        .id(id(header.id))
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .constrain(false)
+        .fixed_pos(position(canvas, width))
+        .min_width(width)
+        .max_width(width)
+        .frame(
+            egui::Frame::window(&context.global_style())
+                .inner_margin(0)
+                .corner_radius(8)
+                .shadow(egui::Shadow {
+                    offset: [0, 4],
+                    blur: 16,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(40),
+                }),
+        )
+}
+
+/// Mesmo cabeçalho do Mover: ícone, nome em maiúsculas e fechar à direita.
+fn heading(ui: &mut egui::Ui, header: Header<'_>) -> bool {
+    let mut close = false;
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(244, 247, 251))
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .corner_radius(egui::CornerRadius {
+            nw: 8,
+            ne: 8,
+            sw: 0,
+            se: 0,
+        })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(22.), egui::Sense::hover());
+                icons::paint(ui.painter(), rect, header.icon, true);
+                ui.label(
+                    egui::RichText::new(header.title.to_uppercase())
+                        .strong()
+                        .size(13.)
+                        .color(theme::INK),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close = icons::button(ui, Icon::Close, text(T::Cancel), false, false).clicked();
+                });
+            });
+        });
+    ui.add(egui::Separator::default().spacing(0.));
+    close
+}
+
+fn content(
+    ui: &mut egui::Ui,
+    canvas: egui::Rect,
+    width: f32,
+    has_footer: bool,
+    body: impl FnOnce(&mut egui::Ui),
+) {
+    // Reservar a altura real abaixo do navegador: em telas curtas o conteúdo
+    // rola, sem empurrar o cabeçalho sobre o cubo nem esconder OK/Cancelar.
+    let available = canvas.bottom()
+        - position(canvas, width).y
+        - 48.
+        - 20.
+        - 20.
+        - if has_footer { 52. } else { 0. };
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            // Linhas de seleção e tabelas extensas também podem precisar rolar
+            // horizontalmente; nunca alargam o painel para fora do canvas.
+            egui::ScrollArea::both()
+                .min_scrolled_width(0.)
+                .min_scrolled_height(0.)
+                .max_width((width - 24.).max(1.))
+                .max_height(available.max(1.))
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 6.;
+                    body(ui);
+                });
+        });
+}
+
+/// Opções aplicadas durante o uso da ferramenta, sem um OK adicional. Os
+/// editores conservam seus próprios comandos e a semântica de Enter/Esc.
+pub(super) fn options(
+    context: &egui::Context,
+    header: Header<'_>,
+    canvas: egui::Rect,
+    width: f32,
+    body: impl FnOnce(&mut egui::Ui),
+) -> Outcome {
+    let mut outcome = Outcome::default();
+    let width = panel_width(canvas, width);
+    window(context, header, canvas, width).show(context, |ui| {
+        ui.set_width(width);
+        outcome.cancel = heading(ui, header);
+        content(ui, canvas, width, false, body);
+    });
+    outcome
 }
 
 /// Painel flutuante com cabeçalho, conteúdo rolável e rodapé.
@@ -66,136 +194,74 @@ pub(super) fn show_validated(
     ok_enabled: bool,
     body: impl FnOnce(&mut egui::Ui) -> bool,
 ) -> Outcome {
-    let Header { id, icon, title } = header;
     let mut outcome = Outcome::default();
     let mut fields_valid = true;
-    // Campo em edição no início do quadro: Enter só conclui o valor digitado; o próximo
-    // Enter, fora do campo, confirma o painel.
+    // Enter termina a edição do campo antes de confirmar o comando inteiro.
     let typing = context.egui_wants_keyboard_input();
-    egui::Window::new(title)
-        .id(egui::Id::new(("command_panel", id)))
-        .title_bar(false)
-        .collapsible(false)
-        .resizable(false)
-        .default_pos(default_position(canvas))
-        .min_width(WIDTH)
-        .max_width(WIDTH)
-        .frame(
-            egui::Frame::window(&context.global_style())
-                .inner_margin(0)
-                .corner_radius(8)
-                .shadow(egui::Shadow {
-                    offset: [0, 4],
-                    blur: 16,
-                    spread: 0,
-                    color: egui::Color32::from_black_alpha(40),
-                }),
-        )
-        .show(context, |ui| {
-            ui.set_width(WIDTH);
-            // Cabeçalho: ícone e nome da ferramenta em maiúsculas; fechar cancela.
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgb(244, 247, 251))
-                .inner_margin(egui::Margin::symmetric(12, 8))
-                .corner_radius(egui::CornerRadius {
-                    nw: 8,
-                    ne: 8,
-                    sw: 0,
-                    se: 0,
-                })
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::Vec2::splat(22.), egui::Sense::hover());
-                        icons::paint(ui.painter(), rect, icon, true);
-                        ui.label(
-                            egui::RichText::new(title.to_uppercase())
-                                .strong()
-                                .size(13.)
-                                .color(theme::INK),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if icons::button(ui, Icon::Close, text(T::Cancel), false, false)
-                                .clicked()
-                            {
-                                outcome.cancel = true;
-                            }
-                        });
-                    });
-                });
-            ui.add(egui::Separator::default().spacing(0.));
-            egui::Frame::new()
-                .inner_margin(egui::Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height((canvas.height() - 260.).max(180.))
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing.y = 6.;
-                            fields_valid = body(ui);
-                        });
-                });
-            ui.add(egui::Separator::default().spacing(0.));
-            egui::Frame::new()
-                .inner_margin(egui::Margin::symmetric(12, 8))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        match footer {
-                            Footer::None => {}
-                            Footer::Waiting => {
-                                ui.spinner();
-                                ui.label(
-                                    egui::RichText::new(text(T::PreviewComputing))
-                                        .small()
-                                        .color(theme::MUTED),
-                                );
-                            }
-                            Footer::Ready => {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::Vec2::splat(16.),
-                                    egui::Sense::hover(),
-                                );
-                                icons::paint(ui.painter(), rect, Icon::Check, true);
-                                ui.label(
-                                    egui::RichText::new(text(T::PreviewReady))
-                                        .small()
-                                        .color(theme::MUTED),
-                                );
-                            }
-                            Footer::Failed(_) => {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::Vec2::splat(16.),
-                                    egui::Sense::hover(),
-                                );
-                                icons::paint(ui.painter(), rect, Icon::Warning, true);
-                                ui.label(
-                                    egui::RichText::new(text(T::PreviewFailed))
-                                        .small()
-                                        .color(theme::DANGER),
-                                );
-                            }
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(text(T::Cancel)).clicked() {
-                                outcome.cancel = true;
-                            }
-                            let ok = egui::Button::new(
-                                egui::RichText::new(text(T::Ok))
-                                    .strong()
-                                    .color(egui::Color32::WHITE),
-                            )
-                            .fill(theme::ACCENT)
-                            .min_size(egui::vec2(64., 26.));
-                            if ui.add_enabled(ok_enabled && fields_valid, ok).clicked() {
-                                outcome.ok = true;
-                            }
-                        });
-                    });
-                    if let Footer::Failed(message) = footer {
-                        ui.label(egui::RichText::new(message).small().color(theme::DANGER));
-                    }
-                });
+    let width = panel_width(canvas, WIDTH);
+    window(context, header, canvas, width).show(context, |ui| {
+        ui.set_width(width);
+        outcome.cancel = heading(ui, header);
+        content(ui, canvas, width, true, |ui| {
+            fields_valid = body(ui);
         });
+        ui.add(egui::Separator::default().spacing(0.));
+        egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    match footer {
+                        Footer::None => {}
+                        Footer::Waiting => {
+                            ui.spinner();
+                            ui.label(
+                                egui::RichText::new(text(T::PreviewComputing))
+                                    .small()
+                                    .color(theme::MUTED),
+                            );
+                        }
+                        Footer::Ready => {
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::Vec2::splat(16.), egui::Sense::hover());
+                            icons::paint(ui.painter(), rect, Icon::Check, true);
+                            ui.label(
+                                egui::RichText::new(text(T::PreviewReady))
+                                    .small()
+                                    .color(theme::MUTED),
+                            );
+                        }
+                        Footer::Failed(_) => {
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::Vec2::splat(16.), egui::Sense::hover());
+                            icons::paint(ui.painter(), rect, Icon::Warning, true);
+                            ui.label(
+                                egui::RichText::new(text(T::PreviewFailed))
+                                    .small()
+                                    .color(theme::DANGER),
+                            );
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(text(T::Cancel)).clicked() {
+                            outcome.cancel = true;
+                        }
+                        let ok = egui::Button::new(
+                            egui::RichText::new(text(T::Ok))
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(theme::ACCENT)
+                        .min_size(egui::vec2(64., 26.));
+                        if ui.add_enabled(ok_enabled && fields_valid, ok).clicked() {
+                            outcome.ok = true;
+                        }
+                    });
+                });
+                if let Footer::Failed(message) = footer {
+                    ui.label(egui::RichText::new(message).small().color(theme::DANGER));
+                }
+            });
+    });
     // Teclado como nos CADs: Esc cancela e Enter confirma, fora de campos em edição (neles,
     // Esc e Enter apenas encerram a digitação).
     if !typing && context.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -468,6 +534,96 @@ mod tests {
     use super::*;
 
     type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+    /// Memória de posição de janelas anteriores e mudanças de tamanho não podem
+    /// recolocar uma ferramenta sobre o navegador. O conteúdo longo deve rolar.
+    #[test]
+    fn tool_panels_stay_below_the_view_control_after_reopening_and_resizing() -> TestResult<()> {
+        let context = egui::Context::default();
+        for (size, requested_width) in [
+            (egui::vec2(1440., 900.), WIDTH),
+            (egui::vec2(900., 600.), WIDTH),
+            (egui::vec2(900., 600.), 720.),
+        ] {
+            let canvas =
+                egui::Rect::from_min_max(egui::pos2(268., 198.), egui::pos2(size.x, size.y - 42.));
+            let input = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let mut old = context.run_ui(input(), |_| {
+                egui::Window::new("Posição antiga")
+                    .id(id("options_position_test"))
+                    .fixed_pos(canvas.left_top())
+                    .show(&context, |ui| {
+                        ui.label("Anterior");
+                    });
+            });
+            old.textures_delta.clear();
+            for _ in 0..2 {
+                let mut output = context.run_ui(input(), |_| {
+                    options(
+                        &context,
+                        Header {
+                            id: "options_position_test",
+                            icon: Icon::Line,
+                            title: "Linha",
+                        },
+                        canvas,
+                        requested_width,
+                        |ui| {
+                            ui.allocate_exact_size(
+                                egui::vec2(requested_width * 2., 20.),
+                                egui::Sense::hover(),
+                            );
+                            for index in 0..80 {
+                                ui.label(format!("Campo {index}"));
+                            }
+                        },
+                    );
+                    show(
+                        &context,
+                        Header {
+                            id: "command_position_test",
+                            icon: Icon::Move,
+                            title: "Mover",
+                        },
+                        canvas,
+                        Footer::None,
+                        true,
+                        |ui| {
+                            ui.allocate_exact_size(
+                                egui::vec2(requested_width * 2., 20.),
+                                egui::Sense::hover(),
+                            );
+                            for index in 0..80 {
+                                ui.label(format!("Campo {index}"));
+                            }
+                        },
+                    );
+                });
+                output.textures_delta.clear();
+            }
+            for key in ["options_position_test", "command_position_test"] {
+                let rect = egui::AreaState::load(&context, id(key))
+                    .ok_or("Painel ausente")?
+                    .rect();
+                assert!(
+                    (rect.top() - (view_cube::rect(canvas).bottom() + 12.)).abs() < 1.,
+                    "{key}: {rect:?}"
+                );
+                assert!(
+                    rect.left() >= canvas.left() && rect.right() <= canvas.right(),
+                    "{key}: {rect:?}"
+                );
+                assert!(
+                    rect.bottom() <= canvas.bottom(),
+                    "{key}: {rect:?}; canvas: {canvas:?}"
+                );
+            }
+        }
+        Ok(())
+    }
 
     /// Eventos reais do egui exercitam foco, edição e confirmação, sem adaptador gráfico.
     fn number_frame(
