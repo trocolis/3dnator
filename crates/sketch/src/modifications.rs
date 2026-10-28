@@ -142,9 +142,9 @@ pub fn offset(
         if !unique.insert(*id) {
             return Err(SketchError("Selecione entidades diferentes.".into()));
         }
-        for distance in &distances {
-            created.push(tools::offset_entity(&mut next, *id, *distance)?);
-        }
+    }
+    for distance in distances {
+        created.extend(crate::path_offset::append(&mut next, selected, distance)?);
     }
     stroke(&mut next, &created, line_type)?;
     next.validate()?;
@@ -155,6 +155,85 @@ pub fn offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn complete_offsets_close_corners_and_reject_collapsed_contours_atomically() -> Result<()> {
+        let mut sketch = Sketch::new("Contorno", Plane::xy());
+        let lines = sketch.add_rectangle([0., 0.], [10., 10.], false)?;
+        let created = offset(
+            &mut sketch,
+            &lines,
+            OffsetMode::Normal,
+            1.,
+            0.,
+            LineType::Normal,
+        )?;
+        assert_eq!(created.len(), 4);
+        let regions = profiles::regions(&sketch)?;
+        assert!(
+            regions
+                .iter()
+                .flat_map(|r| &r.holes)
+                .any(|w| (w.area().abs() - 64.).abs() < 1e-6)
+        );
+        for i in 0..4 {
+            assert_eq!(
+                sketch.entity(created[i])?.point_ids()[1],
+                sketch.entity(created[(i + 1) % 4])?.point_ids()[0]
+            );
+        }
+        let before = (sketch.next_id, sketch.points.len(), sketch.entities.len());
+        assert!(
+            offset(
+                &mut sketch,
+                &lines,
+                OffsetMode::Normal,
+                6.,
+                0.,
+                LineType::Normal
+            )
+            .is_err()
+        );
+        assert_eq!(
+            before,
+            (sketch.next_id, sketch.points.len(), sketch.entities.len())
+        );
+        Ok(())
+    }
+    #[test]
+    fn a_line_and_arc_offset_meet_on_their_exact_supports() -> Result<()> {
+        let mut sketch = Sketch::new("Contorno misto", Plane::xy());
+        let center = sketch.add_point([0., 0.])?;
+        let a = sketch.add_point([10., 0.])?;
+        let b = sketch.add_point([-10., 0.])?;
+        let arc = sketch.add_curve(
+            Curve::Arc {
+                center,
+                start: a,
+                end: b,
+                clockwise: false,
+            },
+            false,
+        )?;
+        let line = sketch.add_curve(Curve::Line { start: b, end: a }, false)?;
+        let created = offset(
+            &mut sketch,
+            &[arc, line],
+            OffsetMode::Normal,
+            1.,
+            0.,
+            LineType::Normal,
+        )?;
+        assert_eq!(created.len(), 2);
+        assert!((sketch.radial(created[0])?.1 - 9.).abs() < 1e-6);
+        let ends = sketch.entity(created[0])?.point_ids();
+        let (a, b) = sketch.line(created[1])?;
+        assert!(
+            distance(a, sketch.point(ends[2])?) < 1e-6
+                && distance(b, sketch.point(ends[1])?) < 1e-6
+        );
+        assert!((a[1] - 1.).abs() < 1e-6 && (b[1] - 1.).abs() < 1e-6);
+        sketch.validate()
+    }
     #[test]
     fn mirrored_selection_preserves_shared_corners_and_uses_the_chosen_stroke() -> Result<()> {
         let mut sketch = Sketch::new("Espelho", Plane::xy());

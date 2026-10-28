@@ -5,6 +5,7 @@ use crate::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    Move,
     Offset,
     Fillet,
     Chamfer,
@@ -40,6 +41,7 @@ impl Action {
     pub fn selection_count(self) -> usize {
         match self {
             Self::Offset
+            | Self::Move
             | Self::Dimension
             | Self::HorizontalVertical
             | Self::Construction
@@ -87,7 +89,8 @@ fn apply_inner(
     options: Options,
 ) -> Result<Outcome> {
     if selected.len() != action.selection_count()
-        && !(matches!(action, Action::Construction | Action::Delete) && !selected.is_empty())
+        && !(matches!(action, Action::Construction | Action::Delete | Action::Move)
+            && !selected.is_empty())
     {
         return Err(SketchError(format!(
             "Selecione {} entidade(s) do rascunho.",
@@ -107,6 +110,9 @@ fn apply_inner(
     let first = selected[0];
     let mut outcome = Outcome::default();
     match action {
+        Action::Move => {
+            *sketch = movement::translated(sketch, selected, [options.value_mm, 0.])?;
+        }
         Action::Offset => {
             outcome
                 .created

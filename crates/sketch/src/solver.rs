@@ -335,6 +335,14 @@ pub fn solve(source: &Sketch) -> Result<Report> {
 /// e a resolução comum pode mover o primeiro. Raios de círculos são variáveis
 /// independentes dos pontos; arcos são preservados pelos seus três apoios.
 pub fn solve_preserving(source: &Sketch, points: &[u64], circles: &[u64]) -> Result<Report> {
+    preserving(source, points, circles, true)
+}
+/// Variante de Mover: a posição solicitada é obrigatória nesta resolução. Se
+/// apoios fixos a impedirem, devolve conflito em vez de abandonar a solicitação.
+pub fn solve_required(source: &Sketch, points: &[u64], circles: &[u64]) -> Result<Report> {
+    preserving(source, points, circles, false)
+}
+fn preserving(source: &Sketch, points: &[u64], circles: &[u64], fallback: bool) -> Result<Report> {
     let mut stationary = vec![false; variables(source).len()];
     for id in points {
         if source.points.iter().any(|p| p.id == *id && p.projected) {
@@ -357,7 +365,7 @@ pub fn solve_preserving(source: &Sketch, points: &[u64], circles: &[u64]) -> Res
         }
     }
     let preferred = solve_internal(source, &stationary)?;
-    if preferred.status == Status::Conflict {
+    if fallback && preferred.status == Status::Conflict {
         solve(source)
     } else {
         Ok(preferred)

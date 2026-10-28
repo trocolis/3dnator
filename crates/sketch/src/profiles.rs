@@ -2,7 +2,7 @@
 use crate::*;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Segment {
     Line {
         a: Point2,

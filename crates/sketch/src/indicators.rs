@@ -26,7 +26,10 @@ fn push(result: &mut Vec<Indicator>, point: Point2, kind: Kind) {
 pub fn markers(sketch: &Sketch) -> Result<Vec<Indicator>> {
     let mut result = Vec::new();
     for entity in &sketch.entities {
-        if matches!(entity.curve, Curve::Circle { .. } | Curve::Arc { .. }) {
+        if matches!(entity.curve, Curve::Arc { .. })
+            || (matches!(entity.curve, Curve::Circle { .. })
+                && connected::center_is_linked(sketch, entity.id)?)
+        {
             push(&mut result, sketch.radial(entity.id)?.0, Kind::Center);
         }
     }
@@ -122,6 +125,8 @@ mod tests {
         let line = sketch.add_line([30., 0.], [50., 0.], false)?;
         let circle = sketch.add_circle([40., 5.], 5., false)?;
         let point = sketch.entity(circle)?.point_ids()[0];
+        let end = sketch.add_point([50., 5.])?;
+        sketch.add_curve(Curve::Line { start: point, end }, false)?;
         sketch.add_constraint(
             ConstraintKind::Tangent {
                 line,

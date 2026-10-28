@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, error::Error, fmt};
 
 pub mod areas;
+pub mod connected;
 mod curve_geometry;
 pub mod dimensions;
 pub mod drafting;
@@ -11,6 +12,8 @@ pub mod indicators;
 pub mod junctions;
 pub mod lines;
 pub mod modifications;
+pub mod movement;
+mod path_offset;
 pub mod profiles;
 pub mod projection;
 pub mod repair;

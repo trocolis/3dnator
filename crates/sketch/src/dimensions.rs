@@ -39,7 +39,7 @@ impl Target {
 
 /// Apoios e entidades que participam de uma restrição, sem inferir conexões pela
 /// mera proximidade. IDs locais de pontos e de entidades compartilham o contador.
-fn participants(kind: &ConstraintKind) -> (Vec<u64>, Vec<u64>) {
+pub(crate) fn participants(kind: &ConstraintKind) -> (Vec<u64>, Vec<u64>) {
     use ConstraintKind::*;
     match *kind {
         Fixed { point, .. } => (vec![point], vec![]),
