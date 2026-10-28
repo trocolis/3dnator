@@ -91,6 +91,7 @@ fn apply_inner(
     if selected.len() != action.selection_count()
         && !(matches!(action, Action::Construction | Action::Delete | Action::Move)
             && !selected.is_empty())
+        && !(matches!(action, Action::Fillet | Action::Chamfer) && selected.len() >= 2)
     {
         return Err(SketchError(format!(
             "Selecione {} entidade(s) do rascunho.",
@@ -118,13 +119,10 @@ fn apply_inner(
                 .created
                 .push(tools::offset_entity(sketch, first, options.value_mm)?)
         }
-        Action::Fillet | Action::Chamfer => outcome.created.push(tools::refine_corner(
-            sketch,
-            first,
-            selected[1],
-            options.value_mm,
-            action == Action::Fillet,
-        )?),
+        Action::Fillet | Action::Chamfer => {
+            outcome.created =
+                corners::refine(sketch, selected, options.value_mm, action == Action::Fillet)?
+        }
         Action::Extend => {
             let (a, b) = sketch.line(first)?;
             let (c, d) = sketch.line(selected[1])?;

@@ -11,6 +11,100 @@ pub enum OffsetMode {
     Symmetric,
 }
 
+/// Apoio e normal positiva do caminho, com a mesma orientação do deslocamento.
+/// Em caminhos abertos começamos no primeiro extremo livre; em fechados, no
+/// início da primeira curva. Círculos e arcos isolados crescem radialmente.
+pub fn offset_guide(sketch: &Sketch, selected: &[u64]) -> Result<(Point2, Point2)> {
+    let seed = *selected
+        .first()
+        .ok_or_else(|| SketchError("Selecione um contorno.".into()))?;
+    let mut entity = sketch.entity(seed)?;
+    let mut reversed = false;
+    let mut ends = selected
+        .iter()
+        .map(|id| {
+            let e = sketch.entity(*id)?;
+            Ok(match e.curve {
+                Curve::Line { start, end } | Curve::Arc { start, end, .. } if !e.infinite => {
+                    Some((*id, [sketch.point(start)?, sketch.point(end)?]))
+                }
+                _ => None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    // A seta representa o primeiro componente da seleção. Um arco isolado
+    // continua radial mesmo quando outras curvas desconectadas foram escolhidas.
+    let mut component = HashSet::from([seed]);
+    loop {
+        let before = component.len();
+        let points = ends
+            .iter()
+            .filter(|(id, _)| component.contains(id))
+            .flat_map(|(_, pair)| *pair)
+            .collect::<Vec<_>>();
+        for (id, pair) in &ends {
+            if pair
+                .iter()
+                .any(|p| points.iter().any(|q| distance(*p, *q) < 1e-6))
+            {
+                component.insert(*id);
+            }
+        }
+        if before == component.len() {
+            break;
+        }
+    }
+    ends.retain(|(id, _)| component.contains(id));
+    if ends.len() > 1
+        && let Some((id, index)) = ends.iter().find_map(|(id, pair)| {
+            pair.iter().enumerate().find_map(|(i, p)| {
+                let degree = ends
+                    .iter()
+                    .flat_map(|(_, ends)| ends)
+                    .filter(|q| distance(**q, *p) < 1e-6)
+                    .count();
+                (degree == 1).then_some((*id, i))
+            })
+        })
+    {
+        entity = sketch.entity(id)?;
+        reversed = index == 1;
+    }
+    match entity.curve {
+        Curve::Line { .. } => {
+            let (mut a, mut b) = sketch.line(entity.id)?;
+            if reversed {
+                std::mem::swap(&mut a, &mut b);
+            }
+            let d = sub(b, a);
+            Ok((
+                scale(add(a, b), 0.5),
+                scale([-d[1], d[0]], 1. / distance(a, b)),
+            ))
+        }
+        Curve::Circle { center, radius } => {
+            Ok((add(sketch.point(center)?, [radius, 0.]), [1., 0.]))
+        }
+        Curve::Arc {
+            center, clockwise, ..
+        } => {
+            let segment = profiles::segment(sketch, entity)?;
+            let sample = segment.sample(2);
+            let at = sample[sample.len() / 2];
+            let radial = sub(at, sketch.point(center)?);
+            let sign = if ends.len() <= 1 || clockwise != reversed {
+                1.
+            } else {
+                -1.
+            };
+            Ok((at, scale(radial, sign / distance(radial, [0., 0.]))))
+        }
+    }
+}
+
 fn stroke(sketch: &mut Sketch, ids: &[u64], line_type: LineType) -> Result<()> {
     for id in ids {
         let entity = sketch
@@ -155,6 +249,44 @@ pub fn offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn offset_guide_follows_open_path_orientation_and_isolated_arc_convention() -> Result<()> {
+        let mut sketch = Sketch::new("Seta", Plane::xy());
+        let middle = sketch.add_line([10., 0.], [20., 0.], false)?;
+        let left = sketch.add_line([10., 0.], [0., 0.], false)?;
+        let right = sketch.add_line([20., 0.], [30., 0.], false)?;
+        let (base, normal) = offset_guide(&sketch, &[middle, left, right])?;
+        assert_eq!(base, [5., 0.]);
+        assert_eq!(normal, [0., 1.]);
+        let created = offset(
+            &mut sketch,
+            &[middle, left, right],
+            OffsetMode::Normal,
+            2.,
+            0.,
+            LineType::Normal,
+        )?;
+        assert!(created.iter().all(|id| {
+            sketch
+                .line(*id)
+                .is_ok_and(|(a, b)| (a[1] - 2.).abs() < 1e-6 && (b[1] - 2.).abs() < 1e-6)
+        }));
+        let c = sketch.add_point([50., 0.])?;
+        let a = sketch.add_point([60., 0.])?;
+        let b = sketch.add_point([50., 10.])?;
+        let arc = sketch.add_curve(
+            Curve::Arc {
+                center: c,
+                start: a,
+                end: b,
+                clockwise: false,
+            },
+            false,
+        )?;
+        let (base, normal) = offset_guide(&sketch, &[arc, middle])?;
+        assert!(dot(sub(base, [50., 0.]), normal) > 9.99);
+        Ok(())
+    }
     #[test]
     fn complete_offsets_close_corners_and_reject_collapsed_contours_atomically() -> Result<()> {
         let mut sketch = Sketch::new("Contorno", Plane::xy());

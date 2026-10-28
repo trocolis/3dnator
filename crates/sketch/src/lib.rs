@@ -4,6 +4,7 @@ use std::{collections::HashSet, error::Error, fmt};
 
 pub mod areas;
 pub mod connected;
+pub mod corners;
 mod curve_geometry;
 pub mod dimensions;
 pub mod drafting;
