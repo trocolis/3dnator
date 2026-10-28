@@ -1,5 +1,5 @@
 //! Árvore do projeto: Projeto → Peças, Rascunhos (de referência) e Origem; cada peça →
-//! Corpos, Subpeças, Rascunhos e Origem (oculta por padrão). Descendentes têm visibilidade
+//! Corpos, Subpeças, Rascunhos, Planos e Origem (oculta por padrão). Descendentes têm visibilidade
 //! própria, gravada no documento e com desfazer; a efetiva combina a dos nós acima, e um
 //! nó oculto por um ancestral aparece esmaecido. O lápis de uma peça entra na edição dela.
 //! Pastas vazias dentro das peças não aparecem.
@@ -10,7 +10,7 @@ use super::{
     icons::{self, Icon},
     *,
 };
-use nator_document::{Folder, Instance, SheetRecord};
+use nator_document::{Folder, Instance, SheetRecord, WorkPlaneId, WorkPlaneRecord};
 
 /// Intenção escolhida na árvore neste quadro.
 pub(super) enum Intent {
@@ -21,6 +21,8 @@ pub(super) enum Intent {
     EditPart(PartId, egui::Id),
     LeavePart,
     EditSketch(PartId, SketchId),
+    /// Plano de trabalho clicado: vale como escolha quando um seletor de suporte está aberto.
+    PickWorkPlane(WorkPlaneId),
     EditReference(SketchId),
     ToggleSection,
     OpenSection,
@@ -435,9 +437,80 @@ impl<'a> Tree<'a> {
                         },
                     );
                 }
+                if !part.work_planes.is_empty() {
+                    tree.folder(
+                        ui,
+                        tree.id(("planes", &path)),
+                        Folder::WorkPlanes(part.id),
+                        Icon::Folder,
+                        format!("{} ({})", text(T::WorkPlanesFolder), part.work_planes.len()),
+                        shown,
+                        false,
+                        |tree, ui, shown| {
+                            for record in &part.work_planes {
+                                tree.work_plane(ui, record, shown);
+                            }
+                        },
+                    );
+                }
                 tree.origin(ui, Folder::PartOrigin(part.id), shown);
             },
         );
+    }
+
+    /// Plano de trabalho: o olho alterna a visibilidade; o menu cria um rascunho nele ou o
+    /// exclui. Usado num rascunho, o plano fica oculto, mas continua listado aqui.
+    fn work_plane(&mut self, ui: &mut egui::Ui, record: &WorkPlaneRecord, parent_shown: bool) {
+        self.leaf(ui, |tree, ui| {
+            if tree.eye(ui, record.visible, true) {
+                tree.intents
+                    .push(Intent::Command(Box::new(Command::SetWorkPlaneVisibility {
+                        id: record.id,
+                        visible: !record.visible,
+                    })));
+            }
+            let response = icons::entry_styled(
+                ui,
+                Icon::WorkPlane,
+                &record.name,
+                false,
+                !(parent_shown && record.visible),
+            )
+            .on_hover_text(format!(
+                "{}: {} mm",
+                text(T::OffsetField),
+                nator_drawing::format_mm(record.plane.offset)
+            ));
+            if response.clicked() && !tree.busy {
+                tree.intents.push(Intent::PickWorkPlane(record.id));
+            }
+            response.context_menu(|ui| {
+                ui.add_enabled_ui(!tree.busy, |ui| {
+                    if ui
+                        .add_enabled(
+                            tree.tab.sketch_edit.is_none(),
+                            egui::Button::new(text(T::NewSketchOnPlane)),
+                        )
+                        .clicked()
+                    {
+                        tree.intents.push(Intent::Command(Box::new(
+                            Command::AddSketchOnWorkPlane {
+                                id: record.id,
+                                name: text(T::Sketch).into(),
+                            },
+                        )));
+                        ui.close();
+                    }
+                    if ui.button(text(T::DeleteFeature)).clicked() {
+                        tree.intents
+                            .push(Intent::Command(Box::new(Command::RemoveWorkPlane {
+                                id: record.id,
+                            })));
+                        ui.close();
+                    }
+                });
+            });
+        });
     }
 
     fn body(

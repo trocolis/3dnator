@@ -74,6 +74,7 @@ enum Action {
     SketchXZ,
     SketchYZ,
     SketchFace,
+    OffsetPlane,
     Solid(SolidTool),
     MoveBody,
     CopyBody,
@@ -129,6 +130,7 @@ impl Action {
             Self::SketchXZ => T::SketchXZ,
             Self::SketchYZ => T::SketchYZ,
             Self::SketchFace => T::SketchOnFace,
+            Self::OffsetPlane => T::OffsetPlane,
             Self::Solid(tool) => tool.label(),
             Self::MoveBody => T::MoveMenu,
             Self::CopyBody => T::CopyMenu,
@@ -203,6 +205,7 @@ impl Action {
             | Self::SketchXZ
             | Self::SketchYZ
             | Self::SketchFace => Icon::Sketch,
+            Self::OffsetPlane => Icon::OffsetPlane,
             Self::Solid(tool) => match tool {
                 SolidTool::Extrude => Icon::Extrude,
                 SolidTool::Revolve => Icon::Revolve,
@@ -295,6 +298,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::SketchXZ,
     Action::SketchYZ,
     Action::SketchFace,
+    Action::OffsetPlane,
     Action::Solid(SolidTool::Extrude),
     Action::Solid(SolidTool::Revolve),
     Action::Solid(SolidTool::Hole),
@@ -400,6 +404,12 @@ impl Editor {
                         .is_some_and(|w| w.pending.is_some())
             }
             Action::Parameters => editable && self.current().active_part.is_some(),
+            // O plano pertence à peça em construção; sem ela não há onde guardá-lo.
+            Action::OffsetPlane => {
+                editable
+                    && self.current().sketch_edit.is_none()
+                    && self.current().active_part.is_some()
+            }
             Action::NewInstance
             | Action::CloneInstance
             | Action::Group
@@ -507,7 +517,11 @@ impl Editor {
             text(action.label()).to_owned()
         };
         let response = response.on_hover_text(hint);
-        if !enabled && matches!(action, Action::Solid(_) | Action::Parameters) {
+        if !enabled && action == Action::OffsetPlane && self.current().active_part.is_none() {
+            response
+                .clone()
+                .on_disabled_hover_text(text(T::ChooseActivePart));
+        } else if !enabled && matches!(action, Action::Solid(_) | Action::Parameters) {
             response
                 .clone()
                 .on_disabled_hover_text(text(if nator_kernel::is_available() {
@@ -591,6 +605,7 @@ impl Editor {
                 });
             }
             Action::SketchFace => self.sketch_on_selected_face(context),
+            Action::OffsetPlane => self.open_offset_plane(),
             Action::Solid(tool) => self.open_feature_tool(tool),
             Action::MoveCopy => self.open_move(),
             Action::MoveBody => self.open_body_move(false),
@@ -1242,6 +1257,7 @@ impl Editor {
         match self.shell.tab {
             RibbonTab::Model => {
                 self.ribbon_group(ui, T::Sketch, &[Action::NewSketch]);
+                self.ribbon_group(ui, T::ConstructionGroup, &[Action::OffsetPlane]);
                 self.ribbon_group(
                     ui,
                     T::CreateGroupLabel,

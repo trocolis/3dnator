@@ -17,6 +17,8 @@ pub(super) const DANGER: egui::Color32 = egui::Color32::from_rgb(189, 63, 68);
 pub(super) const REFERENCE: egui::Color32 = egui::Color32::from_rgb(124, 82, 196);
 /// Geometria auxiliar, excluída das áreas: segmentos de construção e retas infinitas.
 pub(super) const CONSTRUCTION: egui::Color32 = egui::Color32::from_rgb(224, 123, 31);
+/// Planos de trabalho da peça e a prévia do plano deslocado.
+pub(super) const WORK_PLANE: egui::Color32 = egui::Color32::from_rgb(196, 146, 24);
 
 pub(super) fn apply(context: &egui::Context) {
     let mut style = egui::Style {

@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 19
+# Formato de projeto — versão interna 20
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 19; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 20; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -20,6 +20,7 @@ Cada peça contém:
 - corpos: identificador, nome, visibilidade, transformação local, caminho da malha, caminho opcional do B-rep e, desde a versão 7, `face_names`;
 - desde a versão 8, `color_srgb` opcional por corpo, com três canais inteiros de 0 a 255; ausência usa a aparência neutra;
 - rascunhos: plano fixo, pontos, entidades, restrições, expressões das cotas e visibilidade (usada pelo viewport e pelo olho da árvore);
+- desde a versão 20, `work_planes` opcional: planos de trabalho com identificador, nome, visibilidade e `plane` (`base`, plano com origem e eixos U/V unitários e perpendiculares em mm, e `offset`, deslocamento em mm ao longo de U × V, limitado a ±10.000.000 mm). O plano resultante é calculado na leitura; rascunhos criados nele guardam sua própria cópia. Omitido quando vazio;
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
 - histórico de operações (`features`), cada uma com nome, corpo resultante, operação e, desde a versão 12, `suppressed` opcional (operação suprimida, com parâmetros preservados);
 - desde a versão 12, `history_marker` opcional: quantidade de operações construídas a partir do início. As posteriores ficam inativas, com a última geometria oculta, e novas operações entram nessa posição. Ausente, todo o histórico é construído; o marcador nunca aponta para o fim (forma canônica).
@@ -34,7 +35,7 @@ A restrição `LineAngle { line, reference, value }` mede a direção de `line` 
 
 Desde a versão 14, o manifesto pode conter `reference_sketches`: rascunhos de referência da montagem, com o mesmo formato dos rascunhos de peça e coordenadas da montagem. Os identificadores compartilham o espaço dos rascunhos de peça. Não pertencem a peça nenhuma, não têm parâmetros (cotas guardam valores numéricos) e nenhuma operação pode usá-los como perfil; servem apenas de destino para posicionar componentes. Ausente, a lista é vazia.
 
-Desde a versão 15, o manifesto e cada peça podem conter `folders`, a visibilidade das pastas da árvore. No projeto: `project`, `parts`, `sketches` (rascunhos de referência) e `origin`, todos `true` por padrão. `project` é mantido por compatibilidade e normalizado para `true` na leitura: a raiz atual é sempre visível. Na peça: `bodies`, `subparts`, `sketches` (`true` por padrão) e `origin` (`false`). A visibilidade efetiva de um corpo, rascunho ou instância combina a dele com a das pastas acima; a de cada elemento é preservada. O campo só é gravado quando difere do padrão.
+Desde a versão 15, o manifesto e cada peça podem conter `folders`, a visibilidade das pastas da árvore. No projeto: `project`, `parts`, `sketches` (rascunhos de referência) e `origin`, todos `true` por padrão. `project` é mantido por compatibilidade e normalizado para `true` na leitura: a raiz atual é sempre visível. Na peça: `bodies`, `subparts`, `sketches`, `planes` (desde a versão 20; `true` por padrão) e `origin` (`false`). A visibilidade efetiva de um corpo, rascunho ou instância combina a dele com a das pastas acima; a de cada elemento é preservada. O campo só é gravado quando difere do padrão.
 
 Cada instância referencia uma definição de peça, a peça pai opcional (subconjuntos) e guarda posição/orientação relativas ao pai. A geometria de uma definição aparece uma vez no pacote, independentemente do número de instâncias.
 

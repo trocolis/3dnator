@@ -228,6 +228,10 @@ impl Document {
             sketch.id = SketchId(self.allocate_id()?);
             sketch_map.insert(old, sketch.id);
         }
+        // Planos de trabalho não são referenciados pelo histórico: só ganham identidade nova.
+        for plane in &mut part.work_planes {
+            plane.id = WorkPlaneId(self.allocate_id()?);
+        }
         for feature in &mut part.features {
             feature.remap(&body_map, &sketch_map)?;
         }

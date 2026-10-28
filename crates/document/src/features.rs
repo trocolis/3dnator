@@ -1014,6 +1014,7 @@ mod tests {
             name: "Peça".into(),
             bodies: (10..14).map(body).collect(),
             sketches: Vec::new(),
+            work_planes: Vec::new(),
             parameters: parameters::Parameters::default(),
             features: vec![
                 feature(11, transform(10)),

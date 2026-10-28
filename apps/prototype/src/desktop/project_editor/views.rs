@@ -71,7 +71,7 @@ impl Editor {
         if self.current().plane_pick.is_some()
             && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.current_mut().plane_pick = None;
+            self.cancel_plane_pick();
             return;
         }
         if context.egui_wants_keyboard_input()
@@ -201,6 +201,7 @@ impl Editor {
             }
             Intent::LeavePart => self.apply_menu_action(ui.ctx(), browser::MenuAction::Deactivate),
             Intent::EditSketch(part, id) => self.begin_sketch(part, id),
+            Intent::PickWorkPlane(id) => self.choose_work_plane(id),
             Intent::EditReference(id) => {
                 self.finish_sketch();
                 self.current_mut().active_part = None;
@@ -224,9 +225,12 @@ impl Editor {
             .frame(egui::Frame::new().fill(theme::CANVAS).inner_margin(8))
             .show(ui, |ui| {
                 self.animate_camera(ui.ctx());
-                if self.current().plane_pick.is_some() {
+                if let Some(purpose) = self.current().plane_pick.as_ref().map(|p| p.purpose) {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(text(T::ChooseSketchPlane));
+                        ui.label(text(match purpose {
+                            sketch_scene::PlanePurpose::Sketch => T::ChooseSketchPlane,
+                            sketch_scene::PlanePurpose::OffsetBase => T::ChooseOffsetBase,
+                        }));
                         for (label, plane) in [
                             ("XY", nator_sketch::Plane::xy()),
                             ("XZ", nator_sketch::Plane::xz()),
@@ -236,14 +240,14 @@ impl Editor {
                                 .add_enabled(!self.busy(), egui::Button::new(label))
                                 .clicked()
                             {
-                                self.choose_origin_plane(plane);
+                                self.choose_origin_plane(label, plane);
                             }
                         }
                         if ui
                             .add_enabled(!self.busy(), egui::Button::new(text(T::Cancel)))
                             .clicked()
                         {
-                            self.current_mut().plane_pick = None;
+                            self.cancel_plane_pick();
                         }
                     });
                 }
@@ -286,7 +290,8 @@ impl Editor {
                 self.viewport.section = self.current().section_plane();
                 let gizmo = self.extrusion_gizmo(ui, &response)
                     || self.section_gizmo(ui, &response)
-                    || self.move_gizmo(ui, &response);
+                    || self.move_gizmo(ui, &response)
+                    || self.offset_plane_gizmo(ui, &response);
                 let assembly = !gizmo && self.assembly_pick(&response);
                 let profile = !gizmo && self.profile_overlay(ui, &response);
                 let gesture = !gizmo && self.selection_gestures(ui, &response);
@@ -340,6 +345,7 @@ impl Editor {
                     self.fit_view(ui.ctx());
                 }
                 self.viewport.render(&self.gpu.device, &self.gpu.queue);
+                let visible_planes = self.work_planes_overlay(ui, response.rect);
                 let origin_chosen = self.origin_overlay(ui, &response);
                 if !origin_chosen
                     && self.current().plane_pick.is_some()
@@ -362,6 +368,7 @@ impl Editor {
                 self.sketch_repair_overlay(ui, &response);
                 if self.scene.is_none()
                     && !visible_sketches
+                    && !visible_planes
                     && !self.busy()
                     && self.current().sketch_edit.is_none()
                     && self.current().plane_pick.is_none()

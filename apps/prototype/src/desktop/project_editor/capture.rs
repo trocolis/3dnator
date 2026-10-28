@@ -51,6 +51,8 @@ pub(crate) fn render_ui_scenario(
         | "align"
         | "assembly-ribbon"
         | "section"
+        | "offset-plane"
+        | "work-plane-pick"
         | "repair"
         | "recovery"
         | "insert"
@@ -75,7 +77,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -520,6 +522,48 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 section.offset = middle;
                 section.flip = true;
             }
+        }
+        "offset-plane" => {
+            // Primeira peça em construção, plano deslocado 20 mm acima de XY: painel,
+            // contorno do plano-base, plano novo e seta de arraste na mesma captura.
+            let part = editor
+                .current()
+                .session
+                .document()
+                .parts()
+                .first()
+                .map(|p| p.id)
+                .ok_or("Projeto sem peças.")?;
+            editor.current_mut().select(None);
+            editor.current_mut().active_part = Some(part);
+            editor.shell.tab = shell::RibbonTab::Model;
+            editor.open_offset_plane();
+            editor.choose_origin_plane("XY", nator_sketch::Plane::xy());
+            editor.set_offset_plane_for_capture(20.);
+        }
+        "work-plane-pick" => {
+            // Plano de trabalho 20 mm acima de XY na primeira peça, já na escolha de suporte
+            // do Novo rascunho: o plano aparece clicável junto aos planos da origem.
+            let part = editor
+                .current()
+                .session
+                .document()
+                .parts()
+                .first()
+                .map(|p| p.id)
+                .ok_or("Projeto sem peças.")?;
+            editor.current_mut().select(None);
+            editor.current_mut().active_part = Some(part);
+            editor.shell.tab = shell::RibbonTab::Model;
+            editor.execute(Command::AddWorkPlane {
+                part,
+                name: format!("{} 1", text(T::WorkPlaneName)),
+                plane: nator_document::WorkPlane {
+                    base: nator_sketch::Plane::xy(),
+                    offset: 20.,
+                },
+            });
+            editor.start_sketch_plane();
         }
         "menu-new-part" | "menu-move" | "menu-copy" => {
             editor.current_mut().active_part = None;
@@ -4060,6 +4104,192 @@ mod tests {
         assert_eq!(piece.sketches.len(), 3);
         assert!(editor.current_mut().session.undo());
         assert!(editor.current_mut().session.redo());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn offset_plane_follows_the_face_drag_and_typing_and_hides_after_a_sketch()
+    -> Result<(), Box<dyn Error>> {
+        use sketch_scene::PlanePurpose;
+        let context = egui::Context::default();
+        let mut profile = Sketch::new("Base", Plane::xy());
+        profile.add_rectangle([-50., -50.], [50., 50.], false)?;
+        // O nome do projeto aparece na aba: não pode coincidir com o botão procurado.
+        let mut session = Session::new(Document::new("Planos de trabalho")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: profile,
+        })?
+        else {
+            return Err("Rascunho base ausente".into());
+        };
+        session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.shell.tab = shell::RibbonTab::Model;
+        // A peça ativa no primeiro quadro deixa o nó dela aberto na árvore.
+        editor.current_mut().active_part = Some(part);
+        // Vista superior: a normal da face aponta para quem observa, e o arraste da alça
+        // passa a ser vertical na escala do plano.
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        frame(&mut editor, &context, Vec::new())?;
+        settle(&mut editor, &context)?;
+        let project = |editor: &Editor, point: Point3| {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Ponto sem projeção")
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Sem peça em construção não há onde guardar o plano.
+        editor.current_mut().active_part = None;
+        settle(&mut editor, &context)?;
+        let button = label_position(&mut editor, &context, text(T::OffsetPlane))?;
+        click(&mut editor, &context, button)?;
+        assert!(editor.work_plane_edit.is_none());
+        editor.current_mut().active_part = Some(part);
+        settle(&mut editor, &context)?;
+        let revision = editor.current().session.revision();
+        // Esc sem plano-base encerra a ferramenta.
+        click(&mut editor, &context, button)?;
+        assert!(editor.work_plane_edit.is_some());
+        assert!(
+            editor
+                .current()
+                .plane_pick
+                .as_ref()
+                .is_some_and(|p| p.purpose == PlanePurpose::OffsetBase)
+        );
+        frame(&mut editor, &context, vec![key(egui::Key::Escape)])?;
+        assert!(editor.work_plane_edit.is_none() && editor.current().plane_pick.is_none());
+        // A face superior da placa (z = 10) vira o plano-base pela consulta ao B-rep.
+        click(&mut editor, &context, button)?;
+        let face = project(&editor, [-25., -20., 10.])?;
+        click(&mut editor, &context, face)?;
+        settle(&mut editor, &context)?;
+        frame(&mut editor, &context, Vec::new())?;
+        assert!(editor.current().plane_pick.is_none());
+        assert!(editor.offset_plane_has_base());
+        label_position(
+            &mut editor,
+            &context,
+            &format!("{} (Placa)", text(T::PickedFace)),
+        )?;
+        // Com a normal voltada para a câmera, a alça fica acima do centro, a 10 mm.
+        let start = project(&editor, [0., 0., 10.])?;
+        let pixels_per_mm = start.distance(project(&editor, [1., 0., 10.])?);
+        let handle = start + egui::vec2(0., -10. * pixels_per_mm);
+        let moved = handle + egui::vec2(0., -40.);
+        for (position, pressed) in [(handle, Some(true)), (moved, None), (moved, Some(false))] {
+            let mut events = vec![egui::Event::PointerMoved(position)];
+            if let Some(pressed) = pressed {
+                events.push(egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            frame(&mut editor, &context, events)?;
+        }
+        let dragged = editor
+            .work_plane_edit
+            .as_ref()
+            .ok_or("Painel ausente")?
+            .offset;
+        let expected = 10. + f64::from(40. / pixels_per_mm);
+        assert!((dragged - expected).abs() < 0.05, "{dragged} ≠ {expected}");
+        assert_eq!(editor.current().session.revision(), revision);
+        // A distância digitada substitui a do arraste; Enter conclui o campo e depois o OK.
+        let field = label_position(
+            &mut editor,
+            &context,
+            &nator_drawing::format_fixed(dragged, 2),
+        )?;
+        click(&mut editor, &context, field)?;
+        frame(&mut editor, &context, vec![egui::Event::Text("25".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        assert!(
+            editor.work_plane_edit.is_some(),
+            "Enter no campo não confirma"
+        );
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        settle(&mut editor, &context)?;
+        assert!(editor.work_plane_edit.is_none(), "{}", editor.status);
+        assert_eq!(editor.current().session.revision(), revision + 1);
+        let document = editor.current().session.document();
+        let planes = &document.part(part).ok_or("Peça ausente")?.work_planes;
+        assert_eq!(planes.len(), 1);
+        let plane = planes[0].clone();
+        assert_eq!(plane.name, format!("{} 1", text(T::WorkPlaneName)));
+        assert!(plane.visible);
+        assert!(
+            nator_geometry::norm(nator_geometry::sub(
+                plane.plane.plane().origin,
+                [0., 0., 35.]
+            )) < 1e-9
+        );
+        // A árvore lista a pasta e o plano.
+        label_position(
+            &mut editor,
+            &context,
+            &format!("{} (1)", text(T::WorkPlanesFolder)),
+        )?;
+        label_position(&mut editor, &context, &plane.name)?;
+        // No Novo rascunho, o plano visível da peça é clicável acima da placa.
+        let button = label_position(&mut editor, &context, text(T::NewSketch))?;
+        click(&mut editor, &context, button)?;
+        assert!(
+            editor
+                .current()
+                .plane_pick
+                .as_ref()
+                .is_some_and(|p| p.purpose == PlanePurpose::Sketch)
+        );
+        let target = project(&editor, [-25., -25., 35.])?;
+        click(&mut editor, &context, target)?;
+        settle(&mut editor, &context)?;
+        let work = editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .ok_or("Rascunho não abriu")?;
+        let document = editor.current().session.document();
+        let support = document
+            .sketch(work.id)
+            .ok_or("Rascunho ausente")?
+            .sketch
+            .plane;
+        assert!(nator_geometry::norm(nator_geometry::sub(support.origin, [0., 0., 35.])) < 1e-9);
+        assert!(
+            document.work_plane(plane.id).is_some_and(|w| !w.visible),
+            "O plano usado deve ficar oculto"
+        );
+        assert_eq!(editor.current().session.revision(), revision + 2);
         Ok(())
     }
 

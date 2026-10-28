@@ -3,7 +3,7 @@
 use super::ImportError;
 use nator_document::{
     Body, BodyId, Document, Instance, InstanceId, MAX_ELEMENTS, MAX_SCENE_TRIANGLES, MeshAsset,
-    Part, PartId, SketchId, SketchRecord,
+    Part, PartId, SketchId, SketchRecord, WorkPlaneId, WorkPlaneRecord,
 };
 use nator_geometry::{Mesh, Placement, Point3, RgbColor};
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// referências topológicas das versões anteriores a 7 ainda passam por `migrate_to_7`.
 /// Versão 18: retas infinitas de construção e cotas angulares relativas a linhas.
 /// Versão 19: tangência de círculo completo com reta suporte (Tangent usa seu centro).
-pub const FORMAT_VERSION: u32 = 19;
+/// Versão 20: planos de trabalho por peça (`work_planes`) e visibilidade da pasta Planos
+/// (`folders.planes`). Ausentes, a peça não tem planos e a pasta fica visível.
+pub const FORMAT_VERSION: u32 = 20;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -73,6 +75,8 @@ struct PartRecord {
     bodies: Vec<BodyRecord>,
     #[serde(default)]
     sketches: Vec<SketchRecordData>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    work_planes: Vec<WorkPlaneRecordData>,
     #[serde(default)]
     parameters: nator_document::parameters::Parameters,
     #[serde(default)]
@@ -87,6 +91,15 @@ struct PartRecord {
 struct SketchRecordData {
     id: u64,
     sketch: nator_sketch::Sketch,
+    visible: bool,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkPlaneRecordData {
+    id: u64,
+    name: String,
+    /// Plano-base e deslocamento em mm, nas coordenadas da peça.
+    plane: nator_document::WorkPlane,
     visible: bool,
 }
 #[derive(Serialize, Deserialize)]
@@ -367,6 +380,16 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                     visible: s.visible,
                 })
                 .collect(),
+            work_planes: part
+                .work_planes
+                .into_iter()
+                .map(|w| WorkPlaneRecord {
+                    id: WorkPlaneId(w.id),
+                    name: w.name,
+                    plane: w.plane,
+                    visible: w.visible,
+                })
+                .collect(),
             parameters: part.parameters,
             features: part.features,
             history_marker: part.history_marker,
@@ -569,6 +592,16 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                         id: s.id.0,
                         sketch: s.sketch.clone(),
                         visible: s.visible,
+                    })
+                    .collect(),
+                work_planes: p
+                    .work_planes
+                    .iter()
+                    .map(|w| WorkPlaneRecordData {
+                        id: w.id.0,
+                        name: w.name.clone(),
+                        plane: w.plane,
+                        visible: w.visible,
                     })
                     .collect(),
                 bodies: p
@@ -1076,6 +1109,50 @@ mod tests {
         assert!(reopened.folder_visible(Folder::PartOrigin(part))?);
         assert!(!reopened.folder_visible(Folder::ReferenceSketches)?);
         assert!(reopened.folder_visible(Folder::Parts)?);
+        Ok(())
+    }
+
+    #[test]
+    fn work_planes_round_trip_with_their_visibility() -> Result<(), Box<dyn Error>> {
+        use nator_document::{Folder, WorkPlane};
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("planos.3dnator");
+        let mut doc = document()?;
+        let part = doc.parts()[0].id;
+        // Projetos sem planos não gravam o campo nem a visibilidade padrão da pasta.
+        write_project(&path, &doc)?;
+        let mut manifest = String::new();
+        ZipArchive::new(File::open(&path)?)?
+            .by_name("manifest.json")?
+            .read_to_string(&mut manifest)?;
+        assert!(!manifest.contains("work_planes") && !manifest.contains("\"planes\""));
+        assert!(read_project(&path)?.parts()[0].work_planes.is_empty());
+        let base = nator_sketch::Plane::from_normal([1., 2., 3.], [0.3, -0.4, 0.5])?;
+        let shown = doc.add_work_plane(
+            part,
+            "Plano 1".into(),
+            WorkPlane {
+                base,
+                offset: 12.345,
+            },
+        )?;
+        let hidden = doc.add_work_plane(
+            part,
+            "Plano 2".into(),
+            WorkPlane {
+                base: nator_sketch::Plane::yz(),
+                offset: -7.,
+            },
+        )?;
+        doc.work_plane_mut(hidden)?.visible = false;
+        doc.set_folder_visible(Folder::WorkPlanes(part), false)?;
+        let second = directory.path().join("planos-2.3dnator");
+        write_project(&second, &doc)?;
+        let reopened = read_project(&second)?;
+        assert_eq!(reopened.parts()[0].work_planes, doc.parts()[0].work_planes);
+        assert_eq!(reopened.work_plane_part(shown), Some(part));
+        assert!(!reopened.folder_visible(Folder::WorkPlanes(part))?);
+        assert!(reopened.next_id() > hidden.0);
         Ok(())
     }
 

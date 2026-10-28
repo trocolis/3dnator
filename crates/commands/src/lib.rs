@@ -8,7 +8,8 @@ pub mod measure;
 pub mod point_snap;
 pub mod sketch_projection;
 use nator_document::{
-    BodyId, Document, DocumentError, InstanceId, MeshAsset, PartId, SketchId, validate_name,
+    BodyId, Document, DocumentError, InstanceId, MeshAsset, PartId, SketchId, WorkPlaneId,
+    validate_name,
 };
 use nator_geometry::Placement;
 use std::{collections::VecDeque, sync::Arc};
@@ -215,6 +216,27 @@ pub enum Command {
     RemoveSketch {
         id: SketchId,
     },
+    /// Plano de trabalho na peça: um plano-base, em coordenadas da peça, deslocado ao
+    /// longo da sua normal.
+    AddWorkPlane {
+        part: PartId,
+        name: String,
+        plane: nator_document::WorkPlane,
+    },
+    SetWorkPlaneVisibility {
+        id: WorkPlaneId,
+        visible: bool,
+    },
+    /// Exclui o plano. Rascunhos criados nele permanecem: o suporte foi capturado.
+    RemoveWorkPlane {
+        id: WorkPlaneId,
+    },
+    /// Rascunho novo sobre o plano de trabalho, na peça dona dele. Usar o plano o oculta
+    /// na mesma transação, como uma operação oculta o perfil que consome.
+    AddSketchOnWorkPlane {
+        id: WorkPlaneId,
+        name: String,
+    },
     /// Peça nova e vazia, com uma instância na raiz da montagem, ao lado das existentes.
     CreatePart {
         name: String,
@@ -238,6 +260,7 @@ pub enum Effect {
     Changed,
     Imported { part: PartId, body: BodyId },
     SketchCreated { part: PartId, sketch: SketchId },
+    WorkPlaneCreated { part: PartId, plane: WorkPlaneId },
     ReferenceSketchCreated { sketch: SketchId },
     PartCreated { part: PartId },
     SheetSaved { id: nator_document::SheetId },
@@ -355,6 +378,10 @@ impl Command {
             Self::SetSettings { .. } => "Alterar configurações do documento",
             Self::AddReferenceSketch { .. } => "Criar rascunho de referência",
             Self::RemoveSketch { .. } => "Excluir rascunho",
+            Self::AddWorkPlane { .. } => "Criar plano deslocado",
+            Self::SetWorkPlaneVisibility { .. } => "Alterar visibilidade do plano",
+            Self::RemoveWorkPlane { .. } => "Excluir plano de trabalho",
+            Self::AddSketchOnWorkPlane { .. } => "Criar rascunho no plano",
             Self::CreatePart { .. } => "Criar peça",
             Self::InsertPart { .. } => "Inserir peça de outro projeto",
         }
@@ -729,6 +756,27 @@ impl Command {
                 return Ok(Effect::ReferenceSketchCreated { sketch });
             }
             Self::RemoveSketch { id } => doc.remove_sketch(id)?,
+            Self::AddWorkPlane { part, name, plane } => {
+                let plane = doc.add_work_plane(part, name, plane)?;
+                return Ok(Effect::WorkPlaneCreated { part, plane });
+            }
+            Self::SetWorkPlaneVisibility { id, visible } => {
+                doc.work_plane_mut(id)?.visible = visible;
+            }
+            Self::RemoveWorkPlane { id } => doc.remove_work_plane(id)?,
+            Self::AddSketchOnWorkPlane { id, name } => {
+                let part = doc
+                    .work_plane_part(id)
+                    .ok_or_else(|| DocumentError("Plano de trabalho inexistente.".into()))?;
+                let record = doc.work_plane_mut(id)?;
+                record.visible = false;
+                // O rascunho recebe uma cópia do plano: editar ou excluir o plano depois
+                // não move o perfil, como nos rascunhos criados sobre faces.
+                let plane = record.plane.plane();
+                let (part, sketch) =
+                    doc.add_sketch(Some(part), nator_sketch::Sketch::new(name, plane))?;
+                return Ok(Effect::SketchCreated { part, sketch });
+            }
             Self::CreatePart { name } => {
                 let part = doc.create_part(name)?;
                 place_new_part(doc, None, part)?;
@@ -1054,6 +1102,96 @@ mod tests {
                 .execute(Command::SetSketchVisibility {
                     id: SketchId(u64::MAX),
                     visible: true
+                })
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sketches_on_work_planes_capture_the_plane_and_hide_it_in_one_undo()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::Plane;
+        let mut session = Session::new(Document::new("Plano deslocado")?)?;
+        let Effect::PartCreated { part } = session.execute(Command::CreatePart {
+            name: "Suporte".into(),
+        })?
+        else {
+            return Err("Peça ausente".into());
+        };
+        let base = Plane::from_normal([10., 0., 0.], [1., 0., 0.])?;
+        let Effect::WorkPlaneCreated { part: owner, plane } =
+            session.execute(Command::AddWorkPlane {
+                part,
+                name: "Plano 1".into(),
+                plane: nator_document::WorkPlane { base, offset: 15. },
+            })?
+        else {
+            return Err("Plano ausente".into());
+        };
+        assert_eq!(owner, part);
+        assert!(
+            session
+                .document()
+                .work_plane(plane)
+                .is_some_and(|w| w.visible)
+        );
+        let Effect::SketchCreated {
+            part: owner,
+            sketch,
+        } = session.execute(Command::AddSketchOnWorkPlane {
+            id: plane,
+            name: "Perfil".into(),
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        assert_eq!(owner, part);
+        let support = session
+            .document()
+            .sketch(sketch)
+            .ok_or("Rascunho ausente")?
+            .sketch
+            .plane;
+        assert_eq!(support.origin, [25., 0., 0.]);
+        assert_eq!((support.u, support.v), (base.u, base.v));
+        assert!(
+            session
+                .document()
+                .work_plane(plane)
+                .is_some_and(|w| !w.visible)
+        );
+        // Desfazer remove o rascunho e devolve a visibilidade numa única ação.
+        assert!(session.undo());
+        assert!(session.document().sketch(sketch).is_none());
+        assert!(
+            session
+                .document()
+                .work_plane(plane)
+                .is_some_and(|w| w.visible)
+        );
+        assert!(session.redo());
+        // Excluir o plano preserva o rascunho, que já capturou o suporte.
+        session.execute(Command::RemoveWorkPlane { id: plane })?;
+        assert!(session.document().work_plane(plane).is_none());
+        assert!(session.document().sketch(sketch).is_some());
+        assert!(
+            session
+                .execute(Command::AddSketchOnWorkPlane {
+                    id: plane,
+                    name: "Outro".into(),
+                })
+                .is_err()
+        );
+        assert!(
+            session
+                .execute(Command::AddWorkPlane {
+                    part,
+                    name: "Inválido".into(),
+                    plane: nator_document::WorkPlane {
+                        base,
+                        offset: f64::NAN,
+                    },
                 })
                 .is_err()
         );

@@ -98,6 +98,8 @@ pub(super) enum Icon {
     Part,
     Edit,
     Origin,
+    OffsetPlane,
+    WorkPlane,
     #[allow(dead_code)]
     Project,
     Home,
@@ -849,6 +851,19 @@ pub(super) fn paint_with_ink(
             p.line(&[[5., 19.], [5., 3.]], p.ink);
             p.line(&[[5., 19.], [15., 9.]], p.accent);
             p.circle(5., 19., 2.5, p.accent);
+        }
+        // Plano-base em contorno, plano novo preenchido acima e o deslocamento entre eles.
+        Icon::OffsetPlane => {
+            p.line(
+                &[[2., 21.], [7., 15.], [22., 15.], [17., 21.], [2., 21.]],
+                p.ink,
+            );
+            p.face(&[[2., 10.], [7., 4.], [22., 4.], [17., 10.]], p.fill);
+            p.arrow([12., 19.], [12., 8.]);
+        }
+        Icon::WorkPlane => {
+            p.face(&[[2., 18.], [8., 7.], [22., 7.], [16., 18.]], p.fill);
+            p.line(&[[9., 12.5], [15., 12.5]], p.accent);
         }
         Icon::Project => {
             p.line(

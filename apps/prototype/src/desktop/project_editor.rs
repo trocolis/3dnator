@@ -27,6 +27,7 @@ mod timeline;
 mod view_cube;
 mod views;
 mod window_frame;
+mod work_plane;
 use crate::i18n::{Text as T, text};
 use eframe::{egui, egui_wgpu};
 use nator_commands::{Command, Effect, PreparedCommand, Session};
@@ -341,6 +342,13 @@ enum Outcome {
         tab: u64,
         command: PreparedCommand,
     },
+    /// Face escolhida como plano-base do plano deslocado, nas coordenadas da peça, com o
+    /// nome exibido no painel; ou o motivo de não servir de suporte.
+    PlaneChosen {
+        tab: u64,
+        revision: u64,
+        plane: Result<(nator_sketch::Plane, String), String>,
+    },
     /// Edição recusada por uma falha de recálculo atribuída a uma operação.
     Rejected {
         tab: u64,
@@ -466,6 +474,8 @@ pub struct Editor {
     rename: Option<browser::RenameDraft>,
     /// Painel do corte de seção aberto.
     section_edit: Option<section::SectionDraft>,
+    /// Plano deslocado em edição.
+    work_plane_edit: Option<work_plane::Draft>,
     /// Reparo do rascunho em edição.
     sketch_repair: Option<sketch_repair::RepairDraft>,
     /// Miniaturas de projetos em disco (recuperação), por caminho.
@@ -639,6 +649,7 @@ impl Editor {
             assembly_panel: None,
             rename: None,
             section_edit: None,
+            work_plane_edit: None,
             sketch_repair: None,
             thumbnails: std::collections::HashMap::new(),
             insert_part: None,
@@ -847,6 +858,11 @@ impl Editor {
                 }
             }
             Ok(Outcome::Prepared { tab, command }) => self.commit_prepared(tab, command),
+            Ok(Outcome::PlaneChosen {
+                tab,
+                revision,
+                plane,
+            }) => self.receive_offset_base(tab, revision, plane),
             Ok(Outcome::Rejected {
                 tab,
                 command,
@@ -1607,6 +1623,7 @@ impl Editor {
         self.feature_dialog(ui.ctx());
         self.assembly_panel(ui.ctx());
         self.section_panel(ui.ctx());
+        self.offset_plane_panel(ui.ctx());
         self.sketch_repair_panel(ui.ctx());
         self.insert_part_panel(ui.ctx());
         self.mesh_import_panel(ui.ctx());

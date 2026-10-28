@@ -2,6 +2,16 @@
 #[derive(Clone, Copy)]
 pub enum Text {
     ChooseSketchPlane,
+    ChooseOffsetBase,
+    OffsetPlane,
+    ConstructionGroup,
+    WorkPlanesFolder,
+    WorkPlaneName,
+    FlipOffset,
+    NewSketchOnPlane,
+    WorkPlaneOtherPart,
+    OffsetPlaneHint,
+    WorkPlaneCreated,
     SketchHiddenPart,
     Origin,
     SketchXY,
@@ -650,7 +660,21 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
-        Text::ChooseSketchPlane => "Selecione um plano da origem ou uma face plana do modelo",
+        Text::ChooseSketchPlane => {
+            "Selecione um plano da origem, um plano de trabalho ou uma face plana do modelo"
+        }
+        Text::ChooseOffsetBase => {
+            "Selecione o plano a deslocar: plano da origem, plano de trabalho ou face plana"
+        }
+        Text::OffsetPlane => "Plano deslocado",
+        Text::ConstructionGroup => "Construção",
+        Text::WorkPlanesFolder => "Planos",
+        Text::WorkPlaneName => "Plano",
+        Text::FlipOffset => "Inverter sentido",
+        Text::NewSketchOnPlane => "Novo rascunho neste plano",
+        Text::WorkPlaneOtherPart => "O plano escolhido pertence a outra peça.",
+        Text::OffsetPlaneHint => "Arraste a seta ou digite a distância; OK cria o plano",
+        Text::WorkPlaneCreated => "criado. Escolha-o no Novo rascunho para desenhar nele.",
         Text::SketchHiddenPart => "Mostre uma ocorrência da peça para editar seu rascunho.",
         Text::Origin => "Origem",
         Text::SketchXY => "Rascunho XY",

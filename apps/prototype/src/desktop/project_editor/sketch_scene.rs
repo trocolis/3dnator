@@ -2,7 +2,7 @@
 //! Conversões de cursor passam pelo raio da câmera e pelo plano local da peça,
 //! incluindo posições hierárquicas; não existe uma segunda câmera de edição 2D.
 use super::*;
-use nator_document::assembly::Pick;
+use nator_document::{WorkPlaneId, assembly::Pick};
 use nator_geometry::{Bounds, dot, sub};
 use nator_sketch::{Plane, Point2, Sketch, profiles};
 mod plane_hover;
@@ -12,15 +12,53 @@ pub(super) const EMPTY_BOUNDS: Bounds = Bounds {
     max: [50.; 3],
 };
 
+/// Destino do plano escolhido no seletor de suporte.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PlanePurpose {
+    /// Novo rascunho de peça ou, com `reference`, de referência da montagem.
+    Sketch,
+    /// Plano-base do plano deslocado em edição; nenhum comando é publicado na escolha.
+    OffsetBase,
+}
+
 pub(super) struct PlanePicker {
     pub destination: Option<PartId>,
     pub placement: Placement,
     /// Rascunho de referência da montagem: plano em coordenadas da montagem e nenhuma peça
     /// dona, para que não possa virar perfil de corpo.
     pub reference: bool,
-    /// O plano da origem tem prioridade sobre a face desenhada atrás dele.
+    pub purpose: PlanePurpose,
+    /// Os planos da origem e de trabalho têm prioridade sobre a face desenhada atrás deles.
     origin_hovered: bool,
     hover: plane_hover::Cache,
+}
+impl PlanePicker {
+    pub fn new(
+        destination: Option<PartId>,
+        placement: Placement,
+        reference: bool,
+        purpose: PlanePurpose,
+    ) -> Self {
+        Self {
+            destination,
+            placement,
+            reference,
+            purpose,
+            origin_hovered: false,
+            hover: plane_hover::Cache::default(),
+        }
+    }
+    /// Planos de trabalho só servem a rascunhos de peça: são locais à peça de destino.
+    fn offers_work_planes(&self) -> bool {
+        !self.reference && self.destination.is_some()
+    }
+}
+
+/// Plano clicável no seletor: um dos planos da origem ou um plano de trabalho visível.
+#[derive(Clone, Copy, PartialEq)]
+enum Candidate {
+    Origin(&'static str, Plane),
+    Work(WorkPlaneId),
 }
 
 /// Comando que cria o rascunho escolhido pelo seletor de plano.
@@ -248,6 +286,59 @@ fn face_work_plane(world: Plane, placement: Placement) -> Result<Plane, nator_sk
     Plane::from_normal(normal.map(|v| v * distance), normal)
 }
 
+/// Suporte exato da face escolhida, nas coordenadas do destino, e o nome com que o
+/// painel do plano deslocado a apresenta. Roda no trabalhador: consulta o B-rep.
+fn face_plane(
+    document: &Document,
+    pick: &Pick,
+    placement: Placement,
+) -> Result<(Plane, String), String> {
+    let world = nator_commands::measure::sketch_plane(document, pick).map_err(|e| e.to_string())?;
+    let plane = face_work_plane(world, placement).map_err(|e| e.to_string())?;
+    let label = match document.body(pick.body) {
+        Some(body) => format!("{} ({})", text(T::PickedFace), body.name),
+        None => text(T::PickedFace).to_owned(),
+    };
+    Ok((plane, label))
+}
+
+/// Retângulo que representa um plano infinito na área 3D: centrado na projeção do centro
+/// da cena sobre o plano, alinhado a U/V e com lado proporcional à cena (mm, no mundo).
+pub(super) fn plane_patch(world: Plane, bounds: Bounds) -> [Point3; 4] {
+    let center = world.project(bounds.center());
+    let half = (bounds.size().into_iter().fold(0_f64, f64::max) * 0.35).max(10.);
+    [[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]]
+        .map(|[a, b]| world.world([center[0] + a * half, center[1] + b * half]))
+}
+
+/// Plano translúcido com contorno, em pontos de tela; destacado sob o cursor. Triângulos e
+/// arestas independentes evitam junções de traço instáveis com o plano quase de perfil.
+pub(super) fn paint_patch(
+    painter: &egui::Painter,
+    points: &[egui::Pos2],
+    color: egui::Color32,
+    highlighted: bool,
+) {
+    let mut mesh = egui::Mesh::default();
+    for p in points {
+        mesh.colored_vertex(
+            *p,
+            color.gamma_multiply(if highlighted { 0.45 } else { 0.18 }),
+        );
+    }
+    for i in 1..points.len().saturating_sub(1) {
+        let i = i as u32;
+        mesh.add_triangle(0, i, i + 1);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    for (a, b) in points.iter().zip(points.iter().cycle().skip(1)) {
+        painter.line_segment(
+            [*a, *b],
+            egui::Stroke::new(if highlighted { 2. } else { 1. }, color),
+        );
+    }
+}
+
 impl Editor {
     pub(super) fn display_bounds(&self) -> Bounds {
         self.current().scene_bounds.unwrap_or(EMPTY_BOUNDS)
@@ -267,13 +358,12 @@ impl Editor {
                 return;
             }
         };
-        self.current_mut().plane_pick = Some(PlanePicker {
+        self.current_mut().plane_pick = Some(PlanePicker::new(
             destination,
             placement,
-            reference: false,
-            origin_hovered: false,
-            hover: plane_hover::Cache::default(),
-        });
+            false,
+            PlanePurpose::Sketch,
+        ));
         self.status.set(text(T::ChooseSketchPlane));
     }
     /// Seletor de plano para um rascunho de referência da montagem.
@@ -283,24 +373,76 @@ impl Editor {
         }
         // Referências pertencem à montagem: sair da construção deixa o contexto claro.
         self.current_mut().active_part = None;
-        self.current_mut().plane_pick = Some(PlanePicker {
-            destination: None,
-            placement: Placement::default(),
-            reference: true,
-            origin_hovered: false,
-            hover: plane_hover::Cache::default(),
-        });
+        self.current_mut().plane_pick = Some(PlanePicker::new(
+            None,
+            Placement::default(),
+            true,
+            PlanePurpose::Sketch,
+        ));
         self.status.set(text(T::ChooseSketchPlane));
     }
-    pub(super) fn choose_origin_plane(&mut self, plane: Plane) {
+    /// Sai da escolha de suporte. Sem plano-base, o plano deslocado também se encerra:
+    /// não há o que deslocar.
+    pub(super) fn cancel_plane_pick(&mut self) {
+        let purpose = self.current_mut().plane_pick.take().map(|p| p.purpose);
+        if purpose == Some(PlanePurpose::OffsetBase) && !self.offset_plane_has_base() {
+            self.close_offset_plane();
+        }
+    }
+    pub(super) fn choose_origin_plane(&mut self, name: &str, plane: Plane) {
         if self.busy() {
             return;
         }
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
-        let command = new_sketch(picker.destination, picker.reference, plane);
-        self.execute(command);
+        match picker.purpose {
+            PlanePurpose::Sketch => {
+                let command = new_sketch(picker.destination, picker.reference, plane);
+                self.execute(command);
+            }
+            PlanePurpose::OffsetBase => {
+                self.set_offset_base(plane, format!("{name} · {}", text(T::Origin)));
+            }
+        }
+    }
+    /// Plano de trabalho escolhido na área 3D ou na árvore. O rascunho fica na peça dona
+    /// do plano; a escolha de outra peça que não a de destino é recusada, porque o plano
+    /// está nas coordenadas da sua própria peça.
+    pub(super) fn choose_work_plane(&mut self, id: WorkPlaneId) {
+        if self.busy() {
+            return;
+        }
+        let Some(picker) = self.current().plane_pick.as_ref() else {
+            return;
+        };
+        let document = self.current().session.document();
+        let (Some(part), Some(record)) = (document.work_plane_part(id), document.work_plane(id))
+        else {
+            return;
+        };
+        if picker.reference {
+            return;
+        }
+        let accepted = match picker.purpose {
+            // Sem peça em construção, o rascunho vai para a peça do plano escolhido.
+            PlanePurpose::Sketch => picker.destination.is_none_or(|d| d == part),
+            PlanePurpose::OffsetBase => picker.destination == Some(part),
+        };
+        if !accepted {
+            self.status.warning(text(T::WorkPlaneOtherPart));
+            return;
+        }
+        match picker.purpose {
+            PlanePurpose::Sketch => self.execute(Command::AddSketchOnWorkPlane {
+                id,
+                name: text(T::Sketch).into(),
+            }),
+            PlanePurpose::OffsetBase => {
+                let (plane, name) = (record.plane.plane(), record.name.clone());
+                self.set_offset_base(plane, name);
+            }
+        }
     }
     pub(super) fn choose_face_plane(
         &mut self,
@@ -313,8 +455,12 @@ impl Editor {
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
-        let (destination, placement, reference) =
-            (picker.destination, picker.placement, picker.reference);
+        let (destination, placement, reference, purpose) = (
+            picker.destination,
+            picker.placement,
+            picker.reference,
+            picker.purpose,
+        );
         let document = self.current().session.document().clone();
         let (tab, revision) = (self.current().id, self.current().session.revision());
         let view = self.current().view.clone();
@@ -323,11 +469,20 @@ impl Editor {
             let picks = document
                 .pick_all_with(ray, |o| view.pickable(o))
                 .map_err(|e| e.to_string())?;
-            let pick = section::first_visible(picks, section)
-                .ok_or_else(|| text(T::ChooseSketchPlane).to_owned())?;
-            let world = nator_commands::measure::sketch_plane(&document, &pick)
-                .map_err(|e| e.to_string())?;
-            let plane = face_work_plane(world, placement).map_err(|e| e.to_string())?;
+            let pick = section::first_visible(picks, section);
+            if purpose == PlanePurpose::OffsetBase {
+                // Clicar fora de uma face plana só avisa: a escolha continua aberta.
+                let plane = pick
+                    .ok_or_else(|| text(T::ChooseOffsetBase).to_owned())
+                    .and_then(|pick| face_plane(&document, &pick, placement));
+                return Ok(Outcome::PlaneChosen {
+                    tab,
+                    revision,
+                    plane,
+                });
+            }
+            let pick = pick.ok_or_else(|| text(T::ChooseSketchPlane).to_owned())?;
+            let plane = face_plane(&document, &pick, placement)?.0;
             let command = PreparedCommand::new(
                 document,
                 revision,
@@ -344,14 +499,23 @@ impl Editor {
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
-        let (destination, placement, reference) =
-            (picker.destination, picker.placement, picker.reference);
+        let (destination, placement, reference, purpose) = (
+            picker.destination,
+            picker.placement,
+            picker.reference,
+            picker.purpose,
+        );
         let document = self.current().session.document().clone();
         let (tab, revision) = (self.current().id, self.current().session.revision());
         self.start(context, None, move || {
-            let world = nator_commands::measure::sketch_plane(&document, &pick)
-                .map_err(|e| e.to_string())?;
-            let plane = face_work_plane(world, placement).map_err(|e| e.to_string())?;
+            if purpose == PlanePurpose::OffsetBase {
+                return Ok(Outcome::PlaneChosen {
+                    tab,
+                    revision,
+                    plane: face_plane(&document, &pick, placement),
+                });
+            }
+            let plane = face_plane(&document, &pick, placement)?.0;
             let command = PreparedCommand::new(
                 document,
                 revision,
@@ -595,12 +759,14 @@ impl Editor {
             .painter()
             .with_clip_rect(response.rect.intersect(ui.clip_rect()));
         let camera = &self.viewport.camera;
-        let screen = |point| project(camera, bounds, response.rect, placement.apply(point));
+        let world_screen = |point| project(camera, bounds, response.rect, point);
+        let screen = |point| world_screen(placement.apply(point));
         let hover = response
             .hover_pos()
             .filter(|p| !view_cube::rect(response.rect).contains(*p));
         let mut selected = None;
         if picking {
+            // Profundidade, candidato, rótulo, cor, contorno na tela e posição do rótulo.
             let mut planes = Vec::new();
             for (name, plane, color) in [
                 ("XY", Plane::xy(), egui::Color32::from_rgb(77, 142, 211)),
@@ -616,50 +782,68 @@ impl Editor {
                         placement.apply(plane.world([size * 0.5, size * 0.5])),
                         camera.direction(),
                     );
-                    planes.push((depth, name, plane, color, points));
+                    let label = screen(plane.world([size * 0.65, size * 0.65]));
+                    planes.push((
+                        depth,
+                        Candidate::Origin(name, plane),
+                        name.to_owned(),
+                        color,
+                        points,
+                        label.map(|p| (p, egui::Align2::CENTER_CENTER)),
+                    ));
+                }
+            }
+            // Planos de trabalho visíveis da peça de destino, na mesma ocorrência.
+            let destination = self
+                .current()
+                .plane_pick
+                .as_ref()
+                .filter(|p| p.offers_work_planes())
+                .and_then(|p| p.destination)
+                .and_then(|id| document.part(id));
+            for record in destination
+                .iter()
+                .flat_map(|part| part.work_planes.iter().filter(|r| part.shows_work_plane(r)))
+            {
+                let corners =
+                    plane_patch(transformed_plane(record.plane.plane(), placement), bounds);
+                let polygon: Option<Vec<_>> = corners.iter().map(|p| world_screen(*p)).collect();
+                if let Some(points) = polygon {
+                    let center: Point3 =
+                        std::array::from_fn(|i| corners.iter().map(|c| c[i]).sum::<f64>() / 4.);
+                    let label = points[3] + (points[1] - points[3]) * 0.06;
+                    planes.push((
+                        dot(center, camera.direction()),
+                        Candidate::Work(record.id),
+                        record.name.clone(),
+                        theme::WORK_PLANE,
+                        points,
+                        Some((label, egui::Align2::LEFT_BOTTOM)),
+                    ));
                 }
             }
             planes.sort_by(|a, b| a.0.total_cmp(&b.0));
             // O último plano desenhado recebe o clique quando há sobreposição;
             // apenas esse mesmo plano recebe o destaque de pré-seleção.
-            selected = planes.iter().rev().find_map(|(_, _, plane, _, points)| {
-                hover
-                    .is_some_and(|p| polygon_contains(points, p))
-                    .then_some(*plane)
-            });
-            for (_, name, plane, color, points) in planes {
-                let hit = selected == Some(plane);
-                // Triângulos e arestas independentes evitam junções de traço
-                // instáveis quando um plano fica quase de perfil para a câmera.
-                if !polygon_contains(
-                    &points,
-                    points
-                        .iter()
-                        .fold(egui::Pos2::ZERO, |a, b| a + b.to_vec2() / 4.),
-                ) {
+            selected = planes
+                .iter()
+                .rev()
+                .find_map(|(_, candidate, _, _, points, _)| {
+                    hover
+                        .is_some_and(|p| polygon_contains(points, p))
+                        .then_some(*candidate)
+                });
+            for (_, candidate, name, color, points, label) in planes {
+                // Um plano de perfil para a câmera não tem área para receber cliques.
+                let center = points.iter().fold(egui::Pos2::ZERO, |a, b| {
+                    a + b.to_vec2() / points.len() as f32
+                });
+                if !polygon_contains(&points, center) {
                     continue;
                 }
-                let mut mesh = egui::Mesh::default();
-                for p in &points {
-                    mesh.colored_vertex(*p, color.gamma_multiply(if hit { 0.45 } else { 0.18 }));
-                }
-                mesh.add_triangle(0, 1, 2);
-                mesh.add_triangle(0, 2, 3);
-                painter.add(egui::Shape::mesh(mesh));
-                for i in 0..4 {
-                    painter.line_segment(
-                        [points[i], points[(i + 1) % 4]],
-                        egui::Stroke::new(if hit { 2. } else { 1. }, color),
-                    );
-                }
-                if let Some(label) = screen(plane.world([size * 0.65, size * 0.65])) {
-                    painter.text(
-                        label,
-                        egui::Align2::CENTER_CENTER,
-                        name,
-                        egui::FontId::proportional(13.),
-                        color,
-                    );
+                paint_patch(&painter, &points, color, selected == Some(candidate));
+                if let Some((at, align)) = label {
+                    painter.text(at, align, name, egui::FontId::proportional(13.), color);
                 }
             }
         }
@@ -696,12 +880,71 @@ impl Editor {
         if picking
             && !self.busy()
             && response.clicked()
-            && let Some(plane) = selected
+            && let Some(candidate) = selected
         {
-            self.choose_origin_plane(plane);
+            match candidate {
+                Candidate::Origin(name, plane) => self.choose_origin_plane(name, plane),
+                Candidate::Work(id) => self.choose_work_plane(id),
+            }
             return true;
         }
         false
+    }
+    /// Planos de trabalho visíveis em todas as ocorrências isoladas das suas peças. Durante
+    /// a escolha de suporte, os da peça de destino ficam com o seletor, que os torna
+    /// clicáveis; desenhá-los aqui também duplicaria o preenchimento.
+    pub(super) fn work_planes_overlay(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {
+        let document = self.current().session.document();
+        let Ok(occurrences) = document.occurrences() else {
+            return false;
+        };
+        let picked = self
+            .current()
+            .plane_pick
+            .as_ref()
+            .filter(|p| p.offers_work_planes())
+            .map(|p| (p.destination, p.placement));
+        let bounds = self.display_bounds();
+        let camera = &self.viewport.camera;
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        let mut drawn = false;
+        for occurrence in occurrences
+            .iter()
+            .filter(|o| self.current().view.in_isolation(o))
+        {
+            let Some(part) = document
+                .instance(occurrence.instance)
+                .and_then(|i| document.part(i.part))
+            else {
+                continue;
+            };
+            if picked == Some((Some(part.id), occurrence.placement)) {
+                continue;
+            }
+            for record in part.work_planes.iter().filter(|r| part.shows_work_plane(r)) {
+                let corners = plane_patch(
+                    transformed_plane(record.plane.plane(), occurrence.placement),
+                    bounds,
+                );
+                let Some(points) = corners
+                    .iter()
+                    .map(|p| project(camera, bounds, rect, *p))
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    continue;
+                };
+                paint_patch(&painter, &points, theme::WORK_PLANE, false);
+                painter.text(
+                    points[3] + (points[1] - points[3]) * 0.06,
+                    egui::Align2::LEFT_BOTTOM,
+                    &record.name,
+                    egui::FontId::proportional(12.),
+                    theme::WORK_PLANE,
+                );
+                drawn = true;
+            }
+        }
+        drawn
     }
 }
 

@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Plano deslocado e planos de trabalho — 27/10/2026
+
+- Regressões sem GPU cobrem o plano resultante (deslocamento pela normal, eixos U/V preservados, limites e eixos inválidos), visibilidade com a pasta Planos, identificadores novos ao clonar, nomes “Plano N”, `AddSketchOnWorkPlane` com o plano copiado para o rascunho e ocultado em uma só ação de desfazer, exclusão sem afetar o rascunho e ida e volta do formato 20 com projetos sem o campo.
+- Ensaio gráfico com OCCT exercita a interface com eventos reais: botão indisponível sem peça ativa, Esc sem plano-base, escolha da face superior de uma placa pelo B-rep, arraste vertical da alça com a normal voltada para a câmera, digitação de 25 mm com Enter no campo e no painel, plano criado a 35 mm, pasta e nome na árvore, clique no plano durante o Novo rascunho, rascunho aberto a 35 mm e plano oculto.
+- **269 testes do workspace com OCCT, 203 sem OCCT e 18 ensaios gráficos aprovados**. Formatação e Clippy com todos os alvos/avisos negados nas duas configurações aprovados no Linux. Capturas GL/llvmpipe em `target/claude-validation/offset-plane-20261027/`: `offset-plane.png` (painel, plano-base tracejado, plano novo e seta) e `work-plane-pick.png` (plano de trabalho clicável junto a XY/XZ/YZ e pasta Planos), geradas pelos novos cenários `offset-plane` e `work-plane-pick`. Windows e janela nativa não exercitados localmente. Versão 0.3.0 em desenvolvimento; formato 20, sem release ou publicação remota.
+
 ## Faixas das abas uniformes e compactas — 27/10/2026
 
 - Identificada a diferença: os rodapés do Rascunho usavam botões de menu com altura mínima maior que os rótulos das outras abas. Um layout comum passa a reservar corpo, intervalo e rodapé para todos os grupos, incluindo a galeria de restrições.

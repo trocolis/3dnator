@@ -7,6 +7,8 @@ pub mod drawing;
 pub mod features;
 pub mod parameters;
 pub mod selection;
+pub mod work_planes;
+pub use work_planes::{WorkPlane, WorkPlaneRecord};
 
 pub const MAX_ELEMENTS: usize = 10_000;
 pub const MAX_SCENE_TRIANGLES: usize = 2_000_000;
@@ -23,6 +25,7 @@ identifier!(InstanceId);
 identifier!(SketchId);
 identifier!(GroupId);
 identifier!(SheetId);
+identifier!(WorkPlaneId);
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SheetRecord {
     pub id: SheetId,
@@ -176,13 +179,15 @@ pub struct Part {
     pub name: String,
     pub bodies: Vec<Body>,
     pub sketches: Vec<SketchRecord>,
+    /// Planos de trabalho (suportes auxiliares de rascunhos), em coordenadas da peça.
+    pub work_planes: Vec<WorkPlaneRecord>,
     pub parameters: parameters::Parameters,
     pub features: Vec<features::Feature>,
     /// Marcador do histórico: quantidade de operações construídas a partir do início.
     /// `None` constrói todas. As operações depois do marcador ficam inativas e novas
     /// operações são inseridas nessa posição, como ao voltar a uma etapa do histórico.
     pub history_marker: Option<usize>,
-    /// Visibilidade das pastas da peça na árvore (corpos, subpeças, rascunhos, origem).
+    /// Visibilidade das pastas da peça na árvore (corpos, subpeças, rascunhos, planos, origem).
     pub folders: PartFolders,
 }
 impl Part {
@@ -220,6 +225,8 @@ pub struct PartFolders {
     pub bodies: bool,
     pub subparts: bool,
     pub sketches: bool,
+    /// Planos de trabalho; visíveis por padrão, inclusive em projetos sem o campo.
+    pub planes: bool,
     /// Eixos da origem da peça, desenhados em cada ocorrência; ocultos por padrão.
     pub origin: bool,
 }
@@ -229,6 +236,7 @@ impl Default for PartFolders {
             bodies: true,
             subparts: true,
             sketches: true,
+            planes: true,
             origin: false,
         }
     }
@@ -265,6 +273,7 @@ pub enum Folder {
     Bodies(PartId),
     Subparts(PartId),
     Sketches(PartId),
+    WorkPlanes(PartId),
     PartOrigin(PartId),
 }
 #[derive(Debug, Clone)]
@@ -378,6 +387,7 @@ impl Document {
             Folder::Bodies(id) => part(id)?.bodies,
             Folder::Subparts(id) => part(id)?.subparts,
             Folder::Sketches(id) => part(id)?.sketches,
+            Folder::WorkPlanes(id) => part(id)?.planes,
             Folder::PartOrigin(id) => part(id)?.origin,
         })
     }
@@ -399,6 +409,7 @@ impl Document {
             Folder::Bodies(id) => &mut self.part_mut(id)?.folders.bodies,
             Folder::Subparts(id) => &mut self.part_mut(id)?.folders.subparts,
             Folder::Sketches(id) => &mut self.part_mut(id)?.folders.sketches,
+            Folder::WorkPlanes(id) => &mut self.part_mut(id)?.folders.planes,
             Folder::PartOrigin(id) => &mut self.part_mut(id)?.folders.origin,
         };
         *flag = visible;
@@ -632,6 +643,7 @@ impl Document {
             name: name.clone(),
             bodies: Vec::new(),
             sketches: Vec::new(),
+            work_planes: Vec::new(),
             parameters: parameters::Parameters::default(),
             features: Vec::new(),
             history_marker: None,
@@ -728,6 +740,7 @@ impl Document {
                     name: name.clone(),
                     bodies: Vec::new(),
                     sketches: Vec::new(),
+                    work_planes: Vec::new(),
                     parameters: parameters::Parameters::default(),
                     features: Vec::new(),
                     history_marker: None,
@@ -806,6 +819,7 @@ impl Document {
                 .iter()
                 .map(|p| {
                     p.bodies.len()
+                        + p.work_planes.len()
                         + p.sketches
                             .iter()
                             .map(|s| {
@@ -872,6 +886,11 @@ impl Document {
                         ));
                     }
                 }
+            }
+            for record in &part.work_planes {
+                register(record.id.0)?;
+                validate_name(&record.name)?;
+                record.plane.validate()?;
             }
             for body in &part.bodies {
                 register(body.id.0)?;
