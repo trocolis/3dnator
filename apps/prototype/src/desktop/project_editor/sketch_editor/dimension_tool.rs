@@ -2,7 +2,7 @@
 //! escolhas determinam a cota (uma linha, um círculo ou arco, ou o segundo ponto ou linha de
 //! uma distância ou ângulo), a caixa de valor recebe o teclado com a medida atual
 //! selecionada, e digitar a substitui. Enquanto se digita, o texto acompanha o cursor; Enter
-//! posiciona e confirma em uma ação de desfazer, Esc cancela. Antes de digitar, um clique no
+//! posiciona e confirma em uma ação de desfazer; o editor volta à seleção com Esc. Antes de digitar, um clique no
 //! vazio fixa o texto e um clique em outro ponto ou linha transforma a cota em distância ou
 //! ângulo; Tab devolve as escolhas para um clique de posicionamento. Entre dois pontos (ou
 //! numa linha) fora dos eixos, o lugar do texto escolhe o que se mede: a distância entre
@@ -92,6 +92,29 @@ impl Draft {
     #[cfg(all(test, feature = "occt"))]
     pub(super) fn picks(&self) -> usize {
         self.picks.len()
+    }
+    /// Uma curva selecionada, ou duas linhas compatíveis, já determina a cota.
+    /// Seleções ambíguas deixam a ferramenta aguardando os próximos cliques.
+    pub(super) fn seed(&mut self, sketch: &Sketch, selected: &[u64]) {
+        if !(1..=2).contains(&selected.len()) {
+            return;
+        }
+        let picks = selected
+            .iter()
+            .filter_map(|id| {
+                sketch.entity(*id).ok().map(|entity| match entity.curve {
+                    Curve::Line { .. } => Pick::Line(*id),
+                    Curve::Circle { .. } | Curve::Arc { .. } => Pick::Radial(*id),
+                })
+            })
+            .collect::<Vec<_>>();
+        if picks.len() == selected.len()
+            && settle(sketch, &picks).is_ok_and(|measure| measure.is_some())
+        {
+            self.picks = picks;
+            self.editing = true;
+            self.focus = true;
+        }
     }
     fn label(&self) -> Option<Point2> {
         self.pinned.or(if self.moved { self.follow } else { None })

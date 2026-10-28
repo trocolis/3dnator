@@ -61,6 +61,7 @@ impl ShellState {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Action {
+    Select,
     New,
     Open,
     Save,
@@ -117,6 +118,7 @@ enum Action {
 impl Action {
     fn label(self) -> T {
         match self {
+            Self::Select => T::Select,
             Self::New => T::NewProject,
             Self::Open => T::OpenProject,
             Self::Save => T::Save,
@@ -192,6 +194,7 @@ impl Action {
     }
     fn icon(self) -> Icon {
         match self {
+            Self::Select => Icon::Select,
             Self::New => Icon::New,
             Self::Open => Icon::Open,
             Self::Save => Icon::Save,
@@ -256,6 +259,7 @@ impl Action {
     }
     fn shortcut(self) -> Option<&'static str> {
         match self {
+            Self::Select => Some("Esc"),
             Self::Save => Some("Ctrl+S"),
             Self::Undo => Some("Ctrl+Z"),
             Self::Redo => Some("Ctrl+Shift+Z"),
@@ -285,6 +289,7 @@ fn move_menu_items(free: Action) -> [(Action, T, T); 4] {
 
 /// Também alimenta a busca: nenhuma entrada anuncia uma ferramenta sem implementação.
 const SEARCH_ACTIONS: &[Action] = &[
+    Action::Select,
     Action::New,
     Action::Open,
     Action::Save,
@@ -479,6 +484,7 @@ impl Editor {
     }
     fn action_selected(&self, action: Action) -> bool {
         match action {
+            Action::Select => self.selection_active(),
             Action::Perspective => {
                 self.viewport.camera.projection == nator_renderer::Projection::Perspective
             }
@@ -486,11 +492,9 @@ impl Editor {
             Action::Triangles => self.viewport.show_triangles,
             Action::Browser => self.shell.browser_visible,
             Action::Section => self.current().section.is_some_and(|s| s.visible),
-            Action::SketchTool(tool) => self
-                .current()
-                .sketch_edit
-                .as_ref()
-                .is_some_and(|w| w.tool() == tool),
+            Action::SketchTool(tool) => self.current().sketch_edit.as_ref().is_some_and(|w| {
+                w.tool() == tool && (tool != sketch_editor::Tool::Select || w.is_selecting())
+            }),
             Action::SketchEdit(action) => self
                 .current()
                 .sketch_edit
@@ -541,6 +545,35 @@ impl Editor {
         if !self.action_enabled(action) {
             return;
         }
+        // Uma nova ferramenta assume a interação; cancelar a anterior preserva
+        // os elementos selecionados para preencher os campos compatíveis.
+        if matches!(
+            action,
+            Action::NewSketch
+                | Action::SketchFace
+                | Action::OffsetPlane
+                | Action::ReferenceSketch
+                | Action::Solid(_)
+                | Action::MoveBody
+                | Action::CopyBody
+                | Action::MoveCopy
+                | Action::Align
+                | Action::MoveFace
+                | Action::MoveEdge
+                | Action::MovePoint
+                | Action::InstancePattern(_)
+                | Action::InstanceMirror
+                | Action::Section
+                | Action::InsertPart
+                | Action::Parameters
+                | Action::Measure
+                | Action::Drawing
+                | Action::ExportStl
+                | Action::SketchTool(_)
+                | Action::SketchEdit(_)
+        ) {
+            self.activate_selection(context);
+        }
         if matches!(
             action,
             Action::Fit
@@ -553,6 +586,7 @@ impl Editor {
             self.current_mut().camera_transition = None;
         }
         match action {
+            Action::Select => self.activate_selection(context),
             Action::New => {
                 if let Err(error) = Document::new(text(T::Untitled))
                     .map_err(|e| e.to_string())
@@ -580,7 +614,15 @@ impl Editor {
             Action::Reference => {
                 self.import(context, ImportSource::Reference, self.current().active_part)
             }
-            Action::ReferenceSketch => self.start_reference_sketch_plane(),
+            Action::ReferenceSketch => {
+                let pick = (self.pick_mode == navigation::PickMode::Face)
+                    .then(|| self.selected_pick().cloned())
+                    .flatten();
+                self.start_reference_sketch_plane();
+                if let Some(pick) = pick {
+                    self.choose_picked_plane(context, pick);
+                }
+            }
             Action::NewEmptyPart => {
                 let count = self.current().session.document().parts().len() + 1;
                 self.execute(Command::CreatePart {
@@ -592,7 +634,15 @@ impl Editor {
             Action::MoveFace => self.open_align(navigation::PickMode::Face),
             Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
             Action::MovePoint => self.open_align(navigation::PickMode::Vertex),
-            Action::NewSketch => self.start_sketch_plane(),
+            Action::NewSketch => {
+                let pick = (self.pick_mode == navigation::PickMode::Face)
+                    .then(|| self.selected_pick().cloned())
+                    .flatten();
+                self.start_sketch_plane();
+                if let Some(pick) = pick {
+                    self.choose_picked_plane(context, pick);
+                }
+            }
             Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 let plane = match action {
                     Action::SketchXZ => nator_sketch::Plane::xz(),
@@ -605,8 +655,19 @@ impl Editor {
                 });
             }
             Action::SketchFace => self.sketch_on_selected_face(context),
-            Action::OffsetPlane => self.open_offset_plane(),
-            Action::Solid(tool) => self.open_feature_tool(tool),
+            Action::OffsetPlane => {
+                let pick = (self.pick_mode == navigation::PickMode::Face)
+                    .then(|| self.selected_pick().cloned())
+                    .flatten();
+                self.open_offset_plane();
+                if let Some(pick) = pick {
+                    self.choose_picked_plane(context, pick);
+                }
+            }
+            Action::Solid(tool) => {
+                self.open_feature_tool(tool);
+                self.prefill_selected_topology(context);
+            }
             Action::MoveCopy => self.open_move(),
             Action::MoveBody => self.open_body_move(false),
             Action::CopyBody => self.open_body_move(true),
@@ -1252,6 +1313,12 @@ impl Editor {
     }
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
         self.shell.menu_rects.clear();
+        if matches!(
+            self.shell.tab,
+            RibbonTab::Assembly | RibbonTab::Model | RibbonTab::Sketch
+        ) {
+            self.ribbon_group(ui, T::SelectionGroup, &[Action::Select]);
+        }
         match self.shell.tab {
             RibbonTab::Model => {
                 self.ribbon_group(ui, T::Sketch, &[Action::NewSketch]);

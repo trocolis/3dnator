@@ -40,6 +40,68 @@ pub(super) struct SelectionGestures {
 }
 
 impl Editor {
+    /// Um clique antigo não é reaproveitado se o elemento saiu da seleção.
+    pub(super) fn selected_pick(&self) -> Option<&Pick> {
+        let pick = self.current().picked.as_ref()?;
+        let item = if self.current().active_part == Some(pick.part) {
+            Selection::Body {
+                part: pick.part,
+                id: pick.body,
+            }
+        } else {
+            Selection::Instance(pick.instance)
+        };
+        self.current().is_selected(item).then_some(pick)
+    }
+
+    /// A seleção é o estado neutro: cancelar uma ferramenta não apaga os alvos
+    /// escolhidos nem as alterações já confirmadas no documento.
+    pub(super) fn selection_active(&self) -> bool {
+        self.feature_edit.is_none()
+            && self.assembly_panel.is_none()
+            && self.section_edit.is_none()
+            && self.work_plane_edit.is_none()
+            && self.current().plane_pick.is_none()
+            && self.sketch_repair.is_none()
+            && self.insert_part.is_none()
+            && self.mesh_import.is_none()
+            && self.parameters_edit.is_none()
+            && self.drawing_edit.is_none()
+            && self.export_edit.is_none()
+            && !self.shell.measure_open
+            && !self.move_freely
+            && self
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_none_or(|work| work.is_selecting())
+    }
+
+    pub(super) fn activate_selection(&mut self, context: &egui::Context) {
+        self.cancel_plane_pick();
+        self.close_offset_plane();
+        self.cancel_feature_tool();
+        self.assembly_panel = None;
+        self.cancel_section_tool();
+        self.sketch_repair = None;
+        self.insert_part = None;
+        self.mesh_import = None;
+        self.parameters_edit = None;
+        self.drawing_edit = None;
+        self.export_edit = None;
+        self.shell.measure_open = false;
+        self.move_freely = false;
+        self.alignment = None;
+        self.gestures = SelectionGestures::default();
+        if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+            work.activate_selection(context);
+        }
+        // Invalidar a prévia também impede que um resultado calculado depois
+        // de Esc volte a substituir a cena publicada no documento.
+        self.preview_command(self.current().id, None, None, None);
+        context.request_repaint();
+    }
+
     /// Gestos disponíveis fora de rascunhos, seletores de plano, campos de painel e do
     /// arraste livre de posicionamento.
     fn gestures_enabled(&self) -> bool {
@@ -141,7 +203,7 @@ impl Editor {
                 );
             }
             if response.drag_stopped_by(egui::PointerButton::Primary) || !down {
-                let additive = ui.input(|i| i.modifiers.command);
+                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 let items = self.window_items(response.rect, rect, crossing);
                 self.current_mut().select_many(items, additive);
                 self.gestures.window = None;
@@ -344,7 +406,7 @@ impl Editor {
             } else {
                 Selection::Instance(pick.instance)
             };
-            if context.input(|i| i.modifiers.command) {
+            if context.input(|i| i.modifiers.ctrl || i.modifiers.command) {
                 self.current_mut().toggle(item);
             } else {
                 self.current_mut().select(Some(item));

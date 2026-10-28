@@ -612,12 +612,23 @@ impl Editor {
     pub(super) fn open_align(&mut self, kind: navigation::PickMode) {
         self.feature_edit = None;
         self.pick_mode = kind;
+        // O último clique válido já fornece a geometria da origem. Uma seleção
+        // feita só pela árvore não inventa uma face/aresta/ponto para alinhar.
+        let from = self.selected_pick().cloned().map(|mut pick| {
+            navigation::snap_pick(&mut pick, kind);
+            pick
+        });
+        let field = Some(if from.is_some() {
+            AlignField::To
+        } else {
+            AlignField::From
+        });
         self.assembly_panel = Some(Panel::Align(Box::new(AlignDraft {
             tab: self.current().id,
             kind,
-            from: None,
+            from,
             to: None,
-            field: Some(AlignField::From),
+            field,
             flip: false,
         })));
     }
@@ -825,8 +836,11 @@ impl Editor {
             Selection::Instance(pick.instance)
         };
         let mode = self.pick_mode;
+        let additive = response
+            .ctx
+            .input(|input| input.modifiers.ctrl || input.modifiers.command);
         match &mut self.assembly_panel {
-            Some(Panel::Move(d)) if !d.picking => {
+            Some(Panel::Move(d)) if !d.picking && !additive => {
                 navigation::snap_pick(&mut pick, mode);
                 self.current_mut().picked = Some(pick);
             }

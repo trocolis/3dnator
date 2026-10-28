@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Selecionar nas abas e alvos automáticos — 28/10/2026
+
+- Selecionar ocupa o primeiro grupo de Montagem, Peça e Rascunho, com ícone de cursor e sem ícone adicional junto ao ponteiro. Esc cancela a ferramenta e suas prévias, preserva a seleção e retorna a esse estado; o cancelamento de seção restaura a seção anterior.
+- Dois novos ensaios gráficos usam eventos reais de Ctrl, sem depender do modificador Command: alternam elementos da montagem, corpos e entidades do rascunho; verificam Mover com dois componentes, retorno por Esc sem revisão nova, aplicação do deslocamento aos dois alvos, operandos de booleana, aresta de arredondamento consultada no trabalhador, Cota com uma ou duas entidades e restrição com linhas previamente selecionadas. Os ensaios existentes passam a reativar Linha/Cota após Esc.
+- **279 testes do workspace com OCCT, 212 sem OCCT e 22 ensaios gráficos aprovados**. Formatação, Clippy com todos os alvos/avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Logs e capturas GL/llvmpipe em `target/codex-validation/selection-tools-20261028/`; capturas de Montagem e Rascunho inspecionadas para posição do botão, estado ativo e uniformidade da faixa. Windows e janela nativa não exercitados localmente. Versão 0.3.0 em desenvolvimento e formato 22 preservados, sem release ou publicação remota.
+
 ## Cota no modelo da Dimension do SolidCraft — 28/10/2026
 
 - Regressões do solver: diâmetro, ponto–linha e linha–círculo levam a geometria ao valor e `measure` devolve o mesmo valor; a penetração da linha que corta o círculo e o ponto da própria linha são tratados; os lados do `LineAngle` escolhem o setor (45°/−135°) e dirigem a linha ao setor suplementar de 120°; posições de texto exigem cota correspondente e saem junto com ela. Ida e volta do formato 22 conserva os tipos novos, os lados e as posições.

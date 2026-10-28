@@ -154,6 +154,21 @@ impl Workspace {
     pub(super) fn dimension_state(&self) -> (bool, usize) {
         (self.dimension_draft.editing(), self.dimension_draft.picks())
     }
+    pub(super) fn is_selecting(&self) -> bool {
+        self.tool == Tool::Select && self.active_action.is_none()
+    }
+    pub(super) fn activate_selection(&mut self, context: &egui::Context) {
+        self.reset_drawing(context);
+        self.select_tool(Tool::Select);
+        self.tool_panel_open = false;
+        self.pending = None;
+        self.tracker.clear();
+        context.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+    }
     pub(super) fn select_tool(&mut self, tool: Tool) {
         self.active_action = None;
         self.tool = tool;
@@ -375,9 +390,15 @@ impl Editor {
     }
     /// Ferramenta escolhida na faixa, na busca ou pelo atalho D (Cota).
     pub(super) fn select_sketch_tool(&mut self, tool: Tool) {
+        let sketch = (tool == Tool::Dimension)
+            .then(|| self.working_sketch())
+            .flatten();
         if let Some(work) = &mut self.current_mut().sketch_edit {
             work.select_tool(tool);
             if tool == Tool::Dimension {
+                if let Some(sketch) = &sketch {
+                    work.dimension_draft.seed(sketch, &work.selected);
+                }
                 self.status.set(text(T::DimensionPickHint));
             }
         }
@@ -917,9 +938,7 @@ impl Editor {
             escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         }
         if escape {
-            work.reset_drawing(ui.ctx());
-            work.pending = None;
-            work.tracker.clear();
+            work.activate_selection(ui.ctx());
         }
         let dimension = (work.tool == Tool::Dimension).then(|| {
             dimension_tool::update(
@@ -972,10 +991,14 @@ impl Editor {
                             } else {
                                 work.selected.push(id);
                             }
-                        } else if !ui.input(|i| i.modifiers.ctrl) {
+                        } else if !ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
                             work.selected.clear();
                             work.selected.push(id);
-                        } else if !work.selected.contains(&id) {
+                        } else if let Some(index) =
+                            work.selected.iter().position(|selected| *selected == id)
+                        {
+                            work.selected.remove(index);
+                        } else {
                             work.selected.push(id);
                         }
                         work.constraint = None;
@@ -989,7 +1012,9 @@ impl Editor {
                         }
                     }
                 } else {
-                    if work.active_action.is_none() {
+                    if work.active_action.is_none()
+                        && !ui.input(|input| input.modifiers.ctrl || input.modifiers.command)
+                    {
                         work.selected.clear();
                     }
                 }

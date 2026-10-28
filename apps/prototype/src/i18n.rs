@@ -457,6 +457,7 @@ pub enum Text {
     #[allow(dead_code)]
     SketchTools,
     Select,
+    SelectionGroup,
     Line,
     Rectangle,
     Circle,
@@ -888,6 +889,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Redundant => "Há restrições redundantes",
         Text::SketchTools => "Ferramentas do rascunho",
         Text::Select => "Selecionar",
+        Text::SelectionGroup => "Seleção",
         Text::Line => "Linha",
         Text::Rectangle => "Retângulo",
         Text::Circle => "Círculo",

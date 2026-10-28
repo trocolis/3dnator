@@ -71,7 +71,7 @@ impl Editor {
         if self.current().plane_pick.is_some()
             && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.cancel_plane_pick();
+            self.activate_selection(context);
             return;
         }
         if context.egui_wants_keyboard_input()
@@ -81,6 +81,10 @@ impl Editor {
                 .as_ref()
                 .is_some_and(|w| w.is_drawing())
         {
+            return;
+        }
+        if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.activate_selection(context);
             return;
         }
         if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
@@ -189,7 +193,7 @@ impl Editor {
         match intent {
             Intent::Select(selection) => {
                 // Ctrl+clique alterna o elemento, como na área 3D.
-                if ui.input(|i| i.modifiers.command) {
+                if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
                     self.current_mut().toggle(selection);
                 } else {
                     self.current_mut().select(Some(selection));

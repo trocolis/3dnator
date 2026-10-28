@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Selecionar nas abas e alvos pela seleção atual
+
+- Selecionar passa a ser o primeiro item de Montagem, Peça e Rascunho, com ícone de cursor e destaque enquanto o modo está ativo. Seu ícone não acompanha o ponteiro na área de edição. Esc, ao cancelar uma ferramenta, retorna à seleção; prévias e gestos pendentes são descartados, preservando o documento e os elementos já selecionados.
+- Ctrl+clique acrescenta ou retira elementos na área 3D, na árvore e no rascunho. Ctrl no vazio conserva os elementos selecionados; a seleção por janela continua aditiva com Ctrl. Mover recebe todos os alvos selecionados e aceita Ctrl para ampliar os objetos mesmo fora do campo de seleção.
+- Ferramentas compatíveis aproveitam a seleção existente: origem de alinhamento pelo último clique válido, corpos de operações e padrões, dois corpos para combinar, face para casca/extrusão e suporte de rascunhos/planos, aresta de arredondamento/chanfro e entidades para Cota/restrições. Seleções incompatíveis continuam aguardando escolhas, e cliques de elementos retirados da seleção não são reutilizados.
+- A sugestão de aresta é calculada em segundo plano. Trocar de ferramenta encerra a prévia anterior antes de assumir a interação; a seleção é preservada. Esc nos campos numéricos conserva primeiro a edição do valor, como nos painéis existentes.
+
 ### Cota no modelo da Dimension do SolidCraft
 
 - A Cota do rascunho deixa de ser um formulário: com a ferramenta ativa (botão ou **D**), clique no que medir. Uma linha mede o comprimento; um círculo, o diâmetro; um arco, o raio; dois pontos, a distância; ponto e linha, a distância à reta; duas linhas, o ângulo (ou a distância, se paralelas); linha e círculo, a folga até a borda. Pontos têm prioridade sobre as curvas próximas, e o elemento sob o cursor fica realçado.

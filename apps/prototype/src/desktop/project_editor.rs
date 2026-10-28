@@ -819,6 +819,7 @@ impl Editor {
                 if current
                     && let (Some(result), Some(p), Some(draft)) =
                         (topology, pick.as_ref(), self.feature_edit.as_mut())
+                    && draft.tab() == tab
                 {
                     match result {
                         Ok(_) if p.part != draft.part() => {

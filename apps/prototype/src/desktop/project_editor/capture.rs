@@ -1628,6 +1628,282 @@ mod tests {
         Ok(())
     }
 
+    /// Cliques Ctrl reais (sem o modificador Command) selecionam vários alvos;
+    /// Mover recebe todos, Esc não altera o documento e os corpos também alimentam
+    /// operações da aba Peça sem exigir nova seleção dentro do painel.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn selection_ctrl_move_and_feature_targets_follow_the_active_tab() -> Result<(), Box<dyn Error>>
+    {
+        use nator_kernel::Solid;
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Seleção e alvos")?)?;
+        let mut parts = Vec::new();
+        let mut bodies = Vec::new();
+        for index in 0..3 {
+            let mut solid =
+                Solid::cuboid(if index == 2 { [35., 0., 0.] } else { [0.; 3] }, [20.; 3])?;
+            let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+            let Effect::Imported { part, body } = session.execute(Command::ImportSolid {
+                destination: (index == 2).then(|| parts[0]),
+                name: format!("Bloco {index}"),
+                geometry: Arc::new(MeshAsset::with_faces(mesh, faces)?),
+                brep: Arc::new(solid.to_brep()?),
+                faces: solid.face_count()?,
+            })?
+            else {
+                return Err("Corpo não criado".into());
+            };
+            parts.push(part);
+            bodies.push(body);
+        }
+        let mut document = session.document().clone();
+        let instances = document
+            .instances()
+            .iter()
+            .map(|instance| instance.id)
+            .collect::<Vec<_>>();
+        for (index, instance) in instances.iter().enumerate() {
+            document.instance_mut(*instance)?.placement =
+                Placement::new([if index == 0 { -50. } else { 80. }, 0., 0.], [0.; 3])?;
+        }
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, document)
+            .map_err(|error| error.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        settle(&mut editor, &context)?;
+        let select = label_position(&mut editor, &context, text(T::Select))?;
+        assert!(select.x < 100.);
+        click(&mut editor, &context, select)?;
+        assert!(editor.selection_active());
+        let position = |editor: &Editor, point| -> Result<egui::Pos2, Box<dyn Error>> {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or_else(|| "Ponto sem projeção".into())
+        };
+        let a = position(&editor, [-40., 10., 20.])?;
+        let b = position(&editor, [90., 10., 20.])?;
+        click(&mut editor, &context, a)?;
+        settle(&mut editor, &context)?;
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().selected.len(), 2);
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().selected.len(), 1);
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        settle(&mut editor, &context)?;
+        let open_move = |editor: &mut Editor| -> Result<(), Box<dyn Error>> {
+            let button = label_position(editor, &context, text(T::MoveMenu))?;
+            click(editor, &context, button)?;
+            let free = label_position(editor, &context, text(T::MoveFree))?;
+            click(editor, &context, free)
+        };
+        let revision = editor.current().session.revision();
+        open_move(&mut editor)?;
+        assert!(!editor.selection_active());
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        settle(&mut editor, &context)?;
+        assert!(editor.selection_active());
+        assert_eq!(editor.current().selected.len(), 2);
+        assert_eq!(editor.current().session.revision(), revision);
+        open_move(&mut editor)?;
+        editor.set_move_for_capture([0., 15., 0.], [0.; 3]);
+        frame(&mut editor, &context, Vec::new())?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        for instance in &instances {
+            assert!(
+                (editor
+                    .current()
+                    .session
+                    .document()
+                    .instance(*instance)
+                    .ok_or("Instância ausente")?
+                    .placement
+                    .translation_mm()[1]
+                    - 15.)
+                    .abs()
+                    < 1e-6
+            );
+        }
+        editor.current_mut().active_part = Some(parts[0]);
+        editor.current_mut().select(None);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.invalidate_scene();
+        settle(&mut editor, &context)?;
+        let select = label_position(&mut editor, &context, text(T::Select))?;
+        assert!(select.x < 100.);
+        let a = position(&editor, [-40., 25., 20.])?;
+        let b = position(&editor, [-5., 25., 20.])?;
+        click(&mut editor, &context, a)?;
+        settle(&mut editor, &context)?;
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().selected.len(), 2);
+        editor.open_feature_tool(feature_editor::Tool::Join);
+        let part = editor
+            .current()
+            .session
+            .document()
+            .part(parts[0])
+            .ok_or("Peça ausente")?;
+        let command = editor
+            .feature_edit
+            .as_ref()
+            .ok_or("Painel ausente")?
+            .preview_key(part);
+        assert!(
+            matches!(command, Command::AddFeature { operation: Operation::Boolean { base, tool, .. }, .. } if base == bodies[0] && tool == bodies[2])
+        );
+        editor.activate_selection(&context);
+        editor.pick_mode = navigation::PickMode::Edge;
+        editor.open_feature_tool(feature_editor::Tool::Fillet);
+        editor.prefill_selected_topology(&context);
+        settle(&mut editor, &context)?;
+        let draft = editor
+            .feature_edit
+            .as_ref()
+            .ok_or("Arredondamento ausente")?;
+        assert_eq!(draft.base(), Some(bodies[2]));
+        assert_eq!(draft.references().count(), 1);
+        editor.activate_selection(&context);
+        assert!(editor.selection_active());
+        Ok(())
+    }
+
+    /// A seleção do rascunho alimenta Cota e restrições, conserva Ctrl como
+    /// alternância e retorna à seta de seleção após Esc durante uma prévia.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_selection_ctrl_prefills_dimensions_and_constraints() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Seleção do rascunho")?;
+        let mut sketch = Sketch::new("Linhas", Plane::xy());
+        let first = sketch.add_line([-40., 0.], [-20., 0.], false)?;
+        let second = sketch.add_line([-40., 20.], [-10., 20.], false)?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, document)
+            .map_err(|error| error.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let select = label_position(&mut editor, &context, text(T::Select))?;
+        assert!(select.x < 100.);
+        click(&mut editor, &context, select)?;
+        let position = |editor: &Editor, point| -> Result<egui::Pos2, Box<dyn Error>> {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or_else(|| "Ponto sem projeção".into())
+        };
+        let a = position(&editor, [-30., 0., 0.])?;
+        let b = position(&editor, [-25., 20., 0.])?;
+        click(&mut editor, &context, a)?;
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        editor.select_sketch_tool(sketch_editor::Tool::Dimension);
+        assert_eq!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .ok_or("Editor ausente")?
+                .dimension_state()
+                .1,
+            1
+        );
+        editor.activate_selection(&context);
+        click_modified(&mut editor, &context, b, egui::Modifiers::CTRL)?;
+        editor.select_sketch_tool(sketch_editor::Tool::Dimension);
+        assert_eq!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .ok_or("Editor ausente")?
+                .dimension_state()
+                .1,
+            2
+        );
+        frame(&mut editor, &context, Vec::new())?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        assert!(editor.selection_active());
+        editor.open_sketch_action(&context, nator_sketch::edit::Action::Equal);
+        frame(&mut editor, &context, Vec::new())?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert!(sketch.constraints.iter().any(|constraint| matches!(constraint.kind, nator_sketch::ConstraintKind::EqualLength { a, b } if a == first && b == second)));
+        let line = label_position(&mut editor, &context, text(T::Line))?;
+        click(&mut editor, &context, line)?;
+        let start = position(&editor, [-35., -10., 0.])?;
+        click(&mut editor, &context, start)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        assert!(editor.selection_active());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            2
+        );
+        Ok(())
+    }
+
     /// Trocar de aba não deve deslocar o início do canvas. A comparação inclui
     /// a galeria de restrições e os menus do rascunho, em duas larguras de janela.
     #[test]
@@ -3324,6 +3600,9 @@ mod tests {
         );
         assert!(sketch.constraints.iter().any(|c| matches!(c.kind,ConstraintKind::LineAngle {line:l, reference:r,..} if l==line && r==reference)));
         frame(&mut editor, &context, vec![key(egui::Key::Escape)])?;
+        assert!(editor.selection_active());
+        let tool = label_position(&mut editor, &context, text(T::Line))?;
+        click(&mut editor, &context, tool)?;
         // Aproximar a outra linha termina exatamente a 90°, com incidência
         // sobre o alvo e uma restrição perpendicular publicada no histórico.
         let start = position(&editor, [35., -5.])?;
@@ -4641,6 +4920,8 @@ mod tests {
             Some(0)
         );
 
+        assert!(editor.selection_active());
+        frame(&mut editor, &context, vec![key(egui::Key::D, plain)])?;
         // Lugar primeiro: o clique ao lado fixa o texto e a cota passa a medir a vertical.
         let target = at(&editor, 6., 8.)?;
         click(&mut editor, &context, target)?;
@@ -4826,6 +5107,44 @@ mod tests {
         }
         Ok(())
     }
+    fn click_modified(
+        editor: &mut Editor,
+        context: &egui::Context,
+        position: egui::Pos2,
+        modifiers: egui::Modifiers,
+    ) -> Result<(), Box<dyn Error>> {
+        for pressed in [true, false] {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 820.),
+                    )),
+                    events: vec![
+                        egui::Event::ModifiersChanged(modifiers),
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers,
+                        },
+                    ],
+                    time: Some(context.input(|input| input.time) + 1. / 60.),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            output.textures_delta.clear();
+        }
+        frame(
+            editor,
+            context,
+            vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+        )?;
+        Ok(())
+    }
+
     fn settle(editor: &mut Editor, context: &egui::Context) -> Result<(), Box<dyn Error>> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while editor.busy() || editor.rendered != Some(editor.scene_key()) {

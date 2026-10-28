@@ -86,6 +86,14 @@ impl Tab {
 }
 
 impl Editor {
+    pub(super) fn cancel_section_tool(&mut self) {
+        if let Some(draft) = self.section_edit.take()
+            && let Some(tab) = self.find_tab(draft.tab)
+        {
+            tab.section = draft.previous;
+        }
+    }
+
     pub(super) fn open_section(&mut self) {
         let tab = self.current().id;
         let previous = self.current().section;

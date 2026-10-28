@@ -1157,6 +1157,39 @@ impl Editor {
                 d.combine_target = suggestion;
                 d.auto_preferred = suggestion;
             }
+            Tool::Fillet | Tool::Chamfer | Tool::Shell => {
+                d.base = suggestion;
+            }
+            Tool::Join | Tool::Cut | Tool::Intersect => {
+                let bodies = self
+                    .current()
+                    .selected
+                    .iter()
+                    .filter_map(|selection| match selection {
+                        Selection::Body { part: owner, id }
+                            if *owner == part
+                                && self
+                                    .current()
+                                    .session
+                                    .document()
+                                    .body(*id)
+                                    .is_some_and(|body| body.brep.is_some()) =>
+                        {
+                            Some(*id)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                d.base = bodies.first().copied().or(suggestion);
+                d.tool_body = bodies.get(1).copied();
+                d.field = if d.base.is_none() {
+                    Some(Field::Base)
+                } else if d.tool_body.is_none() {
+                    Some(Field::ToolBody)
+                } else {
+                    None
+                };
+            }
             Tool::Hole
             | Tool::LinearPattern
             | Tool::CircularPattern
@@ -1165,13 +1198,30 @@ impl Editor {
                 d.base = suggestion;
                 d.field = suggestion.is_none().then_some(Field::Base);
             }
-            _ => {}
+        }
+        if tool == Tool::Shell
+            && self.pick_mode == navigation::PickMode::Face
+            && let Some(pick) = self.current().picked.as_ref().filter(|pick| {
+                pick.part == part
+                    && self.current().is_selected(Selection::Body {
+                        part,
+                        id: pick.body,
+                    })
+            })
+            && let Ok(face) = self.current().session.document().face_at(pick)
+        {
+            d.apply_pick(pick.body, Kept::Face(face));
         }
         // Concluir o rascunho aberto mantém o perfil visível para a seleção.
         if tool == Tool::Extrude
             && self.current().sketch_edit.is_none()
             && self.pick_mode == navigation::PickMode::Face
-            && let Some(pick) = self.current().picked.as_ref().filter(|p| p.part == part)
+            && let Some(pick) = self.current().picked.as_ref().filter(|p| {
+                p.part == part
+                    && self
+                        .current()
+                        .is_selected(Selection::Body { part, id: p.body })
+            })
             && let Ok(face) = self.current().session.document().face_at(pick)
         {
             d.apply_pick(pick.body, Kept::Face(face));
@@ -1181,6 +1231,42 @@ impl Editor {
         }
         self.feature_edit = Some(d);
     }
+    /// Converter a aresta percorre a tesselação: a sugestão da seleção atual usa
+    /// o mesmo trabalhador dos cliques, sem bloquear a interface na abertura.
+    pub(super) fn prefill_selected_topology(&mut self, context: &egui::Context) {
+        let Some(draft) = self.feature_edit.as_ref() else {
+            return;
+        };
+        if draft.awaiting() != Some(Awaiting::Edge) || self.pick_mode != navigation::PickMode::Edge
+        {
+            return;
+        }
+        let Some(pick) = self
+            .selected_pick()
+            .filter(|pick| pick.part == draft.part())
+            .cloned()
+        else {
+            return;
+        };
+        let tab = self.current().id;
+        let revision = self.current().session.revision();
+        let document = self.current().session.document().clone();
+        self.start(context, None, move || {
+            let topology = document
+                .edge_at(&pick)
+                .map(Kept::Edge)
+                .map_err(|error| error.to_string());
+            Ok(Outcome::Picked {
+                tab,
+                revision,
+                pick: Some(pick),
+                mode: navigation::PickMode::Edge,
+                additive: false,
+                topology: Some(topology),
+            })
+        });
+    }
+
     pub(super) fn feature_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.feature_edit.take() else {
             return;
@@ -1285,6 +1371,12 @@ impl Editor {
             self.preview_command(tab, None, None, None);
         }
         self.feature_edit = Some(d);
+    }
+
+    pub(super) fn cancel_feature_tool(&mut self) {
+        if let Some(draft) = self.feature_edit.take() {
+            self.close_feature_panel(&draft);
+        }
     }
 
     /// Fecha o painel; uma correção pendente volta a oferecer as opções de resolução.
