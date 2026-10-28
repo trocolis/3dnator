@@ -263,6 +263,25 @@ impl Action {
             Self::Save => Some("Ctrl+S"),
             Self::Undo => Some("Ctrl+Z"),
             Self::Redo => Some("Ctrl+Shift+Z"),
+            Self::SketchTool(tool) => Some(match tool {
+                sketch_editor::Tool::Select => "Esc",
+                sketch_editor::Tool::Line => "L",
+                sketch_editor::Tool::Rectangle => "R",
+                sketch_editor::Tool::Circle => "C",
+                sketch_editor::Tool::Arc => "A",
+                sketch_editor::Tool::Project => "P",
+                sketch_editor::Tool::Trim => "G",
+                sketch_editor::Tool::Dimension => "D",
+            }),
+            Self::SketchEdit(action) => match action {
+                SketchEdit::Offset => Some("S"),
+                SketchEdit::Fillet => Some("O"),
+                SketchEdit::Chamfer => Some("H"),
+                SketchEdit::Mirror => Some("E"),
+                SketchEdit::Move => Some("M"),
+                SketchEdit::Delete => Some("Del"),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -363,17 +382,8 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::SketchEdit(SketchEdit::Chamfer),
     Action::SketchEdit(SketchEdit::Extend),
     Action::SketchEdit(SketchEdit::Mirror),
-    Action::SketchEdit(SketchEdit::CircularPattern),
-    Action::SketchEdit(SketchEdit::RectangularPattern),
+    Action::SketchEdit(SketchEdit::Move),
     Action::SketchTool(sketch_editor::Tool::Dimension),
-    Action::SketchEdit(SketchEdit::HorizontalVertical),
-    Action::SketchEdit(SketchEdit::Coincident),
-    Action::SketchEdit(SketchEdit::Tangent),
-    Action::SketchEdit(SketchEdit::Equal),
-    Action::SketchEdit(SketchEdit::Parallel),
-    Action::SketchEdit(SketchEdit::Perpendicular),
-    Action::SketchEdit(SketchEdit::Construction),
-    Action::SketchEdit(SketchEdit::FixPoint),
     Action::SketchEdit(SketchEdit::Delete),
     Action::FinishSketch,
     Action::CancelSketch,
@@ -607,6 +617,10 @@ impl Editor {
                     self.current_mut().session.redo()
                 };
                 if changed {
+                    if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                        work.pending = None;
+                    }
+                    self.sanitize_sketch_selection();
                     self.current_mut().changed();
                     self.invalidate_scene();
                 }
@@ -1092,6 +1106,8 @@ impl Editor {
         );
     }
 
+    // Galeria preservada para futura reativação; oculta conforme AJUSTE.md.
+    #[allow(dead_code)]
     fn sketch_constraints(&mut self, ui: &mut egui::Ui) {
         const GALLERY: [SketchEdit; 6] = [
             SketchEdit::HorizontalVertical,
@@ -1445,6 +1461,10 @@ impl Editor {
                         Action::SketchTool(sketch_editor::Tool::Trim),
                         Action::SketchEdit(SketchEdit::Offset),
                         Action::SketchEdit(SketchEdit::Fillet),
+                        Action::SketchEdit(SketchEdit::Chamfer),
+                        Action::SketchEdit(SketchEdit::Mirror),
+                        Action::SketchEdit(SketchEdit::Move),
+                        Action::SketchTool(sketch_editor::Tool::Dimension),
                     ],
                     &[
                         Action::SketchTool(sketch_editor::Tool::Trim),
@@ -1452,16 +1472,12 @@ impl Editor {
                         Action::SketchEdit(SketchEdit::Fillet),
                         Action::SketchEdit(SketchEdit::Chamfer),
                         Action::SketchEdit(SketchEdit::Extend),
+                        Action::SketchEdit(SketchEdit::Mirror),
+                        Action::SketchEdit(SketchEdit::Move),
+                        Action::SketchTool(sketch_editor::Tool::Dimension),
                         Action::SketchEdit(SketchEdit::Delete),
                     ],
                 );
-                let patterns = [
-                    Action::SketchEdit(SketchEdit::Mirror),
-                    Action::SketchEdit(SketchEdit::CircularPattern),
-                    Action::SketchEdit(SketchEdit::RectangularPattern),
-                ];
-                self.sketch_section(ui, T::SketchPatternGroup, &patterns, &patterns);
-                self.sketch_constraints(ui);
                 let exit = [Action::FinishSketch, Action::CancelSketch];
                 self.sketch_section(ui, T::SketchExitGroup, &exit, &exit);
             }

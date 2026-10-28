@@ -9,6 +9,25 @@ pub(crate) struct Existing {
     edit: Option<(u64, Draft)>,
 }
 impl Existing {
+    pub(crate) fn retain(&mut self, sketch: &Sketch) {
+        self.selected = self
+            .selected
+            .filter(|id| sketch.constraints.iter().any(|c| c.id == *id));
+        if self
+            .drag
+            .as_ref()
+            .is_some_and(|d| !sketch.constraints.iter().any(|c| c.id == d.id))
+        {
+            self.drag = None;
+        }
+        if self
+            .edit
+            .as_ref()
+            .is_some_and(|(id, _)| !sketch.constraints.iter().any(|c| c.id == *id))
+        {
+            self.edit = None;
+        }
+    }
     pub(crate) fn selected(&self) -> Option<u64> {
         self.selected
     }

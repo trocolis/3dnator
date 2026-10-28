@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Refinamento das ferramentas de rascunho
+
+- Mover no rascunho por deslocamento X/Y ou dois pontos, com resolução obrigatória da posição solicitada e erro quando as restrições impedem o movimento. Duplo clique seleciona os elementos ligados por apoios e relações dirigentes; Del exclui a seleção e desfazer limpa alvos que deixaram de existir.
+- Modificar reúne Aparar, Deslocamento, Arredondar, Chanfrar, Espelhar, Mover e Dimencionar. Padrão e Restringir ficam temporariamente ocultos, inclusive na busca, preservando as restrições dos projetos existentes.
+- Deslocamento de cadeias e contornos completos de linhas/arcos, com encontro dos apoios deslocados nos cantos. Escolha da distância pelo mouse, campo flutuante editável e confirmação dos dois lados no modo Dupla. Espelhar, Deslocamento, Arredondar e Chanfrar apresentam prévias translúcidas calculadas em segundo plano; cancelar não modifica o documento.
+- Traço Construção passa a se chamar Referência. X alterna Normal/Referência nas entidades selecionadas ou nas próximas entidades da ferramenta. Atalhos locais do rascunho: L/R/C/A/P/G/S/O/H/E/M/D; S continua abrindo a busca fora desse contexto.
+- Símbolo de centro de círculo somente com vínculo ao centro; extensões de cotas partem do vértice mais próximo do texto, sem percorrer toda a linha de referência. Os 16 novos itens do AJUSTE.md foram concluídos. Aplicativo 0.3.0 em desenvolvimento e formato interno 25 preservados.
+
 ### Operações de rascunho e dimensionamento por conexões
 
 - Cotas existentes são selecionadas pelo texto, arrastadas para reposicionar e editadas por duplo clique. Enter aplica a expressão e Esc cancela. A edição conserva ID, posição do texto e ordem dos elementos; arrastar modifica somente a apresentação e cria uma ação de desfazer ao soltar. Cotas de referência continuam medindo a geometria, com a opção de referência disponível no painel.

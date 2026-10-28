@@ -566,6 +566,21 @@ fn rotate(v: Point2, angle: f64) -> Point2 {
     [v[0] * cos - v[1] * sin, v[0] * sin + v[1] * cos]
 }
 
+/// Uma reta infinita não tem vértice: usa o apoio junto ao texto. Segmentos
+/// finitos usam seu extremo mais próximo, nunca o início arbitrário do índice.
+fn extension_support(sketch: &Sketch, line: u64, text: Point2) -> Option<Point2> {
+    let entity = sketch.entity(line).ok()?;
+    if entity.infinite {
+        return nator_sketch::lines::closest(sketch, entity, text).ok();
+    }
+    let (a, b) = sketch.line(line).ok()?;
+    Some(if distance(a, text) <= distance(b, text) {
+        a
+    } else {
+        b
+    })
+}
+
 fn angular(at: Point2, u: Point2, sweep: f64, text: Option<Point2>, gap: f64) -> Layout {
     let radius = text
         .map(|t| distance(t, at))
@@ -628,11 +643,27 @@ fn layout(
                 unit(sub(f, p)).or_else(|| line_direction(sketch, line).map(|d| [-d[1], d[0]]))?;
             let anchor = scale(add(p, f), 0.5);
             let normal = [-direction[1], direction[0]];
+            let text = place(anchor).unwrap_or_else(|| add(anchor, scale(normal, gap)));
+            let (a, b) = sketch.line(line).ok()?;
+            let original_point = point;
+            let mut point = p;
+            // Entre paralelas, o extremo salvo na restrição não precisa ser o
+            // apoio visual. Usar o vértice mais próximo evita extensões enormes.
+            for entity in &sketch.entities {
+                if entity.id != line
+                    && entity.point_ids().contains(&original_point)
+                    && let Ok((c, d)) = sketch.line(entity.id)
+                    && cross(sub(b, a), sub(d, c)).abs() < 1e-7 * distance(a, b) * distance(c, d)
+                {
+                    point = extension_support(sketch, entity.id, text)?;
+                    break;
+                }
+            }
             linear(
-                p,
-                f,
+                point,
+                extension_support(sketch, line, text)?,
                 direction,
-                place(anchor).unwrap_or_else(|| add(anchor, scale(normal, gap))),
+                text,
             )
         }
         ConstraintKind::LineCircleDistance { line, circle, .. } => {
@@ -642,11 +673,12 @@ fn layout(
             let direction = unit(sub(edge, f)).or_else(|| unit(sub(f, center)))?;
             let anchor = scale(add(f, edge), 0.5);
             let normal = [-direction[1], direction[0]];
+            let text = place(anchor).unwrap_or_else(|| add(anchor, scale(normal, gap)));
             linear(
-                f,
+                extension_support(sketch, line, text)?,
                 edge,
                 direction,
-                place(anchor).unwrap_or_else(|| add(anchor, scale(normal, gap))),
+                text,
             )
         }
         ConstraintKind::Radius { circle, .. } | ConstraintKind::Diameter { circle, .. } => {
@@ -1086,6 +1118,34 @@ mod tests {
     use super::*;
     use nator_sketch::Plane;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[test]
+    fn parallel_dimension_extensions_start_at_the_nearest_vertices() -> TestResult {
+        let mut sketch = Sketch::new("Extensões curtas", Plane::xy());
+        let first = sketch.add_line([0., 0.], [0., 1000.], false)?;
+        let second = sketch.add_line([10., 0.], [10., 1000.], false)?;
+        let point = sketch.entity(second)?.point_ids()[0];
+        let kind = ConstraintKind::PointLineDistance {
+            point,
+            line: first,
+            value: 10.,
+        };
+        let layout = layout(&sketch, &kind, Some([15., 999.]), 2.).ok_or("Cota sem desenho")?;
+        assert_eq!(layout.segments[0][0], [10., 1000.]);
+        assert_eq!(layout.segments[1][0], [0., 1000.]);
+        assert!(
+            layout.segments[..2]
+                .iter()
+                .all(|[a, b]| distance(*a, *b) < 2.)
+        );
+        if let Some(entity) = sketch.entities.iter_mut().find(|e| e.id == first) {
+            entity.construction = true;
+            entity.infinite = true;
+        }
+        let infinite =
+            self::layout(&sketch, &kind, Some([15., 999.]), 2.).ok_or("Cota sem desenho")?;
+        assert_eq!(infinite.segments[1][0], [0., 999.]);
+        Ok(())
+    }
 
     fn endpoints(sketch: &Sketch, line: u64) -> Result<(u64, u64), Box<dyn std::error::Error>> {
         match sketch.entity(line)?.curve {

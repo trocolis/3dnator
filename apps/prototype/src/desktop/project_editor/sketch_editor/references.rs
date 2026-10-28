@@ -80,6 +80,17 @@ impl Cache {
                                 nator_sketch::junctions::all(&sketch, &points.vertices)?;
                             let mut indicators = nator_sketch::indicators::markers(&sketch)?;
                             for center in &points.centers {
+                                let hidden_circle = sketch.entities.iter().any(|e| {
+                                    matches!(e.curve, Curve::Circle { .. })
+                                        && sketch.radial(e.id).is_ok_and(|(c, _)| {
+                                            nator_sketch::distance(c, *center) < 1e-6
+                                        })
+                                        && nator_sketch::connected::center_is_linked(&sketch, e.id)
+                                            .is_ok_and(|linked| !linked)
+                                });
+                                if hidden_circle {
+                                    continue;
+                                }
                                 if !indicators.iter().any(|i| {
                                     i.kind == nator_sketch::indicators::Kind::Center
                                         && nator_sketch::distance(i.point, *center) < 1e-6

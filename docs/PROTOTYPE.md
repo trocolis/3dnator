@@ -8,9 +8,25 @@ Na aba Rascunho, **Dimencionar** (D) substitui o nome Cota. Ao cotar dois elemen
 
 Com Selecionar ou Dimencionar sem escolhas pendentes, clique no texto de uma cota existente para selecioná-la. Arraste o texto para reposicioná-lo, soltando para confirmar; a geometria e o valor são preservados. Duplo clique abre o valor, com expressões, unidades e parâmetros; Enter aplica e Esc cancela. Editar mantém o ID da cota. Cotas de referência somente medem a geometria; sua opção de referência pode ser alterada pelo painel de cotas.
 
-**Espelhar** tem dois campos: **Entidades**, com seleção múltipla por cliques, e **Eixo de espelhamento**, com uma linha separada. Clique no campo para direcionar as próximas escolhas. O seletor **Traço** define Normal, Construção ou Infinita nas cópias; Infinita exige somente linhas. As cópias conservam os cantos compartilhados e coincidências internas, sem vínculo com os originais.
+**Espelhar** tem dois campos: **Entidades**, com seleção múltipla por cliques, e **Eixo de espelhamento**, com uma linha separada. Clique no campo para direcionar as próximas escolhas. O seletor **Traço** define Normal, Referência ou Infinita nas cópias; Infinita exige somente linhas. As cópias conservam os cantos compartilhados e coincidências internas, sem vínculo com os originais.
 
-**Deslocamento** oferece Normal, Dupla e Simétrica, além do mesmo seletor de traço. Normal aceita distância assinada; Dupla recebe uma distância positiva para cada lado; Simétrica aplica a distância informada igualmente em cada lado. Para linhas, o lado positivo é a esquerda do sentido início→fim; para círculos e arcos, aumenta o raio. Se algum lado produzir um raio inválido, nada é criado. OK publica toda a cópia em uma ação de desfazer; Cancelar não altera o documento.
+**Deslocamento** oferece Normal, Dupla e Simétrica, além do mesmo seletor de traço. Normal aceita distância assinada; Dupla recebe uma distância positiva para cada lado; Simétrica aplica a distância informada igualmente em cada lado. A opção Contorno conectado escolhe a cadeia inteira de linhas/arcos, parando em ramificações; desative-a para copiar somente uma aresta. Nos caminhos, o lado positivo é a esquerda da orientação ordenada; nos círculos/arcos isolados, aumenta o raio. Os cantos da cópia são unidos nos encontros dos suportes deslocados. Se algum lado produzir um raio inválido, nada é criado. OK publica toda a cópia em uma ação de desfazer; Cancelar não altera o documento.
+
+Ao escolher Deslocamento, mova o mouse para definir a distância e clique ou use Enter para confirmar. O valor acompanha o cursor num campo flutuante: digitar trava a distância; Tab libera novamente o controle pelo mouse. No modo Dupla, confirme primeiro um lado e depois o outro; ambos entram juntos no histórico. Espelhar, Deslocamento, Arredondar e Chanfrar mostram linhas translúcidas antes da confirmação.
+
+**Mover**, em Modificar, recebe vários elementos e deslocamento X/Y em milímetros. Também é possível escolher origem e destino no desenho. Restrições existentes continuam valendo: um movimento incompatível é recusado. Duplo clique em uma entidade seleciona os elementos ligados por apoios compartilhados e restrições dirigentes; ligações fracas e cruzamentos virtuais não ampliam a seleção. Del exclui os elementos selecionados ou a cota selecionada. X alterna Normal/Referência na seleção ou no traço da ferramenta ativa.
+
+Modificar reúne Aparar, Deslocamento, Arredondar, Chanfrar, Espelhar, Mover e Dimencionar. Padrão e Restringir ficam temporariamente ocultos. As restrições dos projetos continuam sendo respeitadas e podem ser inspecionadas em Selecionar. Os atalhos só atuam no contexto do rascunho e fora da edição de texto:
+
+| Tecla | Ferramenta |
+| --- | --- |
+| L / R / C / A | Linha / Retângulo / Círculo / Arco |
+| P / G / S | Projetar / Aparar (apagar trecho) / Deslocamento |
+| O / H / E | Arredondar / Chanfrar / Espelhar |
+| M / D | Mover / Dimencionar |
+| X / Del | Alternar Normal/Referência / Excluir seleção |
+
+Fora do rascunho, S continua abrindo a busca. O símbolo de centro do círculo exige um vínculo efetivo ao centro; raio e tangência à borda, isoladamente, não o exibem. As linhas auxiliares das cotas usam o vértice mais próximo do texto para evitar extensões longas.
 
 Ícones pequenos junto à geometria indicam perpendicularidade, tangência, ponto médio e centro, incluindo as capturas/prévias correspondentes. Passe o mouse sobre o símbolo para ver seu significado. Os indicadores não modificam as restrições e ficam separados dos cadeados das junções.
 

@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Refinamento de rascunho: 16 novos itens do AJUSTE.md — 28/10/2026
+
+- **311 testes com OCCT e 242 sem OCCT aprovados**. Regressões cobrem seleção por ligações fortes/cotas, exclusão de ligações fracas e cruzamentos virtuais, centro vinculado, movimento obrigatório e conflito com fixação, deslocamento fechado com cantos compartilhados, caminho misto linha/arco e rejeição atômica de colapso. Extensões de cotas escolhem o apoio mais próximo, inclusive em retas infinitas; respostas antigas da prévia não são reutilizadas.
+- **31 ensaios gráficos aprovados**, usando eventos reais e execução serial (`--test-threads=1`) para o contexto gráfico GL. Os quatro novos verificam todos os atalhos locais, S fora do rascunho, duplo clique, X, Del, limpeza da seleção após desfazer, movimento por dois pontos, deslocamento do contorno pelo mouse com campo flutuante, confirmação dos dois lados numa única revisão e Esc sem edição. Verificada a presença da cor translúcida nas prévias de Espelhar, Arredondar e Chanfrar, sem alteração prematura do documento.
+- Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Logs e capturas GL/llvmpipe em `target/codex-validation/sketch-refinement-20261028/`; `final-offset-preview.png` e `final-fillet-preview.png` inspecionadas para contorno, transparência, campo flutuante, faixa e traço Referência.
+- Checklist atualizado. Aplicativo 0.3.0 em desenvolvimento e formato interno 25 preservados. Windows e janela nativa não exercitados localmente; sem release ou publicação remota.
+
 ## Pendências do AJUSTE.md: cotas, Espelhar, Deslocamento e indicadores — 28/10/2026
 
 - **304 testes com OCCT e 235 sem OCCT aprovados**, incluindo conexões fortes versus fracas, desempate pelo segundo elemento, validação dos alvos gravados, cópias múltiplas com cantos compartilhados, traços, distâncias independentes dos dois lados, deslocamento de arcos e falha atômica quando o segundo raio é inválido. Verificados a identidade/posição/ordem das cotas no salvamento/reabertura e o histórico das operações compostas.

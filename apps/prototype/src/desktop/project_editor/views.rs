@@ -87,6 +87,44 @@ impl Editor {
             self.activate_selection(context);
             return;
         }
+        if self.current().sketch_edit.is_some() {
+            use nator_sketch::edit::Action as Edit;
+            use sketch_editor::Tool;
+            if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
+                self.delete_sketch_selection(context);
+                return;
+            }
+            if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::X)) {
+                self.toggle_sketch_stroke(context);
+                return;
+            }
+            for (key, tool) in [
+                (egui::Key::L, Tool::Line),
+                (egui::Key::R, Tool::Rectangle),
+                (egui::Key::C, Tool::Circle),
+                (egui::Key::A, Tool::Arc),
+                (egui::Key::P, Tool::Project),
+                (egui::Key::G, Tool::Trim),
+                (egui::Key::D, Tool::Dimension),
+            ] {
+                if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
+                    self.select_sketch_tool(tool);
+                    return;
+                }
+            }
+            for (key, action) in [
+                (egui::Key::S, Edit::Offset),
+                (egui::Key::O, Edit::Fillet),
+                (egui::Key::H, Edit::Chamfer),
+                (egui::Key::E, Edit::Mirror),
+                (egui::Key::M, Edit::Move),
+            ] {
+                if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
+                    self.open_sketch_action(context, action);
+                    return;
+                }
+            }
+        }
         if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
             self.shell.search_open = true;
             self.shell.search_focus = true;
@@ -123,6 +161,10 @@ impl Editor {
             false
         };
         if changed {
+            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+                work.pending = None;
+            }
+            self.sanitize_sketch_selection();
             self.current_mut().changed();
             self.invalidate_scene();
         }

@@ -62,6 +62,7 @@ pub(super) enum Icon {
     Trim,
     SketchOffset,
     SketchFillet,
+    SketchChamfer,
     SketchMirror,
     CircularPattern,
     RectangularPattern,
@@ -640,6 +641,10 @@ fn paint_styled(
             p.line(&[[3., 19.], [3., 8.], [8., 3.], [20., 3.]], p.ink);
             p.line(&[[8., 21.], [8., 11.], [11., 8.], [22., 8.]], p.accent);
             p.arrow([13., 16.], [20., 16.]);
+        }
+        Icon::SketchChamfer => {
+            p.line(&[[4., 3.], [4., 14.], [10., 20.], [21., 20.]], p.ink);
+            p.line(&[[4., 14.], [10., 20.]], p.accent);
         }
         Icon::SketchFillet => {
             p.line(

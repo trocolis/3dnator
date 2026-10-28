@@ -24,6 +24,17 @@ pub enum Text {
     SketchOffsetDouble,
     SketchOffsetSecond,
     SketchOffsetPerSide,
+    SketchChamfer,
+    SketchMoveX,
+    SketchMoveY,
+    SketchPickOrigin,
+    SketchWholeChain,
+    SketchOffsetMouseHint,
+    SketchMoveValueHint,
+    SketchPreviewPreparing,
+    SketchMoveBlocked,
+    SketchOffsetSelectHint,
+    SketchMoveSelectHint,
     SketchCenterIndicator,
     SketchProject,
     JunctionStrong,
@@ -426,7 +437,6 @@ pub enum Text {
     SketchRelativeAngleHint,
     SketchAngleValue,
     SketchHorizontalAngleHint,
-    SketchPatternGroup,
     ConstrainGroup,
     SketchExitGroup,
     SketchDimension,
@@ -873,7 +883,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchHorizontalAngleHint => {
             "Ângulo em relação ao eixo horizontal do rascunho; positivo no sentido anti-horário."
         }
-        Text::SketchPatternGroup => "Padrão",
         Text::ConstrainGroup => "Restringir",
         Text::SketchExitGroup => "Sair",
         Text::SketchProject => "Projetar",
@@ -894,6 +903,25 @@ pub fn text(key: Text) -> &'static str {
             "Captura a geometria no plano do rascunho. As referências ficam fixas na posição projetada."
         }
         Text::SketchDimension => "Dimencionar",
+        Text::SketchChamfer => "Chanfrar",
+        Text::SketchOffsetSelectHint => "Selecione uma aresta ou um contorno conectado.",
+        Text::SketchMoveSelectHint => {
+            "Selecione os elementos; informe X/Y ou escolha origem e destino no desenho."
+        }
+        Text::SketchMoveBlocked => {
+            "As restrições existentes impedem esse movimento. Libere o apoio correspondente e tente novamente."
+        }
+        Text::SketchPreviewPreparing => "Preparando prévia…",
+        Text::SketchMoveValueHint => {
+            "Informe um deslocamento X/Y ou escolha a origem e o destino na área de desenho."
+        }
+        Text::SketchMoveX => "Deslocamento X",
+        Text::SketchMoveY => "Deslocamento Y",
+        Text::SketchPickOrigin => "Escolher origem",
+        Text::SketchWholeChain => "Contorno conectado",
+        Text::SketchOffsetMouseHint => {
+            "Mouse: distância · Tab: liberar medida · Enter/clique: confirmar · Esc: cancelar"
+        }
         Text::SketchCenterIndicator => "Centro",
         Text::SketchMirrorAxis => "Eixo de espelhamento",
         Text::SketchMirrorAxisHint => "Escolha a linha no campo Eixo de espelhamento.",
@@ -946,7 +974,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Entity => "Entidade",
         Text::ApplyDimension => "Aplicar cota",
         Text::FixPoint => "Fixar primeiro ponto / centro",
-        Text::ConstructionGeometry => "Alternar geometria de construção",
+        Text::ConstructionGeometry => "Alternar traço Normal/Referência",
         Text::Offset => "Criar deslocamento",
         Text::DeleteEntity => "Excluir entidades selecionadas",
         Text::Parallel => "Paralelas",
@@ -1179,7 +1207,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Saved => "Projeto salvo",
         Text::Imported => "Corpo importado",
         Text::Assembly => "Montagem",
-        Text::Construction => "Construção",
+        Text::Construction => "Referência",
         Text::EditPart => "Construir nesta peça",
         Text::LeavePart => "Voltar à montagem",
         Text::Rename => "Renomear",

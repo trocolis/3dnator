@@ -6,9 +6,10 @@ use nator_sketch::edit::{self, Action, Options};
 
 pub(in crate::desktop::project_editor) fn edit_label(action: Action) -> T {
     match action {
+        Action::Move => T::MoveMenu,
         Action::Offset => T::OffsetField,
         Action::Fillet => T::FilletShort,
-        Action::Chamfer => T::Chamfer,
+        Action::Chamfer => T::SketchChamfer,
         Action::Extend => T::SketchExtendShort,
         Action::Mirror => T::MirrorShort,
         Action::CircularPattern => T::CircularPattern,
@@ -27,9 +28,10 @@ pub(in crate::desktop::project_editor) fn edit_label(action: Action) -> T {
 }
 pub(in crate::desktop::project_editor) fn edit_icon(action: Action) -> Icon {
     match action {
+        Action::Move => Icon::Move,
         Action::Offset => Icon::SketchOffset,
         Action::Fillet => Icon::SketchFillet,
-        Action::Chamfer => Icon::Chamfer,
+        Action::Chamfer => Icon::SketchChamfer,
         Action::Extend => Icon::Line,
         Action::Mirror => Icon::SketchMirror,
         Action::CircularPattern => Icon::CircularPattern,
@@ -48,6 +50,8 @@ pub(in crate::desktop::project_editor) fn edit_icon(action: Action) -> Icon {
 }
 fn hint(action: Action) -> T {
     match action {
+        Action::Offset => T::SketchOffsetSelectHint,
+        Action::Move => T::SketchMoveSelectHint,
         Action::Mirror => T::SketchMirrorSelectionHint,
         Action::CircularPattern => T::SketchCircularSelectionHint,
         Action::RectangularPattern => T::SketchRectangularSelectionHint,
@@ -160,12 +164,26 @@ impl Editor {
         context: &egui::Context,
         action: Action,
     ) {
+        self.sanitize_sketch_selection();
+        let source = self.working_sketch();
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
         };
         work.select_tool(Tool::Select);
         work.tool_panel_open = false;
         work.active_action = Some(action);
+        work.operation.selecting = work.selected.is_empty();
+        work.operation.focus = action == Action::Offset && !work.selected.is_empty();
+        if action == Action::Offset
+            && work.selected.len() == 1
+            && let Some(source) = &source
+        {
+            let seed = work.selected[0];
+            work.operation.seed = Some(seed);
+            if let Ok(chain) = nator_sketch::connected::chain(source, seed) {
+                work.selected = chain;
+            }
+        }
         // O Enter que ativou um botão por teclado não confirma o painel recém-aberto.
         context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
@@ -192,6 +210,7 @@ impl Editor {
             .map(|p| p.parameters.clone())
             .unwrap_or_default();
         let canvas = self.canvas_rect;
+        let scene = self.scene_key();
         let busy = self.busy();
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
@@ -222,14 +241,40 @@ impl Editor {
                     text(T::SketchEntities),
                     count,
                     None,
-                    !work.mirror_axis_active,
+                    if matches!(action, Action::Move | Action::Offset) {
+                        work.operation.selecting
+                    } else {
+                        !work.mirror_axis_active
+                    },
                 );
                 if selection.activate {
                     work.mirror_axis_active = false;
+                    if matches!(action, Action::Move | Action::Offset) {
+                        work.operation.selecting = true;
+                    }
                 }
                 if selection.clear {
                     work.selected.clear();
                     work.constraint = None;
+                    work.operation.selecting = true;
+                    work.operation.seed = None;
+                }
+                if action == Action::Move {
+                    for (label, value) in [
+                        (T::SketchMoveX, &mut work.operation.x),
+                        (T::SketchMoveY, &mut work.operation.y),
+                    ] {
+                        panel::row(ui, text(label), |ui| {
+                            if panel::expression(ui, value).changed() {
+                                work.operation.locked = true;
+                            }
+                        });
+                    }
+                    if ui.button(text(T::SketchPickOrigin)).clicked() {
+                        work.operation.selecting = false;
+                        work.operation.origin = None;
+                        work.operation.locked = false;
+                    }
                 }
                 if action == Action::Mirror {
                     let description = work.mirror_axis.map(|id| format!("{} {id}", text(T::Line)));
@@ -271,6 +316,19 @@ impl Editor {
                     });
                 }
                 if action == Action::Offset {
+                    ui.label(text(T::SketchOffsetMouseHint));
+                    if ui
+                        .checkbox(&mut work.operation.whole_chain, text(T::SketchWholeChain))
+                        .changed()
+                        && let Some(seed) = work.operation.seed
+                    {
+                        work.selected = if work.operation.whole_chain {
+                            nator_sketch::connected::chain(&source, seed)
+                                .unwrap_or_else(|_| vec![seed])
+                        } else {
+                            vec![seed]
+                        };
+                    }
                     use nator_sketch::modifications::OffsetMode;
                     ui.horizontal(|ui| {
                         for (mode, label) in [
@@ -299,14 +357,18 @@ impl Editor {
                             T::SketchValue
                         }),
                         |ui| {
-                            panel::expression(ui, &mut work.dimension_expression);
+                            if panel::expression(ui, &mut work.dimension_expression).changed() {
+                                work.operation.locked = true;
+                            }
                         },
                     );
                 }
                 if action == Action::Offset {
                     if work.offset_mode == nator_sketch::modifications::OffsetMode::Double {
                         panel::row(ui, text(T::SketchOffsetSecond), |ui| {
-                            panel::expression(ui, &mut work.offset_second_expression);
+                            if panel::expression(ui, &mut work.offset_second_expression).changed() {
+                                work.operation.locked = true;
+                            }
                         });
                     } else if work.offset_mode == nator_sketch::modifications::OffsetMode::Symmetric
                     {
@@ -321,7 +383,28 @@ impl Editor {
                 if action == Action::Dimension {
                     ui.checkbox(&mut work.reference, text(T::ReferenceDimension));
                 }
-                match candidate(&source, work, action, &parameters) {
+                let result = if operation_preview::supported(action) {
+                    match operation_preview::Request::from(work, action, &parameters) {
+                        Ok(request) => {
+                            if let Err(error) = work
+                                .operation
+                                .cache
+                                .prepare(&source, &request, scene, context)
+                            {
+                                ui.label(error);
+                            }
+                            work.operation
+                                .cache
+                                .result(&source, &request, scene)
+                                .cloned()
+                                .unwrap_or_else(|| Err(text(T::SketchPreviewPreparing).into()))
+                        }
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    candidate(&source, work, action, &parameters)
+                };
+                match result {
                     Ok(_) => true,
                     Err(message) => {
                         ui.label(egui::RichText::new(message).small().color(theme::DANGER));
@@ -333,7 +416,23 @@ impl Editor {
         if outcome.cancel {
             work.active_action = None;
         } else if outcome.ok {
-            let next = candidate(&source, work, action, &parameters);
+            let next = if operation_preview::supported(action) {
+                operation_preview::Request::from(work, action, &parameters).and_then(|request| {
+                    work.operation
+                        .cache
+                        .result(&source, &request, scene)
+                        .cloned()
+                        .unwrap_or_else(|| Err(text(T::SketchPreviewPreparing).into()))
+                })
+            } else {
+                candidate(&source, work, action, &parameters)
+            };
+            let move_points = if action == Action::Move {
+                nator_sketch::movement::points(&source, &work.selected).unwrap_or_default()
+            } else {
+                vec![]
+            };
+            let move_circles = work.selected.clone();
             let edited_dimension = (action == Action::Dimension)
                 .then_some(work.constraint)
                 .flatten();
@@ -342,7 +441,13 @@ impl Editor {
                 Ok(sketch) => {
                     work.selected.retain(|id| sketch.entity(*id).is_ok());
                     if let Some(id) = edited_dimension {
-                        self.solve_sketch_with(context, sketch, Some((id, false)));
+                        self.solve_sketch_with(context, sketch, SolveMode::Dimension(id, false));
+                    } else if action == Action::Move {
+                        self.solve_sketch_with(
+                            context,
+                            sketch,
+                            SolveMode::Move(move_points, move_circles),
+                        );
                     } else {
                         self.solve_sketch(context, sketch);
                     }
