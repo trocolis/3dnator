@@ -24,6 +24,27 @@ A seção **Medidas** edita as mesmas expressões exibidas junto ao cursor e ace
 
 Simetria das linhas, ortogonalidade dos retângulos, tangências dos círculos e medidas digitadas são mantidas por restrições no recálculo, com desfazer/refazer e salvamento. O centro escolhido para construir um retângulo e os extremos usados para construir o diâmetro definem a geometria inicial; esses gestos não criam restrições adicionais de simetria central ou de incidência dos extremos do diâmetro.
 
+### Cota
+
+**Cota** (grupo Restringir, ou **D** no rascunho) funciona como a Dimension do SolidCraft, sem painel: o ícone acompanha o cursor e o elemento sob ele fica realçado. Clique no que medir. Pontos (extremos, centros, pontos soltos) têm prioridade sobre as curvas próximas:
+
+| Escolhas | Cota |
+| --- | --- |
+| Uma linha | Comprimento; se a linha não estiver alinhada a um eixo, o lugar do texto escolhe a medida (veja abaixo) |
+| Um círculo completo / um arco | Diâmetro (Ø) / raio (R) |
+| Dois pontos | Distância, horizontal ou vertical, pelo lugar do texto |
+| Ponto e linha, em qualquer ordem | Distância do ponto à reta suporte |
+| Duas linhas | Ângulo do setor onde fica o texto; paralelas medem a distância entre elas |
+| Linha e círculo/arco, em qualquer ordem | Da reta até a borda, perpendicular à linha; se a linha corta o círculo, quanto a borda passa da reta |
+
+Assim que as escolhas determinam a cota, a caixa de valor recebe o teclado com a medida atual selecionada: digitar a substitui. Valem números, vírgula decimal, unidades (`1 in`), contas e parâmetros da peça; sem unidade, comprimentos usam mm e ângulos, graus. Enquanto se digita, o texto segue o cursor e a caixa fica ao lado dele. **Enter** posiciona o texto ali, ou no lugar padrão se o cursor não se moveu, e confirma em uma ação de desfazer; sem digitar, a medida exata entra sem arredondamento. **Esc** cancela escolhas e valor. A ferramenta continua ativa para a próxima cota.
+
+Antes de digitar, um clique no vazio fixa o texto ali e mantém a caixa com o teclado; um clique em outro ponto, linha ou círculo transforma a cota (por exemplo, de comprimento em ângulo). **Tab** devolve as escolhas: o próximo clique no vazio posiciona o texto. Entre dois pontos ou numa linha fora dos eixos, o texto de frente para eles mede a distância entre eles; acima ou abaixo, a horizontal; ao lado, a vertical. Pontos alinhados a um eixo sempre medem a distância.
+
+Uma cota que a geometria já fixada não comporta (os graus de liberdade não diminuem) entra como cota de referência: mede a geometria, aparece entre parênteses em cinza e não tem valor a editar. Valores inválidos (comprimento negativo, raio zero, ângulo fora de 0° a 180°) deixam a caixa vermelha e não confirmam.
+
+Todas as cotas do rascunho são desenhadas como cotas: linhas de extensão desde a geometria medida, linha de cota com setas e o valor; raios e diâmetros com R/Ø; ângulos como arco entre as linhas. O texto fica na posição escolhida, relativa à geometria, e a acompanha quando ela se move. A janela Selecionar continua listando as cotas para excluir ou editar o valor.
+
 Ferramentas de modificação, padrão e restrição abrem um painel com seleção, campos pertinentes e OK/Cancelar (Enter/Esc). Os cliques alternam entidades sem exigir Ctrl enquanto o painel está aberto. Espelhar recebe primeiro a entidade e depois uma linha como eixo; o padrão retangular recebe uma entidade e uma linha de direção, espaçamento e quantidade total; o circular recebe uma entidade, um círculo/arco como centro e quantidade total. O padrão retangular atual distribui em uma direção, e o circular cobre uma volta completa. Cotas aceitam expressões dos parâmetros da peça e podem ser de referência. Validação e cancelamento preservam o documento; confirmar resolve o rascunho em segundo plano e publica pelo comando de edição, com desfazer/refazer.
 
 Horizontal/vertical escolhe a orientação predominante da linha; Coincidente usa as pontas mais próximas (ou centros de círculos); Tangente usa uma linha e um arco com extremidade compartilhada. Esses são os recursos atuais do solver do 3dnator. A referência visual não implica paridade com todas as variantes de comandos do SolidCraft.

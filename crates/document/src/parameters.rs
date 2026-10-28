@@ -5,35 +5,23 @@ use std::collections::{BTreeMap, HashSet};
 type Result<T> = std::result::Result<T, DocumentError>;
 
 pub fn resolve_sketch(sketch: &mut nator_sketch::Sketch, parameters: &Parameters) -> Result<()> {
-    use nator_sketch::ConstraintKind;
     for (id, expression) in &sketch.dimension_expressions {
         let constraint = sketch
             .constraints
             .iter_mut()
             .find(|c| c.id == *id)
             .ok_or_else(|| DocumentError("Expressão sem cota correspondente.".into()))?;
-        let dimension = if matches!(
-            constraint.kind,
-            ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
-        ) {
+        let dimension = if constraint.kind.is_angular() {
             Dimension::Angle
         } else {
             Dimension::Length
         };
         let value = parameters.evaluate(expression, dimension)?;
-        match &mut constraint.kind {
-            ConstraintKind::Distance { value: target, .. }
-            | ConstraintKind::DeltaX { value: target, .. }
-            | ConstraintKind::DeltaY { value: target, .. }
-            | ConstraintKind::Angle { value: target, .. }
-            | ConstraintKind::LineAngle { value: target, .. }
-            | ConstraintKind::Radius { value: target, .. } => *target = value,
-            _ => {
-                return Err(DocumentError(
-                    "A expressão exige uma cota dimensional.".into(),
-                ));
-            }
-        }
+        *constraint
+            .kind
+            .dimension_value_mut()
+            .ok_or_else(|| DocumentError("A expressão exige uma cota dimensional.".into()))? =
+            value;
     }
     Ok(())
 }

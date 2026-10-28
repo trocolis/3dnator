@@ -243,6 +243,8 @@ mod tests {
                 line,
                 reference,
                 value: std::f64::consts::FRAC_PI_4,
+                flip_line: false,
+                flip_reference: false,
             },
             false,
         )?;

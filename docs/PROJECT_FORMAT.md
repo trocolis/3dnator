@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 21
+# Formato de projeto — versão interna 22
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 21; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 22; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -31,6 +31,8 @@ Desde a versão 19, `Tangent { line, arc, point }` também aceita um círculo co
 Os novos modos de construção são gravados como entidades e restrições comuns: duas linhas colineares de comprimentos iguais para a linha simétrica, quatro lados ortogonais para o retângulo e centro/raio para círculos. O modo e a cadeia de cliques são estado temporário da interface. Dimensões digitadas mantêm suas expressões; no círculo por dois pontos, a expressão de raio é metade do diâmetro informado.
 
 Desde a versão 18, entidades de rascunho aceitam `infinite` opcional, omitido quando `false`. Somente `Curve::Line` com `construction = true` pode usar `infinite = true`. Seus pontos `start`/`end` parametrizam posição e direção para o solver, sem limitar a reta nem fornecer capturas de extremos/ponto médio. Cópias rígidas e espelhamentos preservam o tipo; áreas/extrusões ignoram a entidade. Projetos anteriores mantêm segmentos finitos pelo valor padrão.
+
+Desde a versão 22, rascunhos aceitam as cotas `Diameter { circle, value }` (círculo ou arco), `PointLineDistance { point, line, value }` (distância sem sinal do ponto à reta suporte; o ponto não pode ser extremo da linha) e `LineCircleDistance { line, circle, value, crossing }` (da reta suporte à borda, perpendicular à linha; `crossing`, omitido quando falso, mede quanto a borda passa da reta). Valores em mm, com expressões de comprimento. `LineAngle` aceita `flip_line` e `flip_reference`, omitidos quando falsos: o lado oposto (fim→início) de cada linha, para que o valor seja exatamente o ângulo do setor cotado. `dimension_labels` opcional associa o identificador de uma cota à posição do texto, em mm no plano e relativa à âncora (ponto médio do que se mede, centro do círculo ou vértice do ângulo). Ausente, o texto fica no lugar padrão.
 
 A restrição `LineAngle { line, reference, value }` mede a direção de `line` em relação à direção de `reference`, em radianos e no sentido anti-horário. As duas entidades devem ser linhas distintas existentes. Expressões são avaliadas como ângulo, incluindo números em graus quando não há unidade explícita. A cota acompanha a referência no recálculo, e referências angulares atualizam seu valor medido. `Angle { a, b, value }` continua medindo uma direção em relação ao eixo X local.
 

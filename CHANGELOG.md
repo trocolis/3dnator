@@ -2,6 +2,14 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Cota no modelo da Dimension do SolidCraft
+
+- A Cota do rascunho deixa de ser um formulário: com a ferramenta ativa (botão ou **D**), clique no que medir. Uma linha mede o comprimento; um círculo, o diâmetro; um arco, o raio; dois pontos, a distância; ponto e linha, a distância à reta; duas linhas, o ângulo (ou a distância, se paralelas); linha e círculo, a folga até a borda. Pontos têm prioridade sobre as curvas próximas, e o elemento sob o cursor fica realçado.
+- Assim que a cota fica determinada, a caixa de valor recebe o teclado com a medida selecionada; digitar a substitui, com unidades, contas e parâmetros. O texto segue o cursor e Enter o posiciona e confirma em uma ação de desfazer; Esc cancela. Antes de digitar, um clique no vazio fixa o texto e um clique em outro elemento transforma a cota; Tab devolve as escolhas para um clique de posicionamento. A ferramenta continua ativa para a próxima cota.
+- Entre dois pontos ou numa linha inclinada, o lugar do texto escolhe a distância, a horizontal ou a vertical. Sem digitar, a medida exata é mantida. Uma cota que a geometria já fixada não comporta entra como referência, entre parênteses.
+- Todas as cotas são desenhadas como cotas: linhas de extensão, linha de cota com setas, valor, R/Ø nos raios e diâmetros e arco nos ângulos. O texto fica onde foi posicionado e acompanha a geometria.
+- Novas restrições de diâmetro, distância ponto–linha e linha–círculo no solver; o ângulo entre linhas guarda o lado de cada linha, valendo exatamente o setor cotado. Formato interno 22 grava esses tipos e a posição do texto das cotas (`dimension_labels`), lendo os projetos anteriores.
+
 ### Barra superior, faixa e escolha de plano
 
 - Barra de título com o nome 3Dnator (também no título da janela e no filtro de arquivos), Novo e Salvar logo após Arquivo e sem a busca. Ícones da barra escura com traço claro, destaque azul-claro, preenchimento escuro e realce de passagem escuro, legíveis inclusive ao passar o mouse.

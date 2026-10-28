@@ -232,10 +232,37 @@ pub enum ConstraintKind {
     },
     /// Ângulo orientado entre as direções das duas linhas, em radianos. Ao
     /// recalcular a linha de referência, a nova linha acompanha sua orientação.
+    /// `flip_*` usa o sentido fim→início da linha: a cota de ângulo escolhe os lados
+    /// do setor onde o texto fica, e o valor guardado é exatamente o ângulo desse setor.
     LineAngle {
         line: u64,
         reference: u64,
         value: f64,
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip_line: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip_reference: bool,
+    },
+    /// Diâmetro de um círculo ou do círculo de um arco, em mm.
+    Diameter {
+        circle: u64,
+        value: f64,
+    },
+    /// Distância, sem sinal, de um ponto à reta suporte de uma linha, em mm.
+    PointLineDistance {
+        point: u64,
+        line: u64,
+        value: f64,
+    },
+    /// Distância entre a reta suporte de uma linha e a borda de um círculo (ou do
+    /// círculo de um arco), perpendicular à linha. Com `crossing`, a linha corta o
+    /// círculo e a cota mede o quanto a borda passa da reta.
+    LineCircleDistance {
+        line: u64,
+        circle: u64,
+        value: f64,
+        #[serde(default, skip_serializing_if = "is_false")]
+        crossing: bool,
     },
     Parallel {
         a: u64,
@@ -262,6 +289,47 @@ pub enum ConstraintKind {
         b: u64,
     },
 }
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+impl ConstraintKind {
+    /// Valor de uma cota (mm ou radianos); `None` para restrições geométricas.
+    pub fn dimension_value(&self) -> Option<f64> {
+        match *self {
+            Self::Distance { value, .. }
+            | Self::DeltaX { value, .. }
+            | Self::DeltaY { value, .. }
+            | Self::Radius { value, .. }
+            | Self::Diameter { value, .. }
+            | Self::Angle { value, .. }
+            | Self::LineAngle { value, .. }
+            | Self::PointLineDistance { value, .. }
+            | Self::LineCircleDistance { value, .. } => Some(value),
+            _ => None,
+        }
+    }
+    pub fn dimension_value_mut(&mut self) -> Option<&mut f64> {
+        match self {
+            Self::Distance { value, .. }
+            | Self::DeltaX { value, .. }
+            | Self::DeltaY { value, .. }
+            | Self::Radius { value, .. }
+            | Self::Diameter { value, .. }
+            | Self::Angle { value, .. }
+            | Self::LineAngle { value, .. }
+            | Self::PointLineDistance { value, .. }
+            | Self::LineCircleDistance { value, .. } => Some(value),
+            _ => None,
+        }
+    }
+    pub fn is_dimension(&self) -> bool {
+        self.dimension_value().is_some()
+    }
+    /// Cotas angulares guardam radianos e recebem expressões de ângulo.
+    pub fn is_angular(&self) -> bool {
+        matches!(self, Self::Angle { .. } | Self::LineAngle { .. })
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Constraint {
     pub id: u64,
@@ -279,6 +347,11 @@ pub struct Sketch {
     pub constraints: Vec<Constraint>,
     #[serde(default)]
     pub dimension_expressions: std::collections::BTreeMap<u64, String>,
+    /// Posição do texto de cada cota, em mm no plano local e relativa à âncora da cota
+    /// (ponto médio do que é medido, centro do círculo ou vértice do ângulo), para que o
+    /// texto acompanhe a geometria. Ausente, a interface usa o lugar padrão.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub dimension_labels: std::collections::BTreeMap<u64, Point2>,
 }
 impl Sketch {
     /// Apoios da parametrização de retas infinitas não viram extremos visíveis
@@ -313,6 +386,7 @@ impl Sketch {
             entities: Vec::new(),
             constraints: Vec::new(),
             dimension_expressions: std::collections::BTreeMap::new(),
+            dimension_labels: std::collections::BTreeMap::new(),
         }
     }
     fn allocate(&mut self) -> Result<u64> {
@@ -359,35 +433,66 @@ impl Sketch {
             )),
         }
     }
+    /// Valor que a cota teria na geometria atual (mm ou radianos); `None` para
+    /// restrições que não são cotas. O resíduo do solver é a diferença para o valor.
+    pub fn measure(&self, kind: &ConstraintKind) -> Result<Option<f64>> {
+        let line_direction = |line: u64, flip: bool| -> Result<Point2> {
+            let (a, b) = self.line(line)?;
+            let length = distance(a, b);
+            if length < 1e-12 {
+                return Err(SketchError("Linha degenerada na cota.".into()));
+            }
+            Ok(scale(sub(b, a), if flip { -1. } else { 1. } / length))
+        };
+        // Distância, sem sinal, do ponto à reta suporte da linha.
+        let to_line = |point: Point2, line: u64| -> Result<f64> {
+            let (a, _) = self.line(line)?;
+            Ok(cross(sub(point, a), line_direction(line, false)?).abs())
+        };
+        Ok(Some(match *kind {
+            ConstraintKind::Distance { a, b, .. } => distance(self.point(a)?, self.point(b)?),
+            ConstraintKind::DeltaX { a, b, .. } => self.point(b)?[0] - self.point(a)?[0],
+            ConstraintKind::DeltaY { a, b, .. } => self.point(b)?[1] - self.point(a)?[1],
+            ConstraintKind::Radius { circle, .. } => self.radial(circle)?.1,
+            ConstraintKind::Diameter { circle, .. } => 2. * self.radial(circle)?.1,
+            ConstraintKind::Angle { a, b, .. } => {
+                let d = sub(self.point(b)?, self.point(a)?);
+                d[1].atan2(d[0])
+            }
+            ConstraintKind::LineAngle {
+                line,
+                reference,
+                flip_line,
+                flip_reference,
+                ..
+            } => {
+                let a = line_direction(line, flip_line)?;
+                let b = line_direction(reference, flip_reference)?;
+                cross(b, a).atan2(dot(b, a))
+            }
+            ConstraintKind::PointLineDistance { point, line, .. } => {
+                to_line(self.point(point)?, line)?
+            }
+            ConstraintKind::LineCircleDistance {
+                line,
+                circle,
+                crossing,
+                ..
+            } => {
+                let (center, radius) = self.radial(circle)?;
+                let gap = to_line(center, line)? - radius;
+                if crossing { -gap } else { gap }
+            }
+            _ => return Ok(None),
+        }))
+    }
     pub fn refresh_reference_dimensions(&mut self) -> Result<()> {
         let source = self.clone();
         for c in self.constraints.iter_mut().filter(|c| c.reference) {
-            match &mut c.kind {
-                ConstraintKind::Distance { a, b, value } => {
-                    *value = distance(source.point(*a)?, source.point(*b)?)
-                }
-                ConstraintKind::DeltaX { a, b, value } => {
-                    *value = source.point(*b)?[0] - source.point(*a)?[0]
-                }
-                ConstraintKind::DeltaY { a, b, value } => {
-                    *value = source.point(*b)?[1] - source.point(*a)?[1]
-                }
-                ConstraintKind::Radius { circle, value } => *value = source.radial(*circle)?.1,
-                ConstraintKind::Angle { a, b, value } => {
-                    let d = sub(source.point(*b)?, source.point(*a)?);
-                    *value = d[1].atan2(d[0]);
-                }
-                ConstraintKind::LineAngle {
-                    line,
-                    reference,
-                    value,
-                } => {
-                    *value = lines::relative_angle(
-                        lines::angle(&source, *line)?,
-                        lines::angle(&source, *reference)?,
-                    );
-                }
-                _ => {}
+            if let Some(measured) = source.measure(&c.kind)?
+                && let Some(value) = c.kind.dimension_value_mut()
+            {
+                *value = measured;
             }
         }
         Ok(())
@@ -557,22 +662,25 @@ impl Sketch {
         for (id, expression) in &self.dimension_expressions {
             if expression.is_empty()
                 || expression.len() > 4096
-                || !self.constraints.iter().any(|c| {
-                    c.id == *id
-                        && !c.reference
-                        && matches!(
-                            c.kind,
-                            ConstraintKind::Distance { .. }
-                                | ConstraintKind::DeltaX { .. }
-                                | ConstraintKind::DeltaY { .. }
-                                | ConstraintKind::Radius { .. }
-                                | ConstraintKind::Angle { .. }
-                                | ConstraintKind::LineAngle { .. }
-                        )
-                })
+                || !self
+                    .constraints
+                    .iter()
+                    .any(|c| c.id == *id && !c.reference && c.kind.is_dimension())
             {
                 return Err(SketchError(
                     "Expressão de cota inválida ou sem restrição correspondente.".into(),
+                ));
+            }
+        }
+        for (id, offset) in &self.dimension_labels {
+            if offset.iter().any(|v| !v.is_finite() || v.abs() > 1e12)
+                || !self
+                    .constraints
+                    .iter()
+                    .any(|c| c.id == *id && c.kind.is_dimension())
+            {
+                return Err(SketchError(
+                    "Posição de texto sem cota correspondente.".into(),
                 ));
             }
         }
@@ -586,6 +694,8 @@ impl Sketch {
         self.constraints
             .retain(|c| solver::constraint_residuals(&candidate, &c.kind).is_ok());
         self.dimension_expressions
+            .retain(|id, _| self.constraints.iter().any(|c| c.id == *id));
+        self.dimension_labels
             .retain(|id, _| self.constraints.iter().any(|c| c.id == *id));
     }
 }

@@ -15,6 +15,13 @@ pub enum Text {
     WorkPlaneCreated,
     CurrentBase,
     EditOffsetPlaneHint,
+    PointLineDistance,
+    LineCircleDistance,
+    DimensionPickHint,
+    DimensionPickSecond,
+    DimensionUnsupported,
+    DimensionValueTitle,
+    DimensionInvalidValue,
     SketchHiddenPart,
     Origin,
     SketchXY,
@@ -680,6 +687,17 @@ pub fn text(key: Text) -> &'static str {
         Text::OffsetPlaneHint => "Arraste a seta ou digite a distância; OK cria o plano",
         Text::WorkPlaneCreated => "criado. Escolha-o no Novo rascunho para desenhar nele.",
         Text::CurrentBase => "Plano-base atual",
+        Text::PointLineDistance => "Distância ponto–linha",
+        Text::LineCircleDistance => "Distância linha–círculo",
+        Text::DimensionPickHint => {
+            "Clique numa linha, círculo, arco ou ponto; digite o valor e confirme com Enter"
+        }
+        Text::DimensionPickSecond => "Clique no segundo ponto ou numa linha; Esc cancela a cota",
+        Text::DimensionUnsupported => "Essa combinação não define uma cota.",
+        Text::DimensionValueTitle => "Valor da cota",
+        Text::DimensionInvalidValue => {
+            "Valor inválido: comprimentos não negativos, raios positivos, ângulos entre 0° e 180°."
+        }
         Text::EditOffsetPlaneHint => {
             "Arraste a seta ou digite a distância; OK move o plano e os rascunhos nele"
         }

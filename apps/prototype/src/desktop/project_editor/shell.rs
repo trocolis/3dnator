@@ -359,7 +359,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::SketchEdit(SketchEdit::Mirror),
     Action::SketchEdit(SketchEdit::CircularPattern),
     Action::SketchEdit(SketchEdit::RectangularPattern),
-    Action::SketchEdit(SketchEdit::Dimension),
+    Action::SketchTool(sketch_editor::Tool::Dimension),
     Action::SketchEdit(SketchEdit::HorizontalVertical),
     Action::SketchEdit(SketchEdit::Coincident),
     Action::SketchEdit(SketchEdit::Tangent),
@@ -666,11 +666,7 @@ impl Editor {
             Action::Shadows => self.viewport.show_shadows = !self.viewport.show_shadows,
             Action::Triangles => self.viewport.show_triangles = !self.viewport.show_triangles,
             Action::Browser => self.shell.browser_visible = !self.shell.browser_visible,
-            Action::SketchTool(tool) => {
-                if let Some(work) = &mut self.current_mut().sketch_edit {
-                    work.select_tool(tool);
-                }
-            }
+            Action::SketchTool(tool) => self.select_sketch_tool(tool),
             Action::SketchEdit(action) => self.open_sketch_action(context, action),
             Action::FinishSketch => self.finish_sketch(),
             Action::CancelSketch => self.cancel_sketch(context),
@@ -1047,7 +1043,7 @@ impl Editor {
             ui,
             group_width(1) + GROUP_HORIZONTAL_GAP + 80.,
             |editor, ui| {
-                editor.action_button(ui, Action::SketchEdit(SketchEdit::Dimension), true);
+                editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Dimension), true);
                 // A grade precisa de layout vertical próprio: herdar o alinhamento
                 // central da linha deslocaria a primeira fileira e cortaria o rodapé.
                 let (rect, _) = ui.allocate_exact_size(
@@ -1095,7 +1091,7 @@ impl Editor {
                     ui,
                     T::ConstrainGroup,
                     &[
-                        Action::SketchEdit(SketchEdit::Dimension),
+                        Action::SketchTool(sketch_editor::Tool::Dimension),
                         Action::SketchEdit(SketchEdit::HorizontalVertical),
                         Action::SketchEdit(SketchEdit::Coincident),
                         Action::SketchEdit(SketchEdit::Tangent),

@@ -7,6 +7,7 @@ use nator_sketch::{
     solver::{self, Status},
 };
 mod actions;
+mod dimension_tool;
 mod dynamic_input;
 mod line_tools;
 mod projection;
@@ -22,6 +23,8 @@ pub(super) enum Tool {
     Circle,
     Arc,
     Trim,
+    /// Cota no modelo da Dimension do SolidCraft (`dimension_tool`).
+    Dimension,
 }
 impl Tool {
     pub(super) fn label(self) -> T {
@@ -32,6 +35,7 @@ impl Tool {
             Self::Circle => T::Circle,
             Self::Arc => T::Arc,
             Self::Trim => T::Trim,
+            Self::Dimension => T::SketchDimension,
         }
     }
     /// Chave estável de memória, compartilhada com os campos flutuantes para
@@ -44,6 +48,7 @@ impl Tool {
             Self::Circle => "sketch_circle",
             Self::Arc => "sketch_arc",
             Self::Trim => "sketch_trim",
+            Self::Dimension => "sketch_dimension",
         }
     }
     pub(super) fn icon(self) -> icons::Icon {
@@ -54,6 +59,7 @@ impl Tool {
             Self::Circle => icons::Icon::Circle,
             Self::Arc => icons::Icon::Arc,
             Self::Trim => icons::Icon::Trim,
+            Self::Dimension => icons::Icon::Dimension,
         }
     }
 }
@@ -116,6 +122,8 @@ pub(super) struct Workspace {
     active_action: Option<EditAction>,
     drawing: dynamic_input::Input,
     references: references::Cache,
+    /// Escolhas, texto e caixa de valor da ferramenta Cota.
+    dimension_draft: dimension_tool::Draft,
 }
 impl Workspace {
     #[cfg(all(test, feature = "occt"))]
@@ -141,6 +149,11 @@ impl Workspace {
     pub(super) fn tool(&self) -> Tool {
         self.tool
     }
+    /// Caixa de valor da Cota aberta e quantidade de escolhas, para os ensaios.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn dimension_state(&self) -> (bool, usize) {
+        (self.dimension_draft.editing(), self.dimension_draft.picks())
+    }
     pub(super) fn select_tool(&mut self, tool: Tool) {
         self.active_action = None;
         self.tool = tool;
@@ -155,6 +168,7 @@ impl Workspace {
             self.line_type = LineType::Normal;
         }
         self.drawing = dynamic_input::Input::default();
+        self.dimension_draft.clear();
     }
     fn primitive(&self) -> Option<Primitive> {
         Some(match self.tool {
@@ -178,6 +192,7 @@ impl Workspace {
         self.line_reference = None;
         self.perpendicular = None;
         self.drawing.clear(context);
+        self.dimension_draft.clear();
     }
     /// Cada segmento confirmado conserva o último ponto e captura o próximo
     /// ângulo a partir dele. Medidas digitadas pertencem somente ao segmento atual.
@@ -251,6 +266,7 @@ impl Workspace {
             active_action: None,
             drawing: dynamic_input::Input::default(),
             references: references::Cache::default(),
+            dimension_draft: dimension_tool::Draft::default(),
         }
     }
 }
@@ -357,7 +373,26 @@ impl Editor {
         self.current_mut().sketch_edit = Some(work);
         self.align_sketch_camera(!record.sketch.points.is_empty(), true);
     }
+    /// Ferramenta escolhida na faixa, na busca ou pelo atalho D (Cota).
+    pub(super) fn select_sketch_tool(&mut self, tool: Tool) {
+        if let Some(work) = &mut self.current_mut().sketch_edit {
+            work.select_tool(tool);
+            if tool == Tool::Dimension {
+                self.status.set(text(T::DimensionPickHint));
+            }
+        }
+    }
     pub(super) fn solve_sketch(&mut self, context: &egui::Context, sketch: Sketch) {
+        self.solve_sketch_with(context, sketch, None);
+    }
+    /// `dimension` identifica a cota recém-criada pela ferramenta Cota: antes de resolver,
+    /// o trabalhador decide se ela dirige a geometria ou entra como referência.
+    fn solve_sketch_with(
+        &mut self,
+        context: &egui::Context,
+        sketch: Sketch,
+        dimension: Option<u64>,
+    ) {
         if self.busy() {
             return;
         }
@@ -381,6 +416,9 @@ impl Editor {
             .unwrap_or_default();
         self.start(context, None, move || {
             let mut sketch = sketch;
+            if let Some(id) = dimension {
+                dimension_tool::settle_driven(&mut sketch, id, &parameters)?;
+            }
             nator_document::parameters::resolve_sketch(&mut sketch, &parameters)
                 .map_err(sketch_error)?;
             let report = solver::solve(&sketch).map_err(sketch_error)?;
@@ -432,7 +470,8 @@ impl Editor {
         let Some(work) = self.current().sketch_edit.as_ref() else {
             return;
         };
-        if !work.tool_panel_open || work.active_action.is_some() {
+        // A Cota trabalha no próprio canvas, com a caixa de valor junto ao texto.
+        if !work.tool_panel_open || work.active_action.is_some() || work.tool == Tool::Dimension {
             return;
         }
         let tool = work.tool;
@@ -700,56 +739,8 @@ impl Editor {
                 }
             }
         }
-        for constraint in &sketch.constraints {
-            let annotation = match constraint.kind {
-                ConstraintKind::Distance { a, b, value }
-                | ConstraintKind::DeltaX { a, b, value }
-                | ConstraintKind::DeltaY { a, b, value } => sketch
-                    .point(a)
-                    .ok()
-                    .zip(sketch.point(b).ok())
-                    .map(|(a, b)| {
-                        (
-                            nator_sketch::scale(nator_sketch::add(a, b), 0.5),
-                            nator_drawing::format_mm(value),
-                        )
-                    }),
-                ConstraintKind::Radius { circle, value } => sketch
-                    .radial(circle)
-                    .ok()
-                    .map(|(center, _)| (center, format!("R {}", nator_drawing::format_mm(value)))),
-                ConstraintKind::Angle { a, b, value } => sketch
-                    .point(a)
-                    .ok()
-                    .zip(sketch.point(b).ok())
-                    .map(|(a, b)| {
-                        (
-                            nator_sketch::scale(nator_sketch::add(a, b), 0.5),
-                            format!("{}°", nator_drawing::format_mm(value.to_degrees())),
-                        )
-                    }),
-                ConstraintKind::LineAngle { line, value, .. } => {
-                    sketch.line(line).ok().map(|(a, b)| {
-                        (
-                            nator_sketch::scale(nator_sketch::add(a, b), 0.5),
-                            format!("{}°", nator_drawing::format_mm(value.to_degrees())),
-                        )
-                    })
-                }
-                _ => None,
-            };
-            if let Some((point, label)) = annotation
-                && let Some(position) = frame.screen(point)
-            {
-                painter.text(
-                    position + egui::vec2(0., -12.),
-                    egui::Align2::CENTER_BOTTOM,
-                    label,
-                    egui::FontId::proportional(13.),
-                    theme::INK,
-                );
-            }
-        }
+        // Cotas como cotas: extensões, linha com setas e valor (R/Ø, graus, parênteses).
+        dimension_tool::paint_all(&frame, &painter, &sketch);
 
         let suspended = ui.input(|i| i.modifiers.alt);
         let mut snap = hover.and_then(|point| {
@@ -930,10 +921,24 @@ impl Editor {
             work.pending = None;
             work.tracker.clear();
         }
+        let dimension = (work.tool == Tool::Dimension).then(|| {
+            dimension_tool::update(
+                ui,
+                response,
+                &frame,
+                &painter,
+                &sketch,
+                &mut work.dimension_draft,
+                hover,
+                !busy && !animating,
+                &parameters,
+            )
+        });
         if !busy
             && !animating
             && !escape
             && valid
+            && work.tool != Tool::Dimension
             && !(work.tool == Tool::Rectangle
                 && work.rectangle_mode == RectangleMode::Inclined
                 && work.anchors.len() == 1
@@ -1112,6 +1117,17 @@ impl Editor {
         if submit {
             self.solve_sketch(ui.ctx(), sketch);
         }
+        if let Some(update) = dimension {
+            if let Some(hint) = update.hint {
+                self.status.set(text(hint));
+            }
+            if let Some(warning) = update.warning {
+                self.status.warning(warning);
+            }
+            if let Some((candidate, id)) = update.commit {
+                self.solve_sketch_with(ui.ctx(), candidate, Some(id));
+            }
+        }
     }
 }
 
@@ -1186,6 +1202,8 @@ fn draw_entity(
                                     d[1].atan2(d[0]),
                                     work.drawing.reference_angle,
                                 ),
+                                flip_line: false,
+                                flip_reference: false,
                             }
                         } else {
                             ConstraintKind::Angle {
@@ -1503,35 +1521,18 @@ fn angle_expression(
     }
 }
 fn dimension_expression(kind: &ConstraintKind, value: f64) -> String {
-    if matches!(
-        kind,
-        ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
-    ) {
+    if kind.is_angular() {
         format!("{} deg", value.to_degrees())
     } else {
         format!("{value} mm")
     }
 }
 fn dimension_value(kind: &ConstraintKind) -> Option<f64> {
-    match *kind {
-        ConstraintKind::Distance { value, .. }
-        | ConstraintKind::DeltaX { value, .. }
-        | ConstraintKind::DeltaY { value, .. }
-        | ConstraintKind::Radius { value, .. }
-        | ConstraintKind::Angle { value, .. }
-        | ConstraintKind::LineAngle { value, .. } => Some(value),
-        _ => None,
-    }
+    kind.dimension_value()
 }
 fn set_dimension_value(kind: &mut ConstraintKind, next: f64) {
-    match kind {
-        ConstraintKind::Distance { value, .. }
-        | ConstraintKind::DeltaX { value, .. }
-        | ConstraintKind::DeltaY { value, .. }
-        | ConstraintKind::Radius { value, .. }
-        | ConstraintKind::Angle { value, .. }
-        | ConstraintKind::LineAngle { value, .. } => *value = next,
-        _ => {}
+    if let Some(value) = kind.dimension_value_mut() {
+        *value = next;
     }
 }
 fn constraint_label(kind: &ConstraintKind) -> String {
@@ -1544,6 +1545,9 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::DeltaX { .. } => T::HorizontalDimension,
         ConstraintKind::DeltaY { .. } => T::VerticalDimension,
         ConstraintKind::Radius { .. } => T::Radius,
+        ConstraintKind::Diameter { .. } => T::DiameterLabel,
+        ConstraintKind::PointLineDistance { .. } => T::PointLineDistance,
+        ConstraintKind::LineCircleDistance { .. } => T::LineCircleDistance,
         ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. } => T::AngleLabel,
         ConstraintKind::Parallel { .. } => T::Parallel,
         ConstraintKind::Perpendicular { .. } => T::Perpendicular,
@@ -1554,12 +1558,7 @@ fn constraint_label(kind: &ConstraintKind) -> String {
         ConstraintKind::Tangent { .. } => T::Tangent,
     };
     match dimension_value(kind) {
-        Some(value)
-            if matches!(
-                kind,
-                ConstraintKind::Angle { .. } | ConstraintKind::LineAngle { .. }
-            ) =>
-        {
+        Some(value) if kind.is_angular() => {
             format!(
                 "{}: {}°",
                 text(key),

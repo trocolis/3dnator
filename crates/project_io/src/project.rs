@@ -32,7 +32,10 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// (`folders.planes`). Ausentes, a peça não tem planos e a pasta fica visível.
 /// Versão 21: rascunhos apoiados em plano de trabalho (`support`), que acompanham as
 /// edições do plano. Ausente, o plano do rascunho é fixo.
-pub const FORMAT_VERSION: u32 = 21;
+/// Versão 22: cotas de diâmetro, ponto–linha e linha–círculo, lados do `LineAngle`
+/// (`flip_line`/`flip_reference`) e posição do texto das cotas (`dimension_labels`).
+/// Ausentes, os lados seguem o sentido das linhas e o texto fica no lugar padrão.
+pub const FORMAT_VERSION: u32 = 22;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -1058,6 +1061,8 @@ mod tests {
                 line,
                 reference,
                 value: std::f64::consts::FRAC_PI_2,
+                flip_line: false,
+                flip_reference: false,
             },
             false,
         )?;
@@ -1118,6 +1123,64 @@ mod tests {
         assert!(reopened.folder_visible(Folder::PartOrigin(part))?);
         assert!(!reopened.folder_visible(Folder::ReferenceSketches)?);
         assert!(reopened.folder_visible(Folder::Parts)?);
+        Ok(())
+    }
+
+    #[test]
+    fn dimension_tool_kinds_sides_and_labels_round_trip() -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, Curve, Plane, Sketch};
+        let mut sketch = Sketch::new("Cotas", Plane::xy());
+        let base = sketch.add_line([0., 0.], [40., 0.], false)?;
+        let other = sketch.add_line([0., 0.], [0., 30.], false)?;
+        let circle = sketch.add_circle([20., 15.], 4., false)?;
+        let point = sketch.add_point([5., 9.])?;
+        let Curve::Line { start, end } = sketch.entity(base)?.curve else {
+            return Err("Linha ausente".into());
+        };
+        let kinds = [
+            ConstraintKind::Diameter { circle, value: 8. },
+            ConstraintKind::PointLineDistance {
+                point,
+                line: base,
+                value: 9.,
+            },
+            ConstraintKind::LineCircleDistance {
+                line: base,
+                circle,
+                value: 11.,
+                crossing: false,
+            },
+            ConstraintKind::LineAngle {
+                line: other,
+                reference: base,
+                value: std::f64::consts::FRAC_PI_2,
+                flip_line: false,
+                flip_reference: true,
+            },
+            ConstraintKind::Distance {
+                a: start,
+                b: end,
+                value: 40.,
+            },
+        ];
+        let mut ids = Vec::new();
+        for kind in kinds {
+            ids.push(sketch.add_constraint(kind, true)?);
+        }
+        sketch.refresh_reference_dimensions()?;
+        sketch.dimension_labels.insert(ids[0], [7.5, -3.]);
+        sketch.dimension_labels.insert(ids[4], [0., 12.]);
+        let mut document = Document::new("Cotas")?;
+        let (_, id) = document.add_sketch(None, sketch.clone())?;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("cotas.3dnator");
+        write_project(&path, &document)?;
+        let reopened = read_project(&path)?;
+        let loaded = &reopened.sketch(id).ok_or("Rascunho ausente")?.sketch;
+        assert_eq!(loaded.dimension_labels, sketch.dimension_labels);
+        for (expected, stored) in sketch.constraints.iter().zip(&loaded.constraints) {
+            assert_eq!(expected.kind, stored.kind);
+        }
         Ok(())
     }
 

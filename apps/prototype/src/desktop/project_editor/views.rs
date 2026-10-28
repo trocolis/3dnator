@@ -88,6 +88,14 @@ impl Editor {
             self.shell.search_focus = true;
             return;
         }
+        // D ativa a Cota no rascunho, como no SolidCraft; letras digitadas na caixa de
+        // valor não chegam aqui, pois ela tem o teclado.
+        if self.current().sketch_edit.is_some()
+            && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::D))
+        {
+            self.select_sketch_tool(sketch_editor::Tool::Dimension);
+            return;
+        }
         let redo = context.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
                 egui::Modifiers::CTRL | egui::Modifiers::SHIFT,

@@ -54,6 +54,7 @@ pub(crate) fn render_ui_scenario(
         | "offset-plane"
         | "work-plane-pick"
         | "offset-plane-edit"
+        | "sketch-dimension"
         | "repair"
         | "recovery"
         | "insert"
@@ -78,7 +79,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -138,6 +139,24 @@ pub(crate) fn render_ui_scenario(
                         vec![egui::Event::Text("30".into())]
                     }
                     _ => Vec::new(),
+                };
+            }
+            // Cota: clique no meio da primeira linha do rascunho e cursor afastado dela,
+            // com a caixa de valor e a prévia acompanhando o ponteiro.
+            if pointer == "sketch-dimension"
+                && let Some(middle) = first_line_middle(editor)
+            {
+                return match frame {
+                    2 | 3 => vec![
+                        egui::Event::PointerMoved(middle),
+                        egui::Event::PointerButton {
+                            pos: middle,
+                            button: egui::PointerButton::Primary,
+                            pressed: frame == 2,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    _ => vec![egui::Event::PointerMoved(middle + egui::vec2(60., -80.))],
                 };
             }
             // Menus da faixa: clique no botão (Nova peça, Mover, Copiar) e cursor sobre a
@@ -231,6 +250,25 @@ pub(crate) fn render_ui_scenario(
                 }
         },
     )
+}
+
+/// Meio da primeira linha finita do rascunho em edição, na tela.
+fn first_line_middle(editor: &Editor) -> Option<egui::Pos2> {
+    let work = editor.current().sketch_edit.as_ref()?;
+    let sketch = editor.working_sketch()?;
+    let (a, b) = sketch
+        .entities
+        .iter()
+        .filter(|e| !e.infinite && !e.construction)
+        .find_map(|e| sketch.line(e.id).ok())?;
+    let frame = sketch_scene::Frame {
+        camera: editor.viewport.camera.clone(),
+        bounds: editor.display_bounds(),
+        rect: editor.canvas_rect,
+        placement: work.placement,
+        plane: sketch.plane,
+    };
+    frame.screen(nator_sketch::scale(nator_sketch::add(a, b), 0.5))
 }
 
 fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
@@ -543,6 +581,10 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor.open_offset_plane();
             editor.choose_origin_plane("XY", nator_sketch::Plane::xy());
             editor.set_offset_plane_for_capture(20.);
+        }
+        "sketch-dimension" => {
+            open_first_sketch(editor)?;
+            editor.select_sketch_tool(sketch_editor::Tool::Dimension);
         }
         "offset-plane-edit" => {
             // Plano existente a 20 mm de XY reaberto pela edição e levado a 35 mm: o
@@ -2498,35 +2540,18 @@ mod tests {
         )
         .ok_or("Linha sem projeção")?;
         click(&mut editor, &context, point)?;
+        // Cota: clicar na linha já abre a caixa com a medida selecionada; digitar a
+        // substitui e um Enter confirma em uma ação.
         let dimension = label_position(&mut editor, &context, text(T::SketchDimension))?;
         click(&mut editor, &context, dimension)?;
-        let field = label_position(&mut editor, &context, "20 mm")?;
-        click(&mut editor, &context, field)?;
+        click(&mut editor, &context, point)?;
+        frame(&mut editor, &context, Vec::new())?;
+        label_position(&mut editor, &context, "20 mm")?;
         frame(
             &mut editor,
             &context,
-            vec![
-                key(
-                    egui::Key::A,
-                    egui::Modifiers {
-                        ctrl: true,
-                        command: true,
-                        ..Default::default()
-                    },
-                ),
-                egui::Event::Text("32 mm".into()),
-            ],
+            vec![egui::Event::Text("32 mm".into())],
         )?;
-        frame(&mut editor, &context, vec![enter()])?;
-        assert!(
-            editor
-                .current()
-                .sketch_edit
-                .as_ref()
-                .and_then(|w| w.active_action())
-                .is_some()
-        );
-        frame(&mut editor, &context, Vec::new())?;
         frame(&mut editor, &context, vec![enter()])?;
         settle(&mut editor, &context)?;
         let record = editor
@@ -2564,7 +2589,7 @@ mod tests {
         // Deslocar cria uma entidade; o original conserva sua geometria.
         let offset = label_position(&mut editor, &context, text(T::OffsetField))?;
         click(&mut editor, &context, offset)?;
-        let field = label_position(&mut editor, &context, "32 mm")?;
+        let field = label_position(&mut editor, &context, "20 mm")?;
         click(&mut editor, &context, field)?;
         frame(
             &mut editor,
@@ -4479,6 +4504,192 @@ mod tests {
         settle(&mut editor, &context)?;
         let [low, high] = heights(&editor)?;
         assert!((low - 20.).abs() < 1e-6 && (high - 25.).abs() < 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn dimension_tool_types_follows_places_and_cancels_like_solidcraft()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, Curve};
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Cotas", Plane::xy());
+        let line = sketch.add_line([0., 0.], [12., 16.], false)?;
+        let circle = sketch.add_circle([40., 0.], 5., false)?;
+        let Curve::Line { start, end } = sketch.entity(line)?.curve else {
+            return Err("Linha ausente".into());
+        };
+        let mut document = Document::new("Ferramenta Cota")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let at = |editor: &Editor, x: f64, y: f64| {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                [x, y, 0.],
+            )
+            .ok_or("Ponto sem projeção")
+        };
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let plain = egui::Modifiers::NONE;
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let value_id = egui::Id::new("sketch_dimension_value");
+        let sketch_of = |editor: &Editor| -> Result<Sketch, Box<dyn Error>> {
+            Ok(editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .clone())
+        };
+        let live = |editor: &Editor, context: &egui::Context| {
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|w| w.dimension_state().0)
+                && context.memory(|m| m.focused()) == Some(value_id)
+        };
+        // D ativa a Cota.
+        frame(&mut editor, &context, vec![key(egui::Key::D, plain)])?;
+        assert_eq!(
+            editor.current().sketch_edit.as_ref().map(|w| w.tool()),
+            Some(sketch_editor::Tool::Dimension)
+        );
+        let revision = editor.current().session.revision();
+        // Clique na linha: a caixa recebe o teclado na hora, sem mudar o documento.
+        let target = at(&editor, 6., 8.)?;
+        click(&mut editor, &context, target)?;
+        frame(&mut editor, &context, Vec::new())?;
+        assert!(live(&editor, &context));
+        assert_eq!(editor.current().session.revision(), revision);
+        // Acima da linha inclinada, o texto que segue o cursor mede a horizontal.
+        let target = at(&editor, 6., 25.)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(target)],
+        )?;
+        frame(&mut editor, &context, vec![egui::Event::Text("10".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter, plain)])?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), revision + 1);
+        let solved = sketch_of(&editor)?;
+        let dimension = solved
+            .constraints
+            .iter()
+            .find(|c| c.kind.is_dimension())
+            .ok_or("Cota ausente")?;
+        assert!(
+            matches!(dimension.kind, ConstraintKind::DeltaX { value, .. } if (value - 10.).abs() < 1e-9),
+            "{:?}",
+            dimension.kind
+        );
+        assert_eq!(
+            solved
+                .dimension_expressions
+                .get(&dimension.id)
+                .map(String::as_str),
+            Some("10")
+        );
+        assert!(solved.dimension_labels.contains_key(&dimension.id));
+        let span = (solved.point(end)?[0] - solved.point(start)?[0]).abs();
+        assert!((span - 10.).abs() < 1e-6, "{span}");
+        // A ferramenta continua ativa e sem escolhas, pronta para a próxima cota.
+        let work = editor.current().sketch_edit.as_ref().ok_or("Edição")?;
+        assert_eq!(work.tool(), sketch_editor::Tool::Dimension);
+        assert_eq!(work.dimension_state().1, 0);
+        frame(&mut editor, &context, vec![key(egui::Key::Z, ctrl)])?;
+        settle(&mut editor, &context)?;
+        assert!(sketch_of(&editor)?.constraints.is_empty());
+        let revision = editor.current().session.revision();
+
+        // Esc descarta escolhas e valor, sem tocar no documento.
+        let target = at(&editor, 6., 8.)?;
+        click(&mut editor, &context, target)?;
+        frame(&mut editor, &context, Vec::new())?;
+        assert!(live(&editor, &context));
+        frame(&mut editor, &context, vec![egui::Event::Text("25".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Escape, plain)])?;
+        frame(&mut editor, &context, Vec::new())?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert_eq!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .map(|w| w.dimension_state().1),
+            Some(0)
+        );
+
+        // Lugar primeiro: o clique ao lado fixa o texto e a cota passa a medir a vertical.
+        let target = at(&editor, 6., 8.)?;
+        click(&mut editor, &context, target)?;
+        frame(&mut editor, &context, Vec::new())?;
+        let target = at(&editor, -10., 1.)?;
+        click(&mut editor, &context, target)?;
+        frame(&mut editor, &context, Vec::new())?;
+        assert!(
+            live(&editor, &context),
+            "o clique no vazio devolve o teclado"
+        );
+        let target = at(&editor, 30., 30.)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(target)],
+        )?;
+        frame(&mut editor, &context, vec![egui::Event::Text("18".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter, plain)])?;
+        settle(&mut editor, &context)?;
+        let solved = sketch_of(&editor)?;
+        let vertical = solved
+            .constraints
+            .iter()
+            .find(|c| matches!(c.kind, ConstraintKind::DeltaY { .. }))
+            .ok_or("Cota vertical ausente")?;
+        let span = (solved.point(end)?[1] - solved.point(start)?[1]).abs();
+        assert!((span - 18.).abs() < 1e-6, "{span}");
+        // O texto ficou onde foi fixado, não onde o cursor parou.
+        let offset = solved
+            .dimension_labels
+            .get(&vertical.id)
+            .ok_or("Texto sem posição")?;
+        assert!(offset[0] < 0., "{offset:?}");
+
+        // Um círculo completo recebe diâmetro.
+        let target = at(&editor, 45., 0.)?;
+        click(&mut editor, &context, target)?;
+        frame(&mut editor, &context, Vec::new())?;
+        label_position(&mut editor, &context, "10 mm")?;
+        frame(&mut editor, &context, vec![egui::Event::Text("12".into())])?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter, plain)])?;
+        settle(&mut editor, &context)?;
+        let solved = sketch_of(&editor)?;
+        assert!(solved.constraints.iter().any(|c| matches!(
+            c.kind,
+            ConstraintKind::Diameter { circle: target, value } if target == circle && (value - 12.).abs() < 1e-9
+        )));
+        assert!((solved.radial(circle)?.1 - 6.).abs() < 1e-6);
         Ok(())
     }
 

@@ -109,16 +109,45 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
             line,
             reference,
             value,
+            ..
         } => {
             if line == reference {
                 return Err(SketchError(
                     "A referência angular deve ser outra linha.".into(),
                 ));
             }
-            let a = direction(line)?;
-            let b = direction(reference)?;
-            let measured = cross(b, a).atan2(dot(b, a));
+            let measured = s.measure(c)?.unwrap_or_default();
             vec![lines::relative_angle(measured, checked(value)?)]
+        }
+        ConstraintKind::Diameter { circle, value } => {
+            if checked(value)? <= 0. {
+                return Err(SketchError("Diâmetro de cota inválido.".into()));
+            }
+            vec![2. * s.radial(circle)?.1 - value]
+        }
+        ConstraintKind::PointLineDistance { point, line, value } => {
+            if s.entity(line)?.point_ids().contains(&point) {
+                return Err(SketchError(
+                    "A distância à linha exige um ponto fora dela.".into(),
+                ));
+            }
+            if checked(value)? < 0. {
+                return Err(SketchError("Distância negativa.".into()));
+            }
+            vec![s.measure(c)?.unwrap_or_default() - value]
+        }
+        ConstraintKind::LineCircleDistance {
+            line,
+            circle,
+            value,
+            ..
+        } => {
+            s.line(line)?;
+            s.radial(circle)?;
+            if checked(value)? < 0. {
+                return Err(SketchError("Distância negativa.".into()));
+            }
+            vec![s.measure(c)?.unwrap_or_default() - value]
         }
         ConstraintKind::Parallel { a, b } => vec![cross(direction(a)?, direction(b)?)],
         ConstraintKind::Perpendicular { a, b } => vec![dot(direction(a)?, direction(b)?)],
@@ -505,6 +534,157 @@ mod tests {
         assert_eq!(report.status, Status::Conflict);
         assert!(!report.conflicting.is_empty());
         assert_eq!(s.point(end)?, [10., 0.]);
+        Ok(())
+    }
+
+    /// Cotas da ferramenta Cota: diâmetro, ponto–linha, linha–círculo (folga e
+    /// penetração) e ângulo entre lados escolhidos das linhas. Cada uma leva a geometria
+    /// ao valor e `measure` devolve o mesmo valor depois da solução.
+    #[test]
+    fn dimension_tool_kinds_drive_and_measure_the_geometry() -> Result<()> {
+        let fixed = |s: &mut Sketch, point: u64| -> Result<()> {
+            let position = s.point(point)?;
+            s.add_constraint(ConstraintKind::Fixed { point, position }, false)?;
+            Ok(())
+        };
+        let mut s = Sketch::new("Cotas", Plane::xy());
+        let base = s.add_line([0., 0.], [40., 0.], false)?;
+        let Curve::Line { start, end } = s.entity(base)?.curve else {
+            return Err(SketchError("Linha ausente".into()));
+        };
+        fixed(&mut s, start)?;
+        fixed(&mut s, end)?;
+        let circle = s.add_circle([20., 15.], 4., false)?;
+        let Curve::Circle { center, .. } = s.entity(circle)?.curve else {
+            return Err(SketchError("Círculo ausente".into()));
+        };
+        let point = s.add_point([5., 9.])?;
+        let kinds = [
+            ConstraintKind::Diameter { circle, value: 12. },
+            ConstraintKind::PointLineDistance {
+                point,
+                line: base,
+                value: 3.,
+            },
+            ConstraintKind::LineCircleDistance {
+                line: base,
+                circle,
+                value: 2.,
+                crossing: false,
+            },
+        ];
+        for kind in kinds.iter().cloned() {
+            s.add_constraint(kind, false)?;
+        }
+        let report = solve(&s)?;
+        assert_ne!(report.status, Status::Conflict);
+        let solved = &report.sketch;
+        for kind in &kinds {
+            let measured = solved
+                .measure(kind)?
+                .ok_or(SketchError("Sem medida".into()))?;
+            let expected = kind
+                .dimension_value()
+                .ok_or(SketchError("Sem valor".into()))?;
+            assert!((measured - expected).abs() < 1e-6, "{kind:?}: {measured}");
+        }
+        // Raio 6 e folga 2: o centro fica a 8 mm da linha.
+        assert!((solved.point(center)?[1] - 8.).abs() < 1e-6);
+        // Com a linha cortando o círculo, a cota mede quanto a borda passa da reta.
+        let crossing = ConstraintKind::LineCircleDistance {
+            line: base,
+            circle,
+            value: 0.,
+            crossing: true,
+        };
+        assert!((solved.measure(&crossing)?.unwrap_or_default() + 2.).abs() < 1e-6);
+        // Um ponto da própria linha não define distância.
+        let own = ConstraintKind::PointLineDistance {
+            point: start,
+            line: base,
+            value: 1.,
+        };
+        assert!(constraint_residuals(solved, &own).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn line_angle_sides_choose_the_measured_wedge() -> Result<()> {
+        let mut s = Sketch::new("Setores", Plane::xy());
+        let horizontal = s.add_line([0., 0.], [10., 0.], false)?;
+        let inclined = s.add_line([0., 0.], [10., 10.], false)?;
+        let angle = |flip_line, flip_reference| ConstraintKind::LineAngle {
+            line: inclined,
+            reference: horizontal,
+            value: 0.,
+            flip_line,
+            flip_reference,
+        };
+        let degrees = |kind: &ConstraintKind| -> Result<f64> {
+            Ok(s.measure(kind)?.unwrap_or_default().to_degrees())
+        };
+        assert!((degrees(&angle(false, false))? - 45.).abs() < 1e-9);
+        // Inverter a referência mede o setor suplementar (sentido horário: -135°).
+        assert!((degrees(&angle(false, true))? + 135.).abs() < 1e-9);
+        assert!((degrees(&angle(true, true))? - 45.).abs() < 1e-9);
+        // Dirigida no setor suplementar, a linha gira até ele ter 120°.
+        let mut driven = s.clone();
+        let Curve::Line { start, .. } = driven.entity(horizontal)?.curve else {
+            return Err(SketchError("Linha ausente".into()));
+        };
+        let position = driven.point(start)?;
+        driven.add_constraint(
+            ConstraintKind::Fixed {
+                point: start,
+                position,
+            },
+            false,
+        )?;
+        driven.add_constraint(ConstraintKind::Horizontal { line: horizontal }, false)?;
+        driven.add_constraint(
+            ConstraintKind::LineAngle {
+                line: horizontal,
+                reference: inclined,
+                value: 120_f64.to_radians(),
+                flip_line: true,
+                flip_reference: false,
+            },
+            false,
+        )?;
+        let solved = solve(&driven)?.sketch;
+        let incline = lines::angle(&solved, inclined)?.to_degrees();
+        assert!((incline.abs() - 60.).abs() < 1e-5, "{incline}");
+        Ok(())
+    }
+
+    #[test]
+    fn dimension_labels_follow_their_constraints() -> Result<()> {
+        let mut s = Sketch::new("Textos", Plane::xy());
+        let line = s.add_line([0., 0.], [10., 0.], false)?;
+        let Curve::Line { start, end } = s.entity(line)?.curve else {
+            return Err(SketchError("Linha ausente".into()));
+        };
+        let id = s.add_constraint(
+            ConstraintKind::Distance {
+                a: start,
+                b: end,
+                value: 10.,
+            },
+            false,
+        )?;
+        s.dimension_labels.insert(id, [0., 6.]);
+        s.validate()?;
+        let mut orphan = s.clone();
+        orphan.dimension_labels.insert(999, [0., 1.]);
+        assert!(orphan.validate().is_err());
+        let mut infinite = s.clone();
+        infinite.dimension_labels.insert(id, [f64::NAN, 0.]);
+        assert!(infinite.validate().is_err());
+        // Apagar a linha remove a cota e o texto dela.
+        s.entities.clear();
+        s.prune_unused_points();
+        assert!(s.dimension_labels.is_empty());
+        s.validate()?;
         Ok(())
     }
 }
