@@ -2,14 +2,16 @@
 //! trabalho da peça ou uma face plana — e o desloca ao longo da normal, arrastando a seta
 //! ou digitando a distância. O OK publica `AddWorkPlane` na peça ativa; até lá, painel,
 //! prévia e arraste pertencem à interface e não alteram o documento nem o desfazer.
-//! A escolha do plano-base reaproveita o seletor de suporte do Novo rascunho.
+//! A escolha do plano-base reaproveita o seletor de suporte do Novo rascunho. O mesmo painel
+//! edita um plano existente: o OK publica `UpdateWorkPlane`, preparado no trabalhador porque
+//! os rascunhos apoiados no plano se movem e o histórico da peça é recalculado.
 use super::{
     command_panel::{self as panel, Footer},
     icons::{self, Icon},
     sketch_scene::{PlanePicker, PlanePurpose},
     *,
 };
-use nator_document::{WorkPlane, work_planes::MAX_OFFSET};
+use nator_document::{WorkPlane, WorkPlaneId, work_planes::MAX_OFFSET};
 use nator_geometry::add;
 use nator_sketch::Plane;
 
@@ -41,6 +43,8 @@ pub(super) struct Draft {
     pub(super) offset: f64,
     input: panel::NumberInput,
     drag: Option<Drag>,
+    /// Plano existente em edição e sua definição ao abrir; `None` cria um plano novo.
+    editing: Option<(WorkPlaneId, WorkPlane)>,
 }
 impl Draft {
     fn work_plane(&self) -> Option<WorkPlane> {
@@ -88,8 +92,76 @@ impl Editor {
             offset: DEFAULT_OFFSET,
             input: panel::NumberInput::default(),
             drag: None,
+            editing: None,
         });
         self.pick_offset_base();
+    }
+
+    /// Reabre o painel com um plano existente, já com o plano-base e a distância gravados.
+    /// A peça dona entra em construção, como ao editar um rascunho dela.
+    pub(super) fn edit_work_plane(&mut self, id: WorkPlaneId) {
+        if self.busy() || self.current().sketch_edit.is_some() {
+            return;
+        }
+        let document = self.current().session.document();
+        let (Some(part), Some(plane)) = (
+            document.work_plane_part(id),
+            document.work_plane(id).map(|w| w.plane),
+        ) else {
+            return;
+        };
+        let placement = match sketch_scene::part_placement(self.current(), part) {
+            Ok(placement) => placement,
+            Err(error) => {
+                self.status.error(error);
+                return;
+            }
+        };
+        self.current_mut().active_part = Some(part);
+        if self.shell.tab == shell::RibbonTab::Assembly {
+            self.shell.tab = shell::RibbonTab::Model;
+        }
+        self.current_mut().plane_pick = None;
+        self.feature_edit = None;
+        self.assembly_panel = None;
+        self.section_edit = None;
+        self.work_plane_edit = Some(Draft {
+            tab: self.current().id,
+            part,
+            placement,
+            // O plano-base gravado não guarda a origem (face, XY…), só a geometria.
+            base: Some(Base {
+                plane: plane.base,
+                label: text(T::CurrentBase).to_owned(),
+            }),
+            offset: plane.offset,
+            input: panel::NumberInput::default(),
+            drag: None,
+            editing: Some((id, plane)),
+        });
+        self.status.set(text(self.offset_plane_hint()));
+    }
+
+    /// Dica da barra de estado com o plano-base escolhido: criar ou mover o plano.
+    fn offset_plane_hint(&self) -> T {
+        if self
+            .work_plane_edit
+            .as_ref()
+            .is_some_and(|d| d.editing.is_some())
+        {
+            T::EditOffsetPlaneHint
+        } else {
+            T::OffsetPlaneHint
+        }
+    }
+
+    /// Plano existente em edição na aba ativa. A prévia o substitui na área 3D e ele não
+    /// pode servir de plano-base para si mesmo.
+    pub(super) fn editing_work_plane(&self) -> Option<WorkPlaneId> {
+        self.work_plane_edit
+            .as_ref()
+            .filter(|d| d.tab == self.current().id)
+            .and_then(|d| d.editing.map(|(id, _)| id))
     }
 
     /// Ativa o campo Plano: os planos da origem e de trabalho aparecem na ocorrência da
@@ -147,7 +219,7 @@ impl Editor {
         self.current_mut()
             .plane_pick
             .take_if(|p| p.purpose == PlanePurpose::OffsetBase);
-        self.status.set(text(T::OffsetPlaneHint));
+        self.status.set(text(self.offset_plane_hint()));
     }
 
     /// Entrega da consulta da face em segundo plano. Uma resposta de outra aba ou revisão,
@@ -176,14 +248,23 @@ impl Editor {
             return;
         };
         let purpose = self.current().plane_pick.as_ref().map(|p| p.purpose);
-        // Outra ferramenta assumiu a área 3D, a aba mudou ou a peça deixou de existir.
+        let document = self.current().session.document();
+        // Outra ferramenta assumiu a área 3D, a aba mudou ou a peça (ou o plano em edição,
+        // por exemplo ao desfazer) deixou de existir.
         let replaced = draft.tab != self.current().id
             || self.feature_edit.is_some()
             || self.assembly_panel.is_some()
             || self.section_edit.is_some()
             || self.current().sketch_edit.is_some()
             || purpose == Some(PlanePurpose::Sketch)
-            || self.current().session.document().part(draft.part).is_none();
+            || document.part(draft.part).is_none()
+            || draft
+                .editing
+                .is_some_and(|(id, _)| document.work_plane(id).is_none());
+        let title = match draft.editing.and_then(|(id, _)| document.work_plane(id)) {
+            Some(record) => format!("{} · {}", text(T::OffsetPlane), record.name),
+            None => text(T::OffsetPlane).to_owned(),
+        };
         if replaced {
             self.work_plane_edit = Some(draft);
             self.close_offset_plane();
@@ -203,7 +284,7 @@ impl Editor {
             panel::Header {
                 id: "offset_plane",
                 icon: Icon::OffsetPlane,
-                title: text(T::OffsetPlane),
+                title: &title,
             },
             self.canvas_rect,
             Footer::None,
@@ -245,6 +326,18 @@ impl Editor {
             },
         );
         if outcome.cancel {
+            self.work_plane_edit = Some(draft);
+            self.close_offset_plane();
+            return;
+        }
+        if outcome.ok
+            && let Some(plane) = draft.work_plane()
+            && let Some((id, original)) = draft.editing
+        {
+            // Sem mudança não há o que recalcular nem uma ação nova no desfazer.
+            if plane != original {
+                self.prepare_command(context, draft.tab, Command::UpdateWorkPlane { id, plane });
+            }
             self.work_plane_edit = Some(draft);
             self.close_offset_plane();
             return;

@@ -2,10 +2,16 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Edição da distância dos planos de trabalho
+
+- Duplo clique num plano da pasta Planos, ou **Editar** no menu, reabre o painel do Plano deslocado com o nome do plano, o plano-base atual e a distância gravada, mesmo com o plano oculto. Seta, campo e inversão funcionam como na criação; o campo Plano também permite trocar o plano-base. A prévia ocupa o lugar do plano gravado até o OK; OK sem mudanças não cria ação no desfazer.
+- Rascunhos criados num plano de trabalho ficam apoiados nele. Mudar a distância move esses rascunhos, preservando a geometria local, e recalcula as operações da peça em segundo plano, numa única ação de desfazer; falhas de recálculo abrem a decisão de correção, supressão ou cancelamento. Excluir o plano mantém os rascunhos na última posição, sem o vínculo; clonar a peça leva os vínculos para os planos copiados.
+- Formato interno 21 grava o apoio do rascunho (`support`), lendo os projetos anteriores com rascunhos de plano fixo.
+
 ### Plano deslocado e planos de trabalho
 
 - Nova ferramenta **Plano deslocado** no grupo Construção da aba Peça. O painel escolhe o plano-base entre os planos da origem, os planos de trabalho da peça (na área 3D ou na árvore) e faces planas do sólido, com o realce do Novo rascunho. A seta arrasta o plano ao longo da normal; Distância aceita digitação com unidades e contas e pode ser invertida. OK cria “Plano N” em uma ação de desfazer; Esc/Cancelar não alteram o documento.
-- Planos de trabalho aparecem em âmbar na área 3D e na nova pasta **Planos** da peça, com olho próprio, dica do deslocamento e menu **Novo rascunho neste plano**/**Excluir**. A seleção de suporte do Novo rascunho os oferece junto a XY/XZ/YZ. Criar um rascunho no plano o oculta na mesma ação; o rascunho captura o plano e não muda se o plano for excluído.
+- Planos de trabalho aparecem em âmbar na área 3D e na nova pasta **Planos** da peça, com olho próprio, dica do deslocamento e menu **Novo rascunho neste plano**/**Excluir**. A seleção de suporte do Novo rascunho os oferece junto a XY/XZ/YZ. Criar um rascunho no plano o oculta na mesma ação; excluir o plano não move nem apaga o rascunho.
 - Faces curvas ou cliques fora do modelo durante a escolha do plano-base apenas avisam na barra de estado. A ferramenta exige peça em construção e se encerra quando outra ferramenta assume a área 3D.
 - Formato interno 20 grava `work_planes` e a visibilidade da pasta (`folders.planes`), lendo os projetos anteriores sem planos e com a pasta visível. Clonar, espelhar ou inserir uma peça copia seus planos com novos identificadores; como os rascunhos, eles não são refletidos pelo espelhamento.
 

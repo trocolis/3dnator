@@ -30,7 +30,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 19: tangência de círculo completo com reta suporte (Tangent usa seu centro).
 /// Versão 20: planos de trabalho por peça (`work_planes`) e visibilidade da pasta Planos
 /// (`folders.planes`). Ausentes, a peça não tem planos e a pasta fica visível.
-pub const FORMAT_VERSION: u32 = 20;
+/// Versão 21: rascunhos apoiados em plano de trabalho (`support`), que acompanham as
+/// edições do plano. Ausente, o plano do rascunho é fixo.
+pub const FORMAT_VERSION: u32 = 21;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -92,6 +94,9 @@ struct SketchRecordData {
     id: u64,
     sketch: nator_sketch::Sketch,
     visible: bool,
+    /// Plano de trabalho que apoia o rascunho (versão 21); ausente, o plano é fixo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    support: Option<u64>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -378,6 +383,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                     id: SketchId(s.id),
                     sketch: s.sketch,
                     visible: s.visible,
+                    support: s.support.map(WorkPlaneId),
                 })
                 .collect(),
             work_planes: part
@@ -465,6 +471,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                     id: SketchId(s.id),
                     sketch: s.sketch,
                     visible: s.visible,
+                    support: s.support.map(WorkPlaneId),
                 })
                 .collect(),
         )
@@ -592,6 +599,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                         id: s.id.0,
                         sketch: s.sketch.clone(),
                         visible: s.visible,
+                        support: s.support.map(|id| id.0),
                     })
                     .collect(),
                 work_planes: p
@@ -631,6 +639,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                 id: s.id.0,
                 sketch: s.sketch.clone(),
                 visible: s.visible,
+                support: s.support.map(|id| id.0),
             })
             .collect(),
         groups: document
@@ -1145,12 +1154,27 @@ mod tests {
             },
         )?;
         doc.work_plane_mut(hidden)?.visible = false;
+        let (_, supported) = doc.add_sketch_on_work_plane(shown, "Perfil".into())?;
         doc.set_folder_visible(Folder::WorkPlanes(part), false)?;
         let second = directory.path().join("planos-2.3dnator");
         write_project(&second, &doc)?;
         let reopened = read_project(&second)?;
         assert_eq!(reopened.parts()[0].work_planes, doc.parts()[0].work_planes);
         assert_eq!(reopened.work_plane_part(shown), Some(part));
+        let record = reopened.sketch(supported).ok_or("Rascunho ausente")?;
+        assert_eq!(record.support, Some(shown));
+        assert_eq!(
+            record.sketch.plane,
+            doc.work_plane(shown).ok_or("Plano")?.plane.plane()
+        );
+        // Rascunhos sem apoio continuam sem o campo no manifesto.
+        assert!(
+            reopened.parts()[0]
+                .sketches
+                .iter()
+                .filter(|s| s.id != supported)
+                .all(|s| s.support.is_none())
+        );
         assert!(!reopened.folder_visible(Folder::WorkPlanes(part))?);
         assert!(reopened.next_id() > hidden.0);
         Ok(())

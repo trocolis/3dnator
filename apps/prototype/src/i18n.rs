@@ -12,6 +12,8 @@ pub enum Text {
     WorkPlaneOtherPart,
     OffsetPlaneHint,
     WorkPlaneCreated,
+    CurrentBase,
+    EditOffsetPlaneHint,
     SketchHiddenPart,
     Origin,
     SketchXY,
@@ -675,6 +677,10 @@ pub fn text(key: Text) -> &'static str {
         Text::WorkPlaneOtherPart => "O plano escolhido pertence a outra peça.",
         Text::OffsetPlaneHint => "Arraste a seta ou digite a distância; OK cria o plano",
         Text::WorkPlaneCreated => "criado. Escolha-o no Novo rascunho para desenhar nele.",
+        Text::CurrentBase => "Plano-base atual",
+        Text::EditOffsetPlaneHint => {
+            "Arraste a seta ou digite a distância; OK move o plano e os rascunhos nele"
+        }
         Text::SketchHiddenPart => "Mostre uma ocorrência da peça para editar seu rascunho.",
         Text::Origin => "Origem",
         Text::SketchXY => "Rascunho XY",

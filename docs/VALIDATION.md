@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Edição da distância dos planos de trabalho — 28/10/2026
+
+- Regressões sem GPU cobrem rascunhos apoiados acompanhando a nova distância com a geometria U/V preservada, rascunhos sem apoio inalterados, recusa de distância inválida, exclusão que desfaz o vínculo sem mover o rascunho, clonagem com vínculo remapeado, desfazer/refazer de `UpdateWorkPlane` e ida e volta do formato 21 com o campo `support`.
+- Regressão CAD com OCCT extruda 5 mm um retângulo no plano a 20 mm de XY; levar o plano a 32,5 mm reconstrói o sólido entre 32,5 e 37,5 mm, mantém o plano oculto e volta com desfazer/refazer.
+- Ensaio gráfico abre o plano oculto por duplo clique na árvore, confere título e plano-base atual, confirma OK sem mudança sem nova revisão, digita 32,5 mm, confirma com Enter no campo e no painel e verifica a extrusão reconstruída em uma revisão, desfeita por Ctrl+Z.
+- **271 testes do workspace com OCCT, 204 sem OCCT e 19 ensaios gráficos aprovados**. Formatação e Clippy com todos os alvos/avisos negados nas duas configurações aprovados no Linux. Captura GL/llvmpipe em `target/claude-validation/offset-plane-edit-20261028/offset-plane-edit.png` (novo cenário `offset-plane-edit`), inspecionada: título com o nome do plano, plano-base atual, prévia a 35 mm sem o plano gravado duplicado. Windows e janela nativa não exercitados localmente. Versão 0.3.0 em desenvolvimento; formato 21, sem release ou publicação remota.
+
 ## Plano deslocado e planos de trabalho — 27/10/2026
 
 - Regressões sem GPU cobrem o plano resultante (deslocamento pela normal, eixos U/V preservados, limites e eixos inválidos), visibilidade com a pasta Planos, identificadores novos ao clonar, nomes “Plano N”, `AddSketchOnWorkPlane` com o plano copiado para o rascunho e ocultado em uma só ação de desfazer, exclusão sem afetar o rascunho e ida e volta do formato 20 com projetos sem o campo.

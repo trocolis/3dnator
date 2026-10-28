@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 20
+# Formato de projeto — versão interna 21
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 20; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 21; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -20,7 +20,8 @@ Cada peça contém:
 - corpos: identificador, nome, visibilidade, transformação local, caminho da malha, caminho opcional do B-rep e, desde a versão 7, `face_names`;
 - desde a versão 8, `color_srgb` opcional por corpo, com três canais inteiros de 0 a 255; ausência usa a aparência neutra;
 - rascunhos: plano fixo, pontos, entidades, restrições, expressões das cotas e visibilidade (usada pelo viewport e pelo olho da árvore);
-- desde a versão 20, `work_planes` opcional: planos de trabalho com identificador, nome, visibilidade e `plane` (`base`, plano com origem e eixos U/V unitários e perpendiculares em mm, e `offset`, deslocamento em mm ao longo de U × V, limitado a ±10.000.000 mm). O plano resultante é calculado na leitura; rascunhos criados nele guardam sua própria cópia. Omitido quando vazio;
+- desde a versão 20, `work_planes` opcional: planos de trabalho com identificador, nome, visibilidade e `plane` (`base`, plano com origem e eixos U/V unitários e perpendiculares em mm, e `offset`, deslocamento em mm ao longo de U × V, limitado a ±10.000.000 mm). O plano resultante é calculado na leitura. Omitido quando vazio;
+- desde a versão 21, `support` opcional em cada rascunho de peça: identificador de um plano de trabalho da mesma peça. O plano do rascunho continua gravado e é o que o solver e as operações usam; editar o plano de trabalho reescreve os planos dos rascunhos apoiados. Ausente, o plano do rascunho é fixo; rascunhos de referência nunca têm o campo;
 - parâmetros nomeados com expressões e dimensão (comprimento, ângulo ou escalar);
 - histórico de operações (`features`), cada uma com nome, corpo resultante, operação e, desde a versão 12, `suppressed` opcional (operação suprimida, com parâmetros preservados);
 - desde a versão 12, `history_marker` opcional: quantidade de operações construídas a partir do início. As posteriores ficam inativas, com a última geometria oculta, e novas operações entram nessa posição. Ausente, todo o histórico é construído; o marcador nunca aponta para o fim (forma canônica).

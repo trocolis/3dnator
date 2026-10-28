@@ -53,6 +53,7 @@ pub(crate) fn render_ui_scenario(
         | "section"
         | "offset-plane"
         | "work-plane-pick"
+        | "offset-plane-edit"
         | "repair"
         | "recovery"
         | "insert"
@@ -77,7 +78,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -540,6 +541,39 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor.open_offset_plane();
             editor.choose_origin_plane("XY", nator_sketch::Plane::xy());
             editor.set_offset_plane_for_capture(20.);
+        }
+        "offset-plane-edit" => {
+            // Plano existente a 20 mm de XY reaberto pela edição e levado a 35 mm: o
+            // painel mostra o nome e o plano-base atual; a prévia substitui o plano gravado.
+            let part = editor
+                .current()
+                .session
+                .document()
+                .parts()
+                .first()
+                .map(|p| p.id)
+                .ok_or("Projeto sem peças.")?;
+            editor.current_mut().select(None);
+            editor.current_mut().active_part = Some(part);
+            editor.shell.tab = shell::RibbonTab::Model;
+            editor.execute(Command::AddWorkPlane {
+                part,
+                name: format!("{} 1", text(T::WorkPlaneName)),
+                plane: nator_document::WorkPlane {
+                    base: nator_sketch::Plane::xy(),
+                    offset: 20.,
+                },
+            });
+            let plane = editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .and_then(|p| p.work_planes.last())
+                .map(|w| w.id)
+                .ok_or("Plano ausente.")?;
+            editor.edit_work_plane(plane);
+            editor.set_offset_plane_for_capture(35.);
         }
         "work-plane-pick" => {
             // Plano de trabalho 20 mm acima de XY na primeira peça, já na escolha de suporte
@@ -4290,6 +4324,159 @@ mod tests {
             "O plano usado deve ficar oculto"
         );
         assert_eq!(editor.current().session.revision(), revision + 2);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn editing_a_work_plane_from_the_tree_moves_its_extrusion() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Edição de planos")?)?;
+        let Effect::PartCreated { part } = session.execute(Command::CreatePart {
+            name: "Suporte".into(),
+        })?
+        else {
+            return Err("Peça ausente".into());
+        };
+        let Effect::WorkPlaneCreated { plane, .. } = session.execute(Command::AddWorkPlane {
+            part,
+            name: format!("{} 1", text(T::WorkPlaneName)),
+            plane: nator_document::WorkPlane {
+                base: Plane::xy(),
+                offset: 20.,
+            },
+        })?
+        else {
+            return Err("Plano ausente".into());
+        };
+        let Effect::SketchCreated { sketch, .. } =
+            session.execute(Command::AddSketchOnWorkPlane {
+                id: plane,
+                name: "Perfil".into(),
+            })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let mut profile = session
+            .document()
+            .sketch(sketch)
+            .ok_or("Rascunho ausente")?
+            .sketch
+            .clone();
+        profile.add_rectangle([0., 0.], [20., 10.], false)?;
+        session.execute(Command::UpdateSketch {
+            id: sketch,
+            sketch: profile,
+        })?;
+        let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "5 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Extrusão ausente".into());
+        };
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.current_mut().active_part = Some(part);
+        frame(&mut editor, &context, Vec::new())?;
+        settle(&mut editor, &context)?;
+        let heights = |editor: &Editor| -> Result<[f64; 2], Box<dyn Error>> {
+            let bounds = editor
+                .current()
+                .session
+                .document()
+                .body(body)
+                .ok_or("Corpo ausente")?
+                .geometry
+                .mesh()
+                .bounds();
+            Ok([bounds.min[2], bounds.max[2]])
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let name = format!("{} 1", text(T::WorkPlaneName));
+        let double_click = |editor: &mut Editor| -> Result<(), Box<dyn Error>> {
+            // Meio segundo de quadros vazios: o par anterior não vira clique triplo.
+            for _ in 0..30 {
+                frame(editor, &context, Vec::new())?;
+            }
+            let entry = label_position(editor, &context, &name)?;
+            click(editor, &context, entry)?;
+            click(editor, &context, entry)
+        };
+        assert!((heights(&editor)?[0] - 20.).abs() < 1e-6);
+        let revision = editor.current().session.revision();
+        // Duplo clique na árvore reabre o plano com a distância gravada; OK sem mudança
+        // não cria ação no desfazer.
+        double_click(&mut editor)?;
+        assert_eq!(editor.editing_work_plane(), Some(plane));
+        label_position(
+            &mut editor,
+            &context,
+            &format!("{} · {name}", text(T::OffsetPlane)).to_uppercase(),
+        )?;
+        label_position(&mut editor, &context, text(T::CurrentBase))?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        settle(&mut editor, &context)?;
+        assert!(editor.work_plane_edit.is_none());
+        assert_eq!(editor.current().session.revision(), revision);
+        // Nova distância: o rascunho apoiado e a extrusão acompanham o plano.
+        double_click(&mut editor)?;
+        let field = label_position(&mut editor, &context, "20,00")?;
+        click(&mut editor, &context, field)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("32,5".into())],
+        )?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        assert!(
+            editor.work_plane_edit.is_some(),
+            "Enter no campo não confirma"
+        );
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        settle(&mut editor, &context)?;
+        assert!(editor.work_plane_edit.is_none(), "{}", editor.status);
+        assert_eq!(editor.current().session.revision(), revision + 1);
+        let document = editor.current().session.document();
+        assert_eq!(
+            document.work_plane(plane).map(|w| w.plane.offset),
+            Some(32.5)
+        );
+        assert!(document.work_plane(plane).is_some_and(|w| !w.visible));
+        let [low, high] = heights(&editor)?;
+        assert!((low - 32.5).abs() < 1e-6 && (high - 37.5).abs() < 1e-6);
+        // Uma única ação de desfazer devolve plano, rascunho e extrusão.
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Z,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+        )?;
+        settle(&mut editor, &context)?;
+        let [low, high] = heights(&editor)?;
+        assert!((low - 20.).abs() < 1e-6 && (high - 25.).abs() < 1e-6);
         Ok(())
     }
 

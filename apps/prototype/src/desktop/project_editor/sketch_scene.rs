@@ -421,7 +421,7 @@ impl Editor {
         else {
             return;
         };
-        if picker.reference {
+        if picker.reference || self.editing_work_plane() == Some(id) {
             return;
         }
         let accepted = match picker.purpose {
@@ -801,10 +801,12 @@ impl Editor {
                 .filter(|p| p.offers_work_planes())
                 .and_then(|p| p.destination)
                 .and_then(|id| document.part(id));
-            for record in destination
-                .iter()
-                .flat_map(|part| part.work_planes.iter().filter(|r| part.shows_work_plane(r)))
-            {
+            let editing = self.editing_work_plane();
+            for record in destination.iter().flat_map(|part| {
+                part.work_planes
+                    .iter()
+                    .filter(|r| part.shows_work_plane(r) && Some(r.id) != editing)
+            }) {
                 let corners =
                     plane_patch(transformed_plane(record.plane.plane(), placement), bounds);
                 let polygon: Option<Vec<_>> = corners.iter().map(|p| world_screen(*p)).collect();
@@ -907,6 +909,8 @@ impl Editor {
         let bounds = self.display_bounds();
         let camera = &self.viewport.camera;
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        // O plano em edição aparece só na prévia do painel, na posição nova.
+        let editing = self.editing_work_plane();
         let mut drawn = false;
         for occurrence in occurrences
             .iter()
@@ -921,7 +925,11 @@ impl Editor {
             if picked == Some((Some(part.id), occurrence.placement)) {
                 continue;
             }
-            for record in part.work_planes.iter().filter(|r| part.shows_work_plane(r)) {
+            for record in part
+                .work_planes
+                .iter()
+                .filter(|r| part.shows_work_plane(r) && Some(r.id) != editing)
+            {
                 let corners = plane_patch(
                     transformed_plane(record.plane.plane(), occurrence.placement),
                     bounds,

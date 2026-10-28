@@ -57,6 +57,10 @@ pub struct SketchRecord {
     pub id: SketchId,
     pub sketch: nator_sketch::Sketch,
     pub visible: bool,
+    /// Plano de trabalho da mesma peça que define o plano do rascunho: editar o plano
+    /// move o rascunho e recalcula o histórico. `None` em rascunhos sobre a origem, sobre
+    /// faces (plano capturado) e de referência da montagem.
+    pub support: Option<WorkPlaneId>,
 }
 
 #[derive(Debug, Clone)]
@@ -597,6 +601,7 @@ impl Document {
             id,
             sketch,
             visible: true,
+            support: None,
         });
         Ok(id)
     }
@@ -679,6 +684,7 @@ impl Document {
             id,
             sketch,
             visible: true,
+            support: None,
         });
         Ok((part, id))
     }
@@ -857,6 +863,11 @@ impl Document {
         // Rascunhos de referência não têm parâmetros de peça: cotas só com valores diretos.
         for record in &self.reference_sketches {
             register(record.id.0)?;
+            if record.support.is_some() {
+                return Err(DocumentError(
+                    "Rascunho de referência não pode usar plano de trabalho.".into(),
+                ));
+            }
             record
                 .sketch
                 .validate()
@@ -871,6 +882,14 @@ impl Document {
             features::validate(part)?;
             for record in &part.sketches {
                 register(record.id.0)?;
+                if record
+                    .support
+                    .is_some_and(|id| !part.work_planes.iter().any(|w| w.id == id))
+                {
+                    return Err(DocumentError(
+                        "Rascunho apoiado em plano de trabalho inexistente na peça.".into(),
+                    ));
+                }
                 record
                     .sketch
                     .validate()

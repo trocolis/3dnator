@@ -228,9 +228,16 @@ impl Document {
             sketch.id = SketchId(self.allocate_id()?);
             sketch_map.insert(old, sketch.id);
         }
-        // Planos de trabalho não são referenciados pelo histórico: só ganham identidade nova.
+        // Planos de trabalho não são referenciados pelo histórico; os rascunhos apoiados
+        // neles passam a apontar para as cópias.
+        let mut plane_map = HashMap::new();
         for plane in &mut part.work_planes {
+            let old = plane.id;
             plane.id = WorkPlaneId(self.allocate_id()?);
+            plane_map.insert(old, plane.id);
+        }
+        for sketch in &mut part.sketches {
+            sketch.support = sketch.support.and_then(|id| plane_map.get(&id).copied());
         }
         for feature in &mut part.features {
             feature.remap(&body_map, &sketch_map)?;

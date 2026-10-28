@@ -202,6 +202,7 @@ impl Editor {
             Intent::LeavePart => self.apply_menu_action(ui.ctx(), browser::MenuAction::Deactivate),
             Intent::EditSketch(part, id) => self.begin_sketch(part, id),
             Intent::PickWorkPlane(id) => self.choose_work_plane(id),
+            Intent::EditWorkPlane(id) => self.edit_work_plane(id),
             Intent::EditReference(id) => {
                 self.finish_sketch();
                 self.current_mut().active_part = None;

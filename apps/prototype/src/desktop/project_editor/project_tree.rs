@@ -23,6 +23,8 @@ pub(super) enum Intent {
     EditSketch(PartId, SketchId),
     /// Plano de trabalho clicado: vale como escolha quando um seletor de suporte está aberto.
     PickWorkPlane(WorkPlaneId),
+    /// Reabre o plano de trabalho no painel do plano deslocado.
+    EditWorkPlane(WorkPlaneId),
     EditReference(SketchId),
     ToggleSection,
     OpenSection,
@@ -458,8 +460,9 @@ impl<'a> Tree<'a> {
         );
     }
 
-    /// Plano de trabalho: o olho alterna a visibilidade; o menu cria um rascunho nele ou o
-    /// exclui. Usado num rascunho, o plano fica oculto, mas continua listado aqui.
+    /// Plano de trabalho: o olho alterna a visibilidade; o duplo clique e o menu editam a
+    /// distância, e o menu também cria um rascunho nele ou o exclui. Usado num rascunho, o
+    /// plano fica oculto, mas continua listado aqui.
     fn work_plane(&mut self, ui: &mut egui::Ui, record: &WorkPlaneRecord, parent_shown: bool) {
         self.leaf(ui, |tree, ui| {
             if tree.eye(ui, record.visible, true) {
@@ -481,11 +484,22 @@ impl<'a> Tree<'a> {
                 text(T::OffsetField),
                 nator_drawing::format_mm(record.plane.offset)
             ));
+            let editable = !tree.busy && tree.tab.sketch_edit.is_none();
             if response.clicked() && !tree.busy {
                 tree.intents.push(Intent::PickWorkPlane(record.id));
             }
+            if response.double_clicked() && editable {
+                tree.intents.push(Intent::EditWorkPlane(record.id));
+            }
             response.context_menu(|ui| {
                 ui.add_enabled_ui(!tree.busy, |ui| {
+                    if ui
+                        .add_enabled(editable, egui::Button::new(text(T::EditFeatureShort)))
+                        .clicked()
+                    {
+                        tree.intents.push(Intent::EditWorkPlane(record.id));
+                        ui.close();
+                    }
                     if ui
                         .add_enabled(
                             tree.tab.sketch_edit.is_none(),

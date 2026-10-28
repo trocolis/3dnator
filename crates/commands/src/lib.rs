@@ -223,15 +223,21 @@ pub enum Command {
         name: String,
         plane: nator_document::WorkPlane,
     },
+    /// Nova definição do plano (plano-base e distância). Os rascunhos apoiados nele são
+    /// movidos juntos e o histórico da peça é recalculado na mesma transação.
+    UpdateWorkPlane {
+        id: WorkPlaneId,
+        plane: nator_document::WorkPlane,
+    },
     SetWorkPlaneVisibility {
         id: WorkPlaneId,
         visible: bool,
     },
-    /// Exclui o plano. Rascunhos criados nele permanecem: o suporte foi capturado.
+    /// Exclui o plano. Rascunhos criados nele permanecem onde estão, sem o vínculo.
     RemoveWorkPlane {
         id: WorkPlaneId,
     },
-    /// Rascunho novo sobre o plano de trabalho, na peça dona dele. Usar o plano o oculta
+    /// Rascunho novo apoiado no plano de trabalho, na peça dona dele. Usar o plano o oculta
     /// na mesma transação, como uma operação oculta o perfil que consome.
     AddSketchOnWorkPlane {
         id: WorkPlaneId,
@@ -379,6 +385,7 @@ impl Command {
             Self::AddReferenceSketch { .. } => "Criar rascunho de referência",
             Self::RemoveSketch { .. } => "Excluir rascunho",
             Self::AddWorkPlane { .. } => "Criar plano deslocado",
+            Self::UpdateWorkPlane { .. } => "Editar plano deslocado",
             Self::SetWorkPlaneVisibility { .. } => "Alterar visibilidade do plano",
             Self::RemoveWorkPlane { .. } => "Excluir plano de trabalho",
             Self::AddSketchOnWorkPlane { .. } => "Criar rascunho no plano",
@@ -760,21 +767,19 @@ impl Command {
                 let plane = doc.add_work_plane(part, name, plane)?;
                 return Ok(Effect::WorkPlaneCreated { part, plane });
             }
+            Self::UpdateWorkPlane { id, plane } => {
+                let (part, moved) = doc.update_work_plane(id, plane)?;
+                // Sem rascunhos apoiados, nenhuma operação depende do plano.
+                if moved {
+                    rebuilds.request(doc, part)?;
+                }
+            }
             Self::SetWorkPlaneVisibility { id, visible } => {
                 doc.work_plane_mut(id)?.visible = visible;
             }
             Self::RemoveWorkPlane { id } => doc.remove_work_plane(id)?,
             Self::AddSketchOnWorkPlane { id, name } => {
-                let part = doc
-                    .work_plane_part(id)
-                    .ok_or_else(|| DocumentError("Plano de trabalho inexistente.".into()))?;
-                let record = doc.work_plane_mut(id)?;
-                record.visible = false;
-                // O rascunho recebe uma cópia do plano: editar ou excluir o plano depois
-                // não move o perfil, como nos rascunhos criados sobre faces.
-                let plane = record.plane.plane();
-                let (part, sketch) =
-                    doc.add_sketch(Some(part), nator_sketch::Sketch::new(name, plane))?;
+                let (part, sketch) = doc.add_sketch_on_work_plane(id, name)?;
                 return Ok(Effect::SketchCreated { part, sketch });
             }
             Self::CreatePart { name } => {
@@ -1109,7 +1114,7 @@ mod tests {
     }
 
     #[test]
-    fn sketches_on_work_planes_capture_the_plane_and_hide_it_in_one_undo()
+    fn sketches_on_work_planes_follow_the_plane_and_hide_it_in_one_undo()
     -> Result<(), Box<dyn Error>> {
         use nator_sketch::Plane;
         let mut session = Session::new(Document::new("Plano deslocado")?)?;
@@ -1171,8 +1176,24 @@ mod tests {
                 .is_some_and(|w| w.visible)
         );
         assert!(session.redo());
-        // Excluir o plano preserva o rascunho, que já capturou o suporte.
+        // Editar a distância leva o rascunho apoiado junto, em uma ação de desfazer.
+        session.execute(Command::UpdateWorkPlane {
+            id: plane,
+            plane: nator_document::WorkPlane { base, offset: 40. },
+        })?;
+        let moved = |session: &Session| {
+            session
+                .document()
+                .sketch(sketch)
+                .map(|record| record.sketch.plane.origin)
+        };
+        assert_eq!(moved(&session), Some([50., 0., 0.]));
+        assert!(session.undo());
+        assert_eq!(moved(&session), Some([25., 0., 0.]));
+        assert!(session.redo());
+        // Excluir o plano preserva o rascunho na última posição, sem o vínculo.
         session.execute(Command::RemoveWorkPlane { id: plane })?;
+        assert_eq!(moved(&session), Some([50., 0., 0.]));
         assert!(session.document().work_plane(plane).is_none());
         assert!(session.document().sketch(sketch).is_some());
         assert!(
