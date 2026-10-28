@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Pendências do AJUSTE.md: cotas, Espelhar, Deslocamento e indicadores — 28/10/2026
+
+- **304 testes com OCCT e 235 sem OCCT aprovados**, incluindo conexões fortes versus fracas, desempate pelo segundo elemento, validação dos alvos gravados, cópias múltiplas com cantos compartilhados, traços, distâncias independentes dos dois lados, deslocamento de arcos e falha atômica quando o segundo raio é inválido. Verificados a identidade/posição/ordem das cotas no salvamento/reabertura e o histórico das operações compostas.
+- **27 ensaios gráficos aprovados**. Os três novos ensaios usam eventos reais: arraste do texto sem mover pontos, duplo clique e alteração da expressão sem duplicar a restrição, Esc sem revisão nova, seleção de vários elementos e campo de eixo em Espelhar, modo Dupla com dois campos e desfazer, além da ordem real dos cliques em dois centros livres, preservando o segundo no empate. Os demais fluxos gráficos anteriores continuam passando.
+- Formatação, Clippy com todos os alvos e avisos negados nas duas configurações e compilação desktop com OCCT aprovados no Linux. Logs em `target/codex-validation/adjustments-20261028/`. Captura `indicators.png` conferida com símbolos de ângulo reto, tangência, ponto médio e centro, inclusive empilhamento de símbolos no mesmo contato.
+- Aplicativo 0.3.0 em desenvolvimento; formato interno 25. Windows e janela nativa não exercitados localmente. Todos os seis itens pendentes do AJUSTE.md concluídos, sem release ou publicação remota.
+
 ## Junções fortes/fracas, F e cadeados — 28/10/2026
 
 - Regressões do núcleo verificam que uma ligação forte transmite a edição entre apoios, enquanto a fraca permite separá-los; cantos de retângulos compartilhados abrem sem deslocamento e fecham novamente. Cruzamentos começam fracos, recebem incidências ao fortalecer e voltam a ser virtuais ao liberar um apoio sem cotas próprias. Apoios de cruzamentos fortes sobrevivem à limpeza de pontos. Incidência circular acompanha mudanças do raio.

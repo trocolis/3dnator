@@ -72,6 +72,8 @@ pub(super) enum Icon {
     ConstraintEqual,
     ConstraintParallel,
     ConstraintPerpendicular,
+    SnapMidpoint,
+    SnapCenter,
     Folder,
     First,
     Previous,
@@ -386,6 +388,17 @@ fn paint_styled(
             p.face(&[[5., 11.], [19., 11.], [19., 22.], [5., 22.]], p.fill);
             p.circle(12., 15., 1.3, p.accent);
             p.line(&[[12., 16.], [12., 19.]], p.accent);
+        }
+        Icon::SnapMidpoint => {
+            p.line(&[[2., 18.], [22., 18.]], p.ink);
+            p.face(&[[7., 13.], [17., 13.], [12., 5.]], p.fill);
+            p.line(&[[12., 16.], [12., 21.]], p.accent);
+        }
+        Icon::SnapCenter => {
+            p.circle(12., 12., 7., p.accent);
+            p.line(&[[2., 12.], [22., 12.]], p.ink);
+            p.line(&[[12., 2.], [12., 22.]], p.ink);
+            p.circle(12., 12., 1.5, p.accent);
         }
         Icon::Revolve => {
             p.line(&[[12., 2.], [12., 22.]], p.ink);

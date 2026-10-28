@@ -88,6 +88,39 @@ fn candidate(
         work.dimension
     };
     let mut sketch = source.clone();
+    if action == Action::Mirror {
+        nator_sketch::modifications::mirror(
+            &mut sketch,
+            &work.selected,
+            work.mirror_axis
+                .ok_or_else(|| text(T::SketchMirrorAxisHint).to_owned())?,
+            work.operation_line_type,
+        )
+        .map_err(sketch_error)?;
+        return Ok(sketch);
+    }
+    if action == Action::Offset {
+        let second = if work.offset_mode == nator_sketch::modifications::OffsetMode::Double {
+            parameters
+                .evaluate(
+                    &work.offset_second_expression,
+                    nator_document::parameters::Dimension::Length,
+                )
+                .map_err(sketch_error)?
+        } else {
+            value
+        };
+        nator_sketch::modifications::offset(
+            &mut sketch,
+            &work.selected,
+            work.offset_mode,
+            value,
+            second,
+            work.operation_line_type,
+        )
+        .map_err(sketch_error)?;
+        return Ok(sketch);
+    }
     // Uma cota escolhida na lista mantém a identidade ao mudar valor ou referência.
     if action == Action::Dimension
         && let Some(id) = work.constraint
@@ -184,10 +217,70 @@ impl Editor {
                 } else {
                     work.selected.len()
                 };
-                let selection = panel::selection(ui, text(T::SketchEntities), count, None, true);
+                let selection = panel::selection(
+                    ui,
+                    text(T::SketchEntities),
+                    count,
+                    None,
+                    !work.mirror_axis_active,
+                );
+                if selection.activate {
+                    work.mirror_axis_active = false;
+                }
                 if selection.clear {
                     work.selected.clear();
                     work.constraint = None;
+                }
+                if action == Action::Mirror {
+                    let description = work.mirror_axis.map(|id| format!("{} {id}", text(T::Line)));
+                    let selection = panel::selection(
+                        ui,
+                        text(T::SketchMirrorAxis),
+                        usize::from(work.mirror_axis.is_some()),
+                        description.as_deref(),
+                        work.mirror_axis_active,
+                    );
+                    if selection.activate {
+                        work.mirror_axis_active = true;
+                    }
+                    if selection.clear {
+                        work.mirror_axis = None;
+                        work.mirror_axis_active = true;
+                    }
+                }
+                if matches!(action, Action::Mirror | Action::Offset) {
+                    ui.label(text(T::SketchLineType));
+                    ui.horizontal(|ui| {
+                        for (kind, label) in [
+                            (LineType::Normal, T::SketchLineNormal),
+                            (LineType::Construction, T::Construction),
+                            (LineType::Infinite, T::SketchLineInfinite),
+                        ] {
+                            if icons::button(
+                                ui,
+                                line_tools::icon(kind),
+                                text(label),
+                                true,
+                                work.operation_line_type == kind,
+                            )
+                            .clicked()
+                            {
+                                work.operation_line_type = kind;
+                            }
+                        }
+                    });
+                }
+                if action == Action::Offset {
+                    use nator_sketch::modifications::OffsetMode;
+                    ui.horizontal(|ui| {
+                        for (mode, label) in [
+                            (OffsetMode::Normal, T::SketchLineNormal),
+                            (OffsetMode::Double, T::SketchOffsetDouble),
+                            (OffsetMode::Symmetric, T::Symmetric),
+                        ] {
+                            ui.selectable_value(&mut work.offset_mode, mode, text(label));
+                        }
+                    });
                 }
                 if action.needs_value() {
                     let angular = action == Action::Dimension
@@ -210,6 +303,16 @@ impl Editor {
                         },
                     );
                 }
+                if action == Action::Offset {
+                    if work.offset_mode == nator_sketch::modifications::OffsetMode::Double {
+                        panel::row(ui, text(T::SketchOffsetSecond), |ui| {
+                            panel::expression(ui, &mut work.offset_second_expression);
+                        });
+                    } else if work.offset_mode == nator_sketch::modifications::OffsetMode::Symmetric
+                    {
+                        ui.label(text(T::SketchOffsetPerSide));
+                    }
+                }
                 if action.is_pattern() {
                     panel::row(ui, text(T::PatternCount), |ui| {
                         ui.add(egui::DragValue::new(&mut work.pattern_count).range(2..=100));
@@ -231,11 +334,18 @@ impl Editor {
             work.active_action = None;
         } else if outcome.ok {
             let next = candidate(&source, work, action, &parameters);
+            let edited_dimension = (action == Action::Dimension)
+                .then_some(work.constraint)
+                .flatten();
             work.active_action = None;
             match next {
                 Ok(sketch) => {
                     work.selected.retain(|id| sketch.entity(*id).is_ok());
-                    self.solve_sketch(context, sketch);
+                    if let Some(id) = edited_dimension {
+                        self.solve_sketch_with(context, sketch, Some((id, false)));
+                    } else {
+                        self.solve_sketch(context, sketch);
+                    }
                 }
                 Err(message) => self.status.error(message),
             }

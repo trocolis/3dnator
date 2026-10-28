@@ -4,9 +4,13 @@
 
 ### Operações de rascunho e dimensionamento por conexões
 
+- Cotas existentes são selecionadas pelo texto, arrastadas para reposicionar e editadas por duplo clique. Enter aplica a expressão e Esc cancela. A edição conserva ID, posição do texto e ordem dos elementos; arrastar modifica somente a apresentação e cria uma ação de desfazer ao soltar. Cotas de referência continuam medindo a geometria, com a opção de referência disponível no painel.
+- Painel Espelhar com campos independentes Entidades e Eixo de espelhamento; cliques no desenho alimentam o campo ativo. Painel Deslocamento com modos Normal/Dupla/Simétrica e duas expressões independentes no modo Dupla. As duas ferramentas oferecem Normal/Construção/Infinita para as cópias; o traço infinito exige linhas.
+
 - Política de cotas centralizada no núcleo: o elemento mais conectado é preservado; no empate, o segundo escolhido fica no lugar e o primeiro se ajusta. Ligações fracas não contam como apoios, e a própria cota é excluída da contagem. Restrições existentes prevalecem sobre a preferência transitória.
 - Espelhamento de múltiplas entidades com eixo separado e traço Normal/Construção/Infinita, preservando apoios compartilhados e coincidências internas nas cópias. Deslocamento Normal, Duplo e Simétrico, com distâncias por lado e o mesmo seletor de traço. Arcos passam a aceitar deslocamento radial. Falha em qualquer entidade/lado descarta a operação inteira.
 - Indicadores geométricos calculados fora da interface para perpendicularidade, tangência, ponto médio e centro. Formato interno 25 registra a ordem dos dois elementos cotados em `dimension_targets`, lendo os formatos anteriores. Aplicativo permanece em 0.3.0 em desenvolvimento.
+- Indicadores pequenos junto à geometria, com dicas ao passar o mouse e posições separadas do cadeado. Centros de círculos/arcos e polígonos, pontos médios e relações de tangência/perpendicularidade aparecem também durante as capturas/prévias correspondentes. Checklist AJUSTE.md concluído.
 
 ### Junções fortes/fracas e cadeados nos vértices
 

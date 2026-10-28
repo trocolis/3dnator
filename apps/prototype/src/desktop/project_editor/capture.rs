@@ -5297,6 +5297,306 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn existing_sketch_dimensions_drag_edit_and_cancel_without_recreating_constraints()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, Curve};
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Cota editável", Plane::xy());
+        let line = sketch.add_line([-20., 0.], [20., 0.], false)?;
+        let Curve::Line { start, end } = sketch.entity(line)?.curve else {
+            return Err("Linha ausente".into());
+        };
+        sketch.add_constraint(
+            ConstraintKind::Fixed {
+                point: start,
+                position: [-20., 0.],
+            },
+            false,
+        )?;
+        sketch.add_constraint(ConstraintKind::Horizontal { line }, false)?;
+        let dimension = sketch.add_constraint(
+            ConstraintKind::Distance {
+                a: start,
+                b: end,
+                value: 40.,
+            },
+            false,
+        )?;
+        sketch
+            .dimension_expressions
+            .insert(dimension, "40 mm".into());
+        sketch.dimension_labels.insert(dimension, [0., 12.]);
+        let original_points = sketch.points.iter().map(|p| p.position).collect::<Vec<_>>();
+        let mut document = Document::new("Editar e mover cotas")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let at = label_position(&mut editor, &context, "40")?;
+        let destination = at + egui::vec2(65., 30.);
+        let button = |position, pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(at), button(at, true)],
+        )?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(destination)],
+        )?;
+        frame(&mut editor, &context, vec![button(destination, false)])?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert_ne!(sketch.dimension_labels.get(&dimension), Some(&[0., 12.]));
+        assert_eq!(
+            sketch.points.iter().map(|p| p.position).collect::<Vec<_>>(),
+            original_points
+        );
+        let offset = sketch.dimension_labels[&dimension];
+        let at = label_position(&mut editor, &context, "40")?;
+        click(&mut editor, &context, at)?;
+        click(&mut editor, &context, at)?;
+        frame(&mut editor, &context, vec![])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("60 mm".into())],
+        )?;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert_eq!(sketch.constraints.len(), 3);
+        assert!(
+            (nator_sketch::distance(sketch.point(start)?, sketch.point(end)?) - 60.).abs() < 1e-6,
+            "{}",
+            editor.status
+        );
+        assert_eq!(sketch.dimension_labels[&dimension], offset);
+        let revision = editor.current().session.revision();
+        let at = label_position(&mut editor, &context, "60")?;
+        click(&mut editor, &context, at)?;
+        click(&mut editor, &context, at)?;
+        frame(&mut editor, &context, vec![])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("80 mm".into())],
+        )?;
+        frame(&mut editor, &context, vec![key(egui::Key::Escape)])?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(editor.current_mut().session.undo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .constraints
+                .iter()
+                .find(|c| c.id == dimension)
+                .and_then(|c| c.kind.dimension_value()),
+            Some(40.)
+        );
+        assert!(editor.current_mut().session.redo());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_mirror_fields_accept_multiple_origins_and_offsets_offer_two_sides()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Ferramentas", Plane::xy());
+        sketch.add_line([-25., -10.], [-5., -10.], false)?;
+        sketch.add_line([-5., -10.], [-5., 5.], false)?;
+        sketch.add_line([0., -20.], [0., 20.], true)?;
+        let mut document = Document::new("Espelhar e deslocar")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        editor.open_sketch_action(&context, nator_sketch::edit::Action::Mirror);
+        frame(&mut editor, &context, vec![])?;
+        let at = |editor: &Editor, p: [f64; 3]| {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                p,
+            )
+            .ok_or("Ponto sem projeção")
+        };
+        for p in [[-15., -10., 0.], [-5., 0., 0.]] {
+            let position = at(&editor, p)?;
+            click(&mut editor, &context, position)?;
+        }
+        let axis_label = label_position(&mut editor, &context, text(T::SketchMirrorAxis))?;
+        click(&mut editor, &context, axis_label + egui::vec2(125., 0.))?;
+        let position = at(&editor, [0., 10., 0.])?;
+        click(&mut editor, &context, position)?;
+        let construction = label_position(&mut editor, &context, text(T::Construction))?;
+        click(&mut editor, &context, construction)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert_eq!(sketch.entities.len(), 5, "{}", editor.status);
+        assert!(sketch.entities[3..].iter().all(|e| e.construction));
+        editor.activate_selection(&context);
+        let position = at(&editor, [-15., -10., 0.])?;
+        click(&mut editor, &context, position)?;
+        editor.open_sketch_action(&context, nator_sketch::edit::Action::Offset);
+        frame(&mut editor, &context, vec![])?;
+        let double = label_position(&mut editor, &context, text(T::SketchOffsetDouble))?;
+        click(&mut editor, &context, double)?;
+        label_position(&mut editor, &context, text(T::SketchOffsetSecond))?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            7,
+            "{}",
+            editor.status
+        );
+        assert!(editor.current_mut().session.undo());
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .len(),
+            5
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn dimension_equal_connections_keep_the_second_clicked_center_stationary()
+    -> Result<(), Box<dyn Error>> {
+        use nator_sketch::{ConstraintKind, dimensions::Target};
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Ordem das escolhas", Plane::xy());
+        let first = sketch.add_circle([-15., 0.], 4., false)?;
+        let second = sketch.add_circle([15., 0.], 4., false)?;
+        let a = sketch.entity(first)?.point_ids()[0];
+        let b = sketch.entity(second)?.point_ids()[0];
+        let mut document = Document::new("Empate nas conexões")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        editor.select_sketch_tool(sketch_editor::Tool::Dimension);
+        frame(&mut editor, &context, vec![])?;
+        for point in [[-15., 0., 0.], [15., 0., 0.]] {
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Ponto sem projeção")?;
+            click(&mut editor, &context, at)?;
+        }
+        frame(&mut editor, &context, vec![])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("40 mm".into())],
+        )?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        )?;
+        settle(&mut editor, &context)?;
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        let dimension = sketch
+            .constraints
+            .iter()
+            .find(|c| matches!(c.kind, ConstraintKind::Distance { .. }))
+            .ok_or("Cota ausente")?;
+        assert_eq!(
+            sketch.dimension_targets.get(&dimension.id),
+            Some(&[Target::Point(a), Target::Point(b)])
+        );
+        assert_eq!(sketch.point(b)?, [15., 0.]);
+        assert!((sketch.point(a)?[0] + 25.).abs() < 1e-6);
+        Ok(())
+    }
+
     fn wait_feature_preview(
         editor: &mut Editor,
         context: &egui::Context,

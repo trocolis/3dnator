@@ -18,6 +18,13 @@ pub enum Text {
     PointLineDistance,
     LineCircleDistance,
     DimensionPickHint,
+    DimensionReferenceReadOnly,
+    SketchMirrorAxis,
+    SketchMirrorAxisHint,
+    SketchOffsetDouble,
+    SketchOffsetSecond,
+    SketchOffsetPerSide,
+    SketchCenterIndicator,
     SketchProject,
     JunctionStrong,
     JunctionWeak,
@@ -887,6 +894,15 @@ pub fn text(key: Text) -> &'static str {
             "Captura a geometria no plano do rascunho. As referências ficam fixas na posição projetada."
         }
         Text::SketchDimension => "Dimencionar",
+        Text::SketchCenterIndicator => "Centro",
+        Text::SketchMirrorAxis => "Eixo de espelhamento",
+        Text::SketchMirrorAxisHint => "Escolha a linha no campo Eixo de espelhamento.",
+        Text::SketchOffsetDouble => "Dupla",
+        Text::SketchOffsetSecond => "Distância do segundo lado",
+        Text::SketchOffsetPerSide => "A distância informada é aplicada igualmente a cada lado.",
+        Text::DimensionReferenceReadOnly => {
+            "Esta cota é de referência: acompanha a geometria. Para dirigir uma medida, altere sua opção no painel de cotas."
+        }
         Text::HorizontalVertical => "Horizontal/vertical",
         Text::SketchExtendShort => "Estender",
         Text::SketchCircularShort => "Circular",
@@ -897,7 +913,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchSelectTwo => "Selecione duas entidades no rascunho, na ordem indicada.",
         Text::SketchSelectDimension => "Selecione uma cota ou uma linha, círculo ou arco.",
         Text::SketchMirrorSelectionHint => {
-            "Selecione primeiro a entidade a copiar e depois a linha do eixo."
+            "Selecione os elementos no campo Entidades e escolha uma linha no campo Eixo de espelhamento."
         }
         Text::SketchCircularSelectionHint => {
             "Selecione primeiro a entidade e depois um círculo ou arco que define o centro."

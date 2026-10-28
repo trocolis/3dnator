@@ -14,6 +14,8 @@
 use super::*;
 use nator_document::parameters::{Dimension, Parameters};
 use nator_sketch::{add, cross, distance, dot, scale, sub};
+mod existing;
+pub(super) use existing::{Existing, interact_existing};
 
 /// Folga entre a geometria e o lugar padrão do texto, em pontos de tela.
 const DEFAULT_GAP: f32 = 24.;
@@ -28,6 +30,14 @@ pub(super) enum Pick {
     Point(u64),
     Line(u64),
     Radial(u64),
+}
+impl Pick {
+    fn target(self) -> nator_sketch::dimensions::Target {
+        match self {
+            Self::Point(id) => nator_sketch::dimensions::Target::Point(id),
+            Self::Line(id) | Self::Radial(id) => nator_sketch::dimensions::Target::Entity(id),
+        }
+    }
 }
 
 /// O que as escolhas medem; o lugar do texto completa a variante (alinhada, horizontal,
@@ -82,6 +92,9 @@ pub(super) struct Draft {
     moved: bool,
 }
 impl Draft {
+    pub(super) fn is_empty(&self) -> bool {
+        self.picks.is_empty()
+    }
     pub(super) fn clear(&mut self) {
         *self = Self::default();
     }
@@ -126,7 +139,7 @@ impl Draft {
 pub(super) struct Update {
     /// Rascunho com a cota nova e o identificador dela, para decidir no trabalhador se ela
     /// dirige a geometria ou entra como referência.
-    pub commit: Option<(Sketch, u64, Option<Pick>)>,
+    pub commit: Option<(Sketch, u64)>,
     pub warning: Option<String>,
     /// Orientação da barra de estado, emitida só quando a etapa muda.
     pub hint: Option<T>,
@@ -471,6 +484,7 @@ pub(super) fn settle_driven(
     base.constraints.retain(|c| c.id != id);
     base.dimension_expressions.remove(&id);
     base.dimension_labels.remove(&id);
+    base.dimension_targets.remove(&id);
     nator_document::parameters::resolve_sketch(&mut base, parameters).map_err(sketch_error)?;
     let before = solver::solve(&base).map_err(sketch_error)?.status;
     let mut probe = sketch.clone();
@@ -752,13 +766,20 @@ fn paint(
 }
 
 /// Cotas do rascunho em edição, exceto a que está sendo criada.
-pub(super) fn paint_all(frame: &sketch_scene::Frame, painter: &egui::Painter, sketch: &Sketch) {
+pub(super) fn paint_all(
+    frame: &sketch_scene::Frame,
+    painter: &egui::Painter,
+    sketch: &Sketch,
+    selected: Option<u64>,
+) {
     let gap = f64::from(DEFAULT_GAP) / frame.pixels_per_mm([0., 0.]);
     for constraint in &sketch.constraints {
         let offset = sketch.dimension_labels.get(&constraint.id).copied();
         if let Some(layout) = layout(sketch, &constraint.kind, offset, gap) {
             let caption = caption(&constraint.kind, constraint.reference);
-            let color = if constraint.reference {
+            let color = if selected == Some(constraint.id) {
+                theme::ACCENT
+            } else if constraint.reference {
                 theme::MUTED
             } else {
                 theme::INK
@@ -890,11 +911,15 @@ pub(super) fn update(
     if commit && let Some(built) = &built {
         let typed = draft.typed.then_some(draft.text.as_str());
         match self::commit(sketch, built, typed, label, parameters) {
-            Ok((sketch, id)) => {
+            Ok((mut sketch, id)) => {
                 // A ordem dos cliques é preservada separadamente do tipo da cota:
                 // ponto–linha e linha–círculo normalizam seus campos ao combinar.
-                let first = (draft.picks.len() == 2).then(|| draft.picks[0]);
-                update.commit = Some((sketch, id, first));
+                if draft.picks.len() == 2 {
+                    sketch
+                        .dimension_targets
+                        .insert(id, [draft.picks[0].target(), draft.picks[1].target()]);
+                }
+                update.commit = Some((sketch, id));
                 update.hint = Some(T::DimensionPickHint);
                 draft.clear();
             }

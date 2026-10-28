@@ -6,6 +6,7 @@ struct Computed {
     points: References,
     regions: Vec<profiles::Region>,
     junctions: Vec<nator_sketch::junctions::Junction>,
+    indicators: Vec<nator_sketch::indicators::Indicator>,
 }
 type Answer = Result<Computed, String>;
 
@@ -15,6 +16,7 @@ pub(super) struct Cache {
     pub points: References,
     pub projected_regions: Vec<profiles::Region>,
     pub junctions: Vec<nator_sketch::junctions::Junction>,
+    pub indicators: Vec<nator_sketch::indicators::Indicator>,
     running: Option<Receiver<Answer>>,
 }
 
@@ -64,6 +66,7 @@ impl Cache {
             self.points = References::default();
             self.projected_regions.clear();
             self.junctions.clear();
+            self.indicators.clear();
             self.running = None;
             let sketch = sketch.clone();
             let context = context.clone();
@@ -75,6 +78,18 @@ impl Cache {
                         .and_then(|points| {
                             let junctions =
                                 nator_sketch::junctions::all(&sketch, &points.vertices)?;
+                            let mut indicators = nator_sketch::indicators::markers(&sketch)?;
+                            for center in &points.centers {
+                                if !indicators.iter().any(|i| {
+                                    i.kind == nator_sketch::indicators::Kind::Center
+                                        && nator_sketch::distance(i.point, *center) < 1e-6
+                                }) {
+                                    indicators.push(nator_sketch::indicators::Indicator {
+                                        point: *center,
+                                        kind: nator_sketch::indicators::Kind::Center,
+                                    });
+                                }
+                            }
                             // Somente contornos projetados recebem lilás. O arranjo e
                             // os furos são resolvidos fora da thread da interface.
                             let mut projected = sketch.clone();
@@ -82,6 +97,7 @@ impl Cache {
                             projected.constraints.clear();
                             projected.dimension_expressions.clear();
                             projected.dimension_labels.clear();
+                            projected.dimension_targets.clear();
                             let regions = profiles::regions(&projected).unwrap_or_else(|_| {
                                 nator_sketch::areas::regions(&projected).unwrap_or_default()
                             });
@@ -89,6 +105,7 @@ impl Cache {
                                 points,
                                 regions,
                                 junctions,
+                                indicators,
                             })
                         })
                         .map_err(|e| e.to_string());
@@ -106,6 +123,7 @@ impl Cache {
                     self.points = computed.points;
                     self.projected_regions = computed.regions;
                     self.junctions = computed.junctions;
+                    self.indicators = computed.indicators;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.running = None;

@@ -9,6 +9,7 @@ use nator_sketch::{
 mod actions;
 mod dimension_tool;
 mod dynamic_input;
+mod indicators;
 mod junction_tool;
 mod line_tools;
 mod project_tool;
@@ -131,10 +132,16 @@ pub(super) struct Workspace {
     pattern_count: usize,
     /// Intenção aberta pela faixa; os cliques alternam a seleção até OK/Cancelar.
     active_action: Option<EditAction>,
+    operation_line_type: LineType,
+    mirror_axis: Option<u64>,
+    mirror_axis_active: bool,
+    offset_mode: nator_sketch::modifications::OffsetMode,
+    offset_second_expression: String,
     drawing: dynamic_input::Input,
     references: references::Cache,
     /// Escolhas, texto e caixa de valor da ferramenta Cota.
     dimension_draft: dimension_tool::Draft,
+    dimension_existing: dimension_tool::Existing,
 }
 impl Workspace {
     #[cfg(all(test, feature = "occt"))]
@@ -204,6 +211,8 @@ impl Workspace {
     }
     pub(super) fn select_tool(&mut self, tool: Tool) {
         self.active_action = None;
+        self.mirror_axis = None;
+        self.mirror_axis_active = false;
         self.tool = tool;
         self.tool_panel_open = true;
         self.anchors.clear();
@@ -220,6 +229,7 @@ impl Workspace {
         }
         self.drawing = dynamic_input::Input::default();
         self.dimension_draft.clear();
+        self.dimension_existing = dimension_tool::Existing::default();
     }
     fn primitive(&self) -> Option<Primitive> {
         Some(match self.tool {
@@ -322,9 +332,15 @@ impl Workspace {
             pattern_count: 3,
             reference: false,
             active_action: None,
+            operation_line_type: LineType::Normal,
+            mirror_axis: None,
+            mirror_axis_active: false,
+            offset_mode: nator_sketch::modifications::OffsetMode::Normal,
+            offset_second_expression: "10 mm".into(),
             drawing: dynamic_input::Input::default(),
             references: references::Cache::default(),
             dimension_draft: dimension_tool::Draft::default(),
+            dimension_existing: dimension_tool::Existing::default(),
         }
     }
 }
@@ -435,7 +451,7 @@ impl Editor {
         &mut self,
         context: &egui::Context,
         sketch: Sketch,
-        dimension: Option<(u64, Option<dimension_tool::Pick>)>,
+        dimension: Option<(u64, bool)>,
     ) {
         if self.busy() {
             return;
@@ -460,22 +476,16 @@ impl Editor {
             .unwrap_or_default();
         self.start(context, None, move || {
             let mut sketch = sketch;
-            if let Some((id, _)) = dimension {
+            if let Some((id, true)) = dimension {
                 dimension_tool::settle_driven(&mut sketch, id, &parameters)?;
             }
             nator_document::parameters::resolve_sketch(&mut sketch, &parameters)
                 .map_err(sketch_error)?;
-            let first = dimension.and_then(|(_, first)| first);
-            let (points, circles) = match first {
-                Some(dimension_tool::Pick::Point(id)) => (vec![id], vec![]),
-                Some(dimension_tool::Pick::Line(id) | dimension_tool::Pick::Radial(id)) => {
-                    let entity = sketch.entity(id).map_err(sketch_error)?;
-                    (entity.point_ids(), vec![id])
-                }
-                None => (vec![], vec![]),
-            };
-            let report =
-                solver::solve_preserving(&sketch, &points, &circles).map_err(sketch_error)?;
+            let report = match dimension {
+                Some((id, _)) => nator_sketch::dimensions::solve(&sketch, id),
+                None => solver::solve(&sketch),
+            }
+            .map_err(sketch_error)?;
             // O fechamento com linhas já existentes só é conhecido após resolver
             // a geometria. Esta consulta fica fora da thread da interface.
             let chain_closed = check_area
@@ -629,6 +639,8 @@ impl Editor {
                 if let Some(id) = remove {
                     sketch.constraints.retain(|c| c.id != id);
                     sketch.dimension_expressions.remove(&id);
+                    sketch.dimension_labels.remove(&id);
+                    sketch.dimension_targets.remove(&id);
                     work.constraint = None;
                     submit = true;
                 }
@@ -827,8 +839,50 @@ impl Editor {
             }
         }
         // Cotas como cotas: extensões, linha com setas e valor (R/Ø, graus, parênteses).
-        dimension_tool::paint_all(&frame, &painter, &sketch);
+        let edit_existing = !busy
+            && !animating
+            && (work.is_selecting()
+                || (work.tool == Tool::Dimension && work.dimension_draft.is_empty()));
+        let existing_update = dimension_tool::interact_existing(
+            ui,
+            response,
+            &frame,
+            &painter,
+            &mut sketch,
+            &mut work.dimension_existing,
+            edit_existing,
+            &parameters,
+        );
+        if existing_update.blocked
+            && (response.clicked_by(egui::PointerButton::Primary)
+                || response.drag_started_by(egui::PointerButton::Primary))
+        {
+            work.selected.clear();
+            work.selected_vertex = None;
+            work.constraint = work.dimension_existing.selected();
+            if let Some(constraint) = sketch
+                .constraints
+                .iter()
+                .find(|c| Some(c.id) == work.constraint)
+                && let Some(value) = constraint.kind.dimension_value()
+            {
+                work.dimension = value;
+                work.dimension_expression = sketch
+                    .dimension_expressions
+                    .get(&constraint.id)
+                    .cloned()
+                    .unwrap_or_else(|| dimension_expression(&constraint.kind, value));
+                work.reference = constraint.reference;
+            }
+        }
+        dimension_tool::paint_all(
+            &frame,
+            &painter,
+            &sketch,
+            work.dimension_existing.selected(),
+        );
         junction_tool::paint(&frame, &painter, &work.references.junctions);
+        indicators::paint(ui, &frame, &painter, &work.references.indicators);
         let junction_update = if work.is_selecting() {
             junction_tool::button(
                 ui,
@@ -961,6 +1015,47 @@ impl Editor {
                 );
             }
         }
+        let mut preview_indicators = Vec::new();
+        if work.primitive().is_some() {
+            use nator_sketch::indicators::{Indicator, Kind as IndicatorKind};
+            if let Some(snap) = &snap {
+                let kind = match snap.kind {
+                    Kind::Midpoint(_) | Kind::CurveMidpoint(_) => Some(IndicatorKind::Midpoint),
+                    Kind::Center(_) | Kind::RegionCenter => Some(IndicatorKind::Center),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    preview_indicators.push(Indicator {
+                        point: snap.point,
+                        kind,
+                    });
+                }
+            }
+            if let Some(line) = work.perpendicular
+                && let Some(start) = work.anchors.first()
+                && let Ok((a, b)) = sketch.line(line)
+            {
+                let d = nator_sketch::sub(b, a);
+                let foot = nator_sketch::add(
+                    a,
+                    nator_sketch::scale(
+                        d,
+                        nator_sketch::dot(nator_sketch::sub(*start, a), d)
+                            / nator_sketch::dot(d, d),
+                    ),
+                );
+                preview_indicators.push(Indicator {
+                    point: foot,
+                    kind: IndicatorKind::Perpendicular,
+                });
+            }
+        }
+        preview_indicators.retain(|i| {
+            !work.references.indicators.iter().any(|saved| {
+                saved.kind == i.kind && nator_sketch::distance(saved.point, i.point) < 1e-6
+            })
+        });
+        indicators::paint(ui, &frame, &painter, &preview_indicators);
         // Selecionar/aparar usa o clique real: a atração ao centro ou ao vértice
         // vizinho não pode deslocar o clique para outro trecho do cruzamento.
         let tangent_selection = work.tool == Tool::Circle
@@ -1028,6 +1123,31 @@ impl Editor {
             escape = output.cancel;
             valid = output.preview.is_some();
             if let Some(preview) = output.preview {
+                if primitive == Primitive::TangentCircle {
+                    use nator_sketch::indicators::{Indicator, Kind as IndicatorKind};
+                    let mut markers = vec![Indicator {
+                        point: preview.point,
+                        kind: IndicatorKind::Center,
+                    }];
+                    for line in &work.tangent_lines {
+                        if let Ok((a, b)) = sketch.line(*line) {
+                            let d = nator_sketch::sub(b, a);
+                            let foot = nator_sketch::add(
+                                a,
+                                nator_sketch::scale(
+                                    d,
+                                    nator_sketch::dot(nator_sketch::sub(preview.point, a), d)
+                                        / nator_sketch::dot(d, d),
+                                ),
+                            );
+                            markers.push(Indicator {
+                                point: foot,
+                                kind: IndicatorKind::Tangent,
+                            });
+                        }
+                    }
+                    indicators::paint(ui, &frame, &painter, &markers);
+                }
                 cursor = Some(preview.point);
                 adjusted =
                     raw_cursor.is_none_or(|p| nator_sketch::distance(p, preview.point) > 1e-7);
@@ -1067,7 +1187,7 @@ impl Editor {
         if escape {
             work.activate_selection(ui.ctx());
         }
-        let dimension = (work.tool == Tool::Dimension).then(|| {
+        let dimension = (work.tool == Tool::Dimension && !existing_update.blocked).then(|| {
             dimension_tool::update(
                 ui,
                 response,
@@ -1100,6 +1220,7 @@ impl Editor {
             && !animating
             && !escape
             && !junction_update.blocked
+            && !existing_update.blocked
             && valid
             && !matches!(work.tool, Tool::Dimension | Tool::Project)
             && !(work.tool == Tool::Rectangle
@@ -1137,7 +1258,18 @@ impl Editor {
                             }
                         }
                     } else {
-                        if work.active_action.is_some() {
+                        if work.active_action == Some(EditAction::Mirror) && work.mirror_axis_active
+                        {
+                            if sketch.line(id).is_ok() {
+                                work.mirror_axis = Some(id);
+                                work.selected.retain(|selected| *selected != id);
+                                work.mirror_axis_active = false;
+                            }
+                        } else if work.active_action == Some(EditAction::Mirror)
+                            && work.mirror_axis == Some(id)
+                        {
+                            // O eixo pertence ao campo próprio e não vira origem da cópia.
+                        } else if work.active_action.is_some() {
                             if let Some(index) = work.selected.iter().position(|e| *e == id) {
                                 work.selected.remove(index);
                             } else {
@@ -1298,8 +1430,13 @@ impl Editor {
                 true,
             );
         }
-        if submit {
+        if let Some(id) = existing_update.changed {
+            self.solve_sketch_with(ui.ctx(), sketch, Some((id, false)));
+        } else if submit {
             self.solve_sketch(ui.ctx(), sketch);
+        }
+        if let Some(error) = existing_update.warning {
+            self.status.warning(error);
         }
         if let Some(Err(error)) = projection_result {
             self.status.warning(error);
@@ -1314,8 +1451,8 @@ impl Editor {
             if let Some(warning) = update.warning {
                 self.status.warning(warning);
             }
-            if let Some((candidate, id, first)) = update.commit {
-                self.solve_sketch_with(ui.ctx(), candidate, Some((id, first)));
+            if let Some((candidate, id)) = update.commit {
+                self.solve_sketch_with(ui.ctx(), candidate, Some((id, true)));
             }
         }
     }
