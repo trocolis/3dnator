@@ -11,6 +11,7 @@ pub(super) struct Draft {
     placing: bool,
     anchor: Option<Point2>,
     gesture: Option<Gesture>,
+    model_placement: Option<Placement>,
 }
 struct Gesture {
     pointer: Point2,
@@ -101,6 +102,132 @@ fn read_asset(path: &std::path::Path) -> Result<Arc<RasterAsset>, String> {
     Ok(asset)
 }
 
+fn corner_at(
+    frame: &sketch_scene::Frame,
+    image: &ReferenceImage,
+    pointer: egui::Pos2,
+) -> Option<usize> {
+    corners(image)
+        .iter()
+        .enumerate()
+        .find(|(_, p)| {
+            frame
+                .screen(**p)
+                .is_some_and(|at| at.distance(pointer) <= 10.)
+        })
+        .map(|(i, _)| i)
+}
+fn hit(frame: &sketch_scene::Frame, image: &ReferenceImage, pointer: egui::Pos2) -> bool {
+    corner_at(frame, image, pointer).is_some()
+        || frame.cursor(pointer).is_some_and(|p| contains(image, p))
+}
+fn handles(ui: &egui::Ui, frame: &sketch_scene::Frame, image: &ReferenceImage) {
+    let painter = ui.painter().with_clip_rect(frame.rect);
+    let points = corners(image);
+    frame.path(
+        &painter,
+        points.into_iter().chain([points[0]]),
+        egui::Stroke::new(1.5, theme::GREEN),
+        false,
+    );
+    for point in points {
+        if let Some(at) = frame.screen(point) {
+            painter.rect_filled(
+                egui::Rect::from_center_size(at, egui::Vec2::splat(8.)),
+                1.,
+                theme::GREEN,
+            );
+        }
+    }
+}
+impl Draft {
+    fn interact(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        frame: &sketch_scene::Frame,
+        enabled: bool,
+    ) -> bool {
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let cursor = if self.gesture.is_some() {
+            pointer
+        } else {
+            response.hover_pos()
+        }
+        .and_then(|p| frame.cursor(p));
+        let mut commit = false;
+        if enabled {
+            if self.placing {
+                if let (Some(anchor), Some(cursor)) = (self.anchor, cursor) {
+                    self.image.origin = [anchor[0].min(cursor[0]), anchor[1].min(cursor[1])];
+                    self.image.size = [
+                        (anchor[0] - cursor[0]).abs().max(1e-6),
+                        (anchor[1] - cursor[1]).abs().max(1e-6),
+                    ];
+                }
+                if response.clicked_by(egui::PointerButton::Primary)
+                    && let Some(cursor) = cursor
+                {
+                    if self.anchor.is_none() {
+                        self.anchor = Some(cursor);
+                    } else if self.image.size.iter().all(|v| *v > 1e-5) {
+                        self.placing = false;
+                    }
+                }
+            } else if response.contains_pointer()
+                && ui.input(|i| i.pointer.primary_pressed())
+                && let Some(cursor) = cursor
+            {
+                let corner = corners(&self.image)
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| {
+                        frame
+                            .screen(**p)
+                            .zip(pointer)
+                            .is_some_and(|(a, b)| a.distance(b) < 10.)
+                    })
+                    .map(|(i, _)| i);
+                if corner.is_some() || contains(&self.image, cursor) {
+                    self.gesture = Some(Gesture {
+                        pointer: cursor,
+                        origin: self.image.origin,
+                        size: self.image.size,
+                        corner,
+                        changed: false,
+                    });
+                }
+            }
+            if let Some(gesture) = &mut self.gesture {
+                if let Some(cursor) = cursor {
+                    if let Some(index) = gesture.corner {
+                        let fixed = match index {
+                            0 => add(gesture.origin, gesture.size),
+                            1 => add(gesture.origin, [0., gesture.size[1]]),
+                            2 => gesture.origin,
+                            _ => add(gesture.origin, [gesture.size[0], 0.]),
+                        };
+                        self.image.origin = [fixed[0].min(cursor[0]), fixed[1].min(cursor[1])];
+                        self.image.size = [
+                            (fixed[0] - cursor[0]).abs().max(1e-6),
+                            (fixed[1] - cursor[1]).abs().max(1e-6),
+                        ];
+                    } else {
+                        self.image.origin = add(gesture.origin, sub(cursor, gesture.pointer));
+                    }
+                    gesture.changed |= nator_sketch::distance(cursor, gesture.pointer) > 1e-6;
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
+                if !ui.input(|i| i.pointer.primary_down()) {
+                    commit = gesture.changed && self.editing;
+                    self.gesture = None;
+                }
+            }
+        }
+        commit
+    }
+}
+
 impl Editor {
     pub(super) fn refresh_reference_image(&mut self) {
         if let Some(draft) = self.image_edit.as_mut() {
@@ -117,10 +244,7 @@ impl Editor {
             }
         }
     }
-    pub(super) fn reference_images_in_model(&mut self, ui: &egui::Ui, rect: egui::Rect) {
-        if self.current().sketch_edit.is_some() {
-            return;
-        }
+    fn model_images(&self, rect: egui::Rect) -> Vec<(sketch_scene::Frame, ReferenceImage)> {
         let document = self.current().session.document();
         let mut entries = Vec::new();
         if let Ok(occurrences) = document.occurrences() {
@@ -177,6 +301,62 @@ impl Editor {
                 ));
             }
         }
+        entries
+    }
+    pub(super) fn reference_image_model_gesture(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+    ) -> bool {
+        if self.current().sketch_edit.is_some()
+            || self.busy()
+            || self.current().camera_transition.is_some()
+        {
+            return false;
+        }
+        let entries = self.model_images(response.rect);
+        if self.image_edit.is_none()
+            && self.selection_active()
+            && response.contains_pointer()
+            && ui.input(|i| i.pointer.primary_pressed())
+            && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
+            && let Some((frame, image)) = entries
+                .iter()
+                .rev()
+                .find(|(frame, image)| hit(frame, image, pointer))
+        {
+            self.image_edit = Some(Draft {
+                tab: self.current().id,
+                image: image.clone(),
+                editing: true,
+                placing: false,
+                anchor: None,
+                gesture: None,
+                model_placement: Some(frame.placement),
+            });
+        }
+        let Some(mut draft) = self.image_edit.take() else {
+            return false;
+        };
+        if let Some((frame, _)) = entries.iter().find(|(frame, i)| {
+            i.id == draft.image.id && draft.model_placement.is_none_or(|p| p == frame.placement)
+        }) {
+            if draft.interact(ui, response, frame, true) {
+                self.execute(Command::UpdateReferenceImage {
+                    image: draft.image.clone(),
+                });
+            }
+            self.image_edit = Some(draft);
+            true
+        } else {
+            false
+        }
+    }
+    pub(super) fn reference_images_in_model(&mut self, ui: &egui::Ui, rect: egui::Rect) {
+        if self.current().sketch_edit.is_some() {
+            return;
+        }
+        let entries = self.model_images(rect);
         let active = entries
             .iter()
             .map(|(_, i)| Arc::as_ptr(&i.asset) as usize)
@@ -184,8 +364,14 @@ impl Editor {
         self.image_cache
             .textures
             .retain(|key, _| active.contains(key));
-        for (frame, image) in entries {
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        for (frame, saved) in entries {
+            let draft = self.image_edit.as_ref().filter(|d| d.image.id == saved.id);
+            let image = draft.map(|d| d.image.clone()).unwrap_or(saved);
             self.image_cache.paint(ui, &frame, &image);
+            if draft.is_some() || pointer.is_some_and(|p| hit(&frame, &image, p)) {
+                handles(ui, &frame, &image);
+            }
         }
     }
     pub(super) fn load_reference_image(&mut self, context: &egui::Context) {
@@ -249,6 +435,7 @@ impl Editor {
             placing: true,
             anchor: None,
             gesture: None,
+            model_placement: None,
         });
     }
     pub(super) fn edit_reference_image(&mut self, id: ImageId) {
@@ -279,6 +466,7 @@ impl Editor {
             placing: false,
             anchor: None,
             gesture: None,
+            model_placement: None,
         });
     }
     pub(super) fn reference_image_panel(&mut self, context: &egui::Context) {
@@ -290,7 +478,7 @@ impl Editor {
                 .current()
                 .sketch_edit
                 .as_ref()
-                .is_none_or(|w| w.id != draft.image.sketch)
+                .is_some_and(|w| w.id != draft.image.sketch)
         {
             return;
         }
@@ -413,14 +601,21 @@ impl Editor {
             && response.contains_pointer()
             && ui.input(|i| i.pointer.primary_pressed())
             && let Some(cursor) = cursor
-            && nator_sketch::tools::pick_entity(source, cursor, 8. / frame.pixels_per_mm(cursor))
+            && let Some(pointer) = pointer
+            && let Some(image) = saved.iter().rev().find(|i| hit(frame, i, pointer)).cloned()
+            && (corner_at(frame, &image, pointer).is_some()
+                || (nator_sketch::tools::pick_entity(
+                    source,
+                    cursor,
+                    8. / frame.pixels_per_mm(cursor),
+                )
                 .ok()
                 .flatten()
                 .is_none()
-            && !source.visible_points().any(|p| {
-                nator_sketch::distance(p.position, cursor) <= 8. / frame.pixels_per_mm(cursor)
-            })
-            && let Some(image) = saved.iter().rev().find(|i| contains(i, cursor)).cloned()
+                    && !source.visible_points().any(|p| {
+                        nator_sketch::distance(p.position, cursor)
+                            <= 8. / frame.pixels_per_mm(cursor)
+                    })))
         {
             self.image_edit = Some(Draft {
                 tab: self.current().id,
@@ -429,6 +624,7 @@ impl Editor {
                 placing: false,
                 anchor: None,
                 gesture: None,
+                model_placement: None,
             });
         }
         let mut draft = self
@@ -449,98 +645,17 @@ impl Editor {
                 .is_none_or(|d| !d.editing || d.image.id != image.id)
             {
                 self.image_cache.paint(ui, frame, image);
+                if selectable && pointer.is_some_and(|p| hit(frame, image, p)) {
+                    handles(ui, frame, image);
+                }
             }
         }
         let Some(mut draft) = draft.take() else {
             return false;
         };
-        let mut commit = false;
-        if enabled {
-            if draft.placing {
-                if let (Some(anchor), Some(cursor)) = (draft.anchor, cursor) {
-                    draft.image.origin = [anchor[0].min(cursor[0]), anchor[1].min(cursor[1])];
-                    draft.image.size = [
-                        (anchor[0] - cursor[0]).abs().max(1e-6),
-                        (anchor[1] - cursor[1]).abs().max(1e-6),
-                    ];
-                }
-                if response.clicked_by(egui::PointerButton::Primary)
-                    && let Some(cursor) = cursor
-                {
-                    if draft.anchor.is_none() {
-                        draft.anchor = Some(cursor);
-                    } else if draft.image.size.iter().all(|v| *v > 1e-5) {
-                        draft.placing = false;
-                    }
-                }
-            } else if response.contains_pointer()
-                && ui.input(|i| i.pointer.primary_pressed())
-                && let Some(cursor) = cursor
-            {
-                let corner = corners(&draft.image)
-                    .iter()
-                    .enumerate()
-                    .find(|(_, p)| {
-                        frame
-                            .screen(**p)
-                            .zip(pointer)
-                            .is_some_and(|(a, b)| a.distance(b) < 10.)
-                    })
-                    .map(|(i, _)| i);
-                if corner.is_some() || contains(&draft.image, cursor) {
-                    draft.gesture = Some(Gesture {
-                        pointer: cursor,
-                        origin: draft.image.origin,
-                        size: draft.image.size,
-                        corner,
-                        changed: false,
-                    });
-                }
-            }
-            if let Some(gesture) = &mut draft.gesture {
-                if let Some(cursor) = cursor {
-                    if let Some(index) = gesture.corner {
-                        let fixed = match index {
-                            0 => add(gesture.origin, gesture.size),
-                            1 => add(gesture.origin, [0., gesture.size[1]]),
-                            2 => gesture.origin,
-                            _ => add(gesture.origin, [gesture.size[0], 0.]),
-                        };
-                        draft.image.origin = [fixed[0].min(cursor[0]), fixed[1].min(cursor[1])];
-                        draft.image.size = [
-                            (fixed[0] - cursor[0]).abs().max(1e-6),
-                            (fixed[1] - cursor[1]).abs().max(1e-6),
-                        ];
-                    } else {
-                        draft.image.origin = add(gesture.origin, sub(cursor, gesture.pointer));
-                    }
-                    gesture.changed |= nator_sketch::distance(cursor, gesture.pointer) > 1e-6;
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                }
-                if !ui.input(|i| i.pointer.primary_down()) {
-                    commit = gesture.changed && draft.editing;
-                    draft.gesture = None;
-                }
-            }
-        }
+        let commit = draft.interact(ui, response, frame, enabled);
         self.image_cache.paint(ui, frame, &draft.image);
-        let painter = ui.painter().with_clip_rect(frame.rect);
-        let points = corners(&draft.image);
-        frame.path(
-            &painter,
-            points.into_iter().chain(std::iter::once(points[0])),
-            egui::Stroke::new(1.5, theme::GREEN),
-            false,
-        );
-        for point in points {
-            if let Some(at) = frame.screen(point) {
-                painter.rect_filled(
-                    egui::Rect::from_center_size(at, egui::Vec2::splat(8.)),
-                    1.,
-                    theme::GREEN,
-                );
-            }
-        }
+        handles(ui, frame, &draft.image);
         if commit {
             self.execute(Command::UpdateReferenceImage {
                 image: draft.image.clone(),

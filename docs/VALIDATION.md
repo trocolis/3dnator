@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Pintura, seleção de Projetar e gestos de imagem — 29/10/2026
+
+- **328 testes com OCCT e 255 sem OCCT aprovados**. Novas regressões cobrem cores por face, recorte por região projetada com furo, pintura de superfície cilíndrica, preservação do B-rep/malha de modelagem, desfazer/refazer, salvamento/reabertura, clonagem e recálculo após editar a máscara. Máscara fora da face e cache com material inválido são recusados sem revisão nova. Cena conserva as cores; leitura do formato 27 sem OCCT também aprovada.
+- **39 ensaios gráficos aprovados em execução serial GL/llvmpipe**. Imagem é arrastada e redimensionada sem seleção prévia, no rascunho e diretamente no modelo. Projetar alterna escolhas, não publica antes de Finalizar, cancela sem revisão e confirma toda a seleção numa revisão. Testes sem GPU distinguem origem/projeção em planos diferentes e priorizam a face mais próxima. B-reps legados sem mapa de triângulos recebem seleção de faces; arestas paralelas à normal projetam pontos.
+- Novos ensaios gráficos verificam centros imaginários de círculo/polígono somente durante o desenho, sem novos pontos/entidades, e o painel Pintar: ativação pela faixa, face escolhida no modelo, cor hexadecimal, prévia, cancelamento, escolha de rascunho/área e confirmação com desfazer/refazer.
+- Formatação e Clippy com todos os alvos/avisos negados nas duas configurações aprovados. Compilação e captura desktop com OCCT no Linux aprovadas. Logs e artefatos em `target/codex-validation/paint-projection-20261029/`; `paint-panel.png` inspecionada com ferramenta na aba Peça, paleta, RGB hexadecimal e face azul com recorte vermelho e furo preservado.
+- Quatro novos itens do AJUSTE.md concluídos. Aplicativo 0.3.0 em desenvolvimento; formato 27, mantendo leitura dos anteriores. Windows e janela nativa não exercitados localmente. STEP/STL mantêm a exportação anterior, sem cores individuais/recortes de pintura. Sem release ou publicação remota.
+
 ## Arcos, árvore, projeção, múltiplas áreas e imagens — 28/10/2026
 
 - **322 testes com OCCT e 252 sem OCCT aprovados**. Novas regressões verificam abertura horária/anti-horária contínua além de 180°, projeção de áreas com furos/arestas/vértices de outros rascunhos, áreas de malhas sem diagonais e componentes coplanares desconectados. Duas áreas projetadas são extrudadas numa operação de volume exato; reordenar a seleção conserva os nomes das faces, e as referências persistem no salvamento/reabertura.

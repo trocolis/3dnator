@@ -58,6 +58,7 @@ impl Editor {
     /// escolhidos nem as alterações já confirmadas no documento.
     pub(super) fn selection_active(&self) -> bool {
         self.image_edit.is_none()
+            && self.paint_edit.is_none()
             && self.feature_edit.is_none()
             && self.assembly_panel.is_none()
             && self.section_edit.is_none()
@@ -92,6 +93,7 @@ impl Editor {
         self.drawing_edit = None;
         self.export_edit = None;
         self.shell.measure_open = false;
+        self.paint_edit = None;
         self.move_freely = false;
         self.alignment = None;
         self.gestures = SelectionGestures::default();
@@ -107,6 +109,9 @@ impl Editor {
     /// Gestos disponíveis fora de rascunhos, seletores de plano, campos de painel e do
     /// arraste livre de posicionamento.
     fn gestures_enabled(&self) -> bool {
+        if self.paint_edit.is_some() {
+            return false;
+        }
         self.current().sketch_edit.is_none()
             && self.current().plane_pick.is_none()
             && !self.move_freely

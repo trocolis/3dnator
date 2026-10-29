@@ -227,6 +227,10 @@ impl Workspace {
             })
     }
     #[cfg(all(test, feature = "occt"))]
+    pub(super) fn projection_selected(&self) -> usize {
+        self.projector.selected_count()
+    }
+    #[cfg(all(test, feature = "occt"))]
     pub(super) fn projection_ready(&self) -> bool {
         self.projector.ready()
     }
@@ -278,6 +282,9 @@ impl Workspace {
         });
     }
     pub(super) fn select_tool(&mut self, tool: Tool) {
+        if self.tool == Tool::Project || tool == Tool::Project {
+            self.projector = project_tool::Cache::default();
+        }
         self.active_action = None;
         self.operation = operation_preview::Interaction::default();
         self.dragging = direct_drag::Interaction::default();
@@ -670,7 +677,7 @@ impl Editor {
                 tab,
                 revision,
                 id,
-                report,
+                report: Box::new(report),
                 prepared,
                 chain_closed,
             })
@@ -1026,6 +1033,23 @@ impl Editor {
             }
         }
         // Cotas como cotas: extensões, linha com setas e valor (R/Ø, graus, parênteses).
+        if work.primitive().is_some() {
+            let points = work.references.points.centers.iter().copied().chain(
+                sketch
+                    .entities
+                    .iter()
+                    .filter_map(|e| sketch.radial(e.id).ok().map(|(c, _)| c))
+                    .chain(
+                        sketch
+                            .entities
+                            .iter()
+                            .filter(|e| !e.infinite)
+                            .filter_map(|e| sketch.line(e.id).ok())
+                            .map(|(a, b)| nator_sketch::scale(nator_sketch::add(a, b), 0.5)),
+                    ),
+            );
+            indicators::centers(&frame, &painter, points);
+        }
         let operation_update = operation_preview::canvas(
             ui,
             response,
@@ -1355,6 +1379,29 @@ impl Editor {
             escape = output.cancel;
             valid = output.preview.is_some();
             if let Some(preview) = output.preview {
+                let center = match primitive {
+                    Primitive::Circle | Primitive::Arc | Primitive::SymmetricLine => {
+                        work.anchors.first().copied()
+                    }
+                    Primitive::Line | Primitive::DiameterCircle => work
+                        .anchors
+                        .first()
+                        .map(|a| nator_sketch::scale(nator_sketch::add(*a, preview.point), 0.5)),
+                    Primitive::TangentCircle => Some(preview.point),
+                    Primitive::Rectangle
+                    | Primitive::CenterRectangle
+                    | Primitive::InclinedRectangle
+                        if preview.path.len() == 5 =>
+                    {
+                        let points = preview.path[..4]
+                            .iter()
+                            .map(|p| [p[0], p[1], 0.])
+                            .collect::<Vec<_>>();
+                        nator_geometry::polygon_center(&points).map(|p| [p[0], p[1]])
+                    }
+                    _ => None,
+                };
+                indicators::centers(&frame, &painter, center);
                 if primitive == Primitive::TangentCircle {
                     use nator_sketch::indicators::{Indicator, Kind as IndicatorKind};
                     let mut markers = Vec::new();
@@ -1430,20 +1477,19 @@ impl Editor {
             )
         });
         let projection_result = if work.tool == Tool::Project && !escape && !animating {
-            hover.map(|cursor| {
-                work.projector.update(
-                    &frame,
-                    &painter,
-                    cursor,
-                    !busy && response.clicked_by(egui::PointerButton::Primary),
-                    &mut sketch,
-                )
-            })
+            Some(work.projector.update(
+                ui,
+                &frame,
+                &painter,
+                response.hover_pos(),
+                !busy && response.clicked_by(egui::PointerButton::Primary),
+                &sketch,
+            ))
         } else {
             None
         };
-        if matches!(projection_result, Some(Ok(true))) {
-            submit = true;
+        if projection_result.as_ref().is_some_and(|r| r.finished) {
+            work.activate_selection(ui.ctx());
         }
         if !busy
             && !animating
@@ -1678,6 +1724,8 @@ impl Editor {
             self.solve_sketch_with(ui.ctx(), candidate, mode);
         } else if let Some(id) = existing_update.changed {
             self.solve_sketch_with(ui.ctx(), sketch, SolveMode::Dimension(id, false));
+        } else if let Some(candidate) = projection_result.as_ref().and_then(|r| r.commit.clone()) {
+            self.solve_sketch(ui.ctx(), candidate);
         } else if submit {
             self.solve_sketch(ui.ctx(), sketch);
         }
@@ -1690,7 +1738,7 @@ impl Editor {
         if let Some(error) = drag_update.warning {
             self.status.warning(error);
         }
-        if let Some(Err(error)) = projection_result {
+        if let Some(error) = projection_result.and_then(|r| r.warning) {
             self.status.warning(error);
         }
         if let Some(error) = junction_update.warning {

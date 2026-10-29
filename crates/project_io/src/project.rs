@@ -42,7 +42,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 25: ordem dos elementos de cotas (`dimension_targets`), usada pela
 /// política de preservar o elemento mais conectado e o segundo nos empates.
 /// Versão 26: sequências de criação, imagens RGBA incorporadas e múltiplas áreas na extrusão.
-pub const FORMAT_VERSION: u32 = 26;
+/// Versão 27: pinturas por face e malhas de aparência com materiais por triângulo.
+pub const FORMAT_VERSION: u32 = 27;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -66,6 +67,8 @@ struct Manifest {
     name_counters: nator_document::NameCounters,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     images: Vec<ImageRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    appearances: Vec<AppearanceRecord>,
     parts: Vec<PartRecord>,
     instances: Vec<InstanceRecord>,
     #[serde(default)]
@@ -111,6 +114,21 @@ struct SketchRecordData {
     /// Plano de trabalho que apoia o rascunho (versão 21); ausente, o plano é fixo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     support: Option<u64>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppearanceRecord {
+    body: u64,
+    layers: Vec<nator_document::SurfacePaint>,
+    source_signature: u64,
+    mesh_path: Option<String>,
+    materials_path: Option<String>,
+}
+fn appearance_mesh_path(body: u64) -> String {
+    format!("appearances/{body}.mesh")
+}
+fn appearance_materials_path(body: u64) -> String {
+    format!("appearances/{body}.materials")
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -479,6 +497,45 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             visible: image.visible,
         });
     }
+    let mut appearances = Vec::new();
+    if manifest.appearances.len() > MAX_ELEMENTS {
+        return Err(ImportError("Quantidade de pinturas excessiva.".into()));
+    }
+    let mut appearance_triangles = 0usize;
+    for record in manifest.appearances {
+        let (geometry, materials) = match (record.mesh_path, record.materials_path) {
+            (Some(mesh_path), Some(materials_path)) => {
+                if mesh_path != appearance_mesh_path(record.body)
+                    || materials_path != appearance_materials_path(record.body)
+                    || !expected_names.insert(mesh_path.clone())
+                    || !expected_names.insert(materials_path.clone())
+                {
+                    return Err(ImportError(
+                        "Caminhos de aparência inválidos ou repetidos.".into(),
+                    ));
+                }
+                let mesh = decode_mesh(&read_entry(&mut archive, &mesh_path, MAX_EXPANDED_BYTES)?)?;
+                appearance_triangles += mesh.triangles().len();
+                if appearance_triangles > MAX_SCENE_TRIANGLES {
+                    return Err(ImportError(
+                        "Pinturas excedem o limite de triângulos.".into(),
+                    ));
+                }
+                let materials =
+                    read_entry(&mut archive, &materials_path, MAX_SCENE_TRIANGLES as u64)?;
+                (Some(Arc::new(MeshAsset::new(mesh))), Arc::new(materials))
+            }
+            (None, None) => (None, Arc::new(Vec::new())),
+            _ => return Err(ImportError("Cache de pintura incompleto.".into())),
+        };
+        appearances.push(nator_document::SurfaceAppearance {
+            body: BodyId(record.body),
+            layers: record.layers,
+            source_signature: record.source_signature,
+            geometry,
+            materials,
+        });
+    }
     if archive.index_for_name(super::thumbnail::PATH).is_some() {
         let bytes = read_entry(
             &mut archive,
@@ -554,6 +611,8 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         .map_err(error)?;
     document.restore_folders(manifest.folders);
     document.restore_images(images).map_err(error)?;
+    document.restore_appearances(appearances).map_err(error)?;
+    document.validate().map_err(error)?;
     document
         .restore_name_counters(manifest.name_counters)
         .map_err(error)?;
@@ -663,6 +722,23 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
         name: document.name().into(),
         next_id: document.next_id(),
         name_counters: document.name_counters().clone(),
+        appearances: document
+            .appearances()
+            .iter()
+            .map(|appearance| AppearanceRecord {
+                body: appearance.body.0,
+                layers: appearance.layers.clone(),
+                source_signature: appearance.source_signature,
+                mesh_path: appearance
+                    .geometry
+                    .as_ref()
+                    .map(|_| appearance_mesh_path(appearance.body.0)),
+                materials_path: appearance
+                    .geometry
+                    .as_ref()
+                    .map(|_| appearance_materials_path(appearance.body.0)),
+            })
+            .collect(),
         images: document
             .images()
             .iter()
@@ -775,6 +851,33 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .start_file("manifest.json", options)
             .map_err(error)?;
         archive.write_all(&bytes)?;
+        for appearance in document.appearances() {
+            if let Some(geometry) = &appearance.geometry {
+                archive
+                    .start_file(appearance_mesh_path(appearance.body.0), options)
+                    .map_err(error)?;
+                let mesh = geometry.mesh();
+                archive.write_all(MESH_MAGIC)?;
+                archive.write_all(&(mesh.vertices().len() as u32).to_le_bytes())?;
+                archive.write_all(&(mesh.triangles().len() as u32).to_le_bytes())?;
+                let mut buffer = Vec::new();
+                for point in mesh.vertices() {
+                    for coordinate in point {
+                        buffer.extend_from_slice(&coordinate.to_le_bytes());
+                    }
+                }
+                for triangle in mesh.triangles() {
+                    for index in triangle {
+                        buffer.extend_from_slice(&index.to_le_bytes());
+                    }
+                }
+                archive.write_all(&buffer)?;
+                archive
+                    .start_file(appearance_materials_path(appearance.body.0), options)
+                    .map_err(error)?;
+                archive.write_all(&appearance.materials)?;
+            }
+        }
         for image in document.images() {
             archive
                 .start_file(format!("images/{}.rgba", image.id.0), options)

@@ -1,6 +1,19 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    Paint,
+    PaintColor,
+    PaintBoundary,
+    PaintWholeFace,
+    PaintPickHint,
+    PaintInvalidHex,
+    PaintNoAreas,
+    ProjectionVertex,
+    ProjectionEdge,
+    ProjectionArea,
+    ProjectionSelected,
+    ProjectionPickHint,
+    ProjectionFinish,
     SketchImage,
     ImagesFolder,
     ImageDrawHint,
@@ -52,7 +65,7 @@ pub enum Text {
     SketchProjectPlanes,
     SketchProjectEdges,
     SketchProjectVertices,
-    SketchProjectSnapshot,
+
     DimensionPickSecond,
     DimensionUnsupported,
     DimensionValueTitle,
@@ -705,6 +718,23 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::Paint => "Pintar",
+        Text::PaintColor => "Cor RGB",
+        Text::PaintBoundary => "Delimitar pelo rascunho",
+        Text::PaintWholeFace => "Face inteira",
+        Text::PaintPickHint => {
+            "Clique na face que deseja pintar. Selecione um rascunho e suas áreas para delimitar a pintura."
+        }
+        Text::PaintNoAreas => "O rascunho não contém áreas fechadas.",
+        Text::PaintInvalidHex => "Informe uma cor no formato #RRGGBB.",
+        Text::ProjectionVertex => "Vértice",
+        Text::ProjectionEdge => "Aresta",
+        Text::ProjectionArea => "Área",
+        Text::ProjectionSelected => "Elementos selecionados",
+        Text::ProjectionPickHint => {
+            "Clique na origem ou na projeção para alternar a seleção. Nada é criado até Finalizar."
+        }
+        Text::ProjectionFinish => "Finalizar",
         Text::SketchImage => "Imagem",
         Text::ImagesFolder => "Imagens",
         Text::ImageDrawHint => {
@@ -913,9 +943,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchProjectPlanes => "Faces e áreas",
         Text::SketchProjectEdges => "Arestas e arcos",
         Text::SketchProjectVertices => "Vértices",
-        Text::SketchProjectSnapshot => {
-            "Captura a geometria no plano do rascunho. As referências ficam fixas na posição projetada."
-        }
+
         Text::SketchDimension => "Dimencionar",
         Text::SketchChamfer => "Chanfrar",
         Text::SketchOffsetSelectHint => "Selecione uma aresta ou um contorno conectado.",

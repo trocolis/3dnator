@@ -922,7 +922,7 @@ pub fn pattern_placements(
     }
 }
 
-fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
+pub(crate) fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
     if let RegionRef::Multiple(regions) = region {
         if regions.is_empty()
             || regions.len() > 1024

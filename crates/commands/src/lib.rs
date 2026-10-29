@@ -1,4 +1,5 @@
 //! Transações do documento e coordenação do histórico paramétrico, com desfazer/refazer.
+mod appearance;
 mod assembly;
 pub mod drawing;
 pub mod export;
@@ -16,6 +17,14 @@ use std::{collections::VecDeque, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    PaintSurface {
+        body: BodyId,
+        paint: nator_document::SurfacePaint,
+    },
+    ClearSurfacePaint {
+        body: BodyId,
+        face: nator_document::features::FaceRef,
+    },
     AddReferenceImage {
         image: nator_document::ReferenceImage,
     },
@@ -354,6 +363,8 @@ impl Rebuilds {
 impl Command {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::PaintSurface { .. } => "Pintar superfície",
+            Self::ClearSurfacePaint { .. } => "Restaurar aparência da superfície",
             Self::AddReferenceImage { .. } => "Adicionar imagem de referência",
             Self::UpdateReferenceImage { .. } => "Editar imagem de referência",
             Self::RemoveReferenceImage { .. } => "Excluir imagem de referência",
@@ -417,6 +428,37 @@ impl Command {
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
         match self {
+            Self::PaintSurface { body, paint } => {
+                let mut layers = doc
+                    .body_appearance(body)
+                    .map(|a| a.layers.clone())
+                    .unwrap_or_default();
+                if layers.len() >= 64 {
+                    return Err(DocumentError("Limite de pinturas atingido.".into()).into());
+                }
+                layers.push(paint);
+                let appearance = appearance::build(doc, body, layers)?;
+                doc.set_surface_appearance(appearance)?;
+            }
+            Self::ClearSurfacePaint { body, face } => {
+                let layers = doc
+                    .body_appearance(body)
+                    .map(|a| {
+                        a.layers
+                            .iter()
+                            .filter(|l| l.face != face)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if layers.is_empty() {
+                    doc.remove_surface_appearance(body);
+                } else {
+                    let appearance = appearance::build(doc, body, layers)?;
+                    doc.set_surface_appearance(appearance)?;
+                }
+            }
+
             Self::AddReferenceImage { image } => {
                 doc.add_image(image)?;
             }
@@ -768,6 +810,7 @@ impl Command {
                 }
                 let part = part.id;
                 let body = doc.copy_body(id, placement)?;
+                crate::appearance::rebuild(doc, part)?;
                 return Ok(Effect::Imported { part, body });
             }
             Self::RenameInstance { id, name } => {

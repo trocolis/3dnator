@@ -17,7 +17,7 @@ pub(super) struct Cache {
 pub(super) struct Areas {
     plane: nator_sketch::Plane,
     pub regions: Arc<Vec<profiles::Region>>,
-    references: Vec<nator_document::features::RegionRef>,
+    pub references: Vec<nator_document::features::RegionRef>,
 }
 impl Cache {
     fn query(

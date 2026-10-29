@@ -14,6 +14,7 @@ mod live_preview;
 mod mesh_import;
 mod navigation;
 mod notifications;
+mod paint_editor;
 mod parameter_editor;
 mod point_snap;
 mod profile_pick;
@@ -372,7 +373,7 @@ enum Outcome {
         tab: u64,
         revision: u64,
         id: SketchId,
-        report: nator_sketch::solver::Report,
+        report: Box<nator_sketch::solver::Report>,
         prepared: Result<PreparedCommand, nator_commands::CommandError>,
         chain_closed: bool,
     },
@@ -452,6 +453,7 @@ pub struct Editor {
     parameters_edit: Option<parameter_editor::Draft>,
     feature_edit: Option<feature_editor::Draft>,
     image_edit: Option<image_editor::Draft>,
+    paint_edit: Option<paint_editor::Draft>,
     image_cache: image_editor::Cache,
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
@@ -639,6 +641,7 @@ impl Editor {
             parameters_edit: None,
             feature_edit: None,
             image_edit: None,
+            paint_edit: None,
             image_cache: image_editor::Cache::default(),
             drawing_edit: None,
             export_edit: None,
@@ -848,6 +851,22 @@ impl Editor {
                     .is_some_and(|t| t.session.revision() == revision);
                 // Com um painel esperando, o clique pertence ao campo de seleção ativo.
                 let consumed = topology.is_some();
+                if current
+                    && let (Some(result), Some(pick), Some(draft)) =
+                        (topology.as_ref(), pick.as_ref(), self.paint_edit.as_mut())
+                    && draft.tab == tab
+                {
+                    match result {
+                        Ok(_) if pick.part != draft.part => {
+                            self.status.warning(text(T::PickOtherPart))
+                        }
+                        Ok(feature_editor::Kept::Face(face)) => {
+                            draft.face = Some((pick.body, face.clone()))
+                        }
+                        Err(error) => self.status.error(error),
+                        _ => {}
+                    }
+                }
                 if current
                     && let (Some(result), Some(p), Some(draft)) =
                         (topology, pick.as_ref(), self.feature_edit.as_mut())
@@ -1666,6 +1685,7 @@ impl Editor {
         self.measure_window(ui.ctx());
         self.dialogs(ui.ctx());
         self.feature_dialog(ui.ctx());
+        self.paint_panel(ui.ctx());
         self.assembly_panel(ui.ctx());
         self.section_panel(ui.ctx());
         self.offset_plane_panel(ui.ctx());

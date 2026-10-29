@@ -38,11 +38,14 @@
 - [x] Os desenhos projetados devem ser levados em conta para formar área de extrusão.
 - [x] Deve ser possível selecionar múltipas áreas no mesmo plano para extrusão.
 - [x] A Ferramenta Projetar, deve ser possivel selecionar qualquer área, linha ou vertice, e a projeção dele deve ser gerado no plano do rascunho.
+- [x] Deve ser possível mover uma imagem clicando nela e arrastando, e redimensionar segurando nos vértices e arrastando.
+- [x] Em quanto se desenha deve ser exibido um vértice imaginário nos centos.
 
 ## Refinar
 
 - [x] A ferramenta Espelhar, deve ter o tipo de traço e duas entradas, uma podem ser selecionada multiplos elementos e a segundo a linha que servira de eixo de espelhamento.
 - [x] A ferramenta Deslocamento, deve conter as opções de tipo de traço, e tres tipos, Normal; Dupla, onde recebe duas entradas uma para cada lado; Simétrica onde havera um deslocamento cimetrico para ambos os lados.
+- [x] Ao Iniciar a ferramenta Projetar, em seu painel deve aparece os elementos selecionados, deve ser possível selecionar e desselecionar clicando na projeção e no elemento que a originou, deve ser possível selecionar elementos em qual quer corpo, independente do plano em que ele esta, e a projeção é finalizada ao clicar em Finalizar no painel de propriedades, deve ter também o Botão de cancelar, as áreas, linhas e vértices, geradas pela projeção, devem influenciar na extrusão e pitura .
 
 
 ## Novo
@@ -51,3 +54,4 @@
 - [x] Icones representaivos para desenho, quando um crisamento de linha gera altomativcamente um angulo de 90 graus, deve ter um pequeno icone representando ao lado da junção, o mesmo vale para tanjentes ponto médio e cento, para ilustra para o usuário oque esta ocorrendo.
 - [x] Implementar Atalhos, cada contexto de edição deve ter seu próprio grupo de atalhaos: Rascunho (Linha: L, Retangulo: R, Circulo: C, Arco: A, Projetar: P, Apagar: G, Deslocar: S, Aredondar: O, Chanfra: H, Epelhar: E, Mover: M, Dimencionar: D)
 - [x] Criar uma nova ferramenta para o rascunho, Imagem, pode ser carragada uma imagem para ser usada de referencias, ela deve ser desenhada no Rascunho como o retangulo, ponto inicial e final, ele pode ser redimencionada em seu painel de proproedades, que deve conter tambem o nivel de transparencia, de 0 a 100%, por padrão deve ser 50%, a aposição em relação a origem da peça, e deve poder se arrastada e redimencionada pelo mouse. A imagem deve aparecer na Ravore da peça em um nó Imagens.
+- [x] Na aba Peça, criar a ferramenta Pintar, o painel de propriedades deve ter um seletor de cores, com cores predefinidas e um compositor de cores usando o padrão RGB Hexadecimal, '#FFFFFF', a superfície pintada pode ser delimitada por um rascunho.

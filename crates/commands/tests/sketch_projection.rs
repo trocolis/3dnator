@@ -603,3 +603,32 @@ fn cad_arcs_keep_their_radius_and_reverse_direction_with_the_target_normal() -> 
     }
     Ok(())
 }
+
+#[test]
+#[cfg(feature = "occt")]
+fn original_geometry_survives_a_perpendicular_projection_and_legacy_face_mesh() -> Result<()> {
+    let mut solid = nator_kernel::Solid::cuboid([0., 0., 10.], [10., 10., 10.])?;
+    let mesh = solid.tessellate(0.05, 0.2)?;
+    let mut doc = Document::new("Origem fora do plano")?;
+    let (_, body) = doc.add_mesh(None, "Bloco".into(), Arc::new(MeshAsset::new(mesh)))?;
+    doc.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+    let elements =
+        sketch_projection::elements(&doc, &doc.occurrences()?, Plane::xy(), Placement::default())?;
+    // Arestas paralelas à normal colapsam em pontos; a origem continua selecionável.
+    let edge = elements
+        .iter()
+        .find(|e| e.kind == sketch_projection::Kind::Edge && e.curves.is_empty())
+        .ok_or("Aresta perpendicular ausente")?;
+    assert_eq!(edge.vertices.len(), 1);
+    assert!(!edge.source.curves[0].is_empty());
+    let mut sketch = Sketch::new("Destino", Plane::xy());
+    nator_sketch::projection::insert(&mut sketch, &edge.curves, &edge.vertices)?;
+    assert_eq!(sketch.points.len(), 1);
+    assert!(
+        elements
+            .iter()
+            .filter(|e| e.kind == sketch_projection::Kind::Plane)
+            .all(|e| !e.source.triangles.is_empty())
+    );
+    Ok(())
+}

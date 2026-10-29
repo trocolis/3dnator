@@ -2,7 +2,9 @@
 //! Instâncias referenciam definições de peças; nunca duplicam a geometria automaticamente.
 use nator_geometry::{Mesh, Placement, RgbColor, Topology};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
+pub mod appearance;
 pub mod assembly;
+pub use appearance::{PaintMask, SurfaceAppearance, SurfacePaint};
 pub mod drawing;
 pub mod features;
 pub mod images;
@@ -304,6 +306,7 @@ pub struct Document {
     next_id: u64,
     name_counters: NameCounters,
     images: Vec<ReferenceImage>,
+    appearances: Vec<SurfaceAppearance>,
     parts: Vec<Part>,
     instances: Vec<Instance>,
     groups: Vec<assembly::Group>,
@@ -336,6 +339,7 @@ impl Document {
             next_id: 1,
             name_counters: NameCounters::default(),
             images: vec![],
+            appearances: vec![],
             parts: Vec::new(),
             instances: Vec::new(),
             groups: Vec::new(),
@@ -359,6 +363,7 @@ impl Document {
             next_id,
             name_counters: NameCounters::default(),
             images: vec![],
+            appearances: vec![],
             parts,
             instances,
             groups: Vec::new(),
@@ -634,6 +639,16 @@ impl Document {
     /// Exclui um rascunho de referência, ou de peça quando nenhuma operação o usa: o
     /// histórico nunca fica apontando para um perfil ausente.
     pub fn remove_sketch(&mut self, id: SketchId) -> Result<(), DocumentError> {
+        if self
+            .appearances
+            .iter()
+            .flat_map(|a| &a.layers)
+            .any(|l| l.mask.as_ref().is_some_and(|m| m.sketch == id))
+        {
+            return Err(DocumentError(
+                "O rascunho delimita uma pintura; remova essa pintura antes de excluí-lo.".into(),
+            ));
+        }
         if self.is_reference_sketch(id) {
             self.reference_sketches.retain(|s| s.id != id);
             self.images.retain(|i| i.sketch != id);
@@ -723,6 +738,16 @@ impl Document {
             .validate()
             .map_err(|e| DocumentError(e.to_string()))?;
         self.sketch_mut(id)?.sketch = sketch;
+        for appearance in &mut self.appearances {
+            if appearance
+                .layers
+                .iter()
+                .any(|l| l.mask.as_ref().is_some_and(|m| m.sketch == id))
+            {
+                appearance.geometry = None;
+                appearance.materials = Arc::default();
+            }
+        }
         Ok(())
     }
     pub fn part_mut(&mut self, id: PartId) -> Result<&mut Part, DocumentError> {
@@ -803,11 +828,13 @@ impl Document {
             .find(|p| p.bodies.iter().any(|b| b.id == id))
             .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
         part.bodies.retain(|b| b.id != id);
+        self.appearances.retain(|a| a.body != id);
         Ok(())
     }
 
     pub fn validate(&self) -> Result<(), DocumentError> {
         self.validate_images()?;
+        self.validate_appearances()?;
         validate_name(&self.name)?;
         if self.next_id == 0 {
             return Err(DocumentError(
@@ -1077,7 +1104,13 @@ impl Document {
                     continue;
                 };
                 let group = &mut groups[usize::from(look.is_translucent())];
-                let mesh = body.geometry.mesh();
+                let appearance = self
+                    .body_appearance(body.id)
+                    .filter(|a| a.geometry.is_some());
+                let geometry = appearance
+                    .and_then(|a| a.geometry.as_ref())
+                    .unwrap_or(&body.geometry);
+                let mesh = geometry.mesh();
                 let base = u32::try_from(group.vertices.len())
                     .map_err(|_| DocumentError("Cena com vértices excessivos.".into()))?;
                 group.vertices.extend(
@@ -1088,11 +1121,21 @@ impl Document {
                 group
                     .triangles
                     .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
-                group.creases.extend_from_slice(body.geometry.creases());
-                group.colors.extend(std::iter::repeat_n(
-                    occurrence_color.or(body.color).unwrap_or(RgbColor::NEUTRAL),
-                    mesh.triangles().len(),
-                ));
+                group.creases.extend_from_slice(geometry.creases());
+                let fallback = occurrence_color.or(body.color).unwrap_or(RgbColor::NEUTRAL);
+                if let Some(appearance) = appearance {
+                    group.colors.extend(appearance.materials.iter().map(|m| {
+                        if *m == 0 {
+                            fallback
+                        } else {
+                            appearance.layers[usize::from(*m) - 1].color
+                        }
+                    }));
+                } else {
+                    group
+                        .colors
+                        .extend(std::iter::repeat_n(fallback, mesh.triangles().len()));
+                }
                 group
                     .styles
                     .extend(std::iter::repeat_n(look, mesh.triangles().len()));

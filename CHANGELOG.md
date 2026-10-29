@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Pintura de superfícies e refinamento de Projetar
+
+- Pintar na aba Peça, com paleta, seletor RGB e hexadecimal `#RRGGBB`. Faces inteiras ou delimitadas por uma ou várias áreas de rascunho, inclusive projetadas e com furos; prévia, cancelamento e desfazer/refazer. O recorte preciso afeta somente a aparência, preservando o sólido de modelagem, e acompanha alterações do rascunho.
+- Projetar reúne as escolhas na lista do painel e permite alternar pela origem, projeção ou lista. Seleção da origem em coordenadas de montagem, independente do plano editado, com profundidade para faces sobrepostas. Finalizar publica toda a seleção em uma revisão; Cancelar/Esc não publica alterações. Arestas paralelas à normal projetam um ponto.
+- Imagens podem ser arrastadas diretamente na vista da peça e pelos cantos sem seleção prévia; o gesto conserva o referencial da ocorrência clicada. Durante o desenho, centros e pontos médios aparecem como vértices imaginários, sem alterar a geometria.
+- Formato interno 27 salva camadas e cache de pintura e mantém a leitura dos anteriores. A leitura conserva as cores sem OCCT; o recálculo da delimitação exige esse núcleo. Exportação STEP/STL conserva o comportamento anterior. Aplicativo permanece em 0.3.0 em desenvolvimento.
+
 ### Áreas, referências e organização da árvore
 
 - Arco acompanha o sentido inicial do mouse e conserva a abertura contínua ao percorrer os quadrantes, inclusive além de 180°. Medidas digitadas respeitam o sentido escolhido; o início não produz uma prévia de volta completa.

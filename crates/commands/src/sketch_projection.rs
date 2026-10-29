@@ -18,6 +18,7 @@ pub enum Kind {
 /// e prévia de faces (incluindo furos); as curvas inseridas vêm do B-rep exato.
 #[derive(Debug, Clone)]
 pub struct Element {
+    pub source: SourceGeometry,
     pub kind: Kind,
     pub curves: Vec<Segment>,
     pub vertices: Vec<Point2>,
@@ -26,6 +27,16 @@ pub struct Element {
     pub contours: Vec<Vec<Point2>>,
 }
 
+/// Coordenadas de montagem da origem, separadas das coordenadas locais da
+/// projeção. A seleção pela origem usa a câmera atual, sem supor planos paralelos.
+#[derive(Debug, Clone, Default)]
+pub struct SourceGeometry {
+    pub name: String,
+    pub vertices: Vec<nator_geometry::Point3>,
+    pub curves: Vec<Vec<nator_geometry::Point3>>,
+    pub triangles: Vec<[nator_geometry::Point3; 3]>,
+    pub contours: Vec<Vec<nator_geometry::Point3>>,
+}
 pub fn elements(
     document: &Document,
     occurrences: &[Occurrence],
@@ -59,11 +70,14 @@ fn inside_contours(contours: &[Vec<Point2>], p: Point2) -> bool {
 fn mesh_areas(
     mesh: &nator_geometry::Mesh,
     project: impl Fn(nator_geometry::Point3) -> Point2,
+    world: impl Fn(nator_geometry::Point3) -> nator_geometry::Point3,
+    name: &str,
 ) -> Vec<Element> {
     type Key = [u64; 3];
     #[derive(Default)]
     struct Face {
         triangles: Vec<[Point2; 3]>,
+        source_triangles: Vec<[nator_geometry::Point3; 3]>,
         edges: HashMap<(Key, Key), (usize, [nator_geometry::Point3; 2])>,
     }
     let key = |p: nator_geometry::Point3| p.map(|v| if v == 0. { 0 } else { v.to_bits() });
@@ -124,6 +138,7 @@ fn mesh_areas(
         for (index, points) in triangles.into_iter().enumerate() {
             let face = components.entry(root(&mut parents, index)).or_default();
             face.triangles.push(points.map(&project));
+            face.source_triangles.push(points.map(&world));
             for i in 0..3 {
                 let pair = [points[i], points[(i + 1) % 3]];
                 let (a, b) = (key(pair[0]), key(pair[1]));
@@ -152,6 +167,11 @@ fn mesh_areas(
                 .collect::<Vec<_>>();
             if !curves.is_empty() {
                 result.push(Element {
+                    source: SourceGeometry {
+                        name: name.into(),
+                        triangles: face.source_triangles,
+                        ..Default::default()
+                    },
                     kind: Kind::Plane,
                     curves,
                     vertices: vec![],
@@ -171,7 +191,8 @@ fn sketch_elements(
     target: Placement,
 ) -> Result<Vec<Element>, DocumentError> {
     let error = |e: nator_sketch::SketchError| DocumentError(e.to_string());
-    let project = |p| plane.project(target.inverse_apply(source.apply(sketch.plane.world(p))));
+    let world = |p| source.apply(sketch.plane.world(p));
+    let project = |p| plane.project(target.inverse_apply(world(p)));
     let alignment = nator_geometry::dot(
         target.inverse_vector(source.apply_vector(sketch.plane.normal())),
         plane.normal(),
@@ -226,6 +247,11 @@ fn sketch_elements(
     let mut result = Vec::new();
     for point in sketch.visible_points() {
         result.push(Element {
+            source: SourceGeometry {
+                name: sketch.name.clone(),
+                vertices: vec![world(point.position)],
+                ..Default::default()
+            },
             kind: Kind::Vertex,
             vertices: vec![project(point.position)],
             curves: vec![],
@@ -235,6 +261,18 @@ fn sketch_elements(
     }
     for entity in sketch.entities.iter().filter(|e| !e.infinite) {
         result.push(Element {
+            source: SourceGeometry {
+                name: sketch.name.clone(),
+                curves: vec![
+                    nator_sketch::profiles::segment(sketch, entity)
+                        .map_err(error)?
+                        .sample(128)
+                        .into_iter()
+                        .map(world)
+                        .collect(),
+                ],
+                ..Default::default()
+            },
             kind: Kind::Edge,
             vertices: vec![],
             curves: curves(&nator_sketch::profiles::segment(sketch, entity).map_err(error)?),
@@ -252,6 +290,14 @@ fn sketch_elements(
         }
         if !edges.is_empty() {
             result.push(Element {
+                source: SourceGeometry {
+                    name: sketch.name.clone(),
+                    contours: std::iter::once(&region.outer)
+                        .chain(&region.holes)
+                        .map(|wire| wire.sample(128).into_iter().map(world).collect())
+                        .collect(),
+                    ..Default::default()
+                },
                 kind: Kind::Plane,
                 curves: edges,
                 vertices: vec![],
@@ -290,17 +336,24 @@ pub fn elements_for_sketch(
                 {
                     let query = || -> Result<Vec<Element>, nator_kernel::KernelError> {
                         let mut result = Vec::new();
-                        let solid = nator_kernel::Solid::from_brep(bytes, None)?;
+                        let mut solid = nator_kernel::Solid::from_brep(bytes, None)?;
                         let mut edges = Vec::new();
+                        let mut world_edges: Vec<Vec<nator_geometry::Point3>> = Vec::new();
                         for index in 0..solid.edge_count()? {
                             let anchors = solid.edge_anchors(index)?;
                             if anchors.seam {
                                 edges.push(Vec::new());
+                                world_edges.push(Vec::new());
                                 continue;
                             }
                             if !anchors.circle.is_some_and(|c| c.closed) {
                                 for p in [anchors.start, anchors.end] {
                                     result.push(Element {
+                                        source: SourceGeometry {
+                                            name: body.name.clone(),
+                                            vertices: vec![source.apply(p)],
+                                            ..Default::default()
+                                        },
                                         kind: Kind::Vertex,
                                         curves: vec![],
                                         vertices: vec![project(p)],
@@ -311,21 +364,51 @@ pub fn elements_for_sketch(
                             }
                             let curves =
                                 edge_curves(&solid, index, anchors, plane, source, target)?;
+                            let world_curve = solid
+                                .edge_polyline(index, 0.01)?
+                                .into_iter()
+                                .map(|p| source.apply(p))
+                                .collect::<Vec<_>>();
                             result.push(Element {
+                                source: SourceGeometry {
+                                    name: body.name.clone(),
+                                    curves: vec![world_curve.clone()],
+                                    ..Default::default()
+                                },
                                 kind: Kind::Edge,
+                                vertices: if curves.is_empty() {
+                                    vec![project(anchors.start)]
+                                } else {
+                                    vec![]
+                                },
                                 curves: curves.clone(),
-                                vertices: vec![],
                                 triangles: vec![],
                                 contours: vec![],
                             });
+                            world_edges.push(world_curve);
                             edges.push(curves);
                         }
-                        let mesh = body.geometry.mesh();
+                        // Arquivos legados podem ter B-rep sem mapa de faces da malha.
+                        // Nesse caso consultamos uma tesselação local no mesmo worker.
+                        let fallback = if body.geometry.triangle_faces().is_none() {
+                            Some(solid.tessellate_with_faces(0.02, 0.2)?)
+                        } else {
+                            None
+                        };
+                        let mesh = fallback
+                            .as_ref()
+                            .map(|(m, _)| m)
+                            .unwrap_or_else(|| body.geometry.mesh());
+                        let triangle_faces = fallback
+                            .as_ref()
+                            .map(|(_, f)| f.as_slice())
+                            .or_else(|| body.geometry.triangle_faces());
                         let mut faces = Vec::new();
                         for face in 0..solid.face_count()? {
-                            let curves = solid
-                                .face_edges(face)?
-                                .into_iter()
+                            let face_edges = solid.face_edges(face)?;
+                            let curves = face_edges
+                                .iter()
+                                .copied()
                                 .flat_map(|i| edges[i].clone())
                                 .collect::<Vec<_>>();
                             let triangles = mesh
@@ -333,14 +416,32 @@ pub fn elements_for_sketch(
                                 .iter()
                                 .enumerate()
                                 .filter(|(i, _)| {
-                                    body.geometry
-                                        .triangle_faces()
-                                        .is_some_and(|f| f[*i] as usize == face)
+                                    triangle_faces.is_some_and(|f| f[*i] as usize == face)
                                 })
                                 .map(|(_, t)| mesh.triangle_points(*t).map(project))
                                 .collect();
                             if !curves.is_empty() {
                                 faces.push(Element {
+                                    source: SourceGeometry {
+                                        name: body.name.clone(),
+                                        curves: face_edges
+                                            .iter()
+                                            .map(|i| world_edges[*i].clone())
+                                            .collect(),
+                                        triangles: mesh
+                                            .triangles()
+                                            .iter()
+                                            .enumerate()
+                                            .filter(|(i, _)| {
+                                                triangle_faces
+                                                    .is_some_and(|f| f[*i] as usize == face)
+                                            })
+                                            .map(|(_, t)| {
+                                                mesh.triangle_points(*t).map(|p| source.apply(p))
+                                            })
+                                            .collect(),
+                                        ..Default::default()
+                                    },
                                     kind: Kind::Plane,
                                     curves,
                                     vertices: vec![],
@@ -368,6 +469,11 @@ pub fn elements_for_sketch(
             let mesh = body.geometry.mesh();
             for p in mesh.vertices() {
                 result.push(Element {
+                    source: SourceGeometry {
+                        name: body.name.clone(),
+                        vertices: vec![source.apply(*p)],
+                        ..Default::default()
+                    },
                     kind: Kind::Vertex,
                     curves: vec![],
                     vertices: vec![project(*p)],
@@ -380,6 +486,14 @@ pub fn elements_for_sketch(
                 for i in 0..3 {
                     if mask & (1 << i) != 0 {
                         result.push(Element {
+                            source: SourceGeometry {
+                                name: body.name.clone(),
+                                curves: vec![vec![
+                                    source.apply(mesh.triangle_points(*triangle)[(i + 1) % 3]),
+                                    source.apply(mesh.triangle_points(*triangle)[(i + 2) % 3]),
+                                ]],
+                                ..Default::default()
+                            },
                             kind: Kind::Edge,
                             curves: vec![Segment::Line {
                                 a: points[(i + 1) % 3],
@@ -392,7 +506,7 @@ pub fn elements_for_sketch(
                     }
                 }
             }
-            result.extend(mesh_areas(mesh, project));
+            result.extend(mesh_areas(mesh, project, |p| source.apply(p), &body.name));
         }
     }
     for occurrence in occurrences {

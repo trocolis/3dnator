@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Pintura de faces, Projetar e gestos diretos — 29/10/2026
+
+- Concluídos os quatro novos itens do AJUSTE.md: arraste/redimensionamento direto de imagens também no modelo; vértices imaginários de centro durante o desenho; Projetar com seleção transitória, lista, alternância pela origem/projeção e Finalizar/Cancelar; Pintar com paleta, RGB hexadecimal e recorte pelas áreas de rascunhos.
+- Aparência precisa por face em camadas, separada da geometria de modelagem. Prismas de áreas com furos delimitam as cores; recálculo passa pelo trabalhador de comandos e persiste no formato 27. Seleção das projeções usa coordenadas de montagem e profundidade das faces.
+- Aprovados 328 testes com OCCT, 255 sem OCCT, 39 ensaios gráficos seriais, formatação e Clippy com/sem OCCT. Captura `paint-panel.png` conferida e leitura de projeto pintado sem OCCT aprovada. Evidências em `target/codex-validation/paint-projection-20261029/`. Aplicativo 0.3.0 em desenvolvimento; sem release, publicação remota ou validação Windows.
+
 ## Cubo azul compacto e rotação pela face predominante — 27/10/2026
 
 - Reduzido o controle para 80%, restaurando azuis claros, nomes sobre as faces e Home de contorno. Enquadrar abaixo de Home reutiliza a ação contextual do editor para modelo ou rascunho, sem abrir novamente a barra da câmera.

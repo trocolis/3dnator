@@ -16,6 +16,7 @@ pub(super) enum Icon {
     Sketch,
     SketchProject,
     Image,
+    Paint,
     Extrude,
     Revolve,
     Hole,
@@ -215,6 +216,7 @@ fn paint_styled(
             | Icon::Trim
             | Icon::SketchOffset
             | Icon::SketchProject
+            | Icon::Paint
             | Icon::Image
             | Icon::SketchFillet
             | Icon::SketchChamfer
@@ -258,6 +260,17 @@ fn paint_styled(
     };
     let p = &pen;
     match icon {
+        Icon::Paint => {
+            // Pincel com cerdas verdes e cabo preto, na mesma grade dos demais ícones.
+            p.line(
+                &[[7., 16.], [17., 4.], [20., 7.], [10., 19.], [7., 16.]],
+                p.ink,
+            );
+            p.line(
+                &[[7., 16.], [4., 17.], [3., 22.], [9., 21.], [10., 19.]],
+                p.accent,
+            );
+        }
         Icon::Image => {
             p.line(
                 &[[2., 4.], [22., 4.], [22., 20.], [2., 20.], [2., 4.]],

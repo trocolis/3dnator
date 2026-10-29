@@ -59,6 +59,7 @@ pub(crate) fn render_ui_scenario(
         | "sketch-offset"
         | "sketch-fillet"
         | "sketch-chamfer"
+        | "paint"
         | "sketch-image"
         | "repair"
         | "recovery"
@@ -84,7 +85,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
                     .into(),
             );
         }
@@ -306,6 +307,11 @@ fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    if scenario == "paint" {
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.open_paint();
+        return Ok(());
+    }
     if scenario == "sketch-image" {
         let id = editor
             .current()
@@ -5086,8 +5092,75 @@ mod tests {
             [0., 0., 20.],
         )
         .ok_or("Ponto sem projeção")?;
+        let revision = editor.current().session.revision();
+        let wait_selection = |editor: &mut Editor, count: usize| -> Result<(), Box<dyn Error>> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_none_or(|w| w.projection_selected() != count)
+            {
+                if Instant::now() > deadline {
+                    return Err("Seleção projetada não foi atualizada".into());
+                }
+                frame(editor, &context, vec![])?;
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(())
+        };
         click(&mut editor, &context, at)?;
+        wait_selection(&mut editor, 1)?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho ausente")?
+                .sketch
+                .entities
+                .is_empty()
+        );
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        frame(&mut editor, &context, vec![])?;
+        assert!(editor.selection_active());
+        assert_eq!(editor.current().session.revision(), revision);
+        let tool = label_position(&mut editor, &context, text(T::SketchProject))?;
+        click(&mut editor, &context, tool)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .is_some_and(|w| w.projection_ready())
+        {
+            if Instant::now() > deadline {
+                return Err("Projetar não reiniciou".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        click(&mut editor, &context, at)?;
+        wait_selection(&mut editor, 1)?;
+        click(&mut editor, &context, at)?;
+        wait_selection(&mut editor, 0)?;
+        click(&mut editor, &context, at)?;
+        wait_selection(&mut editor, 1)?;
+        let finish = label_position(&mut editor, &context, text(T::ProjectionFinish))?;
+        click(&mut editor, &context, finish)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.current().session.revision() == revision {
+            if Instant::now() > deadline {
+                return Err(format!("Projetar não finalizou: {}", editor.status).into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
         settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), revision + 1);
         let sketch = &editor
             .current()
             .session
@@ -6623,9 +6696,6 @@ mod tests {
         assert!(nator_sketch::distance(image.size, [20., 10.]) < 1e-4);
         assert_eq!(image.name, "Imagem 1");
         assert_eq!(image.transparency, 0.5);
-        let node = label_position(&mut editor, &context, "Imagem 1")?;
-        click(&mut editor, &context, node)?;
-        settle(&mut editor, &context)?;
         let revision = editor.current().session.revision();
         let from = at(&editor, [10., 5., 0.])?;
         let to = at(&editor, [15., 7., 0.])?;
@@ -6709,6 +6779,286 @@ mod tests {
         click(&mut editor, &context, select)?;
         assert!(editor.image_edit.is_none());
         assert!(editor.selection_active());
+        editor.finish_sketch();
+        settle(&mut editor, &context)?;
+        editor.current_mut().camera_transition = None;
+        let revision = editor.current().session.revision();
+        let from = at(&editor, [17., 8., 0.])?;
+        let to = at(&editor, [20., 10., 0.])?;
+        drag_between(&mut editor, &context, from, to)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor.current().session.revision(),
+            revision + 1,
+            "{}",
+            editor.status
+        );
+        assert!(editor.current().sketch_edit.is_none());
+        assert!(
+            nator_sketch::distance(
+                editor.current().session.document().images()[0].origin,
+                [8., 4.]
+            ) < 1e-4
+        );
+        editor.activate_selection(&context);
+        let from = at(&editor, [33., 17., 0.])?;
+        let to = at(&editor, [38., 20., 0.])?;
+        drag_between(&mut editor, &context, from, to)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor.current().session.revision(),
+            revision + 2,
+            "{}",
+            editor.status
+        );
+        assert!(
+            nator_sketch::distance(
+                editor.current().session.document().images()[0].size,
+                [30., 16.]
+            ) < 1e-4
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn paint_panel_picks_faces_previews_hex_and_masks_and_cancels_atomically()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut solid = nator_kernel::Solid::cuboid([0., 0., 0.], [20., 20., 5.])?;
+        let (mesh, faces) = solid.tessellate_with_faces(0.05, 0.2)?;
+        let mut document = Document::new("Painel Pintar")?;
+        let (part, body) = document.add_mesh(
+            None,
+            "Placa".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        document.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+        document.body_mut(body)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+            &nator_document::features::body_owner(body),
+            solid.face_count()?,
+        ));
+        let mut mask = Sketch::new("Limite", Plane::xy());
+        mask.add_rectangle([2., 2.], [10., 10.], false)?;
+        document.add_sketch(Some(part), mask)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.shell.browser_visible = false;
+        settle(&mut editor, &context)?;
+        let paint = label_position(&mut editor, &context, text(T::Paint))?;
+        click(&mut editor, &context, paint)?;
+        assert!(editor.paint_edit.is_some());
+        let revision = editor.current().session.revision();
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [7., 7., 5.],
+        )
+        .ok_or("Face fora da tela")?;
+        click(&mut editor, &context, at)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.paint_edit.as_ref().is_none_or(|d| d.face.is_none()) {
+            if Instant::now() > deadline {
+                return Err(format!("Face não escolhida: {}", editor.status).into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let draft = editor.paint_edit.as_mut().ok_or("Painel ausente")?;
+        draft.hex = "#1248AC".into();
+        draft.rgb = [18, 72, 172];
+        let wait_preview = |editor: &mut Editor| -> Result<(), Box<dyn Error>> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                frame(editor, &context, vec![])?;
+                let command = editor
+                    .paint_edit
+                    .as_ref()
+                    .and_then(|d| d.command())
+                    .ok_or("Comando incompleto")?;
+                match editor.preview_status(&command) {
+                    live_preview::PreviewStatus::Ready => return Ok(()),
+                    live_preview::PreviewStatus::Failed(e) => return Err(e.to_string().into()),
+                    _ => {}
+                }
+                if Instant::now() > deadline {
+                    return Err("Prévia de pintura não terminou".into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        wait_preview(&mut editor)?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(editor.current().session.document().appearances().is_empty());
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.paint_edit.is_none());
+        assert!(editor.current().session.document().appearances().is_empty());
+        editor.open_paint();
+        frame(&mut editor, &context, vec![])?;
+        click(&mut editor, &context, at)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.paint_edit.as_ref().is_none_or(|d| d.face.is_none()) {
+            if Instant::now() > deadline {
+                return Err("Face não escolhida na segunda pintura".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Escolher o rascunho e a região pelos controles do painel.
+        let whole = label_position(&mut editor, &context, text(T::PaintWholeFace))?;
+        click(&mut editor, &context, whole)?;
+        let sketch = label_position(&mut editor, &context, "Limite")?;
+        click(&mut editor, &context, sketch)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let area = loop {
+            if let Ok(at) = label_position(&mut editor, &context, "Área 1") {
+                break at;
+            }
+            if Instant::now() > deadline {
+                return Err("Área da pintura não apareceu".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        click(&mut editor, &context, area)?;
+        wait_preview(&mut editor)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor.current().session.revision(),
+            revision + 1,
+            "{}",
+            editor.status
+        );
+        let appearance = editor
+            .current()
+            .session
+            .document()
+            .body_appearance(body)
+            .ok_or("Pintura ausente")?;
+        assert!(appearance.layers[0].mask.is_some());
+        assert_eq!(appearance.layers[0].color.channels(), [62, 175, 102]);
+        assert!(editor.current_mut().session.undo());
+        assert!(editor.current().session.document().appearances().is_empty());
+        assert!(editor.current_mut().session.redo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .body_appearance(body)
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn imaginary_centers_appear_while_drawing_without_creating_points() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let mut document = Document::new("Centros imaginários")?;
+        let mut sketch = Sketch::new("Centros", Plane::xy());
+        sketch.add_circle([0., 0.], 10., false)?;
+        sketch.add_rectangle([20., 0.], [40., 20.], false)?;
+        let before = (sketch.points.len(), sketch.entities.len());
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        let diamonds = |editor: &mut Editor| -> Vec<egui::Pos2> {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 820.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            let points = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Path(path)
+                        if path.closed && path.points.len() == 4 && path.stroke.width == 1.3 =>
+                    {
+                        Some(egui::pos2(
+                            path.points.iter().map(|p| p.x).sum::<f32>() / 4.,
+                            path.points.iter().map(|p| p.y).sum::<f32>() / 4.,
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+            points
+        };
+        editor.activate_selection(&context);
+        let found = diamonds(&mut editor);
+        let center = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [0., 0., 0.],
+        )
+        .ok_or("Centro fora da tela")?;
+        assert!(!found.iter().any(|p| p.distance(center) < 0.1));
+        editor.select_sketch_tool(sketch_editor::Tool::Line);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let found = diamonds(&mut editor);
+            let at = |p| {
+                sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    editor.canvas_rect,
+                    p,
+                )
+            };
+            if [[0., 0., 0.], [30., 10., 0.]]
+                .iter()
+                .all(|p| at(*p).is_some_and(|p| found.iter().any(|q| p.distance(*q) < 0.1)))
+            {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err(format!("Centros ausentes: {found:?}").into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        editor.activate_selection(&context);
+        let found = diamonds(&mut editor);
+        let center = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [0., 0., 0.],
+        )
+        .ok_or("Centro fora da tela")?;
+        assert!(!found.iter().any(|p| p.distance(center) < 0.1));
+        let sketch = &editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho ausente")?
+            .sketch;
+        assert_eq!((sketch.points.len(), sketch.entities.len()), before);
         Ok(())
     }
 

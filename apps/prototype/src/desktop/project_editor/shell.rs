@@ -72,6 +72,7 @@ enum Action {
     Reference,
     NewSketch,
     SketchImage,
+    Paint,
     SketchXY,
     SketchXZ,
     SketchYZ,
@@ -130,6 +131,7 @@ impl Action {
             Self::Reference => T::Reference,
             Self::NewSketch => T::NewSketch,
             Self::SketchImage => T::SketchImage,
+            Self::Paint => T::Paint,
             Self::SketchXY => T::SketchXY,
             Self::SketchXZ => T::SketchXZ,
             Self::SketchYZ => T::SketchYZ,
@@ -212,6 +214,7 @@ impl Action {
             | Self::SketchFace => Icon::Sketch,
             Self::OffsetPlane => Icon::OffsetPlane,
             Self::SketchImage => Icon::Image,
+            Self::Paint => Icon::Paint,
             Self::Solid(tool) => match tool {
                 SolidTool::Extrude => Icon::Extrude,
                 SolidTool::Revolve => Icon::Revolve,
@@ -326,6 +329,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::SketchYZ,
     Action::SketchFace,
     Action::OffsetPlane,
+    Action::Paint,
     Action::Solid(SolidTool::Extrude),
     Action::Solid(SolidTool::Revolve),
     Action::Solid(SolidTool::Hole),
@@ -412,7 +416,7 @@ impl Editor {
             Action::Browser => true,
             Action::Undo => editable && self.current().session.undo_label().is_some(),
             Action::Redo => editable && self.current().session.redo_label().is_some(),
-            Action::Solid(_) => {
+            Action::Paint | Action::Solid(_) => {
                 editable
                     && self.current().active_part.is_some()
                     && nator_kernel::is_available()
@@ -499,6 +503,7 @@ impl Editor {
     fn action_selected(&self, action: Action) -> bool {
         match action {
             Action::SketchImage => self.image_edit.is_some(),
+            Action::Paint => self.paint_edit.is_some(),
             Action::Select => self.selection_active() && self.image_edit.is_none(),
             Action::Perspective => {
                 self.viewport.camera.projection == nator_renderer::Projection::Perspective
@@ -568,6 +573,7 @@ impl Editor {
                 | Action::SketchFace
                 | Action::OffsetPlane
                 | Action::ReferenceSketch
+                | Action::Paint
                 | Action::Solid(_)
                 | Action::MoveBody
                 | Action::CopyBody
@@ -688,6 +694,7 @@ impl Editor {
                     self.choose_picked_plane(context, pick);
                 }
             }
+            Action::Paint => self.open_paint(),
             Action::Solid(tool) => {
                 self.open_feature_tool(tool);
                 self.prefill_selected_topology(context);
@@ -1364,6 +1371,7 @@ impl Editor {
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
                         Action::Solid(SolidTool::Shell),
+                        Action::Paint,
                     ],
                 );
                 self.ribbon_group_with(ui, T::ModifyGroup, 4, |editor, ui| {

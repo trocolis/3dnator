@@ -23,6 +23,7 @@ mod annotation;
 mod projection;
 mod section;
 mod step;
+mod surface_appearance;
 pub use projection::projected_edges;
 pub use step::{StepAssembly, StepBody, StepOccurrence, StepPart};
 

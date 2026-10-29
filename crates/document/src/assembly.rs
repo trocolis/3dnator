@@ -149,6 +149,20 @@ impl Document {
                 ..source
             },
         )?;
+        if let Some(mut appearance) = self.body_appearance(id).cloned() {
+            appearance.body = copy;
+            for layer in &mut appearance.layers {
+                if let super::features::FaceRef::Named(name) = &mut layer.face {
+                    *name = super::features::remap_face_name(name, &map);
+                }
+            }
+            // A cópia pode estar em outra posição relativamente ao rascunho.
+            if appearance.layers.iter().any(|l| l.mask.is_some()) {
+                appearance.geometry = None;
+                appearance.materials = Arc::new(Vec::new());
+            }
+            self.set_surface_appearance(appearance)?;
+        }
         Ok(copy)
     }
     pub fn remove_group(&mut self, id: GroupId) -> Result<(), DocumentError> {
@@ -259,6 +273,23 @@ impl Document {
                 image.sketch = *sketch;
             }
             self.add_image(image)?;
+        }
+        for appearance in from
+            .appearances
+            .iter()
+            .filter(|a| body_map.contains_key(&a.body))
+        {
+            let mut appearance = appearance.clone();
+            appearance.body = body_map[&appearance.body];
+            for layer in &mut appearance.layers {
+                if let super::features::FaceRef::Named(name) = &mut layer.face {
+                    *name = super::features::remap_face_name(name, &body_map);
+                }
+                if let Some(mask) = &mut layer.mask {
+                    mask.sketch = sketch_map[&mask.sketch];
+                }
+            }
+            self.set_surface_appearance(appearance)?;
         }
         let children = from
             .instances

@@ -57,6 +57,7 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::Com
         body.brep = Some(built.brep);
         body.face_names = built.faces;
     }
+    crate::appearance::rebuild(doc, part)?;
     Ok(())
 }
 

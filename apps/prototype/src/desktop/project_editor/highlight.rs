@@ -312,11 +312,12 @@ impl Editor {
     /// Contexto de pré-seleção: muda quando o painel, o campo ou o modo mudam.
     fn hover_context(&self) -> String {
         format!(
-            "{:?}|{:?}|{:?}|{:?}",
+            "{:?}|{:?}|{:?}|{:?}|{:?}",
             self.feature_edit
                 .as_ref()
                 .and_then(|d| d.field().map(|f| (d.part(), d.output(), f))),
             self.pick_mode,
+            self.paint_edit.as_ref().map(|d| d.part),
             self.current().active_part,
             self.current().view.version
         )
@@ -486,11 +487,19 @@ impl Editor {
                 .triangle_faces()
                 .and_then(|faces| faces.get(pick.triangle).copied())
         };
-        let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
-        let other_part = self
-            .feature_edit
+        let awaiting = self
+            .paint_edit
             .as_ref()
-            .is_some_and(|d| d.part() != pick.part);
+            .map(|_| feature_editor::Awaiting::Face)
+            .or_else(|| self.feature_edit.as_ref().and_then(|d| d.awaiting()));
+        let other_part = self
+            .paint_edit
+            .as_ref()
+            .is_some_and(|d| d.part != pick.part)
+            || self
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.part() != pick.part);
         let construction = self.current().active_part == Some(pick.part);
         let mode = self.pick_mode;
         let cache = &mut self.highlight_cache;

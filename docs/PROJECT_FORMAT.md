@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 26
+# Formato de projeto — versão interna 27
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 26; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 27; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -10,9 +10,15 @@ meshes/<body_id>.bin
 breps/<body_id>.brep      (somente corpos sólidos CAD)
 faces/<body_id>.bin       (somente corpos sólidos CAD, opcional)
 images/<image_id>.rgba    (imagens de referência, opcional)
+appearances/<body_id>.mesh       (cache de pintura, opcional)
+appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 27, `appearances` opcional guarda uma entrada por corpo pintado: `body`, `layers`, `source_signature`, `mesh_path` e `materials_path`. Cada camada contém uma `FaceRef`, uma cor sRGB `[r, g, b]` e `mask` opcional com `sketch`/`region` (`RegionRef`, inclusive `Multiple`). O rascunho deve pertencer à peça do corpo. A camada posterior prevalece dentro de sua área. O limite é 64 camadas por corpo; o rascunho usado não pode ser excluído enquanto houver pintura dependente.
+
+A malha de aparência usa o mesmo cabeçalho/payload de `meshes`, em coordenadas locais do corpo, sem substituir o B-rep ou a malha original. O arquivo de materiais contém exatamente um byte por triângulo: zero herda a cor do corpo/ocorrência, e N usa a cor da camada N−1. Os dois caminhos devem estar presentes juntos ou ser nulos. Caminhos são derivados do ID e o leitor confere assinatura do B-rep, contagem de materiais, índices e limites geométricos. Assim o projeto reabre com as cores mesmo sem OCCT; recalcular a delimitação exige esse núcleo. Copiar/clonar remapeia corpos, faces nomeadas e rascunhos; os caches são compartilhados em memória. STEP/STL continuam exportando a geometria original; os recortes de aparência e cores por face não são exportados.
 
 Desde a versão 26, `name_counters` opcional no manifesto guarda a última sequência usada por tipo (`Part`, `Body`, `Sketch`, `WorkPlane`, `Image`). São contadores de criação independentes dos IDs globais e dos nomes editáveis. Renomear ou excluir não os reduz; desfazer/refazer restaura o estado correspondente. Na leitura de versões antigas, a sequência inicial usa a quantidade existente e os sufixos padrão ainda presentes. Nomes próprios e nomes importados são preservados.
 
@@ -117,6 +123,8 @@ As variantes `Index` (`RegionRef::Index`, `EdgeRef::Index`, `FaceRef::Index`) gu
 Quando a origem de uma referência desaparece ou fica ambígua, o recálculo falha com uma mensagem pedindo nova seleção. Nenhuma outra região, aresta ou face é escolhida no lugar.
 
 ## Migrações
+
+- 26 → 27: pinturas opcionais por face, com máscaras de rascunho e caches de aparência. Ausência significa aparência uniforme anterior; não há recálculo na abertura.
 
 - 25 → 26: sequências opcionais de nomes e imagens incorporadas; ausências significam sequências inferidas e nenhuma imagem. Extrusões podem guardar múltiplas referências de áreas, sem alterar a interpretação das seleções antigas.
 - 17 → 18: `Entity::infinite` opcional e restrição `LineAngle`. Ausência do campo mantém todas as linhas antigas finitas; não há conversão de geometria nem alteração dos perfis existentes.

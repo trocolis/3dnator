@@ -436,7 +436,8 @@ impl Editor {
                 // pressão longa são gestos de seleção que substituem o clique simples.
                 // O manipulador e os painéis de montagem têm prioridade sobre a seleção comum.
                 self.viewport.section = self.current().section_plane();
-                let gizmo = self.extrusion_gizmo(ui, &response)
+                let gizmo = self.reference_image_model_gesture(ui, &response)
+                    || self.extrusion_gizmo(ui, &response)
                     || self.section_gizmo(ui, &response)
                     || self.move_gizmo(ui, &response)
                     || self.offset_plane_gizmo(ui, &response);
