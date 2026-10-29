@@ -208,3 +208,62 @@ pub(super) fn set_body_color(
         materials: std::sync::Arc::new(vec![]),
     })
 }
+
+/// Malha mundial somente da célula sob o cursor. Usa a mesma seleção e o mesmo
+/// recorte da confirmação de Pintar, sem publicar comandos nem alterar aparência.
+#[cfg(feature = "occt")]
+pub fn highlight(
+    doc: &Document,
+    pick: &nator_document::assembly::Pick,
+) -> Result<Option<nator_geometry::Mesh>, DocumentError> {
+    let Target::Face {
+        body,
+        face,
+        boundaries,
+    } = self::pick(doc, pick, false)?.target
+    else {
+        return Ok(None);
+    };
+    if boundaries.is_empty() {
+        return Ok(None);
+    }
+    let appearance = crate::appearance::build(
+        doc,
+        body,
+        vec![SurfacePaint {
+            face,
+            boundaries,
+            mask: None,
+            color: RgbColor::NEUTRAL,
+        }],
+    )?;
+    let geometry = appearance
+        .geometry
+        .ok_or_else(|| DocumentError("Geometria do realce indisponível.".into()))?;
+    let record = doc
+        .body(body)
+        .ok_or_else(|| DocumentError("Corpo do realce inexistente.".into()))?;
+    let pose = pick
+        .placement
+        .compose(record.placement)
+        .map_err(|e| DocumentError(e.to_string()))?;
+    let mesh = geometry.mesh();
+    let vertices = mesh.vertices().iter().map(|p| pose.apply(*p)).collect();
+    let triangles = mesh
+        .triangles()
+        .iter()
+        .zip(appearance.materials.iter())
+        .filter(|(_, m)| **m == 1)
+        .map(|(t, _)| *t)
+        .collect();
+    nator_geometry::Mesh::new(vertices, triangles)
+        .map(Some)
+        .map_err(|e| DocumentError(e.to_string()))
+}
+#[cfg(not(feature = "occt"))]
+pub fn highlight(
+    _: &Document,
+    _: &nator_document::assembly::Pick,
+) -> Result<Option<nator_geometry::Mesh>, DocumentError> {
+    Ok(None)
+}

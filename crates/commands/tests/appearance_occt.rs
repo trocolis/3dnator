@@ -562,3 +562,77 @@ fn automatic_intersections_and_complements_form_cells_and_batches_fail_atomicall
     assert_eq!(s.document().scene()?.ok_or("Cena ausente")?.colors, colors);
     Ok(())
 }
+
+#[test]
+fn cell_highlight_matches_paint_regions_holes_complements_and_world_placement() -> Result<()> {
+    let (mut s, part, body) = solid_fixture(true)?;
+    let mut sketch = Sketch::new(
+        "Áreas visíveis",
+        Plane {
+            origin: [0., 0., 5.],
+            ..Plane::xy()
+        },
+    );
+    sketch.add_rectangle([2., 2.], [10., 10.], false)?;
+    sketch.add_circle([6., 6.], 2., false)?;
+    s.execute(Command::AddSketch {
+        destination: Some(part),
+        sketch,
+    })?;
+    let before = s.revision();
+    let area = |mesh: &nator_geometry::Mesh| {
+        mesh.triangles()
+            .iter()
+            .map(|t| {
+                let [a, b, c] = mesh.triangle_points(*t);
+                nator_geometry::norm(nator_geometry::cross(
+                    nator_geometry::sub(b, a),
+                    nator_geometry::sub(c, a),
+                )) / 2.
+            })
+            .sum::<f64>()
+    };
+    for (point, expected) in [
+        ([3., 3., 50.], 64. - 4. * std::f64::consts::PI),
+        ([6., 6., 50.], 4. * std::f64::consts::PI),
+        ([1., 1., 50.], 336.),
+    ] {
+        let pick = s
+            .document()
+            .pick(nator_geometry::query::Ray {
+                origin: point,
+                direction: [0., 0., -1.],
+            })?
+            .ok_or("Face ausente")?;
+        let mesh =
+            nator_commands::painting::highlight(s.document(), &pick)?.ok_or("Realce ausente")?;
+        assert!((area(&mesh) - expected).abs() < 0.1);
+        assert!(
+            mesh.triangles()
+                .iter()
+                .flat_map(|t| mesh.triangle_points(*t))
+                .all(|p| (p[2] - 5.).abs() < 1e-7)
+        );
+    }
+    assert_eq!(s.revision(), before);
+    assert!(s.document().body_appearance(body).is_none());
+    let mut doc = s.document().clone();
+    let instance = doc.instances()[0].id;
+    let placement = nator_geometry::Placement::new([30., -12., 7.], [0.1, 0.2, 0.3])?;
+    doc.instance_mut(instance)?.placement = placement;
+    let ray = nator_geometry::query::Ray {
+        origin: placement.apply([3., 3., 50.]),
+        direction: placement.apply_vector([0., 0., -1.]),
+    };
+    let pick = doc.pick(ray)?.ok_or("Face posicionada ausente")?;
+    let mesh =
+        nator_commands::painting::highlight(&doc, &pick)?.ok_or("Realce posicionado ausente")?;
+    assert!((area(&mesh) - (64. - 4. * std::f64::consts::PI)).abs() < 0.1);
+    assert!(
+        mesh.triangles()
+            .iter()
+            .flat_map(|t| mesh.triangle_points(*t))
+            .all(|p| (placement.inverse_apply(p)[2] - 5.).abs() < 1e-6)
+    );
+    Ok(())
+}
