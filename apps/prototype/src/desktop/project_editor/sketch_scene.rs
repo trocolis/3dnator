@@ -415,6 +415,20 @@ impl Editor {
         if self.busy() {
             return;
         }
+        let plane_owner = self.current().session.document().work_plane_part(id);
+        if let Some(draft) = self
+            .feature_edit
+            .as_mut()
+            .filter(|d| d.choosing_cutting_plane())
+        {
+            if plane_owner == Some(draft.part()) {
+                draft.choose_cutting_plane(
+                    Some(nator_document::features::ExtrusionLimit::WorkPlane { work_plane: id }),
+                    None,
+                );
+            }
+            return;
+        }
         let Some(picker) = self.current().plane_pick.as_ref() else {
             return;
         };
@@ -763,7 +777,17 @@ impl Editor {
                 }
             }
         }
-        let picker = self.current().plane_pick.as_ref().map(|p| p.placement);
+        let feature_part = self
+            .feature_edit
+            .as_ref()
+            .filter(|d| d.choosing_cutting_plane())
+            .map(|d| d.part());
+        let picker = self
+            .current()
+            .plane_pick
+            .as_ref()
+            .map(|p| p.placement)
+            .or_else(|| feature_part.and_then(|part| part_placement(self.current(), part).ok()));
         let picking = picker.is_some();
         if let Some(placement) = picker
             && !origins.contains(&placement)
@@ -822,6 +846,7 @@ impl Editor {
                 .as_ref()
                 .filter(|p| p.offers_work_planes())
                 .and_then(|p| p.destination)
+                .or(feature_part)
                 .and_then(|id| document.part(id));
             let editing = self.editing_work_plane();
             for record in destination.iter().flat_map(|part| {
@@ -921,9 +946,25 @@ impl Editor {
             && response.clicked()
             && let Some(candidate) = selected
         {
-            match candidate {
-                Candidate::Origin(name, plane) => self.choose_origin_plane(name, plane),
-                Candidate::Work(id) => self.choose_work_plane(id),
+            if feature_part.is_some() {
+                if let Some(draft) = self.feature_edit.as_mut() {
+                    match candidate {
+                        Candidate::Origin(_, plane) => {
+                            draft.choose_cutting_plane(None, Some(plane))
+                        }
+                        Candidate::Work(id) => draft.choose_cutting_plane(
+                            Some(nator_document::features::ExtrusionLimit::WorkPlane {
+                                work_plane: id,
+                            }),
+                            None,
+                        ),
+                    }
+                }
+            } else {
+                match candidate {
+                    Candidate::Origin(name, plane) => self.choose_origin_plane(name, plane),
+                    Candidate::Work(id) => self.choose_work_plane(id),
+                }
             }
             return true;
         }

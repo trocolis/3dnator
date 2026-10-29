@@ -230,10 +230,7 @@ impl Editor {
             let mode = self.pick_mode;
             let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
             let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
-            let extrusion = self
-                .feature_edit
-                .as_ref()
-                .is_some_and(|d| d.accepts_face_profile());
+            let extrusion = self.feature_edit.as_ref().is_some_and(|d| d.planar_pick());
             let view = self.current().view.clone();
             let cut = self.current().section;
             self.start(ui.ctx(), None, move || {

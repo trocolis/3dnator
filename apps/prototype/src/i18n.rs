@@ -108,6 +108,8 @@ pub enum Text {
     FileMenu,
     SettingsMenu,
     ThroughShell,
+    CuttingPlane,
+    CuttingPlaneHint,
     ExitFace,
     AutomaticExitHint,
     SketchXZ,
@@ -821,6 +823,10 @@ pub fn text(key: Text) -> &'static str {
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
         Text::FileMenu => "Arquivo",
+        Text::CuttingPlane => "Plano de divisão",
+        Text::CuttingPlaneHint => {
+            "Escolha uma face plana, um plano de trabalho ou um plano da origem. Os dois lados serão conservados."
+        }
         Text::ThroughShell => "Transpassar (criar duto)",
         Text::ExitFace => "Face de saída",
         Text::AutomaticExitHint => {

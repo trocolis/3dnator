@@ -1,4 +1,6 @@
-# Protótipo 0.5.0 — CAD paramétrico
+# Protótipo 0.6.0 — CAD paramétrico
+
+**Dividir** tem as entradas Corpo e Plano de divisão. Ative o campo Plano e clique numa face plana, num plano de trabalho visível/na árvore ou num plano da origem. O plano precisa atravessar o interior do corpo para produzir dois lados válidos. OK conserva ambos como corpos independentes e Desfazer desfaz a divisão inteira. Mover o plano de trabalho recalcula os dois lados; editar qualquer cartão da divisão abre seu plano comum.
 
 Na aba Peça, **Casca** substitui a ferramenta Furo. Selecione as faces de entrada e ajuste espessura/direção. **Transpassar (criar duto)** acrescenta **Face de saída**: clique no campo e escolha outra face do mesmo corpo. Sem saída explícita, a ferramenta procura a primeira face oposta única de uma abertura plana; saídas ambíguas ou aberturas curvas exigem seleção explícita. Furos existentes continuam editáveis na linha do tempo.
 

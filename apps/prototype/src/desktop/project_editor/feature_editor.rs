@@ -122,6 +122,7 @@ pub(super) enum Field {
     Target,
     UntilFace,
     ExitFace,
+    CuttingPlane,
 }
 
 /// Eixo da revolução: um eixo do plano do rascunho ou uma linha do rascunho.
@@ -374,6 +375,8 @@ pub(super) struct Draft {
     angle: String,
     hole: HoleDraft,
     layout: LayoutDraft,
+    cutting_plane: Option<ExtrusionLimit>,
+    fixed_plane: Option<nator_sketch::Plane>,
 }
 impl Draft {
     fn new(tab: u64, part: PartId, tool: Tool) -> Self {
@@ -412,6 +415,8 @@ impl Draft {
             angle: "360 deg".into(),
             hole: HoleDraft::default(),
             layout: LayoutDraft::default(),
+            cutting_plane: None,
+            fixed_plane: None,
         }
     }
     pub fn edit(tab: u64, part: PartId, feature: Feature) -> Self {
@@ -626,13 +631,24 @@ impl Draft {
                 base,
                 origin,
                 normal,
+                cutting_plane,
+                reverse,
             } => {
                 d.tool = Tool::Split;
                 d.base = Some(base);
-                d.layout.plane = nearest(normal, &PLANES);
-                let axis = PLANES[d.layout.plane].1;
-                d.layout.offset = nator_geometry::dot(origin, axis);
-                d.layout.flip = nator_geometry::dot(normal, axis) < 0.;
+                d.cutting_plane = cutting_plane;
+                if d.cutting_plane.is_none() {
+                    d.fixed_plane = nator_sketch::Plane::from_normal(origin, normal).ok();
+                } else {
+                    d.layout.flip = reverse;
+                }
+            }
+            Operation::SplitRemainder { base, division } => {
+                // As entradas da interface resolvem essa referência antes de
+                // abrir o painel, para editar o plano da divisão primária.
+                d.tool = Tool::Split;
+                d.base = Some(base);
+                d.output = Some(division);
             }
             Operation::Transform { .. } => {}
         }
@@ -683,10 +699,27 @@ impl Draft {
         }
         match self.field? {
             Field::Edges => Some(Awaiting::Edge),
-            Field::Faces | Field::UntilFace | Field::ExitFace => Some(Awaiting::Face),
+            Field::Faces | Field::UntilFace | Field::ExitFace | Field::CuttingPlane => {
+                Some(Awaiting::Face)
+            }
             Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
             Field::Profile => None,
         }
+    }
+    pub(super) fn choosing_cutting_plane(&self) -> bool {
+        self.tool == Tool::Split && self.field == Some(Field::CuttingPlane)
+    }
+    pub(super) fn planar_pick(&self) -> bool {
+        self.accepts_face_profile() || self.choosing_cutting_plane()
+    }
+    pub(super) fn choose_cutting_plane(
+        &mut self,
+        plane: Option<ExtrusionLimit>,
+        fixed: Option<nator_sketch::Plane>,
+    ) {
+        self.cutting_plane = plane;
+        self.fixed_plane = fixed;
+        self.field = None;
     }
     pub(super) fn field(&self) -> Option<Field> {
         self.field
@@ -763,6 +796,10 @@ impl Draft {
     /// numa já escolhida a retira.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
         if let Kept::PlanarFace(face, plane) = kept {
+            if self.choosing_cutting_plane() {
+                self.choose_cutting_plane(Some(UntilFace { body, face }.into()), None);
+                return;
+            }
             let coplanar = self.interaction.guide.is_some_and(|g| {
                 nator_geometry::norm(nator_geometry::cross(g.normal, plane.normal())) < 1e-7
                     && nator_geometry::dot(nator_geometry::sub(plane.origin, g.origin), g.normal)
@@ -811,6 +848,7 @@ impl Draft {
                     Tool::Join | Tool::Cut | Tool::Intersect if self.tool_body.is_none() => {
                         Some(Field::ToolBody)
                     }
+                    Tool::Split => Some(Field::CuttingPlane),
                     _ => None,
                 };
             }
@@ -898,8 +936,14 @@ impl Draft {
     }
 
     fn plane(&self) -> ([f64; 3], [f64; 3]) {
-        let normal = PLANES[self.layout.plane].1;
-        let origin = normal.map(|v| v * self.layout.offset);
+        let normal = self
+            .fixed_plane
+            .map(|p| p.normal())
+            .unwrap_or(PLANES[self.layout.plane].1);
+        let origin = self
+            .fixed_plane
+            .map(|p| p.origin)
+            .unwrap_or_else(|| normal.map(|v| v * self.layout.offset));
         (
             origin,
             if self.layout.flip {
@@ -930,6 +974,9 @@ impl Draft {
                 self.base.is_some() && self.kept_topology.is_some()
             }
             Tool::Hole => self.base.is_some() && self.sketch.is_some(),
+            Tool::Split => {
+                self.base.is_some() && (self.cutting_plane.is_some() || self.fixed_plane.is_some())
+            }
             _ => self.base.is_some(),
         }
     }
@@ -1130,6 +1177,8 @@ impl Draft {
                     base,
                     origin,
                     normal,
+                    cutting_plane: self.cutting_plane.clone(),
+                    reverse: self.layout.flip,
                 }
             }
         }
@@ -1147,6 +1196,13 @@ impl Draft {
     /// Comando que o OK aplicaria.
     fn command(&self, part: &nator_document::Part) -> Command {
         let operation = self.operation(part);
+        if self.tool == Tool::Split && self.output.is_none() {
+            return Command::SplitBody {
+                part: self.part,
+                name: text(T::SplitBody).into(),
+                operation,
+            };
+        }
         if self.tool == Tool::Extrude && self.automatic && self.output.is_none() {
             return Command::AddSmartExtrusion {
                 part: self.part,
@@ -1194,6 +1250,21 @@ fn body_name(part: &nator_document::Part, id: Option<BodyId>) -> Option<String> 
 }
 
 impl Editor {
+    pub(super) fn edit_cad_feature(&mut self, part: PartId, feature: Feature) {
+        let feature = if let Operation::SplitRemainder { division, .. } = feature.operation {
+            self.current()
+                .session
+                .document()
+                .part(part)
+                .and_then(|p| p.features.iter().find(|f| f.output == division))
+                .cloned()
+        } else {
+            Some(feature)
+        };
+        if let Some(feature) = feature {
+            self.feature_edit = Some(Draft::edit(self.current().id, part, feature));
+        }
+    }
     pub(super) fn open_feature_tool(&mut self, tool: Tool) {
         let Some(part) = self.current().active_part else {
             return;
@@ -1273,7 +1344,13 @@ impl Editor {
             | Tool::Mirror
             | Tool::Split => {
                 d.base = suggestion;
-                d.field = suggestion.is_none().then_some(Field::Base);
+                d.field = if suggestion.is_none() {
+                    Some(Field::Base)
+                } else if tool == Tool::Split {
+                    Some(Field::CuttingPlane)
+                } else {
+                    None
+                };
             }
         }
         if tool == Tool::Shell
@@ -2052,6 +2129,47 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) 
 fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
     body_selection(ui, d, part, Field::Base, T::BodyField);
     let mirror = d.tool == Tool::Mirror;
+    if !mirror {
+        let chosen = d.cutting_plane.is_some() || d.fixed_plane.is_some();
+        let description = match &d.cutting_plane {
+            Some(ExtrusionLimit::Face(UntilFace { face, .. })) => {
+                Some(describe_topology(&Kept::Face(face.clone())))
+            }
+            Some(ExtrusionLimit::WorkPlane { work_plane }) => part
+                .work_planes
+                .iter()
+                .find(|w| w.id == *work_plane)
+                .map(|w| w.name.clone()),
+            Some(ExtrusionLimit::Sketch { sketch }) => part
+                .sketches
+                .iter()
+                .find(|s| s.id == *sketch)
+                .map(|s| s.sketch.name.clone()),
+            None => d.fixed_plane.map(|_| text(T::Origin).into()),
+        };
+        let selection = panel::selection(
+            ui,
+            text(T::CuttingPlane),
+            usize::from(chosen),
+            description.as_deref(),
+            d.field == Some(Field::CuttingPlane),
+        );
+        if selection.activate {
+            d.field = Some(Field::CuttingPlane);
+        }
+        if selection.clear {
+            d.cutting_plane = None;
+            d.fixed_plane = None;
+            d.field = Some(Field::CuttingPlane);
+        }
+        ui.label(
+            egui::RichText::new(text(T::CuttingPlaneHint))
+                .small()
+                .color(theme::MUTED),
+        );
+        ui.checkbox(&mut d.layout.flip, text(T::FlipSide));
+        return;
+    }
     let l = &mut d.layout;
     panel::row(ui, text(T::PlaneField), |ui| {
         axis_choice(ui, &mut l.plane, &PLANES)

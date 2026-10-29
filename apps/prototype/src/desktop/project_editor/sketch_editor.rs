@@ -180,6 +180,10 @@ impl Workspace {
         self.dragging.active()
     }
     #[cfg(all(test, feature = "occt"))]
+    pub(super) fn references_pending(&self) -> bool {
+        self.references.pending()
+    }
+    #[cfg(all(test, feature = "occt"))]
     pub(super) fn visible_indicator_count(&self) -> usize {
         indicators::visible(
             &self.references.indicators,

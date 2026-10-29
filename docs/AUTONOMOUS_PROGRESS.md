@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Divisão com dois corpos — 29/10/2026
+
+- Etapa local 0.6.0, formato 32, sem push/release. Corpo e plano de divisão selecionáveis; resultado complementar vinculado à divisão primária. Plano de trabalho participa de recálculo, proteção contra exclusão e clonagem.
+- Aprovados 351 testes com OCCT, 42 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados com e sem OCCT. Regressão geométrica confere volumes dos dois lados, desfazer/refazer, alteração do plano, supressão, clonagem, persistência e recusa atômica de corte fora do corpo. Novo ensaio gráfico escolhe XY com o mouse, confirma ambos os corpos e edita o plano pelo cartão complementar.
+- O auxiliar gráfico de espera agora aguarda também o worker de apoios/indicadores na seleção do rascunho; evita clicar antes de os apoios estarem disponíveis sob carga de compilação. Logs em `target/codex-validation/split-both-20261029/`. Windows não executado localmente nesta etapa.
+
 ## Casca passante — 29/10/2026
 
 - Etapa local 0.5.0, formato 31, sem push/release. Casca substitui Furo na faixa/busca; operações antigas de Furo permanecem editáveis.

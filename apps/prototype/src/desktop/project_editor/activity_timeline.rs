@@ -250,8 +250,7 @@ impl Editor {
                     .and_then(|p| p.features.iter().find(|f| f.output == output))
                     .cloned()
                 {
-                    self.feature_edit =
-                        Some(feature_editor::Draft::edit(self.current().id, part, f));
+                    self.edit_cad_feature(part, f);
                 }
             }
             A::Image(i) => {

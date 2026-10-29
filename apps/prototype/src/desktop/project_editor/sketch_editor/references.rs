@@ -59,6 +59,11 @@ fn key(sketch: &Sketch) -> Vec<u64> {
 }
 
 impl Cache {
+    #[cfg(all(test, feature = "occt"))]
+    pub fn pending(&self) -> bool {
+        self.running.is_some()
+    }
+
     pub fn prepare(&mut self, sketch: &Sketch, context: &egui::Context) -> Result<(), String> {
         let key = key(sketch);
         if self.key != key {

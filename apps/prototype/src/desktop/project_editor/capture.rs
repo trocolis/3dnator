@@ -1152,6 +1152,117 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn split_picks_origin_plane_and_publishes_both_bodies_in_one_undo() -> Result<(), Box<dyn Error>>
+    {
+        use nator_document::features::{Operation, RegionRef};
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Cubo", Plane::xy());
+        sketch.add_rectangle([-10., -10.], [10., 10.], false)?;
+        let mut document = Document::new("Dividir na origem")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut session = Session::new(document)?;
+        let Effect::Imported { body: base, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Cubo".into(),
+            operation: Operation::Extrude {
+                sketch: id,
+                region: RegionRef::Index(0),
+                from: "-10 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Cubo".into());
+        };
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: base }));
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.open_feature_tool(feature_editor::Tool::Split);
+        let bounds = editor.display_bounds();
+        editor
+            .viewport
+            .camera
+            .align_plane([0.; 3], [1., 0., 0.], [0., 1., 0.], bounds)?;
+        frame(&mut editor, &context, vec![])?;
+        assert!(
+            editor
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.choosing_cutting_plane())
+        );
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [6., 6., 0.],
+        )
+        .ok_or("Plano fora da tela")?;
+        click(&mut editor, &context, at)?;
+        assert!(
+            editor
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| !d.choosing_cutting_plane())
+        );
+        settle(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let p = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert_eq!(p.features.len(), 3, "{}", editor.status);
+        assert_eq!(p.bodies.iter().filter(|b| b.visible).count(), 2);
+        editor.step_history(&context, false);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .features
+                .len(),
+            1
+        );
+        editor.step_history(&context, true);
+        let feature = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .features[2]
+            .clone();
+        let primary = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .features[1]
+            .output;
+        editor.edit_cad_feature(part, feature);
+        assert_eq!(
+            editor.feature_edit.as_ref().and_then(|d| d.output()),
+            Some(primary)
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn compact_footer_and_status_dialog_preserve_messages_and_document()
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
@@ -8057,7 +8168,16 @@ mod tests {
 
     fn settle(editor: &mut Editor, context: &egui::Context) -> Result<(), Box<dyn Error>> {
         let deadline = Instant::now() + Duration::from_secs(10);
-        while editor.busy() || editor.rendered != Some(editor.scene_key()) {
+        // Arranjos/indicadores têm seu próprio worker. A cena pode estar pronta
+        // antes deles; o próximo clique do ensaio precisa dos apoios exibidos.
+        while editor.busy()
+            || editor.rendered != Some(editor.scene_key())
+            || editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|w| w.is_selecting() && w.references_pending())
+        {
             if Instant::now() > deadline {
                 return Err(format!(
                     "Trabalhador não terminou: {}; exibida: {:?}; pedida: {:?}; atual: {:?}",

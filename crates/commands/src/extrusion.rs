@@ -114,7 +114,7 @@ mod precise {
         })
     }
 
-    fn limit_plane(
+    pub(crate) fn limit_plane(
         doc: &Document,
         part: PartId,
         limit: &ExtrusionLimit,
@@ -428,9 +428,9 @@ pub fn combination(operation: &Operation) -> Option<Combine> {
     }
 }
 #[cfg(feature = "occt")]
-pub(super) use precise::tool;
-#[cfg(feature = "occt")]
 pub use precise::{automatic, guide, removed};
+#[cfg(feature = "occt")]
+pub(super) use precise::{limit_plane, tool};
 #[cfg(not(feature = "occt"))]
 pub fn automatic(
     _doc: &Document,

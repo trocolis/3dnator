@@ -378,6 +378,29 @@ pub(super) fn normalize(
                 .map(|f| stable_face(doc, part, base, f))
                 .transpose()?,
         },
+        Operation::Split {
+            base,
+            origin,
+            normal,
+            cutting_plane,
+            reverse,
+        } => Operation::Split {
+            base,
+            origin,
+            normal,
+            reverse,
+            cutting_plane: cutting_plane
+                .map(|plane| match plane {
+                    ExtrusionLimit::Face(UntilFace { body, face }) => {
+                        Ok(ExtrusionLimit::Face(UntilFace {
+                            body,
+                            face: stable_face(doc, part, body, face)?,
+                        }))
+                    }
+                    other => Ok(other),
+                })
+                .transpose()?,
+        },
         other => other,
     })
 }
@@ -616,14 +639,30 @@ pub(super) fn construct(
                 image
             }
         }
-        Operation::Split {
-            base,
-            origin,
-            normal,
-        } => source(doc, part, *base)?
-            .0
-            .split(*origin, *normal, &owner)
-            .map_err(error)?,
+        operation @ Operation::Split { base, .. } => {
+            let (origin, normal) = division_plane(doc, part, operation)?;
+            source(doc, part, *base)?
+                .0
+                .split(origin, normal, &owner)
+                .map_err(error)?
+        }
+        Operation::SplitRemainder { base, division } => {
+            let primary = piece
+                .features
+                .iter()
+                .find(|f| f.output == *division)
+                .ok_or_else(|| DocumentError("Divisão primária inexistente.".into()))?;
+            if !matches!(primary.operation,Operation::Split {base:source,..} if source==*base) {
+                return Err(DocumentError(
+                    "A divisão complementar exige a mesma base da etapa primária.".into(),
+                ));
+            }
+            let (origin, normal) = division_plane(doc, part, &primary.operation)?;
+            source(doc, part, *base)?
+                .0
+                .split(origin, normal.map(|v| -v), &owner)
+                .map_err(error)?
+        }
     };
     solid.volume().map_err(error)?;
     let brep = Arc::new(solid.to_brep().map_err(error)?);
@@ -735,4 +774,33 @@ pub(super) fn reorder(
     }
     features::sync_visibility(piece, &before);
     Ok(())
+}
+
+/// O segundo corpo sempre consulta o plano da divisão primária, inclusive após
+/// mover seu plano de trabalho ou uma face de apoio.
+#[cfg(feature = "occt")]
+fn division_plane(
+    doc: &Document,
+    part: PartId,
+    operation: &Operation,
+) -> Result<([f64; 3], [f64; 3]), DocumentError> {
+    let Operation::Split {
+        origin,
+        normal,
+        cutting_plane,
+        reverse,
+        ..
+    } = operation
+    else {
+        return Err(DocumentError(
+            "A operação referenciada não é uma divisão.".into(),
+        ));
+    };
+    match cutting_plane {
+        Some(plane) => {
+            let (origin, normal) = crate::extrusion::limit_plane(doc, part, plane)?;
+            Ok((origin, if *reverse { normal.map(|v| -v) } else { normal }))
+        }
+        None => Ok((*origin, *normal)),
+    }
 }

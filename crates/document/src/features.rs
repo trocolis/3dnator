@@ -265,12 +265,20 @@ pub enum Operation {
         normal: [f64; 3],
         keep_original: bool,
     },
-    /// Parte do corpo do lado para onde `normal` aponta.
+    /// Parte do corpo do lado para onde `normal` aponta. Referência opcional
+    /// mantém o plano associativo; coordenadas fixas preservam projetos antigos.
     Split {
         base: BodyId,
         origin: [f64; 3],
         normal: [f64; 3],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cutting_plane: Option<ExtrusionLimit>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
     },
+    /// Resultado complementar de uma divisão. Consulta o mesmo plano da etapa
+    /// primária, impedindo divergência entre os lados durante edição/recálculo.
+    SplitRemainder { base: BodyId, division: BodyId },
 }
 
 /// Furo com medidas em expressões dos parâmetros da peça.
@@ -428,7 +436,8 @@ impl Operation {
             | Self::Hole { base, .. }
             | Self::Pattern { base, .. }
             | Self::Mirror { base, .. }
-            | Self::Split { base, .. } => vec![*base],
+            | Self::Split { base, .. }
+            | Self::SplitRemainder { base, .. } => vec![*base],
             _ => Vec::new(),
         }
     }
@@ -445,6 +454,11 @@ impl Operation {
                     bodies.push(*base);
                 }
             }
+            Self::Split {
+                cutting_plane: Some(ExtrusionLimit::Face(limit)),
+                ..
+            } => bodies.push(limit.body),
+            Self::SplitRemainder { division, .. } => bodies.push(*division),
             _ => {}
         }
         bodies.sort_unstable_by_key(|b| b.0);
@@ -453,7 +467,13 @@ impl Operation {
     }
     pub fn uses_sketch(&self, id: SketchId) -> bool {
         self.sketch() == Some(id)
-            || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
+            || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::Split{cutting_plane:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
+    }
+    pub fn uses_work_plane(&self, id: WorkPlaneId) -> bool {
+        matches!(self,
+            Self::Extrude {until:Some(ExtrusionLimit::WorkPlane {work_plane}),..}
+            | Self::ExtrudeFace {until:Some(ExtrusionLimit::WorkPlane {work_plane}),..}
+            | Self::Split {cutting_plane:Some(ExtrusionLimit::WorkPlane {work_plane}),..} if *work_plane==id)
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
@@ -548,9 +568,21 @@ impl Feature {
                 body(base)?;
                 sketch(id)?;
             }
-            Operation::Pattern { base, .. }
-            | Operation::Mirror { base, .. }
-            | Operation::Split { base, .. } => body(base)?,
+            Operation::Pattern { base, .. } | Operation::Mirror { base, .. } => body(base)?,
+            Operation::Split {
+                base,
+                cutting_plane,
+                ..
+            } => {
+                body(base)?;
+                if let Some(plane) = cutting_plane {
+                    plane.remap(bodies, sketches)?;
+                }
+            }
+            Operation::SplitRemainder { base, division } => {
+                body(base)?;
+                body(division)?;
+            }
             Operation::Boolean { base, tool, .. } => {
                 body(base)?;
                 body(tool)?;
@@ -816,8 +848,27 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 validate_hole(spec, &part.parameters)?;
             }
             Operation::Pattern { layout, .. } => validate_pattern(layout, &part.parameters)?,
-            Operation::Mirror { origin, normal, .. } | Operation::Split { origin, normal, .. } => {
+            Operation::Mirror { origin, normal, .. } => validate_plane(*origin, *normal)?,
+            Operation::Split {
+                origin,
+                normal,
+                cutting_plane,
+                ..
+            } => {
                 validate_plane(*origin, *normal)?;
+                if let Some(plane) = cutting_plane {
+                    plane.validate(part)?;
+                }
+            }
+            Operation::SplitRemainder { base, division } => {
+                if !part.features.iter().any(|f| {
+                    f.output == *division
+                        && matches!(f.operation,Operation::Split {base:source,..} if source==*base)
+                }) {
+                    return Err(DocumentError(
+                        "A divisão complementar perdeu sua etapa primária.".into(),
+                    ));
+                }
             }
             Operation::Boolean { .. } => {}
         }

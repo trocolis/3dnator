@@ -42,6 +42,12 @@ pub enum Command {
     },
     /// Escolhe o modo pelo contato geométrico antes de publicar uma operação concreta.
     /// A sugestão não é persistida como regra implícita: editar o histórico mantém o modo.
+    /// Dois resultados vinculados e uma única transação de desfazer/refazer.
+    SplitBody {
+        part: PartId,
+        name: String,
+        operation: nator_document::features::Operation,
+    },
     AddSmartExtrusion {
         part: PartId,
         name: String,
@@ -378,6 +384,7 @@ impl Command {
             Self::ImportStep { .. } => "Importar montagem STEP",
             Self::SetSheet { .. } => "Salvar folha técnica associada",
             Self::ImportSolid { .. } => "Importar sólido CAD",
+            Self::SplitBody { .. } => "Dividir corpo em dois lados",
             Self::AddFeature { .. } | Self::AddSmartExtrusion { .. } => {
                 "Adicionar operação paramétrica"
             }
@@ -535,6 +542,33 @@ impl Command {
                     faces,
                 ));
                 return Ok(Effect::Imported { part, body });
+            }
+            Self::SplitBody {
+                part,
+                name,
+                operation,
+            } => {
+                let nator_document::features::Operation::Split { base, .. } = &operation else {
+                    return Err(DocumentError(
+                        "Dividir exige um corpo e um plano de corte.".into(),
+                    )
+                    .into());
+                };
+                let base = *base;
+                let first = add_feature(doc, part, name.clone(), operation)?;
+                let second = add_feature(
+                    doc,
+                    part,
+                    format!("{name} (2)"),
+                    nator_document::features::Operation::SplitRemainder {
+                        base,
+                        division: first,
+                    },
+                )?;
+                let original = doc.body(base).map(|b| b.name.clone()).unwrap_or(name);
+                doc.body_mut(first)?.name = format!("{original} (1)");
+                doc.body_mut(second)?.name = format!("{original} (2)");
+                return Ok(Effect::Imported { part, body: first });
             }
             Self::AddSmartExtrusion {
                 part,

@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.6.0 — 29/10/2026
+
+- Dividir recebe Corpo e Plano de divisão. O plano pode ser uma face plana, um plano de trabalho escolhido no viewport/árvore ou um plano da origem selecionado com o mouse.
+- Conserva os dois lados como corpos separados, numa ação de desfazer/refazer. O resultado complementar consulta o mesmo plano da divisão primária; editar/mover o plano recalcula ambos. Supressão e exclusão respeitam as dependências, e os dois cartões abrem a mesma edição do plano.
+- Planos referenciados ficam protegidos contra exclusão; clonagem remapeia as referências. Formato interno 32 conserva leitura das divisões antigas. Etapa local sem push ou release.
+
 ## 0.5.0 — 29/10/2026
 
 - Casca substitui Furo na faixa de criação e na busca; furos existentes conservam histórico e edição.

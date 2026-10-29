@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 31
+# Formato de projeto — versão interna 32
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 31; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 32; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -15,6 +15,8 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 32, `Split` admite `cutting_plane: ExtrusionLimit` opcional e `reverse` (padrão `false`). Sem referência, conserva as coordenadas fixas anteriores. `SplitRemainder {base, division}` é o resultado complementar e depende da etapa primária: consulta sempre o mesmo plano, sem cópia divergente de parâmetros. O comando Dividir cria ambos numa transação; as duas etapas têm IDs/B-reps próprios, aceitam operações posteriores independentes e acompanham supressão/dependências/marcador. Selecionar qualquer dos cartões para editar abre a divisão primária. Divisões antigas de um lado permanecem legíveis.
 
 Desde a versão 31, `Shell` guarda `through` (padrão `false`) e `exit_face` opcional. Com transpassar ativo, a saída explícita deve pertencer ao corpo base e diferir das entradas. Sem saída, raios interiores contra a normal de uma abertura plana devem encontrar a mesma primeira face; saídas ambíguas pedem escolha explícita. Essa busca se repete no recálculo. Projetos anteriores mantêm as cascas existentes e operações de Furo continuam legíveis/editáveis, embora a ferramenta tenha saído da faixa e da busca.
 

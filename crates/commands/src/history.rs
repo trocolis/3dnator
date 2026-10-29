@@ -33,7 +33,8 @@ pub(super) fn context(command: &Command, doc: &Document) -> C {
             .find(|i| i.id == *id)
             .map(|i| sketch_context(doc, i.sketch))
             .unwrap_or(C::Keep),
-        Command::AddFeature { part, .. }
+        Command::SplitBody { part, .. }
+        | Command::AddFeature { part, .. }
         | Command::AddSmartExtrusion { part, .. }
         | Command::EditFeature { part, .. }
         | Command::RemoveFeature { part, .. }
@@ -126,7 +127,9 @@ pub(super) fn intent(command: &Command, doc: &Document) -> Option<Intent> {
         | Command::AddReferenceSketch { .. }
         | Command::AddSketchOnWorkPlane { .. } => (K::Sketch, None),
         Command::CreatePart { .. } | Command::CreatePartIn { .. } => (K::Part, None),
-        Command::AddFeature { .. } | Command::AddSmartExtrusion { .. } => (K::Feature, None),
+        Command::SplitBody { .. }
+        | Command::AddFeature { .. }
+        | Command::AddSmartExtrusion { .. } => (K::Feature, None),
         Command::UpdateSketch { id, sketch } => {
             let old = &doc.sketch(*id)?.sketch;
             let added = sketch

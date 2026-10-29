@@ -268,6 +268,10 @@ impl Document {
             | super::features::Operation::ExtrudeFace {
                 until: Some(super::features::ExtrusionLimit::WorkPlane { work_plane }),
                 ..
+            }
+            | super::features::Operation::Split {
+                cutting_plane: Some(super::features::ExtrusionLimit::WorkPlane { work_plane }),
+                ..
             } = &mut feature.operation
             {
                 *work_plane = *plane_map

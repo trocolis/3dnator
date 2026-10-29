@@ -62,7 +62,7 @@ pub(super) fn operation_icon(operation: &Operation) -> Icon {
         Operation::Boolean { .. } => Icon::Boolean,
         Operation::Pattern { .. } => Icon::Pattern,
         Operation::Mirror { .. } => Icon::Mirror,
-        Operation::Split { .. } => Icon::Split,
+        Operation::Split { .. } | Operation::SplitRemainder { .. } => Icon::Split,
         Operation::Transform { .. } => Icon::Move,
     }
 }
@@ -441,7 +441,7 @@ impl Editor {
             self.edit_activity(ui.ctx(), entry);
         }
         if let Some(feature) = edit {
-            self.feature_edit = Some(feature_editor::Draft::edit(tab, part.id, feature));
+            self.edit_cad_feature(part.id, feature);
         }
         if let Some(id) = sketch {
             self.begin_sketch(part.id, id);
@@ -673,11 +673,7 @@ impl Editor {
         match decision {
             Some(0) => {
                 if let Some(feature) = piece.features.iter().find(|f| f.output == failure.output) {
-                    self.feature_edit = Some(feature_editor::Draft::edit(
-                        tab,
-                        failure.part,
-                        feature.clone(),
-                    ));
+                    self.edit_cad_feature(failure.part, feature.clone());
                     if let Some(pending) = &mut self.pending_failure {
                         pending.fixing = true;
                     }

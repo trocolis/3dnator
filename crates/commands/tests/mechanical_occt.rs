@@ -189,6 +189,8 @@ fn pattern_mirror_split_and_revolve_about_a_sketch_line() -> Result<()> {
             base: body,
             origin: [0., 0., 2.],
             normal: [0., 0., 1.],
+            cutting_plane: None,
+            reverse: false,
         },
     )?;
     assert!((volume(&session, half)? - 60. * 40. * 6.).abs() < 1e-3);
