@@ -261,6 +261,19 @@ impl Document {
         }
         for feature in &mut part.features {
             feature.remap(&body_map, &sketch_map)?;
+            if let super::features::Operation::Extrude {
+                until: Some(super::features::ExtrusionLimit::WorkPlane { work_plane }),
+                ..
+            }
+            | super::features::Operation::ExtrudeFace {
+                until: Some(super::features::ExtrusionLimit::WorkPlane { work_plane }),
+                ..
+            } = &mut feature.operation
+            {
+                *work_plane = *plane_map
+                    .get(work_plane)
+                    .ok_or_else(|| DocumentError("Plano limite ausente ao clonar.".into()))?;
+            }
         }
         self.parts.push(part);
         for image in from

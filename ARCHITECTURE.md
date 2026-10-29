@@ -4,6 +4,10 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 
 ## Módulos
 
+`extrusion::guide` calcula o apoio da seta independentemente da construção do sólido. O trabalhador de prévia entrega uma guia vazia para comprimento zero, sem preparar comando nem sinalizar erro; o painel bloqueia a confirmação nesse estado. A seleção de perfis continua ativa durante o arraste. Planos de origens diferentes nunca são misturados no perfil: uma escolha fora do plano inicial vira `ExtrusionLimit`, referenciando face, rascunho ou plano de trabalho da mesma peça.
+
+`kernel::Solid::support_holes` extruda os contornos internos de faces coplanares ao início de uma saliência. `commands::extrusion::tool` subtrai esses prismas somente no modo Unir de perfis de rascunho, antes de aplicar o plano limite. As curvas são exatas; o contorno externo do apoio não restringe a expansão do perfil. Os nomes das faces temporárias mantêm o dono remapeável na clonagem. Zero, consultas de plano e booleanas continuam fora da thread da interface.
+
 `document::appearance` conserva camadas de pintura por corpo, com referências de face, cor sRGB e máscara opcional por região de rascunho. `commands::appearance` cria prismas de recorte e recalcula as camadas depois do histórico; falhas preservam o documento anterior. A ponte `kernel::Solid::surface_appearance` particiona somente faces de exibição com operações Common/Cut e devolve malha/material por triângulo. O B-rep e a malha de modelagem continuam usados na seleção, medição e exportação. A cena aplica o cache local com as mesmas transformações do corpo, herdando a cor uniforme onde o material é zero. O formato 27 persiste as camadas e o cache, permitindo leitura sem OCCT.
 
 `sketch_editor::project_tool` conserva seleção transitória e consulta origens em coordenadas de montagem, separadas do destino local ao rascunho. O usuário alterna escolhas pela origem, projeção ou lista. Escolha por profundidade resolve faces sobrepostas; consultas de seleção e materialização rodam em trabalhadores. Finalizar combina toda a seleção em um único `UpdateSketch`; Cancelar/Esc descarta a seleção sem publicar.

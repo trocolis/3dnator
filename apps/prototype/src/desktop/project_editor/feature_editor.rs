@@ -13,8 +13,8 @@ use super::{
     *,
 };
 use nator_document::features::{
-    BooleanMode, Combine, EdgeRef, FaceRef, Feature, HoleHeadSpec, HoleSpec, LinearAxis, Operation,
-    PatternLayout, RegionRef, ThreadSpec, UntilFace, signature,
+    BooleanMode, Combine, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec, HoleSpec,
+    LinearAxis, Operation, PatternLayout, RegionRef, ThreadSpec, UntilFace, signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
@@ -97,6 +97,7 @@ const PLANES: [(&str, [f64; 3]); 3] = [
 /// Referência escolhida na área 3D ou gravada na operação em edição.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Kept {
+    PlanarFace(FaceRef, nator_sketch::Plane),
     Edge(EdgeRef),
     Face(FaceRef),
     Body(BodyId),
@@ -155,8 +156,8 @@ impl Default for ExtrudeDraft {
     fn default() -> Self {
         Self {
             direction: Direction::OneSide,
-            distance: "10 mm".into(),
-            distance2: "10 mm".into(),
+            distance: "0 mm".into(),
+            distance2: "0 mm".into(),
             offset: "0 mm".into(),
             flip: false,
             to_face: false,
@@ -363,7 +364,7 @@ pub(super) struct Draft {
     combine: usize,
     combine_target: Option<BodyId>,
     /// Face limite da extrusão (corpo e face), escolhida por clique.
-    until: Option<(BodyId, FaceRef)>,
+    until: Option<ExtrusionLimit>,
     extrude: ExtrudeDraft,
     /// Medida principal das ferramentas de uma só dimensão (raio, distância, espessura).
     size: String,
@@ -439,7 +440,7 @@ impl Draft {
                     d.combine_target = Some(combine.target);
                 }
                 d.extrude.to_face = until.is_some();
-                d.until = until.map(|l| (l.body, l.face));
+                d.until = until;
             }
             Operation::Extrude {
                 sketch,
@@ -461,7 +462,7 @@ impl Draft {
                     d.combine_target = Some(combine.target);
                 }
                 d.extrude.to_face = until.is_some();
-                d.until = until.map(|limit| (limit.body, limit.face));
+                d.until = until;
             }
             Operation::Revolve {
                 sketch,
@@ -638,6 +639,7 @@ fn describe_topology(kept: &Kept) -> String {
         Kept::Edge(EdgeRef::Index { index, .. }) | Kept::Face(FaceRef::Index { index, .. }) => {
             format!("#{index}")
         }
+        Kept::PlanarFace(face, _) => describe_topology(&Kept::Face(face.clone())),
         Kept::Body(id) => format!("#{}", id.0),
     }
 }
@@ -736,26 +738,51 @@ impl Draft {
             None
         };
     }
+    pub(super) fn choose_limit(&mut self, limit: ExtrusionLimit) {
+        let (from, _) = self.extrude.limits();
+        self.until = Some(limit);
+        self.extrude.to_face = true;
+        self.extrude.custom = None;
+        self.extrude.direction = Direction::OneSide;
+        self.extrude.offset = from;
+        self.field = Some(Field::Profile);
+    }
     pub(super) fn region_reference(&self) -> Option<&RegionRef> {
         self.kept_region.as_ref()
     }
     /// Aplica uma seleção gráfica ao campo ativo. Arestas e faces alternam: clicar de novo
     /// numa já escolhida a retira.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
+        if let Kept::PlanarFace(face, plane) = kept {
+            let coplanar = self.interaction.guide.is_some_and(|g| {
+                nator_geometry::norm(nator_geometry::cross(g.normal, plane.normal())) < 1e-7
+                    && nator_geometry::dot(nator_geometry::sub(plane.origin, g.origin), g.normal)
+                        .abs()
+                        < 1e-6
+            });
+            if (self.tool == Tool::Extrude && self.complete() && !coplanar)
+                || self.field == Some(Field::UntilFace)
+            {
+                self.choose_limit(UntilFace { body, face }.into());
+            } else {
+                self.apply_pick(body, Kept::Face(face));
+            }
+            return;
+        }
         match (self.field, kept) {
             (Some(Field::Profile), Kept::Face(face)) if self.tool == Tool::Extrude => {
                 self.choose_face_profile(body, face);
             }
             (None, Kept::Face(face)) if self.tool == Tool::Extrude => {
                 let (from, _) = self.extrude.limits();
-                self.until = Some((body, face));
+                self.until = Some(UntilFace { body, face }.into());
                 self.extrude.to_face = true;
                 self.extrude.custom = None;
                 self.extrude.direction = Direction::OneSide;
                 self.extrude.offset = from;
             }
             (Some(Field::UntilFace), Kept::Face(face)) => {
-                self.until = Some((body, face));
+                self.until = Some(UntilFace { body, face }.into());
                 self.extrude.to_face = true;
                 self.field = None;
             }
@@ -891,6 +918,20 @@ impl Draft {
         }
     }
 
+    fn zero_extrusion(&self, part: &nator_document::Part) -> bool {
+        if self.tool != Tool::Extrude || self.extrude.to_face {
+            return false;
+        }
+        let (from, to) = self.extrude.limits();
+        let value = |v: &str| {
+            part.parameters
+                .evaluate(v, nator_document::parameters::Dimension::Length)
+                .ok()
+        };
+        value(&from)
+            .zip(value(&to))
+            .is_some_and(|(a, b)| (a - b).abs() < 1e-7)
+    }
     /// Monta a operação a partir do painel.
     fn operation(&self, part: &nator_document::Part) -> Operation {
         let base = self.base.unwrap_or(BodyId(0));
@@ -942,11 +983,7 @@ impl Draft {
                             _ => BooleanMode::Intersect,
                         },
                     });
-                let until = self
-                    .until
-                    .clone()
-                    .filter(|_| self.extrude.to_face)
-                    .map(|(body, face)| UntilFace { body, face });
+                let until = self.until.clone().filter(|_| self.extrude.to_face);
                 if let Some((base, face)) = &self.face_profile {
                     return Operation::ExtrudeFace {
                         base: *base,
@@ -1318,7 +1355,7 @@ impl Editor {
         let command = d.command(&part);
         let complete = d.complete() && nator_kernel::is_available();
         let footer_error;
-        let footer = if !complete {
+        let footer = if !complete || d.zero_extrusion(&part) {
             Footer::None
         } else {
             match self.preview_status(&command) {
@@ -1343,7 +1380,7 @@ impl Editor {
             },
             self.canvas_rect,
             footer,
-            complete && !self.busy(),
+            complete && !d.zero_extrusion(&part) && !self.busy(),
             |ui| {
                 if !nator_kernel::is_available() {
                     ui.colored_label(theme::WARNING, text(T::KernelUnavailable));
@@ -1375,7 +1412,7 @@ impl Editor {
             self.close_feature_panel(&d);
             return;
         }
-        if outcome.ok && complete {
+        if outcome.ok && complete && !d.zero_extrusion(&part) {
             let command = match d.output {
                 Some(output) => self.with_pending_fix(tab, output, command),
                 None => command,
@@ -1531,10 +1568,21 @@ fn extrude_panel(
         });
         if e.to_face {
             let chosen = usize::from(d.until.is_some());
-            let description = d
-                .until
-                .as_ref()
-                .map(|(_, face)| describe_topology(&Kept::Face(face.clone())));
+            let description = d.until.as_ref().map(|limit| match limit {
+                ExtrusionLimit::Face(face) => describe_topology(&Kept::Face(face.face.clone())),
+                ExtrusionLimit::Sketch { sketch } => part
+                    .sketches
+                    .iter()
+                    .find(|s| s.id == *sketch)
+                    .map(|s| s.sketch.name.clone())
+                    .unwrap_or_default(),
+                ExtrusionLimit::WorkPlane { work_plane } => part
+                    .work_planes
+                    .iter()
+                    .find(|p| p.id == *work_plane)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default(),
+            });
             let s = panel::selection(
                 ui,
                 text(T::FacesField),

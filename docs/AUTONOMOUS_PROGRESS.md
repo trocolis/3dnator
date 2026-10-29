@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Refinamento da extrusão e preservação de furos — 29/10/2026
+
+- Distância inicial zero com guia independente do prisma, seta visível/arrastável e confirmação bloqueada em zero. Seleção de várias áreas permanece ativa; clicar em outro plano define o limite sem substituir os perfis iniciais. Limites por face, plano de rascunho e plano de trabalho são recalculados e persistidos no formato 28.
+- Extrusões de rascunho no modo Unir preservam os contornos internos da face de apoio. Prismas exatos dos furos recortam a saliência sem limitar sua expansão externa. Edição do diâmetro, volume, seleção através do vazio, histórico e persistência aprovados.
+- Aprovados 330 testes com OCCT, 255 sem OCCT, 39 ensaios gráficos, formatação e Clippy nas duas configurações. Captura `zero-arrow.png` conferida em `target/codex-validation/extrusion-20261029/`. Aplicativo 0.3.0 em desenvolvimento; sem release, publicação remota ou validação Windows.
+
 ## Pintura de faces, Projetar e gestos diretos — 29/10/2026
 
 - Concluídos os quatro novos itens do AJUSTE.md: arraste/redimensionamento direto de imagens também no modelo; vértices imaginários de centro durante o desenho; Projetar com seleção transitória, lista, alternância pela origem/projeção e Finalizar/Cancelar; Pintar com paleta, RGB hexadecimal e recorte pelas áreas de rascunhos.

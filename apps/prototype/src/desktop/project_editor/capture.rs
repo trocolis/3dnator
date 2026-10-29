@@ -79,13 +79,14 @@ pub(crate) fn render_ui_scenario(
         | "sketch-infinite-input"
         | "sketch-circle-input"
         | "sketch-rectangle-input"
+        | "extrude-zero"
         | "extrude-face"
         | "status-dialog"
         | "extrude-cut" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog."
                     .into(),
             );
         }
@@ -245,6 +246,17 @@ pub(crate) fn render_ui_scenario(
             if scenario == "sketch-plane-hover" {
                 return editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty());
             }
+            if scenario == "extrude-zero" {
+                return editor.preview_idle()
+                    && editor.feature_edit.as_ref().is_some_and(|d| {
+                        editor
+                            .current()
+                            .session
+                            .document()
+                            .part(d.part())
+                            .is_some_and(|p| d.profile_plane(p).is_some())
+                    });
+            }
             (editor.feature_edit.is_none() && editor.assembly_panel.is_none())
                 || editor.preview.shown != 0
                 || (editor.assembly_panel.is_some() && editor.preview_idle())
@@ -377,7 +389,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
         .unwrap_or_default();
     match scenario {
         "status-dialog" => editor.status.error(text(T::Failed)),
-        "extrude-face" | "extrude-cut" => {
+        "extrude-zero" | "extrude-face" | "extrude-cut" => {
             use nator_document::features::{FaceRef, Operation};
             let doc = editor.current().session.document();
             let base = doc
@@ -408,7 +420,9 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor.open_feature_tool(feature_editor::Tool::Extrude);
             if let Some(d) = editor.feature_edit.as_mut() {
                 d.choose_face_profile(base, face);
-                d.set_size_for_capture(if scenario == "extrude-cut" {
+                d.set_size_for_capture(if scenario == "extrude-zero" {
+                    "0 mm"
+                } else if scenario == "extrude-cut" {
                     "-3 mm"
                 } else {
                     "6 mm"
@@ -4406,6 +4420,11 @@ mod tests {
         frame(&mut editor, &context, Vec::new())?;
         let point = project(&editor, [45., 15., 0.])?;
         click(&mut editor, &context, point)?;
+        editor
+            .feature_edit
+            .as_mut()
+            .ok_or("Painel ausente")?
+            .set_size_for_capture("10 mm");
         wait_feature_preview(&mut editor, &context)?;
         assert_eq!(
             editor
@@ -4427,13 +4446,27 @@ mod tests {
         let point = project(&editor, [5., 5., 10.])?;
         click(&mut editor, &context, point)?;
         settle(&mut editor, &context)?;
-        wait_feature_preview(&mut editor, &context)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .is_none()
+        {
+            if Instant::now() > deadline {
+                return Err("Guia de comprimento zero ausente".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let (guide, mode) = editor
             .feature_edit
             .as_ref()
             .and_then(|d| d.extrusion_state())
             .ok_or("Guia de face ausente")?;
-        assert_eq!(mode, 1);
+        assert_eq!(mode, 0);
+        assert_eq!(guide.to, 0.);
+        assert_eq!(editor.current().session.revision(), initial_revision);
         let origin = project(&editor, guide.origin)?;
         let endpoint = project(
             &editor,
@@ -4443,7 +4476,8 @@ mod tests {
             &editor,
             std::array::from_fn(|i| guide.origin[i] + guide.normal[i]),
         )? - origin;
-        let target = endpoint - unit * (guide.to as f32 + 3.);
+        let endpoint = endpoint + unit.normalized() * 32.;
+        let target = endpoint - unit * 3.;
         for (position, pressed) in [
             (endpoint, Some(true)),
             (target, None),
@@ -4505,7 +4539,7 @@ mod tests {
             .part(part)
             .ok_or("Peça ausente")?;
         assert!(
-            matches!(piece.features.last().map(|f|&f.operation),Some(Operation::ExtrudeFace {base:source,until:Some(until),combine:Some(combine),..}) if *source==base&&until.body==limit&&combine.mode==nator_document::features::BooleanMode::Join)
+            matches!(piece.features.last().map(|f|&f.operation),Some(Operation::ExtrudeFace {base:source,until:Some(until),combine:Some(combine),..}) if *source==base&&matches!(until,nator_document::features::ExtrusionLimit::Face(face) if face.body==limit)&&combine.mode==nator_document::features::BooleanMode::Join)
         );
         assert_eq!(piece.sketches.len(), 3);
         assert!(editor.current_mut().session.undo());
@@ -7081,6 +7115,15 @@ mod tests {
             nator_sketch::projection::insert(&mut sketch, &curves, &[])?;
         }
         let (part, _) = document.add_sketch(None, sketch)?;
+        let mut upper = Sketch::new(
+            "Plano limite",
+            Plane {
+                origin: [0., 0., 20.],
+                ..Plane::xy()
+            },
+        );
+        upper.add_rectangle([-30., -20.], [-20., -10.], false)?;
+        let (_, limit) = document.add_sketch(Some(part), upper)?;
         let mut editor =
             Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
         editor.recoveries.clear();
@@ -7088,6 +7131,7 @@ mod tests {
         editor.current_mut().active_part = Some(part);
         settle(&mut editor, &context)?;
         editor.open_feature_tool(feature_editor::Tool::Extrude);
+
         for _ in 0..15 {
             frame(&mut editor, &context, vec![])?;
             std::thread::sleep(Duration::from_millis(5));
@@ -7099,7 +7143,7 @@ mod tests {
         for p in [[5., 5., 0.], [30., 5., 0.]] {
             let point = at(&editor, p)?;
             click(&mut editor, &context, point)?;
-            wait_feature_preview(&mut editor, &context)?;
+            wait_extrusion_guide(&mut editor, &context)?;
         }
         let reference = editor
             .feature_edit
@@ -7112,7 +7156,7 @@ mod tests {
         );
         let point = at(&editor, [30., 5., 0.])?;
         click(&mut editor, &context, point)?;
-        wait_feature_preview(&mut editor, &context)?;
+        wait_extrusion_guide(&mut editor, &context)?;
         assert_eq!(
             editor
                 .feature_edit
@@ -7125,7 +7169,43 @@ mod tests {
         );
         let point = at(&editor, [30., 5., 0.])?;
         click(&mut editor, &context, point)?;
+        wait_extrusion_guide(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .feature_edit
+                .as_ref()
+                .and_then(|d| d.extrusion_state())
+                .ok_or("Guia ausente")?
+                .0
+                .to,
+            0.
+        );
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça ausente")?
+                .features
+                .len(),
+            0
+        );
+        let point = at(&editor, [-25., -15., 20.])?;
+        click(&mut editor, &context, point)?;
         wait_feature_preview(&mut editor, &context)?;
+        assert!(
+            (editor
+                .feature_edit
+                .as_ref()
+                .and_then(|d| d.extrusion_state())
+                .ok_or("Guia ausente")?
+                .0
+                .to
+                - 20.)
+                .abs()
+                < 1e-5
+        );
         let ok = label_position(&mut editor, &context, text(T::Ok))?;
         click(&mut editor, &context, ok)?;
         settle(&mut editor, &context)?;
@@ -7138,7 +7218,7 @@ mod tests {
         assert_eq!(part.features.len(), 1);
         assert_eq!(part.bodies.len(), 1);
         assert!(
-            matches!(&part.features[0].operation,nator_document::features::Operation::Extrude{region:RegionRef::Multiple(regions),..} if regions.len()==2)
+            matches!(&part.features[0].operation,nator_document::features::Operation::Extrude{region:RegionRef::Multiple(regions),until:Some(nator_document::features::ExtrusionLimit::Sketch{sketch}),..} if regions.len()==2 && *sketch==limit)
         );
         Ok(())
     }
@@ -7384,6 +7464,25 @@ mod tests {
         }
     }
 
+    fn wait_extrusion_guide(
+        editor: &mut Editor,
+        context: &egui::Context,
+    ) -> Result<(), Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .is_none()
+        {
+            if Instant::now() > deadline {
+                return Err(format!("Guia ausente: {}", editor.status).into());
+            }
+            frame(editor, context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Ok(())
+    }
     fn label_position(
         editor: &mut Editor,
         context: &egui::Context,

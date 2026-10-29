@@ -671,10 +671,13 @@ fn extrusion_until_a_face_and_direct_combination() -> Result<()> {
                 target: plate_body,
                 mode: BooleanMode::Join,
             }),
-            until: Some(UntilFace {
-                body: block,
-                face: FaceRef::Named(format!("{}:end", body_owner(block))),
-            }),
+            until: Some(
+                UntilFace {
+                    body: block,
+                    face: FaceRef::Named(format!("{}:end", body_owner(block))),
+                }
+                .into(),
+            ),
         },
     )?;
     let expected = |t: f64, h: f64| 60. * 40. * t + PI * 25. * (h - t);

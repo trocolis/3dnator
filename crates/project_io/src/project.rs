@@ -43,7 +43,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// política de preservar o elemento mais conectado e o segundo nos empates.
 /// Versão 26: sequências de criação, imagens RGBA incorporadas e múltiplas áreas na extrusão.
 /// Versão 27: pinturas por face e malhas de aparência com materiais por triângulo.
-pub const FORMAT_VERSION: u32 = 27;
+/// Versão 28: limites de extrusão por planos de rascunho ou trabalho.
+pub const FORMAT_VERSION: u32 = 28;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

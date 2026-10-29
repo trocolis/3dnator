@@ -176,20 +176,20 @@ pub enum Operation {
         from: String,
         to: String,
         combine: Option<Combine>,
-        until: Option<UntilFace>,
+        until: Option<ExtrusionLimit>,
     },
     Extrude {
         sketch: SketchId,
         region: RegionRef,
         from: String,
-        /// Fim da extrusão; ignorado quando `until` define uma face limite.
+        /// Fim da extrusão; ignorado quando `until` define um plano limite.
         to: String,
         /// Une, corta ou intersecta o resultado com um corpo existente, que é consumido.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         combine: Option<Combine>,
-        /// Termina no plano de uma face plana de outro corpo da mesma peça.
+        /// Termina em uma face plana, rascunho ou plano de trabalho da mesma peça.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        until: Option<UntilFace>,
+        until: Option<ExtrusionLimit>,
     },
     Revolve {
         sketch: SketchId,
@@ -342,6 +342,61 @@ pub struct UntilFace {
     pub face: FaceRef,
 }
 
+/// O formato de face permanece compatível com os arquivos antigos. Planos de
+/// rascunho/trabalho são referências da mesma peça, atualizadas no recálculo.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExtrusionLimit {
+    Face(UntilFace),
+    Sketch { sketch: SketchId },
+    WorkPlane { work_plane: WorkPlaneId },
+}
+impl From<UntilFace> for ExtrusionLimit {
+    fn from(face: UntilFace) -> Self {
+        Self::Face(face)
+    }
+}
+impl ExtrusionLimit {
+    fn validate(&self, part: &Part) -> Result<(), DocumentError> {
+        match self {
+            Self::Face(UntilFace {
+                face: FaceRef::Named(name),
+                ..
+            }) => validate_face_name(name),
+            Self::Face(_) => Ok(()),
+            Self::Sketch { sketch } if part.sketches.iter().any(|s| s.id == *sketch) => Ok(()),
+            Self::WorkPlane { work_plane }
+                if part.work_planes.iter().any(|p| p.id == *work_plane) =>
+            {
+                Ok(())
+            }
+            _ => Err(DocumentError("Plano limite inexistente nesta peça.".into())),
+        }
+    }
+    fn remap(
+        &mut self,
+        bodies: &HashMap<BodyId, BodyId>,
+        sketches: &HashMap<SketchId, SketchId>,
+    ) -> Result<(), DocumentError> {
+        match self {
+            Self::Face(limit) => {
+                limit.body = *bodies
+                    .get(&limit.body)
+                    .ok_or_else(|| DocumentError("Corpo limite ausente ao clonar.".into()))?;
+                if let FaceRef::Named(name) = &mut limit.face {
+                    *name = remap_face_name(name, bodies);
+                }
+            }
+            Self::Sketch { sketch } => {
+                *sketch = *sketches
+                    .get(sketch)
+                    .ok_or_else(|| DocumentError("Rascunho limite ausente ao clonar.".into()))?
+            }
+            Self::WorkPlane { .. } => {} // Remapeado com os planos da peça em assembly::clone_definition.
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BooleanMode {
     Join,
@@ -378,7 +433,7 @@ impl Operation {
         let mut bodies = self.inputs();
         match self {
             Self::Extrude { until, .. } | Self::ExtrudeFace { until, .. } => {
-                if let Some(limit) = until {
+                if let Some(ExtrusionLimit::Face(limit)) = until {
                     bodies.push(limit.body);
                 }
                 if let Self::ExtrudeFace { base, .. } = self {
@@ -390,6 +445,10 @@ impl Operation {
         bodies.sort_unstable_by_key(|b| b.0);
         bodies.dedup();
         bodies
+    }
+    pub fn uses_sketch(&self, id: SketchId) -> bool {
+        self.sketch() == Some(id)
+            || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
@@ -458,10 +517,7 @@ impl Feature {
                     body(&mut combine.target)?;
                 }
                 if let Some(limit) = until {
-                    body(&mut limit.body)?;
-                    if let FaceRef::Named(name) = &mut limit.face {
-                        *name = remap_face_name(name, bodies);
-                    }
+                    limit.remap(bodies, sketches)?;
                 }
             }
             Operation::Extrude {
@@ -475,10 +531,7 @@ impl Feature {
                     body(&mut combine.target)?;
                 }
                 if let Some(limit) = until {
-                    body(&mut limit.body)?;
-                    if let FaceRef::Named(name) = &mut limit.face {
-                        *name = remap_face_name(name, bodies);
-                    }
+                    limit.remap(bodies, sketches)?;
                 }
             }
             Operation::Revolve { sketch: id, .. } => {
@@ -611,9 +664,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 }
                 let a = part.parameters.evaluate(from, Length)?;
                 if let Some(limit) = until {
-                    if let FaceRef::Named(name) = &limit.face {
-                        validate_face_name(name)?;
-                    }
+                    limit.validate(part)?;
                 } else if (a - part.parameters.evaluate(to, Length)?).abs() < 1e-7 {
                     return Err(DocumentError(
                         "Extrusão deve ter comprimento não nulo.".into(),
@@ -632,9 +683,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 match until {
                     // Com face limite, o comprimento só é conhecido no recálculo.
                     Some(limit) => {
-                        if let FaceRef::Named(name) = &limit.face {
-                            validate_face_name(name)?;
-                        }
+                        limit.validate(part)?;
                     }
                     None => {
                         let b = part.parameters.evaluate(to, Length)?;

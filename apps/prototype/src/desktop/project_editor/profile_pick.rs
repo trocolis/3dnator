@@ -150,6 +150,19 @@ impl Candidate {
     }
 }
 
+fn coplanar(a: nator_sketch::Plane, b: nator_sketch::Plane) -> bool {
+    nator_geometry::norm(nator_geometry::cross(a.normal(), b.normal())) < 1e-7
+        && nator_geometry::dot(nator_geometry::sub(a.origin, b.origin), a.normal()).abs() < 1e-6
+}
+fn inside_polygon(points: &[egui::Pos2], p: egui::Pos2) -> bool {
+    let mut inside = false;
+    for (a, b) in points.iter().zip(points.iter().cycle().skip(1)) {
+        if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (b.x - a.x) * (p.y - a.y) / (b.y - a.y) {
+            inside = !inside;
+        }
+    }
+    inside
+}
 impl Editor {
     pub(super) fn profile_areas(
         &mut self,
@@ -165,11 +178,12 @@ impl Editor {
     }
     /// Desenha e trata a escolha de perfil; devolve verdadeiro se consumiu o clique.
     pub(super) fn profile_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
-        let Some(draft) = self
-            .feature_edit
-            .as_ref()
-            .filter(|d| d.tab() == self.current().id && d.field() == Some(Field::Profile))
-        else {
+        let Some(draft) = self.feature_edit.as_ref().filter(|d| {
+            d.tab() == self.current().id
+                && (d.field() == Some(Field::Profile)
+                    || (d.accepts_face_profile()
+                        && matches!(d.field(), None | Some(Field::UntilFace))))
+        }) else {
             return false;
         };
         let part_id = draft.part();
@@ -183,6 +197,15 @@ impl Editor {
         let Ok(placement) = sketch_scene::part_placement(self.current(), part_id) else {
             return false;
         };
+        let source_plane = draft.profile_plane(part);
+        let extrusion = draft.accepts_face_profile();
+        let explicit_limit = draft.field() == Some(Field::UntilFace);
+        let planes = part
+            .work_planes
+            .iter()
+            .filter(|p| part.shows_work_plane(p))
+            .cloned()
+            .collect::<Vec<_>>();
         let ids = part
             .sketches
             .iter()
@@ -274,10 +297,62 @@ impl Editor {
             && let Some(candidate) = hovered.and_then(|i| candidates.get(i))
         {
             let (sketch, reference) = (candidate.sketch, candidate.reference.clone());
+            let different =
+                source_plane.is_some_and(|plane| !coplanar(plane, candidate.frame.plane));
             if let Some(draft) = self.feature_edit.as_mut() {
-                draft.choose_region(sketch, reference);
+                if extrusion && (different || explicit_limit) {
+                    draft.choose_limit(nator_document::features::ExtrusionLimit::Sketch { sketch });
+                } else if !extrusion || chosen.is_none() || current == Some(sketch) {
+                    draft.choose_region(sketch, reference);
+                }
             }
             return true;
+        }
+        if extrusion
+            && source_plane.is_some()
+            && let Some(cursor) = response.hover_pos()
+        {
+            for record in &planes {
+                let plane = record.plane.plane();
+                if source_plane.is_some_and(|p| coplanar(p, plane)) {
+                    continue;
+                }
+                let world = nator_sketch::Plane {
+                    origin: placement.apply(plane.origin),
+                    u: placement.apply_vector(plane.u),
+                    v: placement.apply_vector(plane.v),
+                };
+                let polygon = sketch_scene::plane_patch(world, self.display_bounds())
+                    .iter()
+                    .map(|p| {
+                        sketch_scene::project(
+                            &self.viewport.camera,
+                            self.display_bounds(),
+                            response.rect,
+                            *p,
+                        )
+                    })
+                    .collect::<Option<Vec<_>>>();
+                if let Some(polygon) = polygon
+                    && inside_polygon(&polygon, cursor)
+                {
+                    fill(
+                        &painter,
+                        &[polygon],
+                        egui::Color32::from_rgba_unmultiplied(35, 112, 180, 55),
+                    );
+                    if response.clicked() {
+                        if let Some(draft) = self.feature_edit.as_mut() {
+                            draft.choose_limit(
+                                nator_document::features::ExtrusionLimit::WorkPlane {
+                                    work_plane: record.id,
+                                },
+                            );
+                        }
+                        return true;
+                    }
+                }
+            }
         }
         response.clicked()
             && (pending

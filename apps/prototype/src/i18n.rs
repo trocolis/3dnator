@@ -865,10 +865,10 @@ pub fn text(key: Text) -> &'static str {
         Text::Sketch => "Rascunho",
         Text::AutomaticExtrusion => "Operação automática",
         Text::ExtrusionProfileHint => {
-            "Clique para adicionar/remover áreas do mesmo rascunho, incluindo contornos projetados; ou escolha uma face plana do sólido."
+            "Clique para adicionar/remover áreas no mesmo plano. Clique em outro plano ou face para usá-lo como limite."
         }
         Text::ExtrusionMouseHint => {
-            "Arraste a seta para definir a distância. Clique em uma face para terminar nela. Escolher uma operação desativa a sugestão automática."
+            "A extrusão começa em 0 mm. Arraste a seta ou digite a distância. Clique em outro plano para terminar nele. Escolher uma operação desativa a sugestão automática."
         }
         Text::RemoveMaterial => "Remover",
         Text::FindingClosedAreas => "Identificando áreas fechadas…",
@@ -1320,7 +1320,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Symmetric => "Simétrica",
         Text::ExtentField => "Extensão",
         Text::ExtentDistance => "Distância",
-        Text::ExtentToFace => "Até uma face",
+        Text::ExtentToFace => "Até um plano",
         Text::DistanceField => "Distância",
         Text::Distance2Field => "Distância 2",
         Text::StartOffset => "Deslocamento inicial",

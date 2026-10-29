@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Extrusão a partir de zero, planos limite e furos do apoio
+
+- Novas extrusões começam em 0 mm, com seta de arraste visível antes de existir um prisma. Zero é um estado transitório sem erro de prévia; a confirmação fica desabilitada até haver comprimento. A seta permanece disponível durante a seleção de várias áreas e as pontas dos dois lados ficam separadas em zero.
+- Clicar em áreas de outro plano passa a definir o limite da extrusão, preservando os perfis do plano inicial. Faces planas e planos de trabalho também servem de limite. Rascunhos/planos limite são associativos, persistidos e remapeados na clonagem; sua exclusão é protegida.
+- Corrigido o fechamento de furos existentes no corpo ao unir uma extrusão de rascunho sobre sua face. Contornos internos do apoio são prolongados com geometria exata; a saliência ainda pode ultrapassar o contorno externo. O recorte acompanha alterações do furo no recálculo.
+- Formato interno 28 acrescenta os limites por rascunho/plano de trabalho, mantendo os limites de face e a leitura dos formatos anteriores. Aplicativo permanece em 0.3.0 em desenvolvimento.
+
 ### Pintura de superfícies e refinamento de Projetar
 
 - Pintar na aba Peça, com paleta, seletor RGB e hexadecimal `#RRGGBB`. Faces inteiras ou delimitadas por uma ou várias áreas de rascunho, inclusive projetadas e com furos; prévia, cancelamento e desfazer/refazer. O recorte preciso afeta somente a aparência, preservando o sólido de modelagem, e acompanha alterações do rascunho.

@@ -22,7 +22,7 @@ mod precise {
     use super::*;
     use crate::features::{face_index, region, source};
     use nator_document::{
-        features::{BooleanMode, UntilFace},
+        features::{BooleanMode, ExtrusionLimit},
         parameters::Dimension,
     };
     use nator_geometry::{dot, norm, sub};
@@ -103,7 +103,7 @@ mod precise {
         };
         let from = piece.parameters.evaluate(from, Dimension::Length)?;
         let to = match until {
-            Some(limit) => distance_to_face(doc, part, origin, normal, limit)?,
+            Some(limit) => distance_to_limit(doc, part, origin, normal, limit)?,
             None => piece.parameters.evaluate(to, Dimension::Length)?,
         };
         Ok(Guide {
@@ -117,10 +117,31 @@ mod precise {
     fn limit_plane(
         doc: &Document,
         part: PartId,
-        limit: &UntilFace,
+        limit: &ExtrusionLimit,
     ) -> Result<(Point3, Point3), DocumentError> {
-        let (solid, bytes) = source(doc, part, limit.body)?;
-        let index = face_index(&solid, &bytes, &limit.face)?;
+        let face = match limit {
+            ExtrusionLimit::Face(face) => face,
+            ExtrusionLimit::Sketch { sketch } => {
+                let plane = doc
+                    .part(part)
+                    .and_then(|p| p.sketches.iter().find(|s| s.id == *sketch))
+                    .ok_or_else(|| error("Rascunho limite inexistente."))?
+                    .sketch
+                    .plane;
+                return Ok((plane.origin, plane.normal()));
+            }
+            ExtrusionLimit::WorkPlane { work_plane } => {
+                let plane = doc
+                    .part(part)
+                    .and_then(|p| p.work_planes.iter().find(|p| p.id == *work_plane))
+                    .ok_or_else(|| error("Plano limite inexistente."))?
+                    .plane
+                    .plane();
+                return Ok((plane.origin, plane.normal()));
+            }
+        };
+        let (solid, bytes) = source(doc, part, face.body)?;
+        let index = face_index(&solid, &bytes, &face.face)?;
         match solid.face_measure(index).map_err(error)?.kind {
             nator_kernel::FaceKind::Plane { normal, offset } => {
                 Ok((normal.map(|v| v * offset), normal))
@@ -130,18 +151,18 @@ mod precise {
             )),
         }
     }
-    fn distance_to_face(
+    fn distance_to_limit(
         doc: &Document,
         part: PartId,
         origin: Point3,
         normal: Point3,
-        limit: &UntilFace,
+        limit: &ExtrusionLimit,
     ) -> Result<f64, DocumentError> {
         let (point, n) = limit_plane(doc, part, limit)?;
         let denominator = dot(n, normal);
         if denominator.abs() < 1e-9 {
             return Err(DocumentError(
-                "A face limite é paralela à direção da extrusão.".into(),
+                "O plano limite é paralelo à direção da extrusão.".into(),
             ));
         }
         Ok(dot(n, sub(point, origin)) / denominator)
@@ -260,12 +281,30 @@ mod precise {
             }
             _ => return Err(DocumentError("Perfil de extrusão inválido.".into())),
         };
+        // Unir uma saliência desenhada sobre uma face não deve fechar os furos
+        // dessa face. O recorte usa apenas contornos internos coplanares ao início,
+        // mantendo possível ampliar o contorno externo e sem afetar cortes.
+        if let Operation::Extrude {
+            combine: Some(combine),
+            ..
+        } = operation
+            && combine.mode == BooleanMode::Join
+        {
+            let (support, _) = source(doc, part, combine.target)?;
+            let start = std::array::from_fn(|i| g.origin[i] + g.normal[i] * from);
+            if let Some(holes) = support
+                .support_holes(start, g.normal, to - from, owner)
+                .map_err(error)?
+            {
+                prism = prism.boolean(&holes, 1, owner).map_err(error)?;
+            }
+        }
         if let Some((point, normal)) = limit {
             let start = std::array::from_fn(|i| g.origin[i] + g.normal[i] * from);
             let side = dot(sub(start, point), normal).signum();
             if side == 0. {
                 return Err(DocumentError(
-                    "A face limite coincide com o início da extrusão.".into(),
+                    "O plano limite coincide com o início da extrusão.".into(),
                 ));
             }
             prism = prism

@@ -207,6 +207,9 @@ pub(super) fn reference(
         feature_editor::Kept::Face(FaceRef::Named(name)) => face_index(body, name)
             .map(|f| face(body, pose, f))
             .unwrap_or_default(),
+        feature_editor::Kept::PlanarFace(face, _) => {
+            reference(cache, body, pose, &feature_editor::Kept::Face(face.clone()))
+        }
         feature_editor::Kept::Body(_) => body_outline(cache, body, pose),
         _ => Overlay::default(),
     }

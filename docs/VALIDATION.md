@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Extrusão em zero, planos limite e furos existentes — 29/10/2026
+
+- **330 testes com OCCT e 255 sem OCCT aprovados**. Novas regressões verificam guia em zero sem operação publicável, limites associativos por rascunho e plano de trabalho, recálculo após deslocá-los, proteção contra exclusão e clonagem. Limites de face antigos continuam funcionando, inclusive inclinados.
+- Saliência de rascunho sem círculo sobre uma placa furada mantém o furo original, mesmo ampliando a borda externa. Volume analítico, raio de seleção através do vazio, desfazer/refazer, salvamento/reabertura e alteração do diâmetro do furo de apoio aprovados.
+- **39 ensaios gráficos aprovados**, em execução serial GL/llvmpipe. A regressão da extrusão agora começa em zero com guia/seta e sem nova revisão; arrasta a ponta para dentro do corpo, verifica corte e depois usa a face de outro plano como limite. A regressão de múltiplas áreas conserva duas regiões do plano inicial ao clicar no rascunho de outro plano e confirma uma única operação até esse limite.
+- Formatação e Clippy com todos os alvos/avisos negados aprovados com e sem OCCT. Compilação e captura desktop com OCCT aprovadas no Linux. `zero-arrow.png` inspecionada: seta/0 mm, campo de distância zero, OK desabilitado e furo aberto no corpo. Evidências em `target/codex-validation/extrusion-20261029/`.
+- Formato 28, com leitura dos anteriores; aplicativo 0.3.0 em desenvolvimento. Windows e janela nativa não exercitados localmente; sem release ou publicação remota.
+
 ## Pintura, seleção de Projetar e gestos de imagem — 29/10/2026
 
 - **328 testes com OCCT e 255 sem OCCT aprovados**. Novas regressões cobrem cores por face, recorte por região projetada com furo, pintura de superfície cilíndrica, preservação do B-rep/malha de modelagem, desfazer/refazer, salvamento/reabertura, clonagem e recálculo após editar a máscara. Máscara fora da face e cache com material inválido são recusados sem revisão nova. Cena conserva as cores; leitura do formato 27 sem OCCT também aprovada.

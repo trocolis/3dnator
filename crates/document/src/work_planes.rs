@@ -124,7 +124,7 @@ impl Document {
     }
     /// Troca a definição do plano e leva junto os rascunhos apoiados nele, conservando a
     /// geometria local (coordenadas U/V) de cada um. Devolve a peça e se algum rascunho
-    /// mudou, caso em que o histórico da peça precisa ser recalculado.
+    /// mudou ou o plano limita uma extrusão, exigindo recálculo do histórico.
     pub fn update_work_plane(
         &mut self,
         id: WorkPlaneId,
@@ -136,7 +136,9 @@ impl Document {
             .ok_or_else(|| DocumentError("Plano de trabalho inexistente.".into()))?;
         self.work_plane_mut(id)?.plane = plane;
         let support = plane.plane();
-        let mut moved = false;
+        let mut moved = self.part(part).is_some_and(|p|p.features.iter().any(|f|matches!(&f.operation,
+            super::features::Operation::Extrude{until:Some(super::features::ExtrusionLimit::WorkPlane{work_plane}),..}
+            | super::features::Operation::ExtrudeFace{until:Some(super::features::ExtrusionLimit::WorkPlane{work_plane}),..} if *work_plane==id)));
         for record in self
             .part_mut(part)?
             .sketches
@@ -156,6 +158,11 @@ impl Document {
             .iter_mut()
             .find(|p| p.work_planes.iter().any(|w| w.id == id))
             .ok_or_else(|| DocumentError("Plano de trabalho inexistente.".into()))?;
+        if part.features.iter().any(|f|matches!(&f.operation,
+            super::features::Operation::Extrude{until:Some(super::features::ExtrusionLimit::WorkPlane{work_plane}),..}
+            | super::features::Operation::ExtrudeFace{until:Some(super::features::ExtrusionLimit::WorkPlane{work_plane}),..} if *work_plane==id)) {
+            return Err(DocumentError("O plano limita uma extrusão; altere o limite antes de excluí-lo.".into()));
+        }
         part.work_planes.retain(|w| w.id != id);
         for record in part.sketches.iter_mut().filter(|s| s.support == Some(id)) {
             record.support = None;

@@ -659,13 +659,9 @@ impl Document {
             .iter_mut()
             .find(|p| p.sketches.iter().any(|s| s.id == id))
             .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))?;
-        if part
-            .features
-            .iter()
-            .any(|f| f.operation.sketch() == Some(id))
-        {
+        if part.features.iter().any(|f| f.operation.uses_sketch(id)) {
             return Err(DocumentError(
-                "O rascunho é perfil de operações do histórico; exclua-as antes.".into(),
+                "O rascunho é usado pelo histórico; altere suas referências ou exclua as operações antes.".into(),
             ));
         }
         part.sketches.retain(|s| s.id != id);

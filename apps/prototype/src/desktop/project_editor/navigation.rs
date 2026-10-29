@@ -234,6 +234,10 @@ impl Editor {
                 .as_ref()
                 .map(|_| feature_editor::Awaiting::Face)
                 .or_else(|| self.feature_edit.as_ref().and_then(|d| d.awaiting()));
+            let extrusion = self
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.accepts_face_profile());
             let view = self.current().view.clone();
             let cut = self.current().section;
             self.start(ui.ctx(), None, move || {
@@ -250,9 +254,16 @@ impl Editor {
                         feature_editor::Awaiting::Edge => {
                             document.edge_at(p).map(feature_editor::Kept::Edge)
                         }
-                        feature_editor::Awaiting::Face => {
-                            document.face_at(p).map(feature_editor::Kept::Face)
-                        }
+                        feature_editor::Awaiting::Face => document.face_at(p).and_then(|face| {
+                            if extrusion {
+                                let plane = sketch_scene::face_plane(&document, p, p.placement)
+                                    .map_err(nator_document::DocumentError)?
+                                    .0;
+                                Ok(feature_editor::Kept::PlanarFace(face, plane))
+                            } else {
+                                Ok(feature_editor::Kept::Face(face))
+                            }
+                        }),
                         feature_editor::Awaiting::Body => {
                             if document.body(p.body).is_some_and(|b| b.brep.is_some()) {
                                 Ok(feature_editor::Kept::Body(p.body))

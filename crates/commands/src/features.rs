@@ -2,7 +2,7 @@
 //! documento; objetos nativos do núcleo nunca saem da thread que os criou.
 #[cfg(feature = "occt")]
 use nator_document::features::{
-    BooleanMode, EdgeRef, FaceRef, RegionRef, UntilFace, body_owner, signature,
+    BooleanMode, EdgeRef, ExtrusionLimit, FaceRef, RegionRef, UntilFace, body_owner, signature,
 };
 #[cfg(feature = "occt")]
 use nator_document::parameters::Dimension;
@@ -274,9 +274,13 @@ pub(super) fn normalize(
             combine,
             until: until
                 .map(|limit| {
-                    Ok::<_, DocumentError>(UntilFace {
-                        face: stable_face(doc, part, limit.body, limit.face)?,
-                        body: limit.body,
+                    Ok::<_, DocumentError>(match limit {
+                        ExtrusionLimit::Face(limit) => UntilFace {
+                            face: stable_face(doc, part, limit.body, limit.face)?,
+                            body: limit.body,
+                        }
+                        .into(),
+                        plane => plane,
                     })
                 })
                 .transpose()?,
@@ -292,9 +296,13 @@ pub(super) fn normalize(
             region: stable_region(sketch, region)?,
             until: until
                 .map(|limit| {
-                    Ok::<_, DocumentError>(UntilFace {
-                        face: stable_face(doc, part, limit.body, limit.face)?,
-                        body: limit.body,
+                    Ok::<_, DocumentError>(match limit {
+                        ExtrusionLimit::Face(limit) => UntilFace {
+                            face: stable_face(doc, part, limit.body, limit.face)?,
+                            body: limit.body,
+                        }
+                        .into(),
+                        plane => plane,
                     })
                 })
                 .transpose()?,

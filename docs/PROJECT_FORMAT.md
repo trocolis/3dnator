@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 27
+# Formato de projeto — versão interna 28
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 27; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 28; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -15,6 +15,10 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 28, `until` em `Extrude`/`ExtrudeFace` aceita três referências de limite: `{"body": id, "face": FaceRef}` conserva a representação anterior; `{"sketch": id}` usa o plano de outro rascunho; `{"work_plane": id}` usa um plano de trabalho. Todas pertencem à mesma peça. Editar o plano ou mover o rascunho limite recalcula a extrusão; clonar remapeia os identificadores. Não é permitido excluir um rascunho/plano ainda usado como limite. O prisma é recortado pelo plano inteiro, inclusive quando inclinado; um plano paralelo à direção da extrusão é recusado.
+
+Comprimento zero é somente um estado transitório do painel para apresentar a seta de arraste; nenhuma operação de espessura zero é salva. Ao unir uma extrusão de rascunho sobre uma face, os contornos internos coplanares ao início são prolongados como furos no novo material. O contorno externo pode ultrapassar o corpo de apoio; cortes e extrusões isoladas conservam seus próprios perfis.
 
 Desde a versão 27, `appearances` opcional guarda uma entrada por corpo pintado: `body`, `layers`, `source_signature`, `mesh_path` e `materials_path`. Cada camada contém uma `FaceRef`, uma cor sRGB `[r, g, b]` e `mask` opcional com `sketch`/`region` (`RegionRef`, inclusive `Multiple`). O rascunho deve pertencer à peça do corpo. A camada posterior prevalece dentro de sua área. O limite é 64 camadas por corpo; o rascunho usado não pode ser excluído enquanto houver pintura dependente.
 
@@ -123,6 +127,8 @@ As variantes `Index` (`RegionRef::Index`, `EdgeRef::Index`, `FaceRef::Index`) gu
 Quando a origem de uma referência desaparece ou fica ambígua, o recálculo falha com uma mensagem pedindo nova seleção. Nenhuma outra região, aresta ou face é escolhida no lugar.
 
 ## Migrações
+
+- 27 → 28: limites de extrusão por rascunho/plano de trabalho; limites de face preservam a representação e o significado anteriores. Zero permanece transitório, sem geometria persistida.
 
 - 26 → 27: pinturas opcionais por face, com máscaras de rascunho e caches de aparência. Ausência significa aparência uniforme anterior; não há recálculo na abertura.
 

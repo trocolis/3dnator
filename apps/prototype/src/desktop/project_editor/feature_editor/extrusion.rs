@@ -5,7 +5,7 @@ use nator_commands::extrusion::Guide;
 
 #[derive(Default)]
 pub(super) struct Interaction {
-    guide: Option<Guide>,
+    pub(super) guide: Option<Guide>,
     drag: Option<Drag>,
 }
 struct Drag {
@@ -43,6 +43,20 @@ impl Draft {
     #[cfg(all(test, feature = "occt"))]
     pub(in crate::desktop::project_editor) fn extrusion_state(&self) -> Option<(Guide, usize)> {
         Some((self.interaction.guide?, self.combine))
+    }
+    pub(in crate::desktop::project_editor) fn profile_plane(
+        &self,
+        part: &nator_document::Part,
+    ) -> Option<nator_sketch::Plane> {
+        self.sketch
+            .filter(|_| self.kept_region.is_some() || self.region.is_some())
+            .and_then(|id| part.sketches.iter().find(|s| s.id == id))
+            .map(|s| s.sketch.plane)
+            .or_else(|| {
+                self.interaction
+                    .guide
+                    .and_then(|g| nator_sketch::Plane::from_normal(g.origin, g.normal).ok())
+            })
     }
     pub(in crate::desktop::project_editor) fn accepts_face_profile(&self) -> bool {
         self.tool == Tool::Extrude
@@ -87,7 +101,8 @@ impl Editor {
         response: &egui::Response,
         d: &mut Draft,
     ) -> bool {
-        if d.tool != Tool::Extrude || d.field.is_some() || self.busy() {
+        if d.tool != Tool::Extrude || !matches!(d.field, None | Some(Field::Profile)) || self.busy()
+        {
             return false;
         }
         let Some(g) = d.interaction.guide else {
@@ -156,6 +171,19 @@ impl Editor {
             } else {
                 origin + axis * (distance as f32 * scale)
             };
+            // A distância zero não tem haste geométrica. Reservar 32 px torna
+            // a ponta visível e separa seu clique da seleção do próprio perfil.
+            let position = if distance.abs() * f64::from(scale) < 32. {
+                origin
+                    + axis
+                        * (if distance < 0. || (start && distance.abs() < 1e-7) {
+                            -32.
+                        } else {
+                            32.
+                        })
+            } else {
+                position
+            };
             let position = egui::pos2(
                 position
                     .x
@@ -166,7 +194,11 @@ impl Editor {
             );
             let over = pointer.is_some_and(|p| p.distance(position) < 16.);
             hovered |= over;
-            let sign = if distance < 0. { -1. } else { 1. };
+            let sign = if distance < 0. || (start && distance.abs() < 1e-7) {
+                -1.
+            } else {
+                1.
+            };
             let arrow = distance_arrow::Arrow {
                 origin,
                 tip: position,

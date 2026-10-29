@@ -224,21 +224,26 @@ fn until_slanted_face_trims_the_whole_prism_instead_of_using_one_distance() -> R
     let mut sketch = Sketch::new("Perfil", Plane::xy());
     sketch.add_rectangle([0., 0.], [20., 20.], false)?;
     let (_, id) = add_sketch(&mut s, Some(part), sketch)?;
-    let result = created(s.execute(Command::AddFeature {
-        part,
-        name: "Até face".into(),
-        operation: Operation::Extrude {
-            sketch: id,
-            region: RegionRef::Index(0),
-            from: "0 mm".into(),
-            to: "1 mm".into(),
-            combine: None,
-            until: Some(UntilFace {
-                body: imported,
-                face: FaceRef::Named(format!("{}:f{index}", body_owner(imported))),
-            }),
-        },
-    })?)?;
+    let result = created(
+        s.execute(Command::AddFeature {
+            part,
+            name: "Até face".into(),
+            operation: Operation::Extrude {
+                sketch: id,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "1 mm".into(),
+                combine: None,
+                until: Some(
+                    UntilFace {
+                        body: imported,
+                        face: FaceRef::Named(format!("{}:f{index}", body_owner(imported))),
+                    }
+                    .into(),
+                ),
+            },
+        })?,
+    )?;
     let height = (offset - normal[0] * 10. - normal[1] * 10.) / normal[2];
     assert!((volume(&s, result)? - 400. * height).abs() < 1e-3);
     Ok(())
@@ -355,5 +360,178 @@ fn face_and_area_references_round_trip_clone_and_allow_manual_new_bodies() -> Re
     assert!((volume(&s, output)? - 10000.).abs() < 1e-5);
     assert!((volume(&s, joined)? - 6000.).abs() < 1e-5);
     s.document().validate()?;
+    Ok(())
+}
+
+#[test]
+fn sketch_boss_preserves_existing_support_holes_while_extending_the_outer_border() -> Result<()> {
+    let (mut s, part, base) = fixture(true)?;
+    let mut sketch = Sketch::new(
+        "Saliência",
+        Plane {
+            origin: [0., 0., 10.],
+            ..Plane::xy()
+        },
+    );
+    sketch.add_rectangle([-2., -2.], [22., 22.], false)?;
+    let (_, id) = add_sketch(&mut s, Some(part), sketch)?;
+    let boss = created(s.execute(Command::AddSmartExtrusion {
+        part,
+        name: "Saliência sobre furo".into(),
+        preferred: Some(base),
+        operation: Operation::Extrude {
+            sketch: id,
+            region: RegionRef::Index(0),
+            from: "0 mm".into(),
+            to: "5 mm".into(),
+            combine: None,
+            until: None,
+        },
+    })?)?;
+    let expected =
+        (400. - 9. * std::f64::consts::PI) * 10. + (576. - 9. * std::f64::consts::PI) * 5.;
+    assert!(
+        (volume(&s, boss)? - expected).abs() < 1e-4,
+        "{}",
+        volume(&s, boss)?
+    );
+    let body = s.document().body(boss).ok_or("Saliência ausente")?;
+    assert!(
+        body.geometry
+            .mesh()
+            .ray_hit(nator_geometry::query::Ray {
+                origin: [10., 10., 100.],
+                direction: [0., 0., -1.]
+            })
+            .is_none()
+    );
+    assert!(s.undo());
+    assert!(s.redo());
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("saliência-furada.3dnator");
+    nator_project_io::write_project(&path, s.document())?;
+    let reopened = nator_project_io::read_project(&path)?;
+    assert!((volume(&Session::new(reopened)?, boss)? - expected).abs() < 1e-4);
+    let profile = s.document().part(part).ok_or("Peça ausente")?.sketches[0].id;
+    let mut updated = s
+        .document()
+        .sketch(profile)
+        .ok_or("Perfil ausente")?
+        .sketch
+        .clone();
+    for entity in &mut updated.entities {
+        if let nator_sketch::Curve::Circle { radius, .. } = &mut entity.curve {
+            *radius = 4.;
+        }
+    }
+    s.execute(Command::UpdateSketch {
+        id: profile,
+        sketch: updated,
+    })?;
+    let expected =
+        (400. - 16. * std::f64::consts::PI) * 10. + (576. - 16. * std::f64::consts::PI) * 5.;
+    assert!((volume(&s, boss)? - expected).abs() < 1e-4);
+    if let Some(directory) = std::env::var_os("NATOR_EXTRUSION_CAPTURE_DIR") {
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory)?;
+        nator_project_io::write_project(&directory.join("hole-preserved.3dnator"), s.document())?;
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_is_a_guide_only_and_sketch_and_work_planes_are_associative_limits() -> Result<()> {
+    use nator_document::features::ExtrusionLimit;
+    let mut s = Session::new(Document::new("Planos limite")?)?;
+    let mut sketch = Sketch::new("Perfil", Plane::xy());
+    sketch.add_rectangle([0., 0.], [4., 4.], false)?;
+    let (part, id) = add_sketch(&mut s, None, sketch)?;
+    let (_, limit) = add_sketch(
+        &mut s,
+        Some(part),
+        Sketch::new(
+            "Limite",
+            Plane {
+                origin: [0., 0., 10.],
+                ..Plane::xy()
+            },
+        ),
+    )?;
+    let operation = Operation::Extrude {
+        sketch: id,
+        region: RegionRef::Index(0),
+        from: "0 mm".into(),
+        to: "0 mm".into(),
+        combine: None,
+        until: None,
+    };
+    let guide = extrusion::guide(s.document(), part, &operation)?;
+    assert_eq!((guide.from, guide.to), (0., 0.));
+    let revision = s.revision();
+    assert!(
+        s.execute(Command::AddSmartExtrusion {
+            part,
+            name: "Zero".into(),
+            operation: operation.clone(),
+            preferred: None
+        })
+        .is_err()
+    );
+    assert_eq!(s.revision(), revision);
+    let mut bounded = operation.clone();
+    if let Operation::Extrude { until, .. } = &mut bounded {
+        *until = Some(ExtrusionLimit::Sketch { sketch: limit });
+    }
+    let body = created(s.execute(Command::AddFeature {
+        part,
+        name: "Até rascunho".into(),
+        operation: bounded,
+    })?)?;
+    assert!((volume(&s, body)? - 160.).abs() < 1e-5);
+    let mut moved = s
+        .document()
+        .sketch(limit)
+        .ok_or("Limite ausente")?
+        .sketch
+        .clone();
+    moved.plane.origin[2] = 20.;
+    s.execute(Command::UpdateSketch {
+        id: limit,
+        sketch: moved,
+    })?;
+    assert!((volume(&s, body)? - 320.).abs() < 1e-5);
+    assert!(s.execute(Command::RemoveSketch { id: limit }).is_err());
+    let plane = s.document().clone();
+    let mut plane = plane;
+    let work = plane.add_work_plane(
+        part,
+        "Plano limite".into(),
+        nator_document::WorkPlane {
+            base: Plane::xy(),
+            offset: 15.,
+        },
+    )?;
+    let mut s = Session::new(plane)?;
+    let mut operation = operation;
+    if let Operation::Extrude { until, .. } = &mut operation {
+        *until = Some(ExtrusionLimit::WorkPlane { work_plane: work });
+    }
+    let body = created(s.execute(Command::AddFeature {
+        part,
+        name: "Até plano".into(),
+        operation,
+    })?)?;
+    assert!((volume(&s, body)? - 240.).abs() < 1e-5);
+    s.execute(Command::UpdateWorkPlane {
+        id: work,
+        plane: nator_document::WorkPlane {
+            base: Plane::xy(),
+            offset: 25.,
+        },
+    })?;
+    assert!((volume(&s, body)? - 400.).abs() < 1e-5);
+    let mut doc = s.document().clone();
+    doc.clone_part(part, "Cópia".into())?;
+    doc.validate()?;
     Ok(())
 }

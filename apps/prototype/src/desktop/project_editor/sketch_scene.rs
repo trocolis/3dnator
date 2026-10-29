@@ -290,7 +290,7 @@ fn face_work_plane(world: Plane, placement: Placement) -> Result<Plane, nator_sk
 
 /// Suporte exato da face escolhida, nas coordenadas do destino, e o nome com que o
 /// painel do plano deslocado a apresenta. Roda no trabalhador: consulta o B-rep.
-fn face_plane(
+pub(super) fn face_plane(
     document: &Document,
     pick: &Pick,
     placement: Placement,

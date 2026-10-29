@@ -30,7 +30,7 @@ struct Computed {
     key: String,
     guide: Option<nator_commands::extrusion::Guide>,
     choice: Option<nator_document::features::Combine>,
-    result: Result<(PreparedCommand, Scene), CommandError>,
+    result: Result<Option<(PreparedCommand, Scene)>, CommandError>,
 }
 
 /// Situação da pré-visualização do comando atual, para o rodapé do painel.
@@ -46,6 +46,7 @@ pub(super) struct LivePreview {
     receiver: Option<Receiver<Computed>>,
     ready: Option<(String, PreparedCommand)>,
     failed: Option<(String, CommandError)>,
+    empty: Option<String>,
     /// Algum painel pediu pré-visualização neste quadro.
     requested: bool,
     /// Geração exibida no viewport; zero quando a cena do documento está à mostra.
@@ -64,6 +65,7 @@ impl LivePreview {
         if self.request.is_none() {
             self.ready = None;
             self.failed = None;
+            self.empty = None;
             if std::mem::take(&mut self.shown) != 0 {
                 // Somente a transição pede redesenho. Quadros ociosos continuam sem
                 // repintura contínua; resultados tardios serão rejeitados sem request.
@@ -133,6 +135,7 @@ impl Editor {
             Some(request) => {
                 self.preview.failed.as_ref().map(|(k, _)| k) == Some(&request.key)
                     || self.preview.ready.as_ref().map(|(k, _)| k) == Some(&request.key)
+                    || self.preview.empty.as_ref() == Some(&request.key)
             }
         }
     }
@@ -211,6 +214,9 @@ impl Editor {
             self.preview.request = None;
             return;
         }
+        if self.preview.empty.as_ref() == Some(&request.key) {
+            return;
+        }
         let document = tab.session.document().clone();
         let view = tab.view.clone();
         let active = tab.active_part;
@@ -242,6 +248,20 @@ impl Editor {
                 let guide = extrusion.as_ref().and_then(|(part, operation)| {
                     nator_commands::extrusion::guide(&document, *part, operation).ok()
                 });
+                // Zero é um estado de interação, sem sólido nem comando publicável.
+                // A guia independe da construção e deve chegar para desenhar a seta.
+                if guide.is_some_and(|g| (g.to - g.from).abs() < 1e-7) {
+                    let _ = sender.send(Computed {
+                        tab,
+                        revision,
+                        key,
+                        guide,
+                        choice: None,
+                        result: Ok(None),
+                    });
+                    context.request_repaint();
+                    return;
+                }
                 let original = document.clone();
                 let mut choice = None;
                 let result =
@@ -307,7 +327,7 @@ impl Editor {
                                 message,
                                 failure: None,
                             })?;
-                        Ok((prepared, scene))
+                        Ok(Some((prepared, scene)))
                     });
                 let _ = sender.send(Computed {
                     tab,
@@ -332,7 +352,21 @@ impl Editor {
             return;
         }
         match computed.result {
-            Ok((prepared, scene)) => {
+            Ok(None) => {
+                if let Some(draft) = self
+                    .feature_edit
+                    .as_mut()
+                    .filter(|d| d.tab() == computed.tab)
+                {
+                    draft.receive_extrusion(computed.guide, None);
+                }
+                self.preview.ready = None;
+                self.preview.failed = None;
+                self.preview.shown = 0;
+                self.preview.empty = Some(computed.key);
+            }
+            Ok(Some((prepared, scene))) => {
+                self.preview.empty = None;
                 if let Some(draft) = self
                     .feature_edit
                     .as_mut()
