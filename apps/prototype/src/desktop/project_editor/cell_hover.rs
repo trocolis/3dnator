@@ -11,6 +11,21 @@ struct Key {
     direction: Point3,
     paint: bool,
     section: Option<section::Section>,
+    /// Dois raios fixos da vista identificam orientação, projeção, zoom e pan,
+    /// sem confundir essas mudanças com o deslocamento do ponteiro.
+    view_rays: [(Point3, Point3); 2],
+    rect: egui::Rect,
+    placement: Placement,
+}
+impl Key {
+    fn same_context(&self, other: &Self) -> bool {
+        self.scene == other.scene
+            && self.paint == other.paint
+            && self.section == other.section
+            && self.view_rays == other.view_rays
+            && self.rect == other.rect
+            && self.placement == other.placement
+    }
 }
 struct Query {
     key: Key,
@@ -256,18 +271,40 @@ fn compute(
     }
 }
 impl Cache {
-    fn query(&mut self, query: Query, context: &egui::Context) -> Option<&Answer> {
+    fn poll(&mut self, key: &Key) {
+        // Mover o cursor permite manter a última resposta enquanto o trabalhador
+        // verifica a superfície nova. Mudanças na vista/documento nunca permitem
+        // esse reaproveitamento: poderiam mostrar uma área oculta ou de outra peça.
+        if self
+            .ready
+            .as_ref()
+            .is_some_and(|r| !r.key.same_context(key))
+        {
+            self.ready = None;
+            self.cached = None;
+        }
         if let Some(receiver) = &self.running {
             match receiver.try_recv() {
                 Ok(result) => {
-                    self.cached = result.cached.clone();
-                    self.ready = Some(result);
+                    // Uma consulta de um contexto abandonado pode terminar tarde;
+                    // ela não deve substituir o realce nem o cache atuais.
+                    // Se o ponteiro voltou a uma posição já pronta, uma entrega
+                    // de outra posição também não pode substituir essa resposta.
+                    if result.key.same_context(key)
+                        && (result.key == *key || self.ready.as_ref().is_none_or(|r| r.key != *key))
+                    {
+                        self.cached = result.cached.clone();
+                        self.ready = Some(result);
+                    }
                     self.running = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => self.running = None,
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+    }
+    fn query(&mut self, query: Query, context: &egui::Context) -> Option<&Answer> {
+        self.poll(&query.key);
         if self.ready.as_ref().is_some_and(|r| r.key == query.key) {
             return self.ready.as_ref().map(|r| &r.answer);
         }
@@ -296,7 +333,9 @@ impl Cache {
             }
         }
         context.request_repaint_after(Duration::from_millis(16));
-        None
+        // Exigir igualdade do raio aqui causava quadros vazios a cada movimento
+        // e impedia entregar resultados durante movimento contínuo do ponteiro.
+        self.ready.as_ref().map(|r| &r.answer)
     }
 }
 impl Editor {
@@ -342,6 +381,15 @@ impl Editor {
             direction: ray.direction,
             paint: self.paint_edit.is_some(),
             section: self.current().section,
+            view_rays: [[0., 0.], [1., 1.]].map(|point| {
+                let ray =
+                    self.viewport
+                        .camera
+                        .world_ray(point, bounds, f64::from(rect.aspect_ratio()));
+                (ray.origin, ray.direction)
+            }),
+            rect,
+            placement,
         };
         let query = Query {
             key: key.clone(),
@@ -369,5 +417,193 @@ impl Editor {
             overlay,
             label,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    fn key() -> Key {
+        Key {
+            scene: SceneKey {
+                tab: 1,
+                revision: 1,
+                view: 0,
+                active: Some(PartId(1)),
+                preview: 0,
+            },
+            origin: [0., 0., 10.],
+            direction: [0., 0., -1.],
+            paint: false,
+            section: None,
+            view_rays: [
+                ([0., 0., 10.], [0., 0., -1.]),
+                ([1., 1., 10.], [0., 0., -1.]),
+            ],
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.)),
+            placement: Placement::default(),
+        }
+    }
+    fn computed(key: Key, label: &str) -> Computed {
+        Computed {
+            key,
+            answer: Answer::Cell(
+                highlight::Overlay {
+                    triangles: vec![[[0.; 3], [1., 0., 0.], [0., 1., 0.]]],
+                    ..Default::default()
+                },
+                label.into(),
+            ),
+            cached: None,
+        }
+    }
+    fn query(key: Key) -> Result<Query, Box<dyn Error>> {
+        Ok(Query {
+            part: PartId(1),
+            placement: key.placement,
+            section: key.section,
+            key,
+            document: Document::new("Realce assíncrono")?,
+            view: ViewState::default(),
+        })
+    }
+    fn label(answer: Option<&Answer>) -> Option<&str> {
+        match answer {
+            Some(Answer::Cell(_, label)) => Some(label.as_str()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn moving_pointer_keeps_highlight_while_worker_is_pending_and_accepts_finished_results()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let first = key();
+        let mut cache = Cache {
+            ready: Some(computed(first.clone(), "Área")),
+            ..Default::default()
+        };
+        // A entrega é controlada por canais, sem depender da velocidade do OCCT
+        // ou de sleeps: cada quadro tem um raio novo e um trabalhador pendente.
+        for frame in 1..=20 {
+            let mut current = first.clone();
+            current.origin[0] = f64::from(frame);
+            let (sender, receiver) = mpsc::channel();
+            cache.running = Some(receiver);
+            assert_eq!(
+                label(cache.query(query(current.clone())?, &context)),
+                Some("Área")
+            );
+            sender.send(computed(current.clone(), "Área"))?;
+            let mut next = current;
+            next.origin[0] += 0.5;
+            cache.poll(&next);
+            assert!(
+                cache
+                    .ready
+                    .as_ref()
+                    .is_some_and(|r| r.key.origin[0] == f64::from(frame))
+            );
+            let (_pending, receiver) = mpsc::channel();
+            cache.running = Some(receiver);
+            assert_eq!(label(cache.query(query(next)?, &context)), Some("Área"));
+        }
+        // A resposta vazia também precisa substituir o destaque: sair da peça
+        // não pode deixar uma superfície presa na tela durante movimento contínuo.
+        let mut next = first;
+        next.origin[0] = 50.;
+        let (sender, receiver) = mpsc::channel();
+        cache.running = Some(receiver);
+        sender.send(Computed {
+            key: next.clone(),
+            answer: Answer::Empty,
+            cached: None,
+        })?;
+        assert!(matches!(
+            cache.query(query(next)?, &context),
+            Some(Answer::Empty)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn view_and_document_changes_discard_highlights_and_late_results() -> Result<(), Box<dyn Error>>
+    {
+        let original = key();
+        let mut changes = Vec::new();
+        let mut changed = original.clone();
+        changed.scene.tab += 1;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.scene.revision += 1;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.scene.view += 1;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.scene.active = Some(PartId(2));
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.scene.preview += 1;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.paint = true;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.section = Some(section::Section {
+            base: section::Base::Principal(0),
+            offset: 2.,
+            flip: false,
+            visible: true,
+        });
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.view_rays[0].0[0] += 1.;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.view_rays[1].1[0] += 1.;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.rect.max.x += 1.;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.placement = Placement::new([1., 0., 0.], [0.; 3])?;
+        changes.push(changed);
+        for changed in changes {
+            let mut cache = Cache {
+                ready: Some(computed(original.clone(), "Antigo")),
+                ..Default::default()
+            };
+            let (sender, receiver) = mpsc::channel();
+            cache.running = Some(receiver);
+            cache.poll(&changed);
+            assert!(cache.ready.is_none());
+            sender.send(computed(original.clone(), "Entrega antiga"))?;
+            cache.poll(&changed);
+            assert!(cache.ready.is_none());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn finished_current_highlight_is_not_replaced_by_an_older_pointer_position()
+    -> Result<(), Box<dyn Error>> {
+        let current = key();
+        let mut previous = current.clone();
+        previous.origin[0] = 10.;
+        let mut cache = Cache {
+            ready: Some(computed(current.clone(), "Atual")),
+            ..Default::default()
+        };
+        let (sender, receiver) = mpsc::channel();
+        cache.running = Some(receiver);
+        sender.send(computed(previous, "Anterior"))?;
+        assert_eq!(
+            label(cache.query(query(current)?, &egui::Context::default())),
+            Some("Atual")
+        );
+        Ok(())
     }
 }

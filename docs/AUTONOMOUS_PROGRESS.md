@@ -1,5 +1,10 @@
 # Execução autônoma
 
+## Correção da cintilação do realce — 29/10/2026
+
+- O realce de Peça/Pintar mantém a última resposta do contexto enquanto a próxima consulta de ponteiro é calculada. Resultados de outro contexto são descartados; câmera, retângulo do canvas, seção, modo, posição da peça e chave da cena participam da invalidação. Resposta já pronta para o cursor atual prevalece sobre entregas de posições anteriores.
+- Aprovados 344 testes com OCCT, 260 sem OCCT e 40 ensaios gráficos. Movimento contínuo percorre regiões/furos/face inteira/oclusor sem quadros vazios; câmera e saída do canvas continuam invalidando o realce. Logs em `target/codex-validation/hover-stability-20261029/`. Correção local na versão 0.3.1; formato 29 preservado, sem publicação remota.
+
 ## Publicação da pré-release 0.3.0-alpha.1 — 29/10/2026
 
 - Commits enviados para `main`, tag `v0.3.0-alpha.1` no commit `b3a2679` e [pré-release](https://github.com/trocolis/3dnator/releases/tag/v0.3.0-alpha.1) com Flatpak Linux x86_64, instalador EXE Windows x64 e SHA-256. Versão sincronizada no Cargo/lock e documentação; formato 29 preservado.

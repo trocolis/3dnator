@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.3.1 — 29/10/2026
+
+- Corrigida a cintilação do realce de superfícies ao mover continuamente o mouse em Peça e Pintar. O último destaque válido permanece enquanto a próxima consulta é calculada; mudanças de cena, câmera, enquadramento, seção ou ferramenta descartam respostas antigas. Furos, regiões delimitadas e oclusões continuam respeitados.
+
+- Correção local, mantendo o formato de projeto 29. Sem nova release ou publicação remota.
+
 ## 0.3.0-alpha.1 — 29/10/2026
 
 - Primeira pré-release de distribuição: pacote Flatpak Linux x86_64 e instalador EXE Windows x64, ambos com OCCT e versão identificada no aplicativo.

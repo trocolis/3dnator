@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Estabilidade do realce durante movimento contínuo — 29/10/2026
+
+- **344 testes com OCCT, 260 sem OCCT e 40 ensaios gráficos aprovados.** Três regressões de cache usam canais com entrega controlada: mantêm destaque com um raio novo a cada quadro, aceitam resultados durante movimento contínuo, recebem a resposta vazia ao sair da superfície e recusam resultados de cena/aba/revisão/modo/seção/vista/posição anteriores. Uma entrega de outra posição não substitui uma resposta já pronta para o cursor atual.
+- O fluxo gráfico Peça/Pintar agora percorre 20 quadros consecutivos por região, sem parar para aguardar consultas. Nenhum quadro apaga o preenchimento das células, furos, exterior, face inteira ou corpo à frente. Zoom com cursor parado invalida o resultado anterior imediatamente; sair do canvas limpa o realce. A consulta geométrica permanece fora da interface, sem alterações do documento.
+- Logs em `target/codex-validation/hover-stability-20261029/`. Correção destinada à versão `0.3.1`, com formato de projeto 29 preservado.
+
 ## Pré-release 0.3.0-alpha.1 — 29/10/2026
 
 - Flatpak Linux x86_64 e instalador EXE Windows x64 gerados do commit `b3a2679`, marcado como `v0.3.0-alpha.1`. [Execução de distribuição aprovada](https://github.com/trocolis/3dnator/actions/runs/40863699458): 341 testes com OCCT em cada plataforma, ensaios CAD/primeira peça/STEP e verificação do pacote Windows relocado com PATH sem SDK. Instalação silenciosa do EXE e ensaio CAD do aplicativo instalado aprovados. A [CI Ubuntu](https://github.com/trocolis/3dnator/actions/runs/40860408248) também passou com OCCT 7.6 e sem OCCT (257 testes).

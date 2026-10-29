@@ -7236,18 +7236,72 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
         };
+        // Cada ponto gera um quadro novo, sem esperar o trabalhador terminar.
+        // Parar o mouse e aguardar o realce escondia a regressão de cintilação.
+        let move_highlight = |editor: &mut Editor,
+                              start: Point3,
+                              delta: Point3,
+                              expected: f64|
+         -> Result<(), Box<dyn Error>> {
+            for step in 1..=20 {
+                let point = std::array::from_fn(|i| start[i] + f64::from(step) * delta[i]);
+                let position = sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    editor.canvas_rect,
+                    point,
+                )
+                .ok_or("Ponto fora da tela")?;
+                frame(editor, &context, vec![egui::Event::PointerMoved(position)])?;
+                let hover = editor
+                    .hover
+                    .as_ref()
+                    .ok_or("O destaque apagou durante o movimento")?;
+                assert!(!hover.overlay.is_empty(), "Quadro vazio ao mover o cursor");
+                assert!((area(&hover.overlay) - expected).abs() < 0.1);
+            }
+            Ok(())
+        };
         for paint in [false, true] {
             if paint {
                 editor.open_paint();
                 frame(&mut editor, &context, vec![])?;
             }
             hover_at(&mut editor, [3., 3., 5.], 64. - 4. * std::f64::consts::PI)?;
+            move_highlight(
+                &mut editor,
+                [3., 3., 5.],
+                [0.03, 0., 0.],
+                64. - 4. * std::f64::consts::PI,
+            )?;
             hover_at(&mut editor, [6., 6., 5.], 4. * std::f64::consts::PI)?;
+            move_highlight(
+                &mut editor,
+                [6., 6., 5.],
+                [0.01, 0., 0.],
+                4. * std::f64::consts::PI,
+            )?;
             hover_at(&mut editor, [1., 1., 5.], 336.)?;
+            move_highlight(&mut editor, [1., 1., 5.], [0.02, 0., 0.], 336.)?;
             assert_eq!(editor.current().session.revision(), revision);
         }
         editor.execute(Command::SetSketchVisibility { id, visible: false });
         settle(&mut editor, &context)?;
+        hover_at(&mut editor, [3., 3., 5.], 400.)?;
+        move_highlight(&mut editor, [3., 3., 5.], [0.03, 0., 0.], 400.)?;
+        // Zoom muda o raio mesmo com o cursor parado: a resposta da vista antiga
+        // precisa sair imediatamente, enquanto a nova consulta é calculada.
+        let position = editor.hover.as_ref().ok_or("Realce ausente")?.position;
+        editor.viewport.camera.span *= 1.1;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(position)],
+        )?;
+        assert!(
+            editor.hover.is_none(),
+            "Destaque reaproveitado de outra vista"
+        );
         hover_at(&mut editor, [3., 3., 5.], 400.)?;
         editor.execute(Command::SetSketchVisibility { id, visible: true });
         editor.execute(Command::SetBodyVisibility {
@@ -7256,6 +7310,7 @@ mod tests {
         });
         settle(&mut editor, &context)?;
         hover_at(&mut editor, [6., 6., 10.], 64.)?;
+        move_highlight(&mut editor, [6., 6., 10.], [0.03, 0., 0.], 64.)?;
         // Sem corpo atrás, Peça oferece o perfil livre. Pintar exige uma superfície.
         editor.activate_selection(&context);
         editor.viewport.camera.span = 4.;
