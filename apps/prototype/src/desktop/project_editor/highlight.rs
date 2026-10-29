@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// Intervalo mínimo entre consultas de pré-seleção, para não disputar a interface.
 const HOVER_INTERVAL: Duration = Duration::from_millis(30);
 /// Acima disto, a pré-seleção é desligada: o raio percorre todos os triângulos.
-const HOVER_TRIANGLES: usize = 400_000;
+pub(super) const HOVER_TRIANGLES: usize = 400_000;
 
 /// Geometria de realce em coordenadas do mundo.
 #[derive(Debug, Default, Clone)]
@@ -26,15 +26,21 @@ pub(super) struct Overlay {
     pub segments: Vec<([Point3; 2], Option<Point3>)>,
     pub triangles: Vec<[Point3; 3]>,
     pub points: Vec<Point3>,
+    /// Contornos com furos de perfis livres, no referencial da montagem.
+    pub contours: Vec<Vec<Point3>>,
 }
 impl Overlay {
     pub fn is_empty(&self) -> bool {
-        self.segments.is_empty() && self.triangles.is_empty() && self.points.is_empty()
+        self.segments.is_empty()
+            && self.triangles.is_empty()
+            && self.points.is_empty()
+            && self.contours.is_empty()
     }
     pub(super) fn extend(&mut self, other: Overlay) {
         self.segments.extend(other.segments);
         self.triangles.extend(other.triangles);
         self.points.extend(other.points);
+        self.contours.extend(other.contours);
     }
 }
 
@@ -263,6 +269,17 @@ pub(super) fn draw(
         },
         look.color(255),
     );
+    let contours = overlay
+        .contours
+        .iter()
+        .filter_map(|c| c.iter().map(|p| project(*p)).collect::<Option<Vec<_>>>())
+        .collect::<Vec<_>>();
+    profile_pick::fill(painter, &contours, fill);
+    for contour in contours {
+        if contour.len() > 1 {
+            painter.add(egui::Shape::closed_line(contour, stroke));
+        }
+    }
     for (segment, normal) in &overlay.segments {
         if normal.is_some_and(|n| norm(n) > 0. && dot(n, toward) <= 0.) {
             continue;
@@ -345,6 +362,10 @@ impl Editor {
     pub(super) fn update_hover(&mut self, ui: &egui::Ui, response: &egui::Response) {
         if self.current().plane_pick.is_some() {
             self.update_plane_hover(ui, response);
+            return;
+        }
+        if self.gestures.other.is_none() && self.cell_hover_active() {
+            self.update_cell_hover(ui, response);
             return;
         }
         // A lista de sobrepostos controla o realce enquanto está aberta.

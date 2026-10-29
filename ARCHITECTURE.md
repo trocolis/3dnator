@@ -4,6 +4,10 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 
 ## Módulos
 
+`cell_hover` compartilha a delimitação de `commands::painting::highlight` entre a seleção de faces da peça e Pintar. O serviço retorna somente a malha mundial da célula, usando a mesma seleção e os mesmos prismas de inclusão/exclusão da pintura, sem comandos ou mudanças no documento. Furos, bordas da face e múltiplos rascunhos são recortados no núcleo. Perfis livres usam contornos com furos, como na seleção da Extrusão.
+
+A consulta de oclusão/áreas e as booleanas do realce rodam em um trabalhador por vez. A chave acompanha cena, raio e modo, incluindo seção; respostas antigas não são desenhadas. Uma malha da célula anterior pode ser reutilizada se o novo raio ainda a atingir no mesmo corpo/posição visível. A interface recebe triângulos/contornos e desenha preenchimento e fronteiras, sem diagonais da tesselação. O limite de pré-seleção de cenas densas permanece o mesmo do editor.
+
 `commands::painting` consulta as superfícies/células no trabalhador, usando referências de face únicas ou índice com assinatura quando o nome é repetido. Rascunhos visíveis coplanares fornecem condições de inclusão/exclusão; `commands::appearance` combina os prismas por Common/Cut. Um comando pinta toda a seleção de forma atômica, construindo uma aparência por corpo. Corpo inteiro usa `base_color`, sem uma camada por face; essa cor sobrepõe a cor da ocorrência na cena.
 
 `paint_editor` mantém uma fila independente de cliques: atualizações da cena e o primeiro clique não bloqueiam o segundo clique do duplo clique. A fila respeita revisão e cancelamento. O painel contém apenas lista de superfícies e paleta, com duas linhas de predefinições e a cor personalizada independente. `project_io::preferences` persiste a preferência RGB com substituição atômica; um trabalhador serializa gravações e termina antes do fechamento do editor. Testes/capturas usam uma paleta em memória para não alterar as preferências reais.

@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Destaque das áreas delimitadas por rascunhos — 29/10/2026
+
+- Seleção de faces em Peça e ferramenta Pintar destacam somente a célula sob o cursor, com o mesmo recorte da pintura: furos, interseções e exterior dos contornos. Perfis livres continuam disponíveis na peça; Pintar exige apoio. Cálculo em trabalhador único, cache por cena/raio e reaproveitamento da célula, respeitando rascunhos ocultos e oclusão por outros corpos.
+- Aprovados 336 testes com OCCT, 257 sem OCCT, 40 ensaios gráficos, formatação e Clippy nas duas configurações. Capturas `part-cell.png` e `paint-cell.png` inspecionadas em `target/codex-validation/cell-hover-20261029/`.
+- Sem modificação do documento ou formato 29; aplicativo 0.3.0 em desenvolvimento. Sem release, publicação remota ou validação Windows.
+
 ## Refinamento de Pintar e correções de referência/cor — 29/10/2026
 
 - Balde de tinta com seleção múltipla por cliques, corpo inteiro por duplo clique e delimitação automática das células dos rascunhos visíveis sobre a face. Painel reduzido a superfícies e paleta; duas linhas de predefinições e personalizada hexadecimal persistente, independente da cor ativa.

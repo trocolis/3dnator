@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Realce de células em Peça e Pintar — 29/10/2026
+
+- **336 testes com OCCT e 257 sem OCCT aprovados**. A regressão do núcleo compara a área destacada com os recortes da pintura: retângulo menos círculo, círculo interno e complemento da face. Verifica coordenadas de montagem após translação/rotação, nomes repetidos de faces e ausência de alterações no documento/aparência.
+- **40 ensaios gráficos seriais GL/llvmpipe aprovados**. O novo fluxo passa o cursor pelas três regiões em Peça e Pintar, compara as áreas reais do realce, oculta/restaura o rascunho, mostra um corpo à frente e verifica que o realce não atravessa essa oclusão. Também exercita perfil livre sem apoio e limpeza ao sair do canvas. Revisão do documento permanece igual ao apenas passar o mouse.
+- Formatação e Clippy com todos os alvos/avisos negados aprovados nas duas configurações. Compilação desktop e capturas `part-cell.png`/`paint-cell.png` aprovadas e inspecionadas: apenas a região retangular ao redor do furo fica azul, nas duas ferramentas. Cenários `cell-hover` e `paint-hover` disponíveis no executor de capturas.
+- Evidências em `target/codex-validation/cell-hover-20261029/`. Aplicativo 0.3.0 em desenvolvimento e formato 29 preservados. Windows e janela nativa não exercitados localmente; sem release ou publicação remota.
+
 ## Balde de tinta, células automáticas e conservação de cor — 29/10/2026
 
 - **335 testes com OCCT e 257 sem OCCT aprovados**. Novas regressões verificam pintura dentro/fora de contornos e furos, interseções/complementos de dois rascunhos, áreas analíticas, nomes repetidos de faces sem referência ambígua, falha atômica de seleção inválida e confirmação de várias superfícies. Condições persistem e são remapeadas ao clonar.

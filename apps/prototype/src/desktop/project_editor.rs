@@ -1,6 +1,7 @@
 mod assembly_tools;
 mod browser;
 pub(crate) mod capture;
+mod cell_hover;
 mod command_panel;
 mod distance_arrow;
 mod drawing_editor;
@@ -476,6 +477,7 @@ pub struct Editor {
     canvas_rect: egui::Rect,
     /// Pré-seleção sob o cursor e dados de realce por geometria.
     hover: Option<highlight::Hover>,
+    cell_hover: cell_hover::Cache,
     highlight_cache: highlight::Cache,
     profile_cache: profile_pick::Cache,
     point_cache: point_snap::Cache,
@@ -666,6 +668,7 @@ impl Editor {
             preview: live_preview::LivePreview::default(),
             canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.)),
             hover: None,
+            cell_hover: Default::default(),
             highlight_cache: highlight::Cache::default(),
             point_cache: point_snap::Cache::default(),
             profile_cache: profile_pick::Cache::default(),

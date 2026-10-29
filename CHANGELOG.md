@@ -2,6 +2,12 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Destaque das áreas de rascunho em Peça e Pintar
+
+- Passar o mouse na seleção de faces da peça ou em Pintar destaca somente a célula delimitada pelos rascunhos visíveis sobre a face, incluindo furos, interseções e a região exterior. O realce usa o mesmo recorte exato aplicado pela pintura; não tinge a face inteira quando há uma delimitação.
+- Consulta e recorte em segundo plano, com reaproveitamento da geometria ao mover o cursor dentro da mesma célula. Respostas de outra posição, revisão, peça, câmera ou estado de seção não são exibidas. Corpos à frente e rascunhos ocultos são respeitados. Perfis livres continuam realçáveis na edição da peça; Pintar exige uma superfície de apoio.
+- Sem alteração do documento, histórico, cores ou formato interno 29. Aplicativo permanece em 0.3.0 em desenvolvimento.
+
 ### Balde de tinta, seleção múltipla e conservação de cores
 
 - Pintar usa ícone de balde e painel com somente superfícies e cores. Cliques alternam superfícies/células; duplo clique seleciona o corpo inteiro, com fila de consultas que conserva cliques durante a atualização da prévia. OK publica todas as escolhas em uma ação de desfazer/refazer.

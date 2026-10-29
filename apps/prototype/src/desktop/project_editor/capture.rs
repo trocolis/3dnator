@@ -41,6 +41,8 @@ pub(crate) fn render_ui_scenario(
         | "extrude"
         | "edit-last"
         | "failure"
+        | "cell-hover"
+        | "paint-hover"
         | "hover-face"
         | "hover-edge"
         | "sketch-plane-hover"
@@ -108,7 +110,20 @@ pub(crate) fn render_ui_scenario(
         },
         move |editor, frame| {
             let canvas = editor.canvas_rect;
-            let target = canvas.center() + egui::vec2(-60., 40.);
+            let target = if matches!(pointer.as_str(), "cell-hover" | "paint-hover") {
+                first_cell_target(editor)
+                    .and_then(|point| {
+                        sketch_scene::project(
+                            &editor.viewport.camera,
+                            editor.display_bounds(),
+                            canvas,
+                            point,
+                        )
+                    })
+                    .unwrap_or(canvas.center())
+            } else {
+                canvas.center() + egui::vec2(-60., 40.)
+            };
             if pointer.starts_with("sketch-") && pointer.ends_with("-input") {
                 let start = canvas.center() + egui::vec2(-180., 100.);
                 let end = start + egui::vec2(140., -75.);
@@ -190,7 +205,8 @@ pub(crate) fn render_ui_scenario(
                 ];
             }
             match pointer.as_str() {
-                "hover-face" | "hover-edge" | "sketch-plane-hover" | "work-plane-pick"
+                "cell-hover" | "paint-hover" | "hover-face" | "hover-edge"
+                | "sketch-plane-hover" | "work-plane-pick"
                     if frame >= 2 =>
                 {
                     return vec![egui::Event::PointerMoved(target)];
@@ -242,6 +258,9 @@ pub(crate) fn render_ui_scenario(
                     .sketch_edit
                     .as_ref()
                     .is_some_and(|w| w.operation_ready());
+            }
+            if matches!(scenario, "cell-hover" | "paint-hover") {
+                return editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty());
             }
             if scenario == "sketch-plane-hover" {
                 return editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty());
@@ -299,6 +318,35 @@ fn first_line_middle(editor: &Editor) -> Option<egui::Pos2> {
     frame.screen(nator_sketch::scale(nator_sketch::add(a, b), 0.5))
 }
 
+/// Um ponto interno evita que a captura caia justamente sobre um contorno/furo.
+/// Este preparo pertence ao executor de capturas, fora do fluxo interativo normal.
+fn first_cell_target(editor: &Editor) -> Option<Point3> {
+    let part = editor.current().active_part?;
+    let piece = editor.current().session.document().part(part)?;
+    let placement = sketch_scene::part_placement(editor.current(), part).ok()?;
+    for record in piece.sketches.iter().filter(|s| piece.shows_sketch(s)) {
+        let regions = nator_sketch::areas::regions(&record.sketch).ok()?;
+        for region in regions {
+            let points = region.outer.sample(32);
+            let center = nator_sketch::scale(
+                points.iter().fold([0.; 2], |a, p| nator_sketch::add(a, *p)),
+                1. / points.len().max(1) as f64,
+            );
+            for point in points.iter().map(|p| {
+                nator_sketch::add(
+                    nator_sketch::scale(*p, 0.9),
+                    nator_sketch::scale(center, 0.1),
+                )
+            }) {
+                if region.outer.contains(point) && !region.holes.iter().any(|h| h.contains(point)) {
+                    return Some(placement.apply(record.sketch.plane.world(point)));
+                }
+            }
+        }
+    }
+    None
+}
+
 fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
     let sketch = editor
         .current()
@@ -319,7 +367,7 @@ fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
-    if scenario == "paint" {
+    if matches!(scenario, "paint" | "paint-hover") {
         editor.shell.tab = shell::RibbonTab::Model;
         editor.open_paint();
         return Ok(());
@@ -544,7 +592,10 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             let feature = features.last().ok_or("Peça sem operações.")?.clone();
             editor.feature_edit = Some(feature_editor::Draft::edit(tab, part, feature));
         }
-        "hover-face" | "hover-edge" | "sketch-plane-hover" | "window" => {
+        "cell-hover" | "hover-face" | "hover-edge" | "sketch-plane-hover" | "window" => {
+            if scenario == "cell-hover" {
+                editor.shell.tab = shell::RibbonTab::Model;
+            }
             editor.current_mut().select(None);
             editor.pick_mode = if scenario == "hover-edge" {
                 navigation::PickMode::Edge
@@ -7081,6 +7132,174 @@ mod tests {
                 .is_some()
         );
         assert!(editor.current_mut().session.redo());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn part_and_paint_hover_only_the_visible_sketch_cell_and_respect_holes_and_occlusion()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut solid = nator_kernel::Solid::cuboid([0.; 3], [20., 20., 5.])?;
+        let (mesh, faces) = solid.tessellate_with_faces(0.02, 0.2)?;
+        let mut document = Document::new("Realce de células")?;
+        let (part, body) = document.add_mesh(
+            None,
+            "Placa".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        document.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+        // Nomes repetidos também precisam de realce preciso, como na pintura.
+        document.body_mut(body)?.face_names =
+            Arc::new(vec!["shared:face".into(); solid.face_count()?]);
+        let mut sketch = Sketch::new(
+            "Divisões",
+            Plane {
+                origin: [0., 0., 5.],
+                ..Plane::xy()
+            },
+        );
+        sketch.add_rectangle([2., 2.], [10., 10.], false)?;
+        sketch.add_circle([6., 6.], 2., false)?;
+        let (_, id) = document.add_sketch(Some(part), sketch)?;
+        let mut free = Sketch::new(
+            "Perfil livre",
+            Plane {
+                origin: [0., 0., 20.],
+                ..Plane::xy()
+            },
+        );
+        free.add_rectangle([-20., -20.], [-10., -10.], false)?;
+        document.add_sketch(Some(part), free)?;
+        let mut cover = nator_kernel::Solid::cuboid([2., 2., 8.], [8., 8., 2.])?;
+        let (mesh, faces) = cover.tessellate_with_faces(0.02, 0.2)?;
+        let (_, blocker) = document.add_mesh(
+            Some(part),
+            "Cobertura".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        document.body_mut(blocker)?.brep = Some(Arc::new(cover.to_brep()?));
+        document.body_mut(blocker)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+            "cover",
+            cover.face_count()?,
+        ));
+        document.body_mut(blocker)?.visible = false;
+        if let Some(directory) = std::env::var_os("NATOR_CELL_HOVER_CAPTURE_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory)?;
+            write_project(&directory.join("cell-hover.3dnator"), &document)?;
+        }
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.browser_visible = false;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        settle(&mut editor, &context)?;
+        let revision = editor.current().session.revision();
+        let area = |overlay: &highlight::Overlay| {
+            overlay
+                .triangles
+                .iter()
+                .map(|[a, b, c]| {
+                    nator_geometry::norm(nator_geometry::cross(
+                        nator_geometry::sub(*b, *a),
+                        nator_geometry::sub(*c, *a),
+                    )) / 2.
+                })
+                .sum::<f64>()
+        };
+        let hover_at = |editor: &mut Editor, point, expected: f64| -> Result<(), Box<dyn Error>> {
+            let position = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Área fora da tela")?;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                frame(editor, &context, vec![egui::Event::PointerMoved(position)])?;
+                if editor.hover.as_ref().is_some_and(|h| {
+                    h.position.distance(position) < 0.1 && (area(&h.overlay) - expected).abs() < 0.1
+                }) {
+                    return Ok(());
+                }
+                if Instant::now() > deadline {
+                    return Err(format!(
+                        "Área de realce incorreta: esperado {expected}, recebido {:?}",
+                        editor.hover.as_ref().map(|h| area(&h.overlay))
+                    )
+                    .into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        for paint in [false, true] {
+            if paint {
+                editor.open_paint();
+                frame(&mut editor, &context, vec![])?;
+            }
+            hover_at(&mut editor, [3., 3., 5.], 64. - 4. * std::f64::consts::PI)?;
+            hover_at(&mut editor, [6., 6., 5.], 4. * std::f64::consts::PI)?;
+            hover_at(&mut editor, [1., 1., 5.], 336.)?;
+            assert_eq!(editor.current().session.revision(), revision);
+        }
+        editor.execute(Command::SetSketchVisibility { id, visible: false });
+        settle(&mut editor, &context)?;
+        hover_at(&mut editor, [3., 3., 5.], 400.)?;
+        editor.execute(Command::SetSketchVisibility { id, visible: true });
+        editor.execute(Command::SetBodyVisibility {
+            id: blocker,
+            visible: true,
+        });
+        settle(&mut editor, &context)?;
+        hover_at(&mut editor, [6., 6., 10.], 64.)?;
+        // Sem corpo atrás, Peça oferece o perfil livre. Pintar exige uma superfície.
+        editor.activate_selection(&context);
+        editor.viewport.camera.span = 4.;
+        frame(&mut editor, &context, vec![])?;
+        let position = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [-15., -15., 20.],
+        )
+        .ok_or("Perfil fora da tela")?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(position)],
+            )?;
+            if editor
+                .hover
+                .as_ref()
+                .is_some_and(|h| !h.overlay.contours.is_empty())
+            {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "Perfil livre não realçado: pos={position:?}; canvas={:?}; hover={:?}",
+                    editor.canvas_rect,
+                    editor
+                        .hover
+                        .as_ref()
+                        .map(|h| (&h.label, h.overlay.contours.len()))
+                )
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(egui::pos2(1., 1.))],
+        )?;
+        assert!(editor.hover.is_none());
         Ok(())
     }
 
