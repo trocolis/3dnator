@@ -14,10 +14,15 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("output", type=Path)
 parser.add_argument("--conda-prefix", type=Path)
+parser.add_argument("--conda-info", type=Path)
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=False)
 if args.conda_prefix:
-    cache = json.loads(subprocess.check_output(["conda", "info", "--json"], text=True))["pkgs_dirs"]
+    # No Bash Windows, conda pode ser uma função/batch, indisponível ao
+    # CreateProcess do Python. O shell fornece o JSON, sem shell=True.
+    if args.conda_info is None:
+        parser.error("Informe --conda-info com a saída de conda info --json.")
+    cache = json.loads(args.conda_info.read_text(encoding="utf-8-sig"))["pkgs_dirs"]
     for metadata in (args.conda_prefix / "conda-meta").glob("*.json"):
         target = args.output / metadata.stem
         target.mkdir()

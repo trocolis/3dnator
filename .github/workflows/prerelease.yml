@@ -16,6 +16,7 @@ permissions:
 env:
   CARGO_BUILD_JOBS: 2
   CARGO_INCREMENTAL: 0
+  PYTHONUTF8: 1
 
 jobs:
   flatpak:
@@ -91,7 +92,8 @@ jobs:
           cargo build -p nator-prototype --release --features occt --locked
           python -c 'import tomllib; print("APP_VERSION=" + tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])' >> "$GITHUB_ENV"
           python scripts/collect_licenses.py dist/licenses/rust
-          python scripts/collect_native_licenses.py dist/licenses/native --conda-prefix "$CONDA_PREFIX"
+          conda info --json > dist/conda-info.json
+          python scripts/collect_native_licenses.py dist/licenses/native --conda-prefix "$CONDA_PREFIX" --conda-info dist/conda-info.json
       - name: Empacotar e validar sem o SDK no PATH
         shell: pwsh
         run: |
@@ -112,11 +114,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile dist/vc_redist.x64.exe
+          Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile dist/vc_redist.x64.exe
           $Signature = Get-AuthenticodeSignature dist/vc_redist.x64.exe
           if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notlike '*Microsoft Corporation*') { throw 'Assinatura do redistribuível Microsoft inválida.' }
-          $Compiler = 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
-          if (-not (Test-Path $Compiler)) { throw 'Compilador Inno Setup ausente no runner.' }
+          $Compiler = Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup*/ISCC.exe", "$env:ProgramFiles/Inno Setup*/ISCC.exe" -File -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $Compiler) { throw 'Compilador Inno Setup ausente no runner.' }
           & $Compiler "/DAppVersion=$env:APP_VERSION" "/DAppNumericVersion=$($env:APP_VERSION.Split('-')[0])" "/DPackageDir=$((Resolve-Path dist/windows-relocado).Path)" "/DRedistPath=$((Resolve-Path dist/vc_redist.x64.exe).Path)" "/O$((Resolve-Path dist).Path)" packaging/windows/3dnator.iss
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao compilar o instalador.' }
           $Installer = (Get-Item "dist/3dnator-$env:APP_VERSION-windows-x64-setup.exe").FullName
