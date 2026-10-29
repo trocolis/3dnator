@@ -21,6 +21,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: prerelease-linux
+          cache-on-failure: true
       - name: Preparar SDK nativo e runtime Flatpak
         run: |
           sudo apt-get update
@@ -62,6 +63,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: prerelease-windows
+          cache-on-failure: true
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
@@ -72,7 +74,10 @@ jobs:
       - name: Validar e compilar
         run: |
           export CMAKE_PREFIX_PATH="$CONDA_PREFIX/Library"
-          export PATH="$CONDA_PREFIX/Library/bin:$PATH"
+          # O Bash do Git também fornece link.exe; escolher explicitamente MSVC.
+          MSVC_TOOLS="$(cygpath -u "$VCToolsInstallDir")/bin/Hostx64/x64"
+          export PATH="$MSVC_TOOLS:$CONDA_PREFIX/Library/bin:$PATH"
+          export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER="$(cygpath -w "$MSVC_TOOLS/link.exe")"
           echo "NATOR_OCCT_BIN=$(cygpath -w "$CONDA_PREFIX/Library/bin")" >> "$GITHUB_ENV"
           cargo test --workspace --features occt --locked
           cargo build -p nator-prototype --release --features occt --locked

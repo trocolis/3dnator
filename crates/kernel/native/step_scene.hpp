@@ -43,10 +43,11 @@ std::string step_name(const TDF_Label& label) {
     result.resize(text.ToUTF8CString(buffer));
     return result.empty() ? "Peça STEP" : result;
 }
-std::array<int,3> step_color(const TDF_Label& label) {
+// No OCCT 7.6 GetColor é membro; nas versões novas também aceita esta chamada.
+std::array<int,3> step_color(const Handle(XCAFDoc_ColorTool)& colors, const TDF_Label& label) {
     Quantity_Color color;
-    if (!XCAFDoc_ColorTool::GetColor(label, XCAFDoc_ColorSurf, color) &&
-        !XCAFDoc_ColorTool::GetColor(label, XCAFDoc_ColorGen, color)) return {-1,-1,-1};
+    if (!colors->GetColor(label, XCAFDoc_ColorSurf, color) &&
+        !colors->GetColor(label, XCAFDoc_ColorGen, color)) return {-1,-1,-1};
     double r, g, b;
     color.Values(r, g, b, Quantity_TOC_sRGB);
     return {int(std::lround(r * 255)), int(std::lround(g * 255)), int(std::lround(b * 255))};
@@ -88,7 +89,7 @@ StepScene* nator_step_scene_read(const char* path) noexcept {
             XCAFDoc_ShapeTool::GetReferredShape(label, target);
             if (target.IsNull()) target = label;
             const auto part = definition(target, depth);
-            scene->instances.push_back({part, parent, step_name(label), XCAFDoc_ShapeTool::GetLocation(label).Transformation(), step_color(label)});
+            scene->instances.push_back({part, parent, step_name(label), XCAFDoc_ShapeTool::GetLocation(label).Transformation(), step_color(colors,label)});
         };
         definition = [&](const TDF_Label& label, std::size_t depth) -> std::size_t {
             if (depth > 64) throw std::runtime_error("Hierarquia STEP excede 64 níveis.");
@@ -117,7 +118,7 @@ StepScene* nator_step_scene_read(const char* path) noexcept {
                     if (++body_count > max_step_elements) throw std::runtime_error("STEP excede dez mil corpos.");
                     auto solid = it.Current();
                     if (!BRepCheck_Analyzer(solid).IsValid()) throw std::runtime_error("Sólido STEP inválido.");
-                    auto color = step_color(label);
+                    auto color = step_color(colors,label);
                     Quantity_Color specific;
                     if (colors->GetColor(solid, XCAFDoc_ColorSurf, specific) || colors->GetColor(solid, XCAFDoc_ColorGen, specific)) {
                         double r, g, b; specific.Values(r, g, b, Quantity_TOC_sRGB);
