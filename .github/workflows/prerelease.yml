@@ -3,6 +3,12 @@ name: Empacotar pré-release
 # A publicação da release é deliberada, após conferir ambos os artefatos.
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Pacote a gerar
+        type: choice
+        default: all
+        options: [all, flatpak, windows]
 
 permissions:
   contents: read
@@ -13,6 +19,7 @@ env:
 
 jobs:
   flatpak:
+    if: inputs.platform != 'windows'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -25,7 +32,7 @@ jobs:
       - name: Preparar SDK nativo e runtime Flatpak
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libxkbcommon-dev libwayland-dev libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-ocaf-dev flatpak
+          sudo apt-get install -y cmake libxkbcommon-dev libwayland-dev libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-ocaf-dev flatpak librsvg2-common
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install --user -y --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
       - name: Validar e compilar
@@ -51,6 +58,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: inputs.platform != 'flatpak'
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
