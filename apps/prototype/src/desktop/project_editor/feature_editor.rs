@@ -14,10 +14,11 @@ use super::{
 };
 use nator_document::features::{
     BooleanMode, Combine, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec, HoleSpec,
-    LinearAxis, Operation, PatternLayout, RegionRef, ThreadSpec, UntilFace, signature,
+    LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, ThreadSpec, UntilFace, signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
+mod revolve;
 
 /// Ferramentas do painel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,14 +124,7 @@ pub(super) enum Field {
     UntilFace,
     ExitFace,
     CuttingPlane,
-}
-
-/// Eixo da revolução: um eixo do plano do rascunho ou uma linha do rascunho.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum RevolveAxis {
-    U,
-    V,
-    Line(u64),
+    RevolveAxis,
 }
 
 /// Direção da extrusão, como nos CADs de mercado. Os limites gravados continuam sendo
@@ -348,7 +342,8 @@ pub(super) struct Draft {
     automatic: bool,
     auto_preferred: Option<BodyId>,
     interaction: extrusion::Interaction,
-    axis: RevolveAxis,
+    revolve_axis: Option<(SketchId, u64)>,
+    additional_profiles: Vec<ProfileRef>,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
     kept_axis: Option<([f64; 3], [f64; 3])>,
     /// Índice de aresta/face no corpo base, para seleções sem nome estável.
@@ -394,7 +389,8 @@ impl Draft {
             automatic: tool == Tool::Extrude,
             auto_preferred: None,
             interaction: extrusion::Interaction::default(),
-            axis: RevolveAxis::V,
+            revolve_axis: None,
+            additional_profiles: vec![],
             kept_axis: None,
             index: 0,
             kept_topology: None,
@@ -481,13 +477,16 @@ impl Draft {
                 axis_line,
                 axis_origin,
                 axis_direction,
+                axis_sketch,
+                additional_profiles,
             } => {
                 d.tool = Tool::Revolve;
                 d.sketch = Some(sketch);
                 d.kept_region = Some(region);
                 d.angle = angle;
+                d.additional_profiles = additional_profiles;
                 match axis_line {
-                    Some(line) => d.axis = RevolveAxis::Line(line),
+                    Some(line) => d.revolve_axis = Some((axis_sketch.unwrap_or(sketch), line)),
                     None => d.kept_axis = Some((axis_origin, axis_direction)),
                 }
             }
@@ -703,7 +702,7 @@ impl Draft {
                 Some(Awaiting::Face)
             }
             Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
-            Field::Profile => None,
+            Field::Profile | Field::RevolveAxis => None,
         }
     }
     pub(super) fn choosing_cutting_plane(&self) -> bool {
@@ -747,6 +746,43 @@ impl Draft {
     }
     /// Região do perfil escolhida por clique no rascunho.
     pub(super) fn choose_region(&mut self, sketch: SketchId, region: RegionRef) {
+        if self.tool == Tool::Revolve {
+            if self.kept_region.is_none() {
+                self.sketch = Some(sketch);
+                self.kept_region = Some(region);
+            } else if self.sketch == Some(sketch) {
+                let mut selected = self
+                    .kept_region
+                    .take()
+                    .map(|r| r.selections().to_vec())
+                    .unwrap_or_default();
+                if let Some(i) = selected.iter().position(|r| *r == region) {
+                    selected.remove(i);
+                } else {
+                    selected.push(region);
+                }
+                self.kept_region = match selected.len() {
+                    0 => None,
+                    1 => selected.pop(),
+                    _ => Some(RegionRef::Multiple(selected)),
+                };
+                if self.kept_region.is_none() && !self.additional_profiles.is_empty() {
+                    let next = self.additional_profiles.remove(0);
+                    self.sketch = Some(next.sketch);
+                    self.kept_region = Some(next.region);
+                }
+            } else {
+                let profile = ProfileRef { sketch, region };
+                if let Some(i) = self.additional_profiles.iter().position(|p| *p == profile) {
+                    self.additional_profiles.remove(i);
+                } else {
+                    self.additional_profiles.push(profile);
+                }
+            }
+            self.region = None;
+            self.field = Some(Field::Profile);
+            return;
+        }
         self.face_profile = None;
         self.interaction = extrusion::Interaction::default();
         if self.tool == Tool::Extrude && self.sketch == Some(sketch) {
@@ -770,11 +806,27 @@ impl Draft {
         }
         self.sketch = Some(sketch);
         self.region = None;
-        // Na revolução, o eixo gravado pertence ao rascunho anterior.
-        if self.tool == Tool::Revolve {
-            self.kept_axis = None;
-        }
         self.field = if self.tool == Tool::Extrude {
+            Some(Field::Profile)
+        } else {
+            None
+        };
+    }
+    pub(super) fn selected_profiles(&self) -> Vec<ProfileRef> {
+        self.sketch
+            .zip(self.kept_region.clone())
+            .map(|(sketch, region)| ProfileRef { sketch, region })
+            .into_iter()
+            .chain(self.additional_profiles.clone())
+            .collect()
+    }
+    pub(super) fn accepts_coplanar_profiles(&self) -> bool {
+        self.tool == Tool::Revolve
+    }
+    pub(super) fn choose_revolve_axis(&mut self, sketch: SketchId, line: u64) {
+        self.revolve_axis = Some((sketch, line));
+        self.kept_axis = None;
+        self.field = if self.kept_region.is_none() {
             Some(Field::Profile)
         } else {
             None
@@ -965,7 +1017,9 @@ impl Draft {
                     && (self.automatic || self.combine == 0 || self.combine_target.is_some())
             }
             Tool::Revolve => {
-                self.sketch.is_some() && (self.kept_region.is_some() || self.region.is_some())
+                self.sketch.is_some()
+                    && (self.kept_region.is_some() || self.region.is_some())
+                    && (self.revolve_axis.is_some() || self.kept_axis.is_some())
             }
             Tool::Join | Tool::Cut | Tool::Intersect => {
                 self.base.is_some() && self.tool_body.is_some() && self.base != self.tool_body
@@ -1068,20 +1122,17 @@ impl Draft {
             }
             Tool::Revolve => {
                 let plane = record.map(|r| r.sketch.plane).unwrap_or_default();
-                let (axis_origin, axis_direction) = self.kept_axis.unwrap_or(match self.axis {
-                    RevolveAxis::U => (plane.origin, plane.u),
-                    _ => (plane.origin, plane.v),
-                });
+                let (axis_origin, axis_direction) =
+                    self.kept_axis.unwrap_or((plane.origin, plane.v));
                 Operation::Revolve {
                     sketch,
                     region,
                     axis_origin,
                     axis_direction,
                     angle: self.angle.clone(),
-                    axis_line: match self.axis {
-                        RevolveAxis::Line(line) if self.kept_axis.is_none() => Some(line),
-                        _ => None,
-                    },
+                    axis_line: self.revolve_axis.map(|(_, line)| line),
+                    axis_sketch: self.revolve_axis.map(|(sketch, _)| sketch),
+                    additional_profiles: self.additional_profiles.clone(),
                 }
             }
             Tool::Join | Tool::Cut | Tool::Intersect => Operation::Boolean {
@@ -1571,7 +1622,11 @@ fn profile_rows(
         .kept_region
         .as_ref()
         .map(|r| r.selections().len())
-        .unwrap_or_else(|| usize::from(d.face_profile.is_some() || d.region.is_some()));
+        .unwrap_or_else(|| usize::from(d.face_profile.is_some() || d.region.is_some()))
+        + d.additional_profiles
+            .iter()
+            .map(|p| p.region.selections().len())
+            .sum::<usize>();
     let sketch_name = d
         .sketch
         .and_then(|id| part.sketches.iter().find(|s| s.id == id))
@@ -1595,6 +1650,7 @@ fn profile_rows(
         d.face_profile = None;
         d.interaction = extrusion::Interaction::default();
         d.kept_region = None;
+        d.additional_profiles.clear();
         d.region = None;
         d.field = Some(Field::Profile);
     }
@@ -1764,48 +1820,44 @@ fn revolve_panel(
     d: &mut Draft,
     part: &nator_document::Part,
     regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
-    record: Option<&nator_document::SketchRecord>,
+    _record: Option<&nator_document::SketchRecord>,
 ) {
     profile_rows(ui, d, part, regions);
-    let label = |axis: RevolveAxis| match axis {
-        RevolveAxis::U => text(T::AxisU).to_owned(),
-        RevolveAxis::V => text(T::AxisV).to_owned(),
-        RevolveAxis::Line(id) => format!("{} #{id}", text(T::Entity)),
-    };
-    let selected = if d.kept_axis.is_some() {
-        text(T::KeptReference).to_owned()
-    } else {
-        label(d.axis)
-    };
-    let lines = record
-        .map(|s| {
-            s.sketch
-                .entities
+    let description = d
+        .revolve_axis
+        .map(|(sketch, line)| {
+            let name = part
+                .sketches
                 .iter()
-                .filter(|e| matches!(e.curve, Curve::Line { .. }))
-                .map(|e| e.id)
-                .collect::<Vec<_>>()
+                .find(|s| s.id == sketch)
+                .map(|s| s.sketch.name.as_str())
+                .unwrap_or("—");
+            format!("{name} · {} #{line}", text(T::Entity))
         })
-        .unwrap_or_default();
-    panel::row(ui, text(T::AxisField), |ui| {
-        egui::ComboBox::from_id_salt("revolve_axis")
-            .width(170.)
-            .selected_text(selected)
-            .show_ui(ui, |ui| {
-                for axis in [RevolveAxis::U, RevolveAxis::V]
-                    .into_iter()
-                    .chain(lines.into_iter().map(RevolveAxis::Line))
-                {
-                    if ui
-                        .selectable_label(d.kept_axis.is_none() && d.axis == axis, label(axis))
-                        .clicked()
-                    {
-                        d.axis = axis;
-                        d.kept_axis = None;
-                    }
-                }
-            });
-    });
+        .or_else(|| d.kept_axis.map(|_| text(T::KeptReference).into()));
+    let selected = d.revolve_axis.is_some() || d.kept_axis.is_some();
+    let selection = panel::selection(
+        ui,
+        text(T::AxisField),
+        usize::from(selected),
+        description.as_deref(),
+        d.field == Some(Field::RevolveAxis),
+    );
+    if selection.activate {
+        d.field = Some(Field::RevolveAxis);
+    }
+    if selection.clear {
+        d.revolve_axis = None;
+        d.kept_axis = None;
+        d.field = Some(Field::RevolveAxis);
+    }
+    if d.field == Some(Field::RevolveAxis) {
+        ui.label(
+            egui::RichText::new(text(T::RevolveAxisHint))
+                .small()
+                .color(theme::MUTED),
+        );
+    }
     let mut full = d.angle.trim() == "360 deg";
     panel::row(ui, text(T::Angle), |ui| {
         ui.add_enabled_ui(!full, |ui| panel::expression(ui, &mut d.angle));
@@ -1813,7 +1865,6 @@ fn revolve_panel(
             d.angle = if full { "360 deg" } else { "180 deg" }.into();
         }
     });
-    operation_rows(ui, d, part);
 }
 
 fn body_selection(

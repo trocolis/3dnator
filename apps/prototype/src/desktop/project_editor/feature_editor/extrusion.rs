@@ -53,6 +53,11 @@ impl Draft {
             .and_then(|id| part.sketches.iter().find(|s| s.id == id))
             .map(|s| s.sketch.plane)
             .or_else(|| {
+                self.revolve_axis
+                    .and_then(|(id, _)| part.sketches.iter().find(|s| s.id == id))
+                    .map(|s| s.sketch.plane)
+            })
+            .or_else(|| {
                 self.interaction
                     .guide
                     .and_then(|g| nator_sketch::Plane::from_normal(g.origin, g.normal).ok())

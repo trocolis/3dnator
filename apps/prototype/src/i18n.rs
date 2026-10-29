@@ -109,6 +109,8 @@ pub enum Text {
     SettingsMenu,
     ThroughShell,
     CuttingPlane,
+    RevolveAxisHint,
+    CoplanarProfilesRequired,
     CuttingPlaneHint,
     ExitFace,
     AutomaticExitHint,
@@ -253,7 +255,9 @@ pub enum Text {
     MirrorBody,
     SplitBody,
     SplitShort,
+    #[allow(dead_code)]
     AxisU,
+    #[allow(dead_code)]
     AxisV,
     HolePoints,
     NoHolePoints,
@@ -823,6 +827,10 @@ pub fn text(key: Text) -> &'static str {
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
         Text::FileMenu => "Arquivo",
+        Text::CoplanarProfilesRequired => "Selecione áreas e eixo no mesmo plano.",
+        Text::RevolveAxisHint => {
+            "Clique numa linha de um rascunho coplanar às áreas, inclusive linha de referência ou infinita."
+        }
         Text::CuttingPlane => "Plano de divisão",
         Text::CuttingPlaneHint => {
             "Escolha uma face plana, um plano de trabalho ou um plano da origem. Os dois lados serão conservados."

@@ -188,6 +188,8 @@ impl Editor {
         };
         let part_id = draft.part();
         let chosen = draft.sketch().zip(draft.region_reference().cloned());
+        let selected_profiles = draft.selected_profiles();
+        let coplanar_only = draft.accepts_coplanar_profiles();
         let current = draft.sketch();
         let editing = draft.output().is_some();
         let document = self.current().session.document();
@@ -257,9 +259,9 @@ impl Editor {
             .painter()
             .with_clip_rect(response.rect.intersect(ui.clip_rect()));
         for (index, candidate) in candidates.iter().enumerate() {
-            let selected = chosen.as_ref().is_some_and(|(s, b)| {
-                *s == candidate.sketch
-                    && b.selections().iter().any(|b| match b {
+            let selected = selected_profiles.iter().any(|profile| {
+                profile.sketch == candidate.sketch
+                    && profile.region.selections().iter().any(|b| match b {
                         nator_document::features::RegionRef::Boundary(ids) => {
                             *ids == candidate.boundary
                         }
@@ -299,6 +301,10 @@ impl Editor {
             let (sketch, reference) = (candidate.sketch, candidate.reference.clone());
             let different =
                 source_plane.is_some_and(|plane| !coplanar(plane, candidate.frame.plane));
+            if different && coplanar_only {
+                self.status.warning(text(T::CoplanarProfilesRequired));
+                return true;
+            }
             if let Some(draft) = self.feature_edit.as_mut() {
                 if extrusion && (different || explicit_limit) {
                     draft.choose_limit(nator_document::features::ExtrusionLimit::Sketch { sketch });

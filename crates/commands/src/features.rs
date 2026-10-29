@@ -318,6 +318,8 @@ pub(super) fn normalize(
             axis_direction,
             angle,
             axis_line,
+            axis_sketch,
+            additional_profiles,
         } => Operation::Revolve {
             region: stable_region(sketch, region)?,
             sketch,
@@ -325,6 +327,16 @@ pub(super) fn normalize(
             axis_direction,
             angle,
             axis_line,
+            axis_sketch,
+            additional_profiles: additional_profiles
+                .into_iter()
+                .map(|p| {
+                    Ok(nator_document::features::ProfileRef {
+                        sketch: p.sketch,
+                        region: stable_region(p.sketch, p.region)?,
+                    })
+                })
+                .collect::<Result<_, DocumentError>>()?,
         },
         Operation::Fillet {
             base,
@@ -479,27 +491,54 @@ pub(super) fn construct(
             }
         }
         Operation::Revolve {
-            sketch,
+            sketch: primary_id,
             region: reference,
             axis_origin,
             axis_direction,
             angle,
             axis_line,
+            axis_sketch,
+            additional_profiles,
         } => {
-            let sketch = sketch_of(doc, part, *sketch)?;
+            let sketch = sketch_of(doc, part, *primary_id)?;
             let (origin, direction) = match axis_line {
-                Some(line) => sketch_axis(sketch, *line)?,
+                Some(line) => {
+                    let axis = sketch_of(doc, part, axis_sketch.unwrap_or(*primary_id))?;
+                    nator_document::features::validate_coplanar(sketch.plane, axis.plane)?;
+                    sketch_axis(axis, *line)?
+                }
                 None => (*axis_origin, *axis_direction),
             };
-            Solid::revolve(
-                sketch,
-                &region(sketch, reference)?,
-                origin,
-                direction,
-                piece.parameters.evaluate(angle, Dimension::Angle)?,
-                &owner,
-            )
-            .map_err(error)?
+            let angle = piece.parameters.evaluate(angle, Dimension::Angle)?;
+            let mut result: Option<Solid> = None;
+            let profiles = std::iter::once((*primary_id, reference))
+                .chain(additional_profiles.iter().map(|p| (p.sketch, &p.region)));
+            for (id, reference) in profiles {
+                let profile = sketch_of(doc, part, id)?;
+                nator_document::features::validate_coplanar(sketch.plane, profile.plane)?;
+                for selection in reference.selections() {
+                    let mut solid = Solid::revolve(
+                        profile,
+                        &region(profile, selection)?,
+                        origin,
+                        direction,
+                        angle,
+                        &owner,
+                    )
+                    .map_err(error)?;
+                    // IDs de entidades são locais a cada rascunho. Não atribuir
+                    // nomes ambíguos às faces de outro rascunho: essas seleções
+                    // usam índice + assinatura até existir um dono composto.
+                    if id != *primary_id {
+                        solid.map_face_names(|_| String::new());
+                    }
+                    result = Some(match result {
+                        None => solid,
+                        Some(previous) => previous.boolean(&solid, 0, &owner).map_err(error)?,
+                    });
+                }
+            }
+            result.ok_or_else(|| DocumentError("Escolha ao menos uma área de revolução.".into()))?
         }
         Operation::Boolean { base, tool, mode } => source(doc, part, *base)?
             .0

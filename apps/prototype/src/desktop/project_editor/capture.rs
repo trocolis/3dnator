@@ -1152,6 +1152,108 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn revolve_selects_multiple_areas_and_a_coplanar_sketch_axis_with_mouse()
+    -> Result<(), Box<dyn Error>> {
+        use nator_document::features::Operation;
+        let context = egui::Context::default();
+        let mut areas = Sketch::new("Áreas", Plane::xy());
+        areas.add_rectangle([10., 0.], [14., 5.], false)?;
+        areas.add_rectangle([10., 8.], [14., 13.], false)?;
+        let mut axis = Sketch::new("Eixo", Plane::xy());
+        let line = axis.add_line([0., -5.], [0., 20.], true)?;
+        let mut doc = Document::new("Revolução pelo mouse")?;
+        let (part, id) = doc.add_sketch(None, areas)?;
+        let (_, axis) = doc.add_sketch(Some(part), axis)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.open_feature_tool(feature_editor::Tool::Revolve);
+        let bounds = editor.display_bounds();
+        editor
+            .viewport
+            .camera
+            .align_plane([0.; 3], [1., 0., 0.], [0., 1., 0.], bounds)?;
+        settle(&mut editor, &context)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !matches!(editor.profile_areas(id, &context), Some(Ok(Some(_)))) {
+            if Instant::now() > deadline {
+                return Err("Perfis não calculados".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for point in [[12., 2.5, 0.], [12., 10.5, 0.]] {
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Área fora da tela")?;
+            click(&mut editor, &context, at)?;
+        }
+        assert_eq!(
+            editor
+                .feature_edit
+                .as_ref()
+                .and_then(|d| d.region_reference())
+                .map(|r| r.selections().len()),
+            Some(2)
+        );
+        frame(&mut editor, &context, vec![])?;
+        let axis_row = context
+            .data(|data| {
+                data.get_temp::<egui::Rect>(egui::Id::new(("selection_rect", text(T::AxisField))))
+            })
+            .ok_or("Campo Eixo ausente")?;
+        click(&mut editor, &context, axis_row.center())?;
+        assert_eq!(
+            editor.feature_edit.as_ref().and_then(|d| d.field()),
+            Some(feature_editor::Field::RevolveAxis)
+        );
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [0., 5., 0.],
+        )
+        .ok_or("Eixo fora da tela")?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        let draft = editor.feature_edit.as_ref().ok_or("Painel")?;
+        let piece = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert!(
+            matches!(draft.preview_key(piece),Command::AddFeature {operation:Operation::Revolve {axis_line:Some(found),axis_sketch:Some(sketch),..},..} if found==line && sketch==axis)
+        );
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .features
+                .len(),
+            1,
+            "{}",
+            editor.status
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn split_picks_origin_plane_and_publishes_both_bodies_in_one_undo() -> Result<(), Box<dyn Error>>
     {
         use nator_document::features::{Operation, RegionRef};

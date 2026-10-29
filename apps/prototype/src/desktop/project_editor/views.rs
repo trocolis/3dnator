@@ -432,7 +432,9 @@ impl Editor {
                     || self.move_gizmo(ui, &response)
                     || self.offset_plane_gizmo(ui, &response);
                 let assembly = !gizmo && self.assembly_pick(&response);
-                let profile = !gizmo && self.profile_overlay(ui, &response);
+                let profile = !gizmo
+                    && (self.revolve_axis_overlay(ui, &response)
+                        || self.profile_overlay(ui, &response));
                 let gesture = !gizmo && self.selection_gestures(ui, &response);
                 if self.current().sketch_edit.is_none()
                     && self.current().plane_pick.is_none()

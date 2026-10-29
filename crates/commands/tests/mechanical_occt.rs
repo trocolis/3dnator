@@ -220,6 +220,8 @@ fn pattern_mirror_split_and_revolve_about_a_sketch_line() -> Result<()> {
             axis_direction: [0., 0., 1.],
             angle: "360 deg".into(),
             axis_line: Some(axis),
+            axis_sketch: None,
+            additional_profiles: vec![],
         },
     )?;
     assert!(

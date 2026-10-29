@@ -319,6 +319,9 @@ pub(super) fn selection(
         };
         let width = (ui.available_width() - 30.).max(80.);
         let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 26.), egui::Sense::click());
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(egui::Id::new(("selection_rect", label)), rect));
         let (fill, stroke) = if active {
             (theme::BLUE_FILL, egui::Stroke::new(1.5, theme::ACCENT))
         } else if chosen > 0 {

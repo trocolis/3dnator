@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.7.0 — 29/10/2026
+
+- Revolução recebe áreas e eixo em campos separados: várias áreas coplanares, inclusive de rascunhos diferentes, e uma linha escolhida diretamente com o mouse. Linhas normais, de referência e infinitas podem servir de eixo.
+- A seleção alterna áreas sem apagar o eixo. Perfis e linha acompanham as edições dos rascunhos, são protegidos contra exclusão enquanto usados e têm IDs remapeados na clonagem. Planos distintos são recusados sem alterar o documento; eixos fixos de projetos antigos continuam editáveis.
+- Formato interno 33, mantendo leitura dos anteriores. Etapa local sem push ou release.
+
 ## 0.6.0 — 29/10/2026
 
 - Dividir recebe Corpo e Plano de divisão. O plano pode ser uma face plana, um plano de trabalho escolhido no viewport/árvore ou um plano da origem selecionado com o mouse.

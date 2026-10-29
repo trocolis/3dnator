@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 32
+# Formato de projeto — versão interna 33
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 32; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 33; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -15,6 +15,8 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 33, `Revolve` admite `additional_profiles: Vec<ProfileRef {sketch, region}>` e `axis_sketch` opcional. A linha continua em `axis_line`; sem `axis_sketch`, pertence ao rascunho principal, preservando projetos anteriores. Áreas e eixo precisam ser coplanares, mesmo com orientações U/V diferentes. `region` aceita `Multiple`, e cada perfil mantém sua referência estável. Perfis adicionais de outro rascunho usam referências topológicas conservadoras por índice/assinatura quando não há nome único, evitando colisão entre IDs locais de entidades.
 
 Desde a versão 32, `Split` admite `cutting_plane: ExtrusionLimit` opcional e `reverse` (padrão `false`). Sem referência, conserva as coordenadas fixas anteriores. `SplitRemainder {base, division}` é o resultado complementar e depende da etapa primária: consulta sempre o mesmo plano, sem cópia divergente de parâmetros. O comando Dividir cria ambos numa transação; as duas etapas têm IDs/B-reps próprios, aceitam operações posteriores independentes e acompanham supressão/dependências/marcador. Selecionar qualquer dos cartões para editar abre a divisão primária. Divisões antigas de um lado permanecem legíveis.
 

@@ -149,6 +149,13 @@ impl RegionRef {
     }
 }
 
+/// Perfil referenciado por identidade. Compartilhado por revolução e transições.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRef {
+    pub sketch: SketchId,
+    pub region: RegionRef,
+}
+
 /// Aresta usada por arredondamento ou chanfro.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EdgeRef {
@@ -202,6 +209,11 @@ pub enum Operation {
         /// do rascunho a cada recálculo.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_line: Option<u64>,
+        /// Ausente nos arquivos antigos: a linha pertence ao rascunho principal.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis_sketch: Option<SketchId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_profiles: Vec<ProfileRef>,
     },
     Boolean {
         base: BodyId,
@@ -467,6 +479,7 @@ impl Operation {
     }
     pub fn uses_sketch(&self, id: SketchId) -> bool {
         self.sketch() == Some(id)
+            || matches!(self,Self::Revolve {additional_profiles,axis_sketch,..} if *axis_sketch==Some(id) || additional_profiles.iter().any(|p|p.sketch==id))
             || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::Split{cutting_plane:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
     }
     pub fn uses_work_plane(&self, id: WorkPlaneId) -> bool {
@@ -559,8 +572,19 @@ impl Feature {
                     limit.remap(bodies, sketches)?;
                 }
             }
-            Operation::Revolve { sketch: id, .. } => {
+            Operation::Revolve {
+                sketch: id,
+                axis_sketch,
+                additional_profiles,
+                ..
+            } => {
                 sketch(id)?;
+                if let Some(id) = axis_sketch {
+                    sketch(id)?;
+                }
+                for profile in additional_profiles {
+                    sketch(&mut profile.sketch)?;
+                }
             }
             Operation::Hole {
                 base, sketch: id, ..
@@ -741,9 +765,42 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 axis_origin,
                 axis_direction,
                 region,
-                ..
+                sketch,
+                axis_line,
+                axis_sketch,
+                additional_profiles,
             } => {
                 validate_region(region)?;
+                let source = part
+                    .sketches
+                    .iter()
+                    .find(|s| s.id == *sketch)
+                    .ok_or_else(|| DocumentError("Perfil de revolução inexistente.".into()))?;
+                if additional_profiles.len() > MAX_OCCURRENCES {
+                    return Err(DocumentError("Perfis demais na revolução.".into()));
+                }
+                for profile in additional_profiles {
+                    validate_region(&profile.region)?;
+                    let record = part
+                        .sketches
+                        .iter()
+                        .find(|s| s.id == profile.sketch)
+                        .ok_or_else(|| {
+                            DocumentError("Perfil adicional inexistente nesta peça.".into())
+                        })?;
+                    validate_coplanar(source.sketch.plane, record.sketch.plane)?;
+                }
+                if let Some(id) = axis_sketch {
+                    let axis = part.sketches.iter().find(|s| s.id == *id).ok_or_else(|| {
+                        DocumentError("Rascunho do eixo inexistente nesta peça.".into())
+                    })?;
+                    validate_coplanar(source.sketch.plane, axis.sketch.plane)?;
+                    if axis_line.is_none() {
+                        return Err(DocumentError(
+                            "Selecione a linha do eixo da revolução.".into(),
+                        ));
+                    }
+                }
                 let a = part.parameters.evaluate(angle, Angle)?;
                 if !a.is_finite()
                     || a.abs() < 1e-7
@@ -1073,6 +1130,23 @@ pub(crate) fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
 pub fn validate_face_name(name: &str) -> Result<(), DocumentError> {
     if name.is_empty() || name.len() > 256 || name.contains('\0') {
         return Err(DocumentError("Nome de face inválido.".into()));
+    }
+    Ok(())
+}
+
+/// Perfis/eixo precisam estar no mesmo plano geométrico, independentemente de
+/// origem U/V, sinal da normal ou ocorrência escolhida na montagem.
+pub fn validate_coplanar(
+    a: nator_sketch::Plane,
+    b: nator_sketch::Plane,
+) -> Result<(), DocumentError> {
+    let n = a.normal();
+    if nator_geometry::norm(nator_geometry::cross(n, b.normal())) > 1e-7
+        || nator_geometry::dot(nator_geometry::sub(a.origin, b.origin), n).abs() > 1e-6
+    {
+        return Err(DocumentError(
+            "As áreas e a linha do eixo devem estar no mesmo plano.".into(),
+        ));
     }
     Ok(())
 }

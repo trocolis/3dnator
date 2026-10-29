@@ -1,4 +1,6 @@
-# Protótipo 0.6.0 — CAD paramétrico
+# Protótipo 0.7.0 — CAD paramétrico
+
+**Revolução** tem os campos Áreas e Eixo. Ative Áreas e clique em uma ou mais células coplanares, inclusive de outros rascunhos da peça; clicar novamente retira a área. Depois ative Eixo e escolha uma linha coplanar, normal, de referência ou infinita. A linha e as áreas acompanham suas cotas. Os eixos fixos de projetos anteriores permanecem até serem substituídos por uma linha.
 
 **Dividir** tem as entradas Corpo e Plano de divisão. Ative o campo Plano e clique numa face plana, num plano de trabalho visível/na árvore ou num plano da origem. O plano precisa atravessar o interior do corpo para produzir dois lados válidos. OK conserva ambos como corpos independentes e Desfazer desfaz a divisão inteira. Mover o plano de trabalho recalcula os dois lados; editar qualquer cartão da divisão abre seu plano comum.
 

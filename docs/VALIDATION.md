@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Revolução por áreas e linha do eixo — 29/10/2026
+
+- Etapa local 0.7.0, formato 33, sem push/release. Seleção gráfica separada de áreas coplanares e linha do eixo; regiões múltiplas também podem vir de rascunhos diferentes da mesma peça.
+- Aprovados 352 testes com OCCT, 43 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados com e sem OCCT. Regressão geométrica confere volumes de várias áreas, normais invertidas, recálculo do eixo em outro rascunho, recusa atômica de planos distintos, proteção de referências, clone e persistência. Novo ensaio gráfico escolhe duas áreas, ativa o campo Eixo, clica a linha e confirma o resultado.
+- Logs em `target/codex-validation/revolve-selection-20261029/`. Referências topológicas de perfis adicionais são conservadoras quando não há nome único. Windows não executado localmente nesta etapa.
+
 ## Divisão com dois corpos — 29/10/2026
 
 - Etapa local 0.6.0, formato 32, sem push/release. Corpo e plano de divisão selecionáveis; resultado complementar vinculado à divisão primária. Plano de trabalho participa de recálculo, proteção contra exclusão e clonagem.
