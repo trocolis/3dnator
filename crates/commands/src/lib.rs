@@ -5,6 +5,7 @@ pub mod drawing;
 pub mod export;
 pub mod extrusion;
 mod features;
+mod history;
 pub mod measure;
 pub mod painting;
 pub mod point_snap;
@@ -433,6 +434,16 @@ impl Command {
         }
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
+        let intent = history::intent(&self, doc);
+        let effect = self.apply_inner(doc, rebuilds)?;
+        history::record(doc, intent, effect)?;
+        Ok(effect)
+    }
+    fn apply_inner(
+        self,
+        doc: &mut Document,
+        rebuilds: &mut Rebuilds,
+    ) -> Result<Effect, CommandError> {
         match self {
             Self::PaintSurfaces { targets, color } => painting::apply(doc, targets, color)?,
             Self::PaintSurface { body, paint } => {
@@ -1024,6 +1035,7 @@ fn add_feature(
 
 #[derive(Debug, Clone)]
 struct Snapshot {
+    context: nator_document::activity::EditContext,
     document: Document,
     state: u64,
     label: String,
@@ -1031,6 +1043,7 @@ struct Snapshot {
 
 /// Preparação pode calcular parâmetros/soluções em outra thread, sem alterar a sessão.
 pub struct PreparedCommand {
+    context: nator_document::activity::EditContext,
     document: Document,
     revision: u64,
     effect: Effect,
@@ -1042,10 +1055,12 @@ impl PreparedCommand {
         revision: u64,
         command: Command,
     ) -> Result<Self, CommandError> {
+        let context = history::context(&command, &document);
         let label = command.label().to_owned();
         let effect = command.apply(&mut document, &mut Rebuilds::immediate())?;
         document.validate()?;
         Ok(Self {
+            context: history::created_context(context, effect),
             document,
             revision,
             effect,
@@ -1106,6 +1121,12 @@ impl Session {
     pub fn mark_unsaved(&mut self) {
         self.saved_state = None;
     }
+    pub fn undo_context(&self) -> Option<nator_document::activity::EditContext> {
+        self.undo.back().map(|s| s.context)
+    }
+    pub fn redo_context(&self) -> Option<nator_document::activity::EditContext> {
+        self.redo.last().map(|s| s.context)
+    }
     pub fn undo_label(&self) -> Option<&str> {
         self.undo.back().map(|s| s.label.as_str())
     }
@@ -1126,6 +1147,7 @@ impl Session {
             document: candidate,
             effect,
             label,
+            context,
             ..
         } = prepared;
         let next_state = self
@@ -1138,6 +1160,7 @@ impl Session {
             .ok_or_else(|| DocumentError("Revisões esgotadas.".into()))?;
         // Somente a partir daqui a edição é publicada: falhas anteriores não alteram o documento.
         self.undo.push_back(Snapshot {
+            context,
             document: std::mem::replace(&mut self.document, candidate),
             state: self.state,
             label,
@@ -1159,6 +1182,7 @@ impl Session {
             return false;
         };
         self.redo.push(Snapshot {
+            context: previous.context,
             document: std::mem::replace(&mut self.document, previous.document),
             state: self.state,
             label: previous.label,
@@ -1175,6 +1199,7 @@ impl Session {
             return false;
         };
         self.undo.push_back(Snapshot {
+            context: next.context,
             document: std::mem::replace(&mut self.document, next.document),
             state: self.state,
             label: next.label,

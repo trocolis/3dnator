@@ -437,13 +437,35 @@ fn attach(
 }
 impl Editor {
     pub(super) fn begin_sketch(&mut self, part: PartId, id: SketchId) {
-        self.begin_sketch_in(Some(part), id);
+        self.begin_sketch_in(Some(part), id, true);
     }
     /// Edição de um rascunho de referência da montagem, em coordenadas da montagem.
     pub(super) fn begin_reference_sketch(&mut self, id: SketchId) {
-        self.begin_sketch_in(None, id);
+        self.begin_sketch_in(None, id, true);
     }
-    fn begin_sketch_in(&mut self, owner: Option<PartId>, id: SketchId) {
+    /// Navegação do histórico não pode criar comando de visibilidade: isso
+    /// apagaria a pilha Refazer ao reabrir um rascunho oculto.
+    pub(super) fn begin_history_sketch(&mut self, owner: Option<PartId>, id: SketchId) {
+        self.begin_sketch_in(owner, id, false);
+    }
+    pub(super) fn select_history_elements(&mut self, entities: &[u64], constraints: &[u64]) {
+        let Some(sketch) = self.working_sketch() else {
+            return;
+        };
+        if let Some(work) = self.current_mut().sketch_edit.as_mut() {
+            work.select_tool(Tool::Select);
+            work.selected = entities
+                .iter()
+                .copied()
+                .filter(|id| sketch.entity(*id).is_ok())
+                .collect();
+            work.constraint = constraints
+                .iter()
+                .copied()
+                .find(|id| sketch.constraints.iter().any(|c| c.id == *id));
+        }
+    }
+    fn begin_sketch_in(&mut self, owner: Option<PartId>, id: SketchId, reveal: bool) {
         if self.busy() {
             return;
         }
@@ -476,7 +498,7 @@ impl Editor {
                 return;
             }
         };
-        if !record.visible {
+        if reveal && !record.visible {
             self.execute(Command::SetSketchVisibility { id, visible: true });
         }
         let previous = self

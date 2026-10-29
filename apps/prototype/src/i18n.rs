@@ -104,7 +104,9 @@ pub enum Text {
     /// Identificador reservado da aba removida, preservado para futuras traduções.
     #[allow(dead_code)]
     ViewTab,
+    #[allow(dead_code)]
     FileMenu,
+    SettingsMenu,
     SketchXZ,
     SketchYZ,
     SearchTools,
@@ -134,6 +136,9 @@ pub enum Text {
     FinishGroup,
     #[allow(dead_code)]
     TimelineEmpty,
+    ActivityGeometry,
+    ActivityRelation,
+    ActivityModify,
     #[allow(dead_code)]
     UnitsMm,
     BrowserEmpty,
@@ -813,6 +818,7 @@ pub fn text(key: Text) -> &'static str {
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
         Text::FileMenu => "Arquivo",
+        Text::SettingsMenu => "Configurações",
         Text::SketchXZ => "Rascunho XZ",
         Text::SketchYZ => "Rascunho YZ",
         Text::SearchTools => "Buscar ferramentas",
@@ -831,6 +837,9 @@ pub fn text(key: Text) -> &'static str {
         Text::CameraGroup => "Câmera",
         Text::PanelsGroup => "Painéis",
         Text::FinishGroup => "Concluir",
+        Text::ActivityGeometry => "Criar geometria",
+        Text::ActivityRelation => "Editar relações",
+        Text::ActivityModify => "Modificar geometria",
         Text::TimelineEmpty => "As operações da peça ativa aparecem aqui.",
         Text::UnitsMm => "Unidade: mm",
         Text::BrowserEmpty => "Seu projeto começa aqui",

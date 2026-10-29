@@ -195,6 +195,11 @@ impl Draft {
     }
 }
 impl Editor {
+    pub(super) fn seed_paint_body(&mut self, body: BodyId) {
+        if let Some(draft) = &mut self.paint_edit {
+            draft.targets = vec![Target::Body(body)];
+        }
+    }
     pub(super) fn open_paint(&mut self) {
         let Some(part) = self.current().active_part else {
             return;

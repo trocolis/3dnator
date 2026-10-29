@@ -5838,6 +5838,78 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn history_reopens_hidden_sketch_without_erasing_redo_and_lists_contexts()
+    -> Result<(), Box<dyn Error>> {
+        use nator_document::activity::{ActivityKind, EditContext};
+        let context = egui::Context::default();
+        let mut document = Document::new("Histórico contextual")?;
+        let mut sketch = Sketch::new("Oculto", Plane::xy());
+        sketch.add_rectangle([0., 0.], [20., 10.], false)?;
+        let (part, id) = document.add_sketch(None, sketch.clone())?;
+        document.sketch_mut(id)?.visible = false;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        sketch.add_circle([30., 5.], 3., false)?;
+        editor
+            .current_mut()
+            .session
+            .execute(Command::UpdateSketch { id, sketch })?;
+        editor.step_history(&context, false);
+        assert_eq!(
+            editor.current().sketch_edit.as_ref().map(|w| w.id),
+            Some(id)
+        );
+        assert_eq!(editor.current().active_part, Some(part));
+        assert!(editor.current().session.redo_label().is_some());
+        assert!(
+            !editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho")?
+                .visible
+        );
+        frame(&mut editor, &context, vec![])?;
+        editor.step_history(&context, true);
+        let entries = editor.context_activities(EditContext::Sketch {
+            part: Some(part),
+            sketch: id,
+        });
+        assert!(entries.iter().any(|a| a.kind == ActivityKind::Geometry));
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .sketch(id)
+                .ok_or("Rascunho")?
+                .sketch
+                .entities
+                .len(),
+            5
+        );
+        editor.current_mut().session.execute(Command::RenamePart {
+            id: part,
+            name: "Renomeada".into(),
+        })?;
+        editor.step_history(&context, false);
+        assert!(editor.current().sketch_edit.is_none());
+        assert_eq!(editor.current().active_part, Some(part));
+        assert_eq!(editor.shell.tab, shell::RibbonTab::Model);
+        assert!(
+            !editor
+                .context_activities(EditContext::Part(part))
+                .is_empty()
+        );
+        frame(&mut editor, &context, vec![])?;
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn sketch_context_shortcuts_delete_connected_selection_and_clear_undo_targets()
     -> Result<(), Box<dyn Error>> {
         use nator_sketch::edit::Action as Edit;

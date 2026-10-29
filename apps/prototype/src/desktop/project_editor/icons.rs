@@ -9,6 +9,7 @@ pub(super) enum Icon {
     Open,
     Save,
     SaveAs,
+    Settings,
     Undo,
     Redo,
     Import,
@@ -260,6 +261,18 @@ fn paint_styled(
     };
     let p = &pen;
     match icon {
+        Icon::Settings => {
+            p.circle(12., 12., 6., p.ink);
+            p.circle(12., 12., 2., p.accent);
+            for tooth in 0..8 {
+                let angle = tooth as f32 * std::f32::consts::FRAC_PI_4;
+                let (s, c) = angle.sin_cos();
+                p.line(
+                    &[[12. + 6. * c, 12. + 6. * s], [12. + 10. * c, 12. + 10. * s]],
+                    p.ink,
+                );
+            }
+        }
         Icon::Paint => {
             // Balde inclinado: aro preto, tinta verde escorrendo e alça curva.
             p.face(&[[3., 11.], [11., 3.], [19., 11.], [11., 19.]], p.fill);

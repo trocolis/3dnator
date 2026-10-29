@@ -164,21 +164,8 @@ impl Editor {
                 egui::Key::Z,
             ))
         });
-        let changed = if redo {
-            self.current_mut().session.redo()
-        } else if undo {
-            self.current_mut().session.undo()
-        } else {
-            false
-        };
-        if changed {
-            if let Some(work) = self.current_mut().sketch_edit.as_mut() {
-                work.pending = None;
-            }
-            self.sanitize_sketch_selection();
-            self.refresh_reference_image();
-            self.current_mut().changed();
-            self.invalidate_scene();
+        if redo || undo {
+            self.step_history(context, redo);
         }
     }
     pub(super) fn tree(&mut self, ui: &mut egui::Ui) {

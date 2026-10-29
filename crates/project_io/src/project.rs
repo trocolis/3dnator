@@ -45,7 +45,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 27: pinturas por face e malhas de aparência com materiais por triângulo.
 /// Versão 28: limites de extrusão por planos de rascunho ou trabalho.
 /// Versão 29: células automáticas de pintura, com interseções e complementos.
-pub const FORMAT_VERSION: u32 = 29;
+/// Versão 30: atividades semânticas por contexto.
+pub const FORMAT_VERSION: u32 = 30;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -71,6 +72,8 @@ struct Manifest {
     images: Vec<ImageRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     appearances: Vec<AppearanceRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    activities: Vec<nator_document::activity::Activity>,
     parts: Vec<PartRecord>,
     instances: Vec<InstanceRecord>,
     #[serde(default)]
@@ -614,6 +617,9 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 .collect(),
         )
         .map_err(error)?;
+    document
+        .restore_activities(manifest.activities)
+        .map_err(error)?;
     document.restore_folders(manifest.folders);
     document.restore_images(images).map_err(error)?;
     document.restore_appearances(appearances).map_err(error)?;
@@ -727,6 +733,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
         name: document.name().into(),
         next_id: document.next_id(),
         name_counters: document.name_counters().clone(),
+        activities: document.activities().to_vec(),
         appearances: document
             .appearances()
             .iter()

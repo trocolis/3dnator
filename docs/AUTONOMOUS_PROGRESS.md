@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Histórico contextual e barra de título — 29/10/2026
+
+- Versão local 0.4.0, formato de projeto 30, sem publicação remota. Barra Novo/Abrir/Salvar/Configurações e linha do tempo de montagem/peça/rascunho com referências persistidas; controles paramétricos da peça preservados.
+- Aprovados 347 testes com OCCT, 263 sem OCCT e 41 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados. Três regressões verificam classificação/referências das edições, persistência, contexto, atomicidade e desagrupar sem afetar outras ações. Ensaio gráfico abre rascunho oculto por Desfazer sem perder Refazer, mantém a visibilidade e retorna à peça para uma edição da peça.
+- Logs em `target/codex-validation/context-history-20261029/`. Testes executados no Linux; compilação/execução Windows desta etapa não exercitadas localmente.
+
 ## Correção da cintilação do realce — 29/10/2026
 
 - O realce de Peça/Pintar mantém a última resposta do contexto enquanto a próxima consulta de ponteiro é calculada. Resultados de outro contexto são descartados; câmera, retângulo do canvas, seção, modo, posição da peça e chave da cena participam da invalidação. Resposta já pronta para o cursor atual prevalece sobre entregas de posições anteriores.

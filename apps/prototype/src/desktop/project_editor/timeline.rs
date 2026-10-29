@@ -147,16 +147,46 @@ fn paint_tile(ui: &egui::Ui, response: &egui::Response, operation: &Operation, l
 impl Editor {
     /// Faixa da linha do tempo da peça ativa, dentro da barra inferior.
     pub(super) fn timeline_strip(&mut self, ui: &mut egui::Ui) {
+        use nator_document::activity::{ActivityTarget, EditContext};
         let tab = self.current().id;
+        if let Some(work) = &self.current().sketch_edit {
+            let context = EditContext::Sketch {
+                part: self.current().active_part,
+                sketch: work.id,
+            };
+            self.activity_strip(ui, context);
+            return;
+        }
+        if self.current().active_part.is_none() {
+            self.activity_strip(ui, EditContext::Assembly);
+            return;
+        }
         let Some(part) = self
             .current()
             .active_part
             .and_then(|id| self.current().session.document().part(id))
             .cloned()
-            .filter(|p| !p.features.is_empty())
         else {
             return;
         };
+        if part.features.is_empty() {
+            self.activity_strip(ui, EditContext::Part(part.id));
+            return;
+        }
+        // Cartões não paramétricos ficam entre as operações que os cercavam.
+        // O marcador continua contando somente features, mantendo dependências.
+        let mut extras = vec![vec![]; part.features.len() + 1];
+        let mut position = 0;
+        for entry in self.context_activities(EditContext::Part(part.id)) {
+            if let ActivityTarget::Feature { output, .. } = entry.target {
+                if let Some(index) = part.features.iter().position(|f| f.output == output) {
+                    position = index + 1;
+                }
+            } else {
+                extras[position].push(entry);
+            }
+        }
+        let mut activity_edit = None;
         let states = nator_document::features::states(&part);
         let count = part.features.len();
         let marker = part.history_marker.unwrap_or(count);
@@ -212,7 +242,10 @@ impl Editor {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 3.;
-                    for index in 0..=count {
+                    for (index, entries) in extras.iter().enumerate() {
+                        if let Some(entry) = self.activity_cards(ui, entries) {
+                            activity_edit = Some(entry);
+                        }
                         if index == marker {
                             let (rect, response) =
                                 ui.allocate_exact_size(egui::vec2(9., TILE), egui::Sense::drag());
@@ -403,6 +436,9 @@ impl Editor {
         }
         if let Some(output) = delete {
             self.request_feature_removal(ui.ctx(), tab, part.id, output);
+        }
+        if let Some(entry) = activity_edit {
+            self.edit_activity(ui.ctx(), entry);
         }
         if let Some(feature) = edit {
             self.feature_edit = Some(feature_editor::Draft::edit(tab, part.id, feature));

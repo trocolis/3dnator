@@ -1,4 +1,4 @@
-# Protótipo 0.3.1 — CAD paramétrico
+# Protótipo 0.4.0 — CAD paramétrico
 
 Ao desenhar, capturar um vértice cria uma **junção forte**; capturar um cruzamento ou o interior de uma curva cria uma **junção fraca**. **F** alterna a força do próximo clique, indicada por um cadeado na prévia. A forte mantém a relação ao editar; a fraca somente conserva o posicionamento inicial. Junções fortes têm ponto/anel verde-azulado; fracas, círculo vazio.
 

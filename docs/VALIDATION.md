@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Histórico contextual e barra de título — 29/10/2026
+
+- Versão local 0.4.0, formato de projeto 30, sem publicação remota. Barra Novo/Abrir/Salvar/Configurações e linha do tempo de montagem/peça/rascunho com referências persistidas; controles paramétricos da peça preservados.
+- Aprovados 347 testes com OCCT, 263 sem OCCT e 41 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados. Três regressões verificam classificação/referências das edições, persistência, contexto, atomicidade e desagrupar sem afetar outras ações. Ensaio gráfico abre rascunho oculto por Desfazer sem perder Refazer, mantém a visibilidade e retorna à peça para uma edição da peça.
+- Logs em `target/codex-validation/context-history-20261029/`. Testes executados no Linux; compilação/execução Windows desta etapa não exercitadas localmente.
+
 ## Estabilidade do realce durante movimento contínuo — 29/10/2026
 
 - **344 testes com OCCT, 260 sem OCCT e 40 ensaios gráficos aprovados.** Três regressões de cache usam canais com entrega controlada: mantêm destaque com um raio novo a cada quadro, aceitam resultados durante movimento contínuo, recebem a resposta vazia ao sair da superfície e recusam resultados de cena/aba/revisão/modo/seção/vista/posição anteriores. Uma entrega de outra posição não substitui uma resposta já pronta para o cursor atual.

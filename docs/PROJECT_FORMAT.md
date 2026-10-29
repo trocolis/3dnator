@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 29
+# Formato de projeto — versão interna 30
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 29; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 30; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -15,6 +15,8 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 30, `activities` opcional contém cartões semânticos com identificador crescente, contexto (`Assembly`, `Part`, `Sketch`) e alvo tipado. Rascunhos guardam IDs de entidades/restrições, sem instantâneos de gestos. A lista acompanha desfazer/refazer e persiste entre sessões; é limitada a 10.000 entradas. Alvos excluídos são aceitos como referências históricas e omitidos da edição. Arquivos anteriores recebem cartões dos elementos atuais, sem inventar ordem histórica. O contexto transitório de cada comando pertence às pilhas de desfazer/refazer da sessão e não ao arquivo.
 
 Desde a versão 29, cada camada de pintura pode guardar `boundaries`, uma lista de `{ "mask": { "sketch": id, "region": RegionRef }, "inside": bool }`. As condições são combinadas por interseção: `inside = true` conserva a célula; `false` conserva seu complemento na face. Isso identifica automaticamente células de vários rascunhos visíveis/coplanares, inclusive o exterior dos contornos e furos. `mask` anterior continua legível. Cada camada aceita até 64 condições e o corpo até 255 camadas; material continua sendo um byte por triângulo.
 

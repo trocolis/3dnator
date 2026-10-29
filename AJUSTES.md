@@ -1,8 +1,8 @@
 # AJUSTES
 
-- [ ] Reorganizar barra de titulo, remover menu Arquivo, ordenar icones, Novo, Abrir, Salvar, Configurações. Este ultimo ainda será definido.
-- [ ] Refinar desfazer, ao desfazer a ultima ação, se ela for uma edição em um rascuno, deve ser alternado para o modo de edição de rascunho, o mesmo vale para o modo de edição de peças.
-- [ ] Refinar linha do tempo, A linha do tempo deve ser exibida de acordo com o contexto, Montagem (Criar Rascunho, Criar Peça, Mover Peça, Agrupar Peças), Desagrupara caracteriza como desfazer um agrupamento, então não dev aparecer na linha do tempo; Peça (Criar Rascunho, Extrusão Resolução, Furo, Arredondamento, Chamfro, Pintura, Vover, Copiar, Combinar, Dividir, Criara Plano deslocado), Rascunho (Ajude a definir oque deve ir para alinha do tempo).
+- [x] Reorganizar barra de titulo, remover menu Arquivo, ordenar icones, Novo, Abrir, Salvar, Configurações. Este ultimo ainda será definido.
+- [x] Refinar desfazer, ao desfazer a ultima ação, se ela for uma edição em um rascuno, deve ser alternado para o modo de edição de rascunho, o mesmo vale para o modo de edição de peças.
+- [x] Refinar linha do tempo, A linha do tempo deve ser exibida de acordo com o contexto, Montagem (Criar Rascunho, Criar Peça, Mover Peça, Agrupar Peças), Desagrupara caracteriza como desfazer um agrupamento, então não dev aparecer na linha do tempo; Peça (Criar Rascunho, Extrusão Resolução, Furo, Arredondamento, Chamfro, Pintura, Vover, Copiar, Combinar, Dividir, Criara Plano deslocado), Rascunho (Ajude a definir oque deve ir para alinha do tempo).
 - [ ] Refinar Resolução, deve haver duas entradas, área usada, podem ser multiplas des de que estejão no mesmo plano; a linha que vai servir de eixo de revolução, deve ser uma linha em um rasculho no mesmo plano, selecionada com o mouse.
 - [ ] Remova a Ferramenta Furo e a substitua por Casca, Além das opções que já existem no painel de propriedades, Adicione a opção transpaçar, que quando abilitada Cria um duto.
 - [ ] Adicionar um tipo de extrusão que usa duas áreas em planos diferentes, para criar um corpo, por exemplo, com base retangular e to redondo, fazendo a transforamação de uma forma inicial em outra forma final.

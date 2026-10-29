@@ -620,21 +620,7 @@ impl Editor {
             Action::Save | Action::SaveAs => {
                 self.save(context, self.current().id, action == Action::SaveAs, false)
             }
-            Action::Undo | Action::Redo => {
-                let changed = if action == Action::Undo {
-                    self.current_mut().session.undo()
-                } else {
-                    self.current_mut().session.redo()
-                };
-                if changed {
-                    if let Some(work) = self.current_mut().sketch_edit.as_mut() {
-                        work.pending = None;
-                    }
-                    self.sanitize_sketch_selection();
-                    self.current_mut().changed();
-                    self.invalidate_scene();
-                }
-            }
+            Action::Undo | Action::Redo => self.step_history(context, action == Action::Redo),
             Action::Import => self.import(context, ImportSource::Any, self.current().active_part),
             Action::Reference => {
                 self.import(context, ImportSource::Reference, self.current().active_part)
@@ -815,11 +801,14 @@ impl Editor {
                     icons::paint(ui.painter(), rect, Icon::Cube, true);
                     ui.label(egui::RichText::new(text(T::AppName)).strong().size(18.));
                     ui.separator();
-                    ui.menu_button(text(T::FileMenu), |ui| {
+                    self.action_button(ui, Action::New, false);
+                    self.action_button(ui, Action::Open, false);
+                    let save = icons::button(ui, Icon::Save, text(T::Save), false, false);
+                    if save.clicked() && self.action_enabled(Action::Save) {
+                        self.activate_action(ui.ctx(), Action::Save);
+                    }
+                    save.context_menu(|ui| {
                         for action in [
-                            Action::New,
-                            Action::Open,
-                            Action::Save,
                             Action::SaveAs,
                             Action::Import,
                             Action::ExportStl,
@@ -836,6 +825,10 @@ impl Editor {
                                 ui.close();
                             }
                         }
+                    });
+                    let settings =
+                        icons::button(ui, Icon::Settings, text(T::SettingsMenu), false, false);
+                    egui::Popup::menu(&settings).show(|ui| {
                         ui.separator();
                         if ui
                             .add_enabled(
@@ -871,9 +864,7 @@ impl Editor {
                             ui.label(text(T::DisplayDecimalsHint));
                         });
                     });
-                    // Novo e Salvar logo depois de Arquivo; a busca fica na linha das abas.
-                    self.action_button(ui, Action::New, false);
-                    self.action_button(ui, Action::Save, false);
+                    // As ações secundárias continuam acessíveis pelo menu de Salvar e pela busca.
                     ui.separator();
                     let width =
                         (ui.available_width() - 20. - window_frame::CONTROLS_WIDTH).max(110.);

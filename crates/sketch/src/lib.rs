@@ -138,7 +138,7 @@ pub struct Point {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub projected: bool,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Curve {
     Line {
         start: u64,
@@ -155,7 +155,7 @@ pub enum Curve {
         clockwise: bool,
     },
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
     pub id: u64,
     pub curve: Curve,
@@ -352,7 +352,7 @@ impl ConstraintKind {
         matches!(self, Self::Angle { .. } | Self::LineAngle { .. })
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {
     pub id: u64,
     pub kind: ConstraintKind,

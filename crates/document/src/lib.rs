@@ -2,6 +2,7 @@
 //! Instâncias referenciam definições de peças; nunca duplicam a geometria automaticamente.
 use nator_geometry::{Mesh, Placement, RgbColor, Topology};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
+pub mod activity;
 pub mod appearance;
 pub mod assembly;
 pub use appearance::{PaintBoundary, PaintMask, SurfaceAppearance, SurfacePaint};
@@ -307,6 +308,7 @@ pub struct Document {
     name_counters: NameCounters,
     images: Vec<ReferenceImage>,
     appearances: Vec<SurfaceAppearance>,
+    activities: Vec<activity::Activity>,
     parts: Vec<Part>,
     instances: Vec<Instance>,
     groups: Vec<assembly::Group>,
@@ -340,6 +342,7 @@ impl Document {
             name_counters: NameCounters::default(),
             images: vec![],
             appearances: vec![],
+            activities: vec![],
             parts: Vec::new(),
             instances: Vec::new(),
             groups: Vec::new(),
@@ -364,6 +367,7 @@ impl Document {
             name_counters: NameCounters::default(),
             images: vec![],
             appearances: vec![],
+            activities: vec![],
             parts,
             instances,
             groups: Vec::new(),

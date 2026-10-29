@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.4.0 — 29/10/2026
+
+- Barra de título com Novo, Abrir, Salvar e Configurações; Salvar oferece Salvar como/Importar/Exportar no menu de contexto. Recuperação e precisão ficam nas configurações.
+- Desfazer/Refazer reabrem o contexto da edição, inclusive rascunhos ocultos, sem acrescentar comandos de visibilidade nem apagar Refazer.
+- Linha do tempo contextual: montagem lista peças, rascunhos, movimentos, cópias e agrupamentos; rascunho lista geometria, cotas, relações, modificações e projeções; peça inclui rascunhos, planos, pintura, movimentos e cópias entre operações paramétricas. Cartões abrem elementos atuais; os controles de marcador, supressão e ordem de features da peça permanecem disponíveis. Desagrupar remove seu cartão e continua reversível.
+- Formato interno 30 persiste referências de atividades e lê versões 1–29. Etapa local, sem push ou release.
+
 ## 0.3.1 — 29/10/2026
 
 - Corrigida a cintilação do realce de superfícies ao mover continuamente o mouse em Peça e Pintar. O último destaque válido permanece enquanto a próxima consulta é calculada; mudanças de cena, câmera, enquadramento, seção ou ferramenta descartam respostas antigas. Furos, regiões delimitadas e oclusões continuam respeitados.

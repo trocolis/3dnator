@@ -1,3 +1,4 @@
+mod activity_timeline;
 mod assembly_tools;
 mod browser;
 pub(crate) mod capture;
@@ -8,6 +9,7 @@ mod drawing_editor;
 mod export_editor;
 mod feature_editor;
 mod highlight;
+mod history;
 mod icons;
 mod image_editor;
 mod insert_part;
