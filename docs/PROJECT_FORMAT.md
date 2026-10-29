@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 33
+# Formato de projeto — versão interna 34
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 33; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 34; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -15,6 +15,8 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 34, `Loft {start, end, ruled, holes}` referencia duas áreas (`ProfileRef`) em planos diferentes. Furos são pareados inicialmente por ordem de criação e persistidos em `HolePair` com IDs dos contornos. Alterar suas cotas conserva a correspondência; substituir/remover um furo exige atualizá-la explicitamente. O núcleo constrói a transição externa e subtrai transições dos furos, rejeitando cruzamentos ou furos que saiam do volume externo. Contornos com números diferentes de arestas são compatibilizados pelo OCCT sem poligonização; faces sem origem topológica única usam índice/assinatura. `ruled` escolhe geratrizes retas.
 
 Desde a versão 33, `Revolve` admite `additional_profiles: Vec<ProfileRef {sketch, region}>` e `axis_sketch` opcional. A linha continua em `axis_line`; sem `axis_sketch`, pertence ao rascunho principal, preservando projetos anteriores. Áreas e eixo precisam ser coplanares, mesmo com orientações U/V diferentes. `region` aceita `Multiple`, e cada perfil mantém sua referência estável. Perfis adicionais de outro rascunho usam referências topológicas conservadoras por índice/assinatura quando não há nome único, evitando colisão entre IDs locais de entidades.
 

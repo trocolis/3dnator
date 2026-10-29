@@ -11,6 +11,46 @@ use nator_document::{BodyId, Document, DocumentError, MeshAsset, PartId, feature
 use nator_kernel::Solid;
 use std::sync::Arc;
 
+#[cfg(feature = "occt")]
+fn hole_key(wire: &nator_sketch::profiles::Wire) -> Vec<u64> {
+    let mut key = wire.entities.clone();
+    key.sort_unstable();
+    key.dedup();
+    key
+}
+#[cfg(feature = "occt")]
+fn order_holes(
+    region: &mut nator_sketch::profiles::Region,
+    keys: &[Vec<u64>],
+) -> Result<(), DocumentError> {
+    if region.holes.len() != keys.len() {
+        return Err(DocumentError(
+            "A quantidade de furos mudou; atualize a correspondência na transição.".into(),
+        ));
+    }
+    let mut ordered = vec![];
+    for key in keys {
+        if region.holes.iter().filter(|w| hole_key(w) == *key).count() != 1 {
+            return Err(DocumentError(
+                "Identidade do furo perdida ou ambígua; atualize a correspondência da transição."
+                    .into(),
+            ));
+        }
+        let index = region
+            .holes
+            .iter()
+            .position(|w| hole_key(w) == *key)
+            .ok_or_else(|| {
+                DocumentError(
+                    "Um furo da transição foi substituído; atualize sua correspondência.".into(),
+                )
+            })?;
+        ordered.push(region.holes.remove(index));
+    }
+    region.holes = ordered;
+    Ok(())
+}
+
 /// Resultado CAD de uma operação: malha de exibição, B-rep e nomes estáveis das faces.
 pub(super) struct Built {
     pub mesh: Arc<MeshAsset>,
@@ -311,6 +351,49 @@ pub(super) fn normalize(
             to,
             combine,
         },
+        Operation::Loft {
+            start,
+            end,
+            ruled,
+            holes,
+        } => {
+            let profile = |p: nator_document::features::ProfileRef| -> Result<_, DocumentError> {
+                Ok(nator_document::features::ProfileRef {
+                    region: stable_region(p.sketch, p.region)?,
+                    sketch: p.sketch,
+                })
+            };
+            let start = profile(start)?;
+            let end = profile(end)?;
+            let holes = match holes {
+                Some(pairs) => pairs,
+                None => {
+                    let a = region(sketch_of(doc, part, start.sketch)?, &start.region)?;
+                    let b = region(sketch_of(doc, part, end.sketch)?, &end.region)?;
+                    if a.holes.len() != b.holes.len() {
+                        return Err(DocumentError(
+                            "Os perfis da transição precisam ter os mesmos furos.".into(),
+                        ));
+                    }
+                    let keys = |r: &nator_sketch::profiles::Region| {
+                        let mut keys = r.holes.iter().map(hole_key).collect::<Vec<_>>();
+                        keys.sort();
+                        keys
+                    };
+                    keys(&a)
+                        .into_iter()
+                        .zip(keys(&b))
+                        .map(|(start, end)| nator_document::features::HolePair { start, end })
+                        .collect()
+                }
+            };
+            Operation::Loft {
+                start,
+                end,
+                ruled,
+                holes: Some(holes),
+            }
+        }
         Operation::Revolve {
             sketch,
             region,
@@ -489,6 +572,33 @@ pub(super) fn construct(
                     .map_err(error)?,
                 None => extrusion,
             }
+        }
+        Operation::Loft {
+            start,
+            end,
+            ruled,
+            holes,
+        } => {
+            let a = sketch_of(doc, part, start.sketch)?;
+            let b = sketch_of(doc, part, end.sketch)?;
+            if nator_document::features::validate_coplanar(a.plane, b.plane).is_ok() {
+                return Err(DocumentError(
+                    "Escolha perfis em planos diferentes para criar a transição.".into(),
+                ));
+            }
+            let mut first = region(a, &start.region)?;
+            let mut last = region(b, &end.region)?;
+            if let Some(pairs) = holes {
+                order_holes(
+                    &mut first,
+                    &pairs.iter().map(|p| p.start.clone()).collect::<Vec<_>>(),
+                )?;
+                order_holes(
+                    &mut last,
+                    &pairs.iter().map(|p| p.end.clone()).collect::<Vec<_>>(),
+                )?;
+            }
+            Solid::loft((a, &first), (b, &last), *ruled, &owner).map_err(error)?
         }
         Operation::Revolve {
             sketch: primary_id,

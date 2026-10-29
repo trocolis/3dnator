@@ -25,6 +25,7 @@ mod section;
 mod step;
 mod support_holes;
 mod surface_appearance;
+mod transitions;
 pub use projection::projected_edges;
 pub use step::{StepAssembly, StepBody, StepOccurrence, StepPart};
 

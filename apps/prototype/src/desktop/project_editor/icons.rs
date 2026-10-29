@@ -20,6 +20,7 @@ pub(super) enum Icon {
     Paint,
     Extrude,
     Revolve,
+    Loft,
     Hole,
     Fillet,
     Chamfer,
@@ -450,6 +451,12 @@ fn paint_styled(
             p.line(&[[2., 12.], [22., 12.]], p.ink);
             p.line(&[[12., 2.], [12., 22.]], p.ink);
             p.circle(12., 12., 1.5, p.accent);
+        }
+        Icon::Loft => {
+            p.face(&[[4., 17.], [18., 17.], [21., 21.], [7., 21.]], p.fill);
+            p.circle(12., 5., 3.5, p.accent);
+            p.line(&[[4., 17.], [8.5, 5.]], p.ink);
+            p.line(&[[21., 21.], [15.5, 5.]], p.ink);
         }
         Icon::Revolve => {
             p.line(&[[12., 2.], [12., 22.]], p.ink);

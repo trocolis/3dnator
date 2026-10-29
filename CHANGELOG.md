@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.8.0 — 29/10/2026
+
+- Nova ferramenta Transição entre perfis: duas áreas em rascunhos de planos diferentes, como base retangular e topo circular, com prévia e opção de geratrizes retas.
+- Curvas exatas, sólidos fechados e furos preservados. Correspondências dos furos são capturadas por identidade; substituir um contorno exige atualização explícita. Furos incompatíveis, cruzados ou fora do volume externo são recusados sem publicar resultado parcial.
+- Perfis acompanham as edições, ficam protegidos contra exclusão enquanto usados e são remapeados na clonagem. Salvamento/reabertura e exportação STEP preservam a transição. Formato interno 34; etapa local sem push ou release.
+
 ## 0.7.0 — 29/10/2026
 
 - Revolução recebe áreas e eixo em campos separados: várias áreas coplanares, inclusive de rascunhos diferentes, e uma linha escolhida diretamente com o mouse. Linhas normais, de referência e infinitas podem servir de eixo.

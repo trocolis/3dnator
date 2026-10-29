@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Transição entre perfis — 29/10/2026
+
+- Etapa local 0.8.0, formato 34, sem push/release. Duas áreas em planos diferentes e opção de geratrizes retas. Curvas preservadas no núcleo OCCT; furos são transições subtraídas com verificação de contenção/cruzamento e correspondência persistida por identidade.
+- Aprovados 355 testes com OCCT e 44 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados com e sem OCCT. Três regressões conferem retângulo/círculo, recálculo da altura, anéis com furo, recusa de perfis coplanares/incompatíveis, proteção, clonagem, projeto salvo/reaberto e STEP gravado/relido. Substituir um furo é recusado até atualizar explicitamente sua correspondência numa transação.
+- Novo ensaio gráfico escolhe as duas áreas, aguarda prévia sólida e confirma a operação. Logs em `target/codex-validation/loft-20261029/`. Windows não executado localmente nesta etapa.
+
 ## Revolução por áreas e linha do eixo — 29/10/2026
 
 - Etapa local 0.7.0, formato 33, sem push/release. Seleção gráfica separada de áreas coplanares e linha do eixo; regiões múltiplas também podem vir de rascunhos diferentes da mesma peça.

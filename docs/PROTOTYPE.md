@@ -1,4 +1,6 @@
-# Protótipo 0.7.0 — CAD paramétrico
+# Protótipo 0.8.0 — CAD paramétrico
+
+**Transição entre perfis**, na criação de peças, liga uma Área inicial e uma Área final em rascunhos de planos diferentes. Clique nas áreas pelo viewport; o segundo campo é ativado após a primeira escolha. Retângulo para círculo e perfis com furos são suportados. Furos precisam existir nos dois perfis e correspondem inicialmente por ordem de criação; a ligação fica salva por identidade. Se substituir um contorno, edite a operação e use Atualizar correspondência dos furos. Geratrizes retas oferece uma transição regrada. Prévia, desfazer/refazer, parâmetros, persistência e STEP usam o sólido exato.
 
 **Revolução** tem os campos Áreas e Eixo. Ative Áreas e clique em uma ou mais células coplanares, inclusive de outros rascunhos da peça; clicar novamente retira a área. Depois ative Eixo e escolha uma linha coplanar, normal, de referência ou infinita. A linha e as áreas acompanham suas cotas. Os eixos fixos de projetos anteriores permanecem até serem substituídos por uma linha.
 

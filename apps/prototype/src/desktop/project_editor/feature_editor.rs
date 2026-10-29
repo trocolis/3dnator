@@ -25,6 +25,7 @@ mod revolve;
 pub(super) enum Tool {
     Extrude,
     Revolve,
+    Loft,
     Join,
     Cut,
     Intersect,
@@ -42,6 +43,7 @@ impl Tool {
         match self {
             Self::Extrude => T::Extrude,
             Self::Revolve => T::Revolve,
+            Self::Loft => T::Loft,
             Self::Join | Self::Cut | Self::Intersect => T::CombineTool,
             Self::Fillet => T::Fillet,
             Self::Chamfer => T::Chamfer,
@@ -57,6 +59,7 @@ impl Tool {
         match self {
             Self::Extrude => Icon::Extrude,
             Self::Revolve => Icon::Revolve,
+            Self::Loft => Icon::Loft,
             Self::Hole => Icon::Hole,
             Self::Fillet => Icon::Fillet,
             Self::Chamfer => Icon::Chamfer,
@@ -69,12 +72,12 @@ impl Tool {
     }
     /// Ferramentas que partem de um rascunho de perfil.
     fn uses_profile(self) -> bool {
-        matches!(self, Self::Extrude | Self::Revolve)
+        matches!(self, Self::Extrude | Self::Revolve | Self::Loft)
     }
     /// Campo que recebe os primeiros cliques ao abrir o painel.
     fn first_field(self) -> Field {
         match self {
-            Self::Extrude | Self::Revolve => Field::Profile,
+            Self::Extrude | Self::Revolve | Self::Loft => Field::Profile,
             Self::Fillet | Self::Chamfer => Field::Edges,
             Self::Shell => Field::Faces,
             _ => Field::Base,
@@ -125,6 +128,7 @@ pub(super) enum Field {
     ExitFace,
     CuttingPlane,
     RevolveAxis,
+    EndProfile,
 }
 
 /// Direção da extrusão, como nos CADs de mercado. Os limites gravados continuam sendo
@@ -344,6 +348,9 @@ pub(super) struct Draft {
     interaction: extrusion::Interaction,
     revolve_axis: Option<(SketchId, u64)>,
     additional_profiles: Vec<ProfileRef>,
+    end_profile: Option<ProfileRef>,
+    ruled: bool,
+    hole_pairs: Option<Vec<nator_document::features::HolePair>>,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
     kept_axis: Option<([f64; 3], [f64; 3])>,
     /// Índice de aresta/face no corpo base, para seleções sem nome estável.
@@ -391,6 +398,9 @@ impl Draft {
             interaction: extrusion::Interaction::default(),
             revolve_axis: None,
             additional_profiles: vec![],
+            end_profile: None,
+            ruled: false,
+            hole_pairs: None,
             kept_axis: None,
             index: 0,
             kept_topology: None,
@@ -469,6 +479,19 @@ impl Draft {
                 }
                 d.extrude.to_face = until.is_some();
                 d.until = until;
+            }
+            Operation::Loft {
+                start,
+                end,
+                ruled,
+                holes,
+            } => {
+                d.tool = Tool::Loft;
+                d.sketch = Some(start.sketch);
+                d.kept_region = Some(start.region);
+                d.end_profile = Some(end);
+                d.ruled = ruled;
+                d.hole_pairs = holes;
             }
             Operation::Revolve {
                 sketch,
@@ -702,7 +725,7 @@ impl Draft {
                 Some(Awaiting::Face)
             }
             Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
-            Field::Profile | Field::RevolveAxis => None,
+            Field::Profile | Field::RevolveAxis | Field::EndProfile => None,
         }
     }
     pub(super) fn choosing_cutting_plane(&self) -> bool {
@@ -746,6 +769,19 @@ impl Draft {
     }
     /// Região do perfil escolhida por clique no rascunho.
     pub(super) fn choose_region(&mut self, sketch: SketchId, region: RegionRef) {
+        if self.tool == Tool::Loft {
+            self.hole_pairs = None;
+            if self.field == Some(Field::EndProfile) {
+                self.end_profile = Some(ProfileRef { sketch, region });
+                self.field = None;
+            } else {
+                self.sketch = Some(sketch);
+                self.kept_region = Some(region);
+                self.region = None;
+                self.field = Some(Field::EndProfile);
+            }
+            return;
+        }
         if self.tool == Tool::Revolve {
             if self.kept_region.is_none() {
                 self.sketch = Some(sketch);
@@ -818,7 +854,11 @@ impl Draft {
             .map(|(sketch, region)| ProfileRef { sketch, region })
             .into_iter()
             .chain(self.additional_profiles.clone())
+            .chain(self.end_profile.clone())
             .collect()
+    }
+    pub(super) fn requires_distinct_plane(&self) -> bool {
+        self.tool == Tool::Loft && self.field == Some(Field::EndProfile)
     }
     pub(super) fn accepts_coplanar_profiles(&self) -> bool {
         self.tool == Tool::Revolve
@@ -1016,6 +1056,9 @@ impl Draft {
                     && (!self.extrude.to_face || self.until.is_some())
                     && (self.automatic || self.combine == 0 || self.combine_target.is_some())
             }
+            Tool::Loft => {
+                self.sketch.is_some() && self.kept_region.is_some() && self.end_profile.is_some()
+            }
             Tool::Revolve => {
                 self.sketch.is_some()
                     && (self.kept_region.is_some() || self.region.is_some())
@@ -1120,6 +1163,15 @@ impl Draft {
                     until,
                 }
             }
+            Tool::Loft => Operation::Loft {
+                start: ProfileRef { sketch, region },
+                end: self.end_profile.clone().unwrap_or(ProfileRef {
+                    sketch: SketchId(0),
+                    region: RegionRef::Index(0),
+                }),
+                ruled: self.ruled,
+                holes: self.hole_pairs.clone(),
+            },
             Tool::Revolve => {
                 let plane = record.map(|r| r.sketch.plane).unwrap_or_default();
                 let (axis_origin, axis_direction) =
@@ -1352,7 +1404,7 @@ impl Editor {
                 .map(|b| b.id),
         };
         match tool {
-            Tool::Extrude | Tool::Revolve => {
+            Tool::Extrude | Tool::Revolve | Tool::Loft => {
                 d.combine_target = suggestion;
                 d.auto_preferred = suggestion;
             }
@@ -1541,6 +1593,7 @@ impl Editor {
                 match d.tool {
                     Tool::Extrude => extrude_panel(ui, &mut d, &part, &regions),
                     Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
+                    Tool::Loft => loft_panel(ui, &mut d, &part, &regions),
                     Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
                     Tool::Fillet | Tool::Chamfer | Tool::Shell => topology_panel(ui, &mut d, &part),
                     Tool::Hole => hole_panel(ui, &mut d, &part, record),
@@ -1638,7 +1691,11 @@ fn profile_rows(
         });
     let selection = panel::selection(
         ui,
-        text(T::ProfileField),
+        text(if d.tool == Tool::Loft {
+            T::StartProfile
+        } else {
+            T::ProfileField
+        }),
         chosen,
         sketch_name.as_deref(),
         d.field == Some(Field::Profile),
@@ -1813,6 +1870,44 @@ fn operation_rows(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
             d.field = Some(Field::Target);
         }
     }
+}
+
+/// Seletores independentes de início/fim, sem exigir planos paralelos.
+fn loft_panel(
+    ui: &mut egui::Ui,
+    d: &mut Draft,
+    part: &nator_document::Part,
+    regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
+) {
+    profile_rows(ui, d, part, regions);
+    let name = d
+        .end_profile
+        .as_ref()
+        .and_then(|p| part.sketches.iter().find(|s| s.id == p.sketch))
+        .map(|s| s.sketch.name.as_str());
+    let selection = panel::selection(
+        ui,
+        text(T::EndProfile),
+        usize::from(d.end_profile.is_some()),
+        name,
+        d.field == Some(Field::EndProfile),
+    );
+    if selection.activate {
+        d.field = Some(Field::EndProfile);
+    }
+    if selection.clear {
+        d.end_profile = None;
+        d.field = Some(Field::EndProfile);
+    }
+    ui.checkbox(&mut d.ruled, text(T::RuledLoft));
+    if d.hole_pairs.is_some() && ui.button(text(T::UpdateHolePairs)).clicked() {
+        d.hole_pairs = None;
+    }
+    ui.label(
+        egui::RichText::new(text(T::LoftHint))
+            .small()
+            .color(theme::MUTED),
+    );
 }
 
 fn revolve_panel(

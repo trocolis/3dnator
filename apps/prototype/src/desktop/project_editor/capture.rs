@@ -1152,6 +1152,80 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn loft_picks_two_profiles_in_different_planes_and_previews_a_solid()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut a = Sketch::new("Base", Plane::xy());
+        a.add_rectangle([-20., -5.], [-10., 5.], false)?;
+        let mut b = Sketch::new(
+            "Topo",
+            Plane {
+                origin: [0., 0., 20.],
+                ..Plane::xy()
+            },
+        );
+        b.add_circle([15., 0.], 3., false)?;
+        let mut doc = Document::new("Loft pelo mouse")?;
+        let (part, start) = doc.add_sketch(None, a)?;
+        let (_, end) = doc.add_sketch(Some(part), b)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.open_feature_tool(feature_editor::Tool::Loft);
+        settle(&mut editor, &context)?;
+        for id in [start, end] {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !matches!(editor.profile_areas(id, &context), Some(Ok(Some(_)))) {
+                if Instant::now() > deadline {
+                    return Err("Área não calculada".into());
+                }
+                frame(&mut editor, &context, vec![])?;
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        for point in [[-15., 0., 0.], [15., 0., 20.]] {
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Perfil fora da tela")?;
+            click(&mut editor, &context, at)?;
+        }
+        wait_feature_preview(&mut editor, &context)?;
+        let draft = editor.feature_edit.as_ref().ok_or("Painel")?;
+        let piece = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert!(
+            matches!(draft.preview_key(piece),Command::AddFeature {operation:nator_document::features::Operation::Loft {start:a,end:b,..},..} if a.sketch==start && b.sketch==end)
+        );
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .features
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn revolve_selects_multiple_areas_and_a_coplanar_sketch_axis_with_mouse()
     -> Result<(), Box<dyn Error>> {
         use nator_document::features::Operation;

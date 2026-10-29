@@ -180,7 +180,7 @@ impl Editor {
     pub(super) fn profile_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
         let Some(draft) = self.feature_edit.as_ref().filter(|d| {
             d.tab() == self.current().id
-                && (d.field() == Some(Field::Profile)
+                && (matches!(d.field(), Some(Field::Profile | Field::EndProfile))
                     || (d.accepts_face_profile()
                         && matches!(d.field(), None | Some(Field::UntilFace))))
         }) else {
@@ -190,6 +190,7 @@ impl Editor {
         let chosen = draft.sketch().zip(draft.region_reference().cloned());
         let selected_profiles = draft.selected_profiles();
         let coplanar_only = draft.accepts_coplanar_profiles();
+        let distinct_plane = draft.requires_distinct_plane();
         let current = draft.sketch();
         let editing = draft.output().is_some();
         let document = self.current().session.document();
@@ -211,7 +212,10 @@ impl Editor {
         let ids = part
             .sketches
             .iter()
-            .filter(|s| part.shows_sketch(s) || (editing && Some(s.id) == current))
+            .filter(|s| {
+                part.shows_sketch(s)
+                    || (editing && selected_profiles.iter().any(|p| p.sketch == s.id))
+            })
             .map(|s| s.id)
             .collect::<Vec<_>>();
         let mut candidates = Vec::new();
@@ -301,6 +305,10 @@ impl Editor {
             let (sketch, reference) = (candidate.sketch, candidate.reference.clone());
             let different =
                 source_plane.is_some_and(|plane| !coplanar(plane, candidate.frame.plane));
+            if !different && distinct_plane {
+                self.status.warning(text(T::LoftDifferentPlanes));
+                return true;
+            }
             if different && coplanar_only {
                 self.status.warning(text(T::CoplanarProfilesRequired));
                 return true;

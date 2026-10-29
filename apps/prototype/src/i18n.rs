@@ -111,6 +111,13 @@ pub enum Text {
     CuttingPlane,
     RevolveAxisHint,
     CoplanarProfilesRequired,
+    Loft,
+    EndProfile,
+    StartProfile,
+    RuledLoft,
+    UpdateHolePairs,
+    LoftHint,
+    LoftDifferentPlanes,
     CuttingPlaneHint,
     ExitFace,
     AutomaticExitHint,
@@ -827,6 +834,15 @@ pub fn text(key: Text) -> &'static str {
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
         Text::FileMenu => "Arquivo",
+        Text::Loft => "Transição entre perfis",
+        Text::StartProfile => "Área inicial",
+        Text::EndProfile => "Área final",
+        Text::UpdateHolePairs => "Atualizar correspondência dos furos",
+        Text::RuledLoft => "Geratrizes retas",
+        Text::LoftHint => {
+            "Escolha uma área em cada plano. Os furos precisam corresponder pela ordem de criação e existir nos dois perfis."
+        }
+        Text::LoftDifferentPlanes => "Escolha a área final em um plano diferente do inicial.",
         Text::CoplanarProfilesRequired => "Selecione áreas e eixo no mesmo plano.",
         Text::RevolveAxisHint => {
             "Clique numa linha de um rascunho coplanar às áreas, inclusive linha de referência ou infinita."

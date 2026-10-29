@@ -1013,3 +1013,5 @@ Shape* nator_brep_read(const char* data, std::size_t size) noexcept {
 #include "support_holes.hpp"
 
 #include "opposite_face.hpp"
+
+#include "transitions.hpp"

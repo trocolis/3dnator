@@ -156,6 +156,14 @@ pub struct ProfileRef {
     pub region: RegionRef,
 }
 
+/// Correspondência explícita de contornos internos, capturada ao criar a
+/// transição. IDs são locais ao perfil, preservados nas edições e clonagem.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HolePair {
+    pub start: Vec<u64>,
+    pub end: Vec<u64>,
+}
+
 /// Aresta usada por arredondamento ou chanfro.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EdgeRef {
@@ -214,6 +222,16 @@ pub enum Operation {
         axis_sketch: Option<SketchId>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         additional_profiles: Vec<ProfileRef>,
+    },
+    /// Sólido entre duas áreas em planos diferentes. Furos correspondem pela
+    /// ordem de criação de seus contornos e precisam existir nos dois perfis.
+    Loft {
+        start: ProfileRef,
+        end: ProfileRef,
+        #[serde(default)]
+        ruled: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        holes: Option<Vec<HolePair>>,
     },
     Boolean {
         base: BodyId,
@@ -479,6 +497,7 @@ impl Operation {
     }
     pub fn uses_sketch(&self, id: SketchId) -> bool {
         self.sketch() == Some(id)
+            || matches!(self,Self::Loft {end,..} if end.sketch==id)
             || matches!(self,Self::Revolve {additional_profiles,axis_sketch,..} if *axis_sketch==Some(id) || additional_profiles.iter().any(|p|p.sketch==id))
             || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::Split{cutting_plane:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
     }
@@ -490,6 +509,7 @@ impl Operation {
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
+            Self::Loft { start, .. } => Some(start.sketch),
             Self::Extrude { sketch, .. }
             | Self::Revolve { sketch, .. }
             | Self::Hole { sketch, .. } => Some(*sketch),
@@ -571,6 +591,10 @@ impl Feature {
                 if let Some(limit) = until {
                     limit.remap(bodies, sketches)?;
                 }
+            }
+            Operation::Loft { start, end, .. } => {
+                sketch(&mut start.sketch)?;
+                sketch(&mut end.sketch)?;
             }
             Operation::Revolve {
                 sketch: id,
@@ -758,6 +782,46 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                             ));
                         }
                     }
+                }
+            }
+            Operation::Loft {
+                start, end, holes, ..
+            } => {
+                if holes.as_ref().is_some_and(|pairs| {
+                    pairs.len() > 64
+                        || pairs.iter().any(|p| {
+                            p.start.is_empty()
+                                || p.end.is_empty()
+                                || p.start.len() > MAX_ELEMENTS
+                                || p.end.len() > MAX_ELEMENTS
+                        })
+                }) {
+                    return Err(DocumentError("Correspondência de furos inválida.".into()));
+                }
+                for profile in [start, end] {
+                    validate_region(&profile.region)?;
+                    if matches!(profile.region, RegionRef::Multiple(_)) {
+                        return Err(DocumentError(
+                            "Escolha uma única área em cada extremidade da transição.".into(),
+                        ));
+                    }
+                }
+                let a = part
+                    .sketches
+                    .iter()
+                    .find(|s| s.id == start.sketch)
+                    .ok_or_else(|| {
+                        DocumentError("Perfil inicial inexistente nesta peça.".into())
+                    })?;
+                let b = part
+                    .sketches
+                    .iter()
+                    .find(|s| s.id == end.sketch)
+                    .ok_or_else(|| DocumentError("Perfil final inexistente nesta peça.".into()))?;
+                if validate_coplanar(a.sketch.plane, b.sketch.plane).is_ok() {
+                    return Err(DocumentError(
+                        "Os perfis da transição precisam estar em planos diferentes.".into(),
+                    ));
                 }
             }
             Operation::Revolve {
