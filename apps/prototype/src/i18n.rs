@@ -667,7 +667,6 @@ pub enum Text {
     ResetTransform,
     MoveHint,
     InvalidTransformNumber,
-    AlignType,
     AlignFrom,
     AlignTo,
     AlignHint,
@@ -721,6 +720,7 @@ pub enum Text {
     NewEmptyPart,
     NewPartFromStep,
     NewPartFromStl,
+    MovementMode,
     MoveMenu,
     MoveFree,
     MoveFaceToFace,
@@ -1466,7 +1466,6 @@ pub fn text(key: Text) -> &'static str {
         Text::MoveHint => {
             "Arraste as setas para transladar, os anéis para girar e o centro para mover livremente."
         }
-        Text::AlignType => "Tipo",
         Text::AlignFrom => "Origem",
         Text::AlignTo => "Destino",
         Text::AlignHint => {
@@ -1534,6 +1533,7 @@ pub fn text(key: Text) -> &'static str {
         Text::NewEmptyPart => "Criar nova peça",
         Text::NewPartFromStep => "Criar a partir de STEP",
         Text::NewPartFromStl => "Criar a partir de STL",
+        Text::MovementMode => "Modo de movimento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Livre",
         Text::MoveFaceToFace => "Face a face",

@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.12.0 — 29/10/2026
+
+- Corrigido o movimento de conjuntos com subpeças: entrar na aba Montagem encerra a edição de corpos, e o movimento atua na instância com toda a hierarquia. Selecionar pai e filho não aplica o deslocamento duas vezes. Pivô e contorno de arraste incluem os descendentes, mesmo quando a peça principal não tem corpo próprio.
+- Mover pelo menu de contexto da árvore assume o contexto do elemento escolhido e abre o manipulador para o conjunto. Posições locais dos filhos e outras instâncias da mesma definição permanecem preservadas.
+- Modos Livre, Face a face, Aresta a aresta e Vértice a vértice reunidos no painel de propriedades de Mover/Copiar. O botão da faixa abre diretamente o painel. Trocar o modo conserva os alvos e a intenção de copiar; uma face/aresta/vértice de um filho pode alinhar o conjunto selecionado.
+- Versão local, sem push/release; formato do projeto mantido em 36.
+
 ## 0.11.0 — 29/10/2026
 
 - Campos flutuantes junto ao cursor nas setas de extrusão, raio/chanfro/casca, deslocamento e cantos do rascunho, plano deslocado, seção e eixos/anéis de Mover/Copiar. A medida pode ser digitada durante ou após o arraste, com unidades e vírgula decimal; Enter fixa o valor da prévia e OK conclui a operação.

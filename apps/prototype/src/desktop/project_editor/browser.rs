@@ -360,6 +360,15 @@ impl Editor {
             }
             MenuAction::Select(items) => self.current_mut().select_many(items, false),
             MenuAction::Move(items) => {
+                self.activate_selection(context);
+                self.finish_sketch();
+                if items.iter().all(|s| matches!(s, Selection::Instance(_))) {
+                    self.current_mut().active_part = None;
+                    self.shell.tab = shell::RibbonTab::Assembly;
+                } else if let Some(Selection::Body { part, .. }) = items.first() {
+                    self.current_mut().active_part = Some(*part);
+                    self.shell.tab = shell::RibbonTab::Model;
+                }
                 self.current_mut().select_many(items, false);
                 self.open_move();
             }

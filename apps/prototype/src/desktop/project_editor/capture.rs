@@ -185,9 +185,7 @@ pub(crate) fn render_ui_scenario(
             // primeira subopção.
             let ribbon_menu = match pointer.as_str() {
                 "menu-new-part" => Some(0),
-                "part-menu-move" => Some(0),
-                "menu-move" => Some(1),
-                "menu-copy" => Some(2),
+                "menu-copy" => Some(1),
                 _ => None,
             };
             if let Some(index) = ribbon_menu
@@ -785,10 +783,26 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             editor
                 .current_mut()
                 .select(instance.map(Selection::Instance));
+            if scenario == "menu-move" {
+                editor.open_move();
+            }
         }
         "part-menu-move" => {
             editor.current_mut().active_part = Some(part);
             editor.shell.tab = shell::RibbonTab::Model;
+            if let Some(body) = editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .and_then(|p| p.shown_bodies().next())
+                .map(|b| b.id)
+            {
+                editor
+                    .current_mut()
+                    .select(Some(Selection::Body { part, id: body }));
+            }
+            editor.open_body_move(false);
         }
         "tree-folders" => {
             // Peça da raiz em edição, com a origem dela visível e a pasta de rascunhos
@@ -1224,6 +1238,253 @@ mod tests {
         )?;
         Ok(())
     }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn move_assemblies_from_tree_and_ribbon_preserves_children_and_offers_modes_in_properties()
+    -> Result<(), Box<dyn Error>> {
+        use nator_geometry::{norm, sub};
+        for own_body in [false, true] {
+            let context = egui::Context::default();
+            let mut doc = Document::new("Conjunto com subpeças")?;
+            let root = doc.create_part("Conjunto".into())?;
+            let root_instance = doc
+                .instances()
+                .iter()
+                .find(|i| i.part == root)
+                .ok_or("Raiz")?
+                .id;
+            let mut solid = nator_kernel::Solid::cuboid([0.; 3], [10.; 3])?;
+            let asset = Arc::new(MeshAsset::new(solid.tessellate(0.1, 0.2)?));
+            let main = if own_body {
+                Some(
+                    doc.add_mesh(Some(root), "Principal".into(), asset.clone())?
+                        .1,
+                )
+            } else {
+                None
+            };
+            let (child, child_body) = doc.add_mesh(None, "Subpeça".into(), asset.clone())?;
+            let child_instance = doc
+                .instances()
+                .iter()
+                .find(|i| i.part == child)
+                .ok_or("Filho")?
+                .id;
+            doc.reparent(child_instance, Some(root))?;
+            doc.instance_mut(child_instance)?.placement =
+                Placement::new([30., 0., 0.], [0., 0., 0.2])?;
+            let (grandchild, _) = doc.add_mesh(None, "Subpeça interna".into(), asset)?;
+            let grandchild_instance = doc
+                .instances()
+                .iter()
+                .find(|i| i.part == grandchild)
+                .ok_or("Neto")?
+                .id;
+            doc.reparent(grandchild_instance, Some(child))?;
+            doc.instance_mut(grandchild_instance)?.placement =
+                Placement::new([0., 25., 0.], [0., 0.1, 0.])?;
+            doc.instance_mut(root_instance)?.placement =
+                Placement::new([20., -10., 5.], [0., 0., 0.3])?;
+            doc.add_instance(root, None, Placement::new([150., 0., 0.], [0.; 3])?)?;
+            let before = doc.occurrences()?;
+            let original_child = doc.instance(child_instance).ok_or("Filho")?.placement;
+            let original_grandchild = doc.instance(grandchild_instance).ok_or("Neto")?.placement;
+            let mut editor =
+                Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+            editor.recoveries.clear();
+            editor.show_recovery = false;
+            editor.current_mut().active_part = Some(root);
+            editor.shell.tab = shell::RibbonTab::Model;
+            if let Some(id) = main {
+                editor
+                    .current_mut()
+                    .select(Some(Selection::Body { part: root, id }));
+                let placement = editor
+                    .current()
+                    .session
+                    .document()
+                    .instance(root_instance)
+                    .ok_or("Raiz")?
+                    .placement;
+                let point = placement.apply([0., 0., 10.]);
+                editor.current_mut().picked = Some(nator_document::assembly::Pick {
+                    instance: root_instance,
+                    part: root,
+                    body: id,
+                    triangle: 0,
+                    point,
+                    normal: placement.apply_vector([0., 0., 1.]),
+                    vertices: [point; 3],
+                    placement,
+                });
+            }
+            settle(&mut editor, &context)?;
+            if own_body {
+                let tab = label_position(&mut editor, &context, text(T::Assembly))?;
+                click(&mut editor, &context, tab)?;
+                settle(&mut editor, &context)?;
+                assert_eq!(editor.current().active_part, None);
+                assert!(
+                    editor
+                        .current()
+                        .is_selected(Selection::Instance(root_instance))
+                );
+                let button = label_position(&mut editor, &context, text(T::MoveMenu))?;
+                click(&mut editor, &context, button)?;
+            } else {
+                editor.apply_menu_action(
+                    &context,
+                    browser::MenuAction::Move(vec![
+                        Selection::Instance(root_instance),
+                        Selection::Instance(child_instance),
+                    ]),
+                );
+            }
+            settle(&mut editor, &context)?;
+            assert_eq!(editor.current().active_part, None);
+            let center = context
+                .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("move_center")))
+                .ok_or("Manipulador do conjunto ausente")?;
+            assert!(editor.canvas_rect.contains(center));
+            let tips = context
+                .data(|d| d.get_temp::<[Option<egui::Pos2>; 3]>(egui::Id::new("move_tips")))
+                .ok_or("Setas")?;
+            let tip = tips[0].ok_or("Eixo X")?;
+            drag_between(&mut editor, &context, tip, tip + egui::vec2(18., -6.))?;
+            assert_eq!(editor.current().session.revision(), 0);
+            let mut current = T::MoveFree;
+            for next in [
+                T::MoveFaceToFace,
+                T::MoveEdgeToEdge,
+                T::MovePointToPoint,
+                T::MoveFree,
+            ] {
+                let combo = label_position(&mut editor, &context, text(current))?;
+                click(&mut editor, &context, combo)?;
+                let option = label_position(&mut editor, &context, text(next))?;
+                click(&mut editor, &context, option)?;
+                current = next;
+                assert_eq!(editor.current().session.revision(), 0);
+            }
+            editor.set_move_for_capture([12., -3., 7.], [0., 0., 25.]);
+            settle(&mut editor, &context)?;
+            let ok = label_position(&mut editor, &context, text(T::Ok))?;
+            click(&mut editor, &context, ok)?;
+            settle(&mut editor, &context)?;
+            let document = editor.current().session.document();
+            let after = document.occurrences()?;
+            let a = before
+                .iter()
+                .find(|o| o.instance == root_instance)
+                .ok_or("Raiz")?;
+            let b = after
+                .iter()
+                .find(|o| o.instance == root_instance)
+                .ok_or("Raiz movida")?;
+            let delta = b.placement.compose(a.placement.inverse()?)?;
+            for original in &before {
+                let moved = after
+                    .iter()
+                    .find(|o| o.path == original.path)
+                    .ok_or("Descendente")?;
+                let expected = if original.path.starts_with(&[root_instance]) {
+                    delta.compose(original.placement)?
+                } else {
+                    original.placement
+                };
+                assert!(
+                    norm(sub(
+                        moved.placement.apply([2., 3., 4.]),
+                        expected.apply([2., 3., 4.])
+                    )) < 1e-8
+                );
+            }
+            assert_eq!(
+                document.instance(child_instance).ok_or("Filho")?.placement,
+                original_child
+            );
+            assert_eq!(
+                document
+                    .instance(grandchild_instance)
+                    .ok_or("Neto")?
+                    .placement,
+                original_grandchild
+            );
+            assert_eq!(
+                document.body(child_body).ok_or("Corpo")?.placement,
+                Placement::default()
+            );
+            assert_eq!(editor.current().session.revision(), 1);
+            assert!(editor.current_mut().session.undo());
+            assert!(editor.current_mut().session.redo());
+            // Alinhar pela geometria do filho mantém o conjunto como alvo.
+            editor.apply_menu_action(
+                &context,
+                browser::MenuAction::Move(vec![Selection::Instance(root_instance)]),
+            );
+            frame(&mut editor, &context, vec![])?;
+            let combo = label_position(&mut editor, &context, text(T::MoveFree))?;
+            click(&mut editor, &context, combo)?;
+            let option = label_position(&mut editor, &context, text(T::MovePointToPoint))?;
+            click(&mut editor, &context, option)?;
+            let document = editor.current().session.document();
+            let occurrence = document
+                .occurrences()?
+                .into_iter()
+                .find(|o| o.instance == child_instance)
+                .ok_or("Filho")?;
+            let point = occurrence.placement.apply([0.; 3]);
+            editor.set_align_for_capture(
+                nator_document::assembly::Pick {
+                    instance: child_instance,
+                    part: child,
+                    body: child_body,
+                    triangle: 0,
+                    point,
+                    normal: occurrence.placement.apply_vector([0., 0., 1.]),
+                    vertices: [point; 3],
+                    placement: occurrence.placement,
+                },
+                nator_geometry::add(point, [8., 0., 0.]),
+            );
+            let root_before = editor
+                .current()
+                .session
+                .document()
+                .instance(root_instance)
+                .ok_or("Raiz")?
+                .placement;
+            settle(&mut editor, &context)?;
+            let ok = label_position(&mut editor, &context, text(T::Ok))?;
+            click(&mut editor, &context, ok)?;
+            settle(&mut editor, &context)?;
+            let root_after = editor
+                .current()
+                .session
+                .document()
+                .instance(root_instance)
+                .ok_or("Raiz")?
+                .placement;
+            assert!(
+                norm(sub(
+                    root_after.apply([0.; 3]),
+                    nator_geometry::add(root_before.apply([0.; 3]), [8., 0., 0.])
+                )) < 1e-8
+            );
+            assert_eq!(
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .instance(child_instance)
+                    .ok_or("Filho")?
+                    .placement,
+                original_child
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn floating_planes_sections_and_move_axes_keep_enter_separate_from_ok()
@@ -2685,8 +2946,7 @@ mod tests {
         let open_move = |editor: &mut Editor| -> Result<(), Box<dyn Error>> {
             let button = label_position(editor, &context, text(T::MoveMenu))?;
             click(editor, &context, button)?;
-            let free = label_position(editor, &context, text(T::MoveFree))?;
-            click(editor, &context, free)
+            Ok(())
         };
         let revision = editor.current().session.revision();
         open_move(&mut editor)?;
@@ -3617,8 +3877,7 @@ mod tests {
         settle(&mut editor, &context)?;
         let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
         click(&mut editor, &context, move_button)?;
-        let free = label_position(&mut editor, &context, text(T::MoveFree))?;
-        click(&mut editor, &context, free)?;
+
         editor.set_move_for_capture([50., 0., 0.], [0.; 3]);
         frame(&mut editor, &context, vec![enter()])?;
         settle(&mut editor, &context)?;
@@ -3681,7 +3940,7 @@ mod tests {
             .select(Some(Selection::Body { part, id: original }));
         editor.invalidate_scene();
         settle(&mut editor, &context)?;
-        // Cada subopção usa geometria da malha real e altera somente a posição do
+        // Cada modo escolhido no painel usa geometria da malha real e altera somente a posição do
         // corpo. Desfazer entre os casos mantém a mesma origem de referência.
         for (label, mode) in [
             (T::MoveFaceToFace, navigation::PickMode::Face),
@@ -3690,6 +3949,8 @@ mod tests {
         ] {
             let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
             click(&mut editor, &context, move_button)?;
+            let free = label_position(&mut editor, &context, text(T::MoveFree))?;
+            click(&mut editor, &context, free)?;
             let option = label_position(&mut editor, &context, text(label))?;
             click(&mut editor, &context, option)?;
             assert_eq!(editor.pick_mode, mode);
@@ -3733,6 +3994,8 @@ mod tests {
         // durante a edição da peça ativa, mesmo que chegue ao painel por uma seleção.
         let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
         click(&mut editor, &context, move_button)?;
+        let free = label_position(&mut editor, &context, text(T::MoveFree))?;
+        click(&mut editor, &context, free)?;
         let option = label_position(&mut editor, &context, text(T::MovePointToPoint))?;
         click(&mut editor, &context, option)?;
         let foreign = editor

@@ -140,7 +140,7 @@ impl Action {
             Self::Solid(tool) => tool.label(),
             Self::MoveBody => T::MoveMenu,
             Self::CopyBody => T::CopyMenu,
-            Self::MoveCopy => T::MoveCopyTool,
+            Self::MoveCopy => T::MoveMenu,
             Self::Align => T::AlignTool,
             Self::NewInstance => T::NewInstanceTool,
             Self::CloneInstance => T::CloneTool,
@@ -303,17 +303,6 @@ struct Menu<'a> {
     items: &'a [(Action, T, T)],
 }
 
-/// As abas compartilham as opções de alinhamento; Livre muda apenas o alvo:
-/// corpos na Peça e componentes na Montagem.
-fn move_menu_items(free: Action) -> [(Action, T, T); 4] {
-    [
-        (free, T::MoveFree, T::MoveFreeHint),
-        (Action::MoveFace, T::MoveFaceToFace, T::MoveFaceHint),
-        (Action::MoveEdge, T::MoveEdgeToEdge, T::MoveEdgeHint),
-        (Action::MovePoint, T::MovePointToPoint, T::MovePointHint),
-    ]
-}
-
 /// Também alimenta a busca: nenhuma entrada anuncia uma ferramenta sem implementação.
 const SEARCH_ACTIONS: &[Action] = &[
     Action::Select,
@@ -349,7 +338,6 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Mirror),
     Action::Solid(SolidTool::Split),
     Action::MoveCopy,
-    Action::MoveBody,
     Action::CopyBody,
     Action::Align,
     Action::NewInstance,
@@ -690,7 +678,12 @@ impl Editor {
                 self.open_feature_tool(tool);
                 self.prefill_selected_topology(context);
             }
-            Action::MoveCopy => self.open_move(),
+            Action::MoveCopy => {
+                if self.shell.tab == RibbonTab::Assembly {
+                    self.enter_assembly_context(context);
+                }
+                self.open_move();
+            }
             Action::MoveBody => self.open_body_move(false),
             Action::CopyBody => self.open_body_move(true),
             Action::Align => self.open_align(navigation::PickMode::Face),
@@ -936,7 +929,13 @@ impl Editor {
                             .frame(selected),
                         );
                         if response.clicked() {
-                            self.shell.tab = tab;
+                            if tab == RibbonTab::Assembly
+                                && (!selected || self.current().active_part.is_some())
+                            {
+                                self.enter_assembly_context(ui.ctx());
+                            } else {
+                                self.shell.tab = tab;
+                            }
                         }
                     }
                     // Mostrar/ocultar a árvore continua na busca (S), como as demais vistas.
@@ -1373,17 +1372,7 @@ impl Editor {
                     ],
                 );
                 self.ribbon_group_with(ui, T::ModifyGroup, 4, |editor, ui| {
-                    let enabled = editor.action_enabled(Action::MoveBody);
-                    ui.add_enabled_ui(enabled, |ui| {
-                        editor.ribbon_menu_button(
-                            ui,
-                            Menu {
-                                icon: Icon::Move,
-                                label: T::MoveMenu,
-                                items: &move_menu_items(Action::MoveBody),
-                            },
-                        );
-                    });
+                    editor.action_button(ui, Action::MoveBody, true);
                     for action in [
                         Action::CopyBody,
                         Action::Solid(SolidTool::Join),
@@ -1412,15 +1401,7 @@ impl Editor {
                         ],
                     },
                 );
-                self.ribbon_menu_group(
-                    ui,
-                    T::PositionGroup,
-                    Menu {
-                        icon: Icon::Move,
-                        label: T::MoveMenu,
-                        items: &move_menu_items(Action::MoveCopy),
-                    },
-                );
+                self.ribbon_group(ui, T::PositionGroup, &[Action::MoveCopy]);
                 self.ribbon_menu_group(
                     ui,
                     T::CopyMenu,

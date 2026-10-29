@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Movimento de conjuntos e modos no painel — 29/10/2026
+
+- Etapa local 0.12.0, formato mantido em 36, sem push/release. Entrar na aba Montagem encerra a edição de corpos; Mover pela árvore assume o contexto dos alvos. O pivô e o contorno do manipulador incluem a subárvore visível, mesmo sem corpo na peça principal. Pai e filho selecionados recebem uma transformação única.
+- Aprovados 360 testes com OCCT, 264 sem OCCT e 50 ensaios gráficos seriais; formatação e Clippy com todos os alvos/avisos negados aprovados nas duas configurações. Logs em `target/codex-validation/move-hierarchy-20261029/`, bateria gráfica final em `gpu-final.log`.
+- Regressão gráfica exercita conjuntos com e sem corpo próprio, filho e neto rotacionados/deslocados, segunda instância da mesma definição, menu da árvore durante edição de peça, transição Peça → Montagem, arraste do manipulador, seleção simultânea de pai/filho, quatro modos no painel, rotação/translação, desfazer/refazer e alinhamento usando referência de um filho. Confere posições mundiais por caminho de ocorrência, posições locais preservadas e outra instância inalterada.
+- Ensaio existente de Mover/Copiar na peça agora escolhe os alinhamentos no painel e continua verificando corpos, cópias, desfazer e recusa de origem de outra peça. Capturas antigas `menu-move` e `part-menu-move` passam a mostrar o painel atual. Captura real conferida em `mover.png`, no mesmo diretório. Windows não executado localmente.
+
 ## Campos flutuantes de medida — 29/10/2026
 
 - Etapa local 0.11.0, formato mantido em 36, sem push/release. Campos junto ao cursor em extrusão, acabamento de sólidos, setas de rascunho, plano deslocado, seção e eixos/anéis de movimento. Novas setas de raio/chanfro/espessura usam as referências selecionadas como apoio visual; o comando CAD exato calcula o resultado.
