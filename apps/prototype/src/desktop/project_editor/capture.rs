@@ -1152,6 +1152,110 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn label_selects_a_face_drags_and_preserves_style_in_the_timeline() -> Result<(), Box<dyn Error>>
+    {
+        use nator_document::features::{LabelMode, Operation};
+        let context = egui::Context::default();
+        let mut solid = nator_kernel::Solid::cuboid([-30., -30., 0.], [60., 60., 5.])?;
+        solid.name_faces_by_index("base")?;
+        let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+        let mut doc = Document::new("Rótulo pelo mouse")?;
+        let (part, body) = doc.add_mesh(
+            None,
+            "Bloco".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        doc.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+        doc.body_mut(body)?.face_names = Arc::new(solid.face_names().to_vec());
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        let tool = label_position(&mut editor, &context, text(T::Label))?;
+        click(&mut editor, &context, tool)?;
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [0., 0., 5.],
+        )
+        .ok_or("Face fora da tela")?;
+        click(&mut editor, &context, at)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let command = editor.feature_edit.as_ref().ok_or("Painel")?.preview_key(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?,
+        );
+        let Command::AddFeature {
+            operation: Operation::Label { spec, .. },
+            ..
+        } = command
+        else {
+            return Err("Rótulo".into());
+        };
+        assert!(!spec.outline.is_empty());
+        let center = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            spec.position,
+        )
+        .ok_or("Marcador")?;
+        drag_between(
+            &mut editor,
+            &context,
+            center,
+            center + egui::vec2(24., -12.),
+        )?;
+        wait_feature_preview(&mut editor, &context)?;
+        let raised = context
+            .data(|data| {
+                data.get_temp::<egui::Rect>(egui::Id::new(("choice_rect", text(T::LabelRaised))))
+            })
+            .ok_or("Modo relevo")?
+            .center();
+        click(&mut editor, &context, raised)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let feature = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .features
+            .last()
+            .ok_or("Histórico")?
+            .clone();
+        let Operation::Label { spec: after, .. } = &feature.operation else {
+            return Err("Histórico".into());
+        };
+        assert_eq!(after.mode, LabelMode::Raised);
+        assert!(nator_geometry::norm(nator_geometry::sub(after.position, spec.position)) > 1.);
+        assert!(!after.outline.is_empty());
+        assert!(editor.current_mut().session.undo());
+        assert!(editor.current_mut().session.redo());
+        editor.feature_edit = Some(feature_editor::Draft::edit(
+            editor.current().id,
+            part,
+            feature,
+        ));
+        settle(&mut editor, &context)?;
+        wait_feature_preview(&mut editor, &context)?;
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn sweep_picks_profile_planes_and_a_curved_sketch_guide() -> Result<(), Box<dyn Error>> {
         use nator_document::features::{Operation, SweepRoute};
         use nator_sketch::Curve;

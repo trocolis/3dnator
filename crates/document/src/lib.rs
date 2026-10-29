@@ -177,6 +177,8 @@ pub struct Body {
     /// Nome estável de cada face do B-rep, na ordem topológica do núcleo. Vazio quando o
     /// corpo é malha ou veio de um projeto sem nomes; um nome vazio marca face sem origem.
     pub face_names: Arc<Vec<String>>,
+    /// Cores próprias produzidas por operações; pinturas explícitas prevalecem.
+    pub intrinsic_colors: Arc<Vec<Option<RgbColor>>>,
     pub placement: Placement,
     pub visible: bool,
     /// Cor sólida definida pelo usuário ou importada; ausência usa a aparência neutra.
@@ -793,6 +795,7 @@ impl Document {
         };
         let body = self.allocate_body_id()?;
         self.part_mut(part)?.bodies.push(Body {
+            intrinsic_colors: Default::default(),
             id: body,
             name,
             geometry,
@@ -973,6 +976,13 @@ impl Document {
                         "Nomes de faces inválidos ou sem B-rep correspondente.".into(),
                     ));
                 }
+                if !body.intrinsic_colors.is_empty()
+                    && (body.brep.is_none() || body.intrinsic_colors.len() != body.face_names.len())
+                {
+                    return Err(DocumentError(
+                        "Cores de faces incompatíveis com o sólido.".into(),
+                    ));
+                }
                 validate_name(&body.name)?;
                 total_triangles = total_triangles
                     .checked_add(body.geometry.mesh().triangles().len())
@@ -1122,24 +1132,42 @@ impl Document {
                     .triangles
                     .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
                 group.creases.extend_from_slice(geometry.creases());
-                let fallback = self
-                    .body_appearance(body.id)
-                    .and_then(|a| a.base_color)
+                let painted_base = self.body_appearance(body.id).and_then(|a| a.base_color);
+                let fallback = painted_base
                     .or(occurrence_color)
                     .or(body.color)
                     .unwrap_or(RgbColor::NEUTRAL);
+                let intrinsic = |triangle: usize| {
+                    geometry
+                        .triangle_faces()
+                        .and_then(|faces| faces.get(triangle))
+                        .and_then(|face| body.intrinsic_colors.get(*face as usize))
+                        .copied()
+                        .flatten()
+                };
                 if let Some(appearance) = appearance {
-                    group.colors.extend(appearance.materials.iter().map(|m| {
-                        if *m == 0 {
-                            fallback
-                        } else {
-                            appearance.layers[usize::from(*m) - 1].color
-                        }
-                    }));
-                } else {
                     group
                         .colors
-                        .extend(std::iter::repeat_n(fallback, mesh.triangles().len()));
+                        .extend(
+                            appearance
+                                .materials
+                                .iter()
+                                .enumerate()
+                                .map(|(triangle, m)| {
+                                    if *m == 0 {
+                                        painted_base
+                                            .or_else(|| intrinsic(triangle))
+                                            .unwrap_or(fallback)
+                                    } else {
+                                        appearance.layers[usize::from(*m) - 1].color
+                                    }
+                                }),
+                        );
+                } else {
+                    group.colors.extend(
+                        (0..mesh.triangles().len())
+                            .map(|i| painted_base.or_else(|| intrinsic(i)).unwrap_or(fallback)),
+                    );
                 }
                 group
                     .styles

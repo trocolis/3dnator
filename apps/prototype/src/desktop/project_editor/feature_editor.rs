@@ -14,11 +14,12 @@ use super::{
 };
 use nator_document::features::{
     BooleanMode, Combine, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec, HoleSpec,
-    LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, SweepRoute, ThreadSpec, UntilFace,
-    signature,
+    LabelSpec, LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, SweepRoute, ThreadSpec,
+    UntilFace, signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
+pub(super) mod label;
 mod revolve;
 
 /// Ferramentas do painel.
@@ -28,6 +29,7 @@ pub(super) enum Tool {
     Revolve,
     Loft,
     Sweep,
+    Label,
     Join,
     Cut,
     Intersect,
@@ -47,6 +49,7 @@ impl Tool {
             Self::Revolve => T::Revolve,
             Self::Loft => T::Loft,
             Self::Sweep => T::Sweep,
+            Self::Label => T::Label,
             Self::Join | Self::Cut | Self::Intersect => T::CombineTool,
             Self::Fillet => T::Fillet,
             Self::Chamfer => T::Chamfer,
@@ -64,6 +67,7 @@ impl Tool {
             Self::Revolve => Icon::Revolve,
             Self::Loft => Icon::Loft,
             Self::Sweep => Icon::Sweep,
+            Self::Label => Icon::Label,
             Self::Hole => Icon::Hole,
             Self::Fillet => Icon::Fillet,
             Self::Chamfer => Icon::Chamfer,
@@ -86,7 +90,7 @@ impl Tool {
         match self {
             Self::Extrude | Self::Revolve | Self::Loft | Self::Sweep => Field::Profile,
             Self::Fillet | Self::Chamfer => Field::Edges,
-            Self::Shell => Field::Faces,
+            Self::Shell | Self::Label => Field::Faces,
             _ => Field::Base,
         }
     }
@@ -389,6 +393,8 @@ pub(super) struct Draft {
     layout: LayoutDraft,
     cutting_plane: Option<ExtrusionLimit>,
     fixed_plane: Option<nator_sketch::Plane>,
+    label: LabelSpec,
+    label_drag: Option<label::Drag>,
 }
 impl Draft {
     fn new(tab: u64, part: PartId, tool: Tool) -> Self {
@@ -434,6 +440,8 @@ impl Draft {
             layout: LayoutDraft::default(),
             cutting_plane: None,
             fixed_plane: None,
+            label: Default::default(),
+            label_drag: None,
         }
     }
     pub fn edit(tab: u64, part: PartId, feature: Feature) -> Self {
@@ -448,6 +456,12 @@ impl Draft {
                 .unwrap_or(0)
         };
         match feature.operation {
+            Operation::Label { base, face, spec } => {
+                d.tool = Tool::Label;
+                d.base = Some(base);
+                d.kept_topology = Some(Kept::Face(face));
+                d.label = spec;
+            }
             Operation::ExtrudeFace {
                 base,
                 face,
@@ -951,6 +965,13 @@ impl Draft {
             }
             return;
         }
+        if self.tool == Tool::Label && self.field == Some(Field::Faces) {
+            self.base = Some(body);
+            self.kept_topology = Some(kept);
+            self.extra_topology.clear();
+            self.field = None;
+            return;
+        }
         match (self.field, kept) {
             (Some(Field::ExitFace), Kept::Face(face)) => {
                 if self.base == Some(body) {
@@ -1123,7 +1144,7 @@ impl Draft {
             Tool::Join | Tool::Cut | Tool::Intersect => {
                 self.base.is_some() && self.tool_body.is_some() && self.base != self.tool_body
             }
-            Tool::Fillet | Tool::Chamfer | Tool::Shell => {
+            Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::Label => {
                 self.base.is_some() && self.kept_topology.is_some()
             }
             Tool::Hole => self.base.is_some() && self.sketch.is_some(),
@@ -1219,6 +1240,11 @@ impl Draft {
                     until,
                 }
             }
+            Tool::Label => Operation::Label {
+                base: self.base.unwrap_or(BodyId(0)),
+                face,
+                spec: self.label.clone(),
+            },
             Tool::Sweep => Operation::Sweep {
                 start: ProfileRef { sketch, region },
                 end: self.end_profile.clone().unwrap_or(ProfileRef {
@@ -1473,7 +1499,7 @@ impl Editor {
                 d.combine_target = suggestion;
                 d.auto_preferred = suggestion;
             }
-            Tool::Fillet | Tool::Chamfer | Tool::Shell => {
+            Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::Label => {
                 d.base = suggestion;
             }
             Tool::Join | Tool::Cut | Tool::Intersect => {
@@ -1521,7 +1547,7 @@ impl Editor {
                 };
             }
         }
-        if tool == Tool::Shell
+        if matches!(tool, Tool::Shell | Tool::Label)
             && self.pick_mode == navigation::PickMode::Face
             && let Some(pick) = self.current().picked.as_ref().filter(|pick| {
                 pick.part == part
@@ -1533,6 +1559,7 @@ impl Editor {
             && let Ok(face) = self.current().session.document().face_at(pick)
         {
             d.apply_pick(pick.body, Kept::Face(face));
+            d.capture_label_pick(pick);
         }
         // Concluir o rascunho aberto mantém o perfil visível para a seleção.
         if tool == Tool::Extrude
@@ -1615,6 +1642,18 @@ impl Editor {
                 })
             });
         let command = d.command(&part);
+        if d.tool == Tool::Label {
+            if let Some(spec) = self.normalized_label_preview(&command) {
+                d.label.outline = spec.outline;
+                d.label.outline_key = spec.outline_key;
+                if d.label_drag.is_none() {
+                    d.label.position = spec.position;
+                    d.label.uv = spec.uv;
+                    d.label.normal = spec.normal;
+                }
+            }
+            self.label_fonts.poll(ctx);
+        }
         let complete = d.complete() && nator_kernel::is_available();
         let footer_error;
         let footer = if !complete || d.zero_extrusion(&part) {
@@ -1655,6 +1694,7 @@ impl Editor {
                     ui.colored_label(theme::WARNING, text(T::FixingFailure));
                 }
                 match d.tool {
+                    Tool::Label => label::panel(ui, &mut d, &self.label_fonts.names),
                     Tool::Extrude => extrude_panel(ui, &mut d, &part, &regions),
                     Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
                     Tool::Loft | Tool::Sweep => loft_panel(ui, &mut d, &part, &regions),

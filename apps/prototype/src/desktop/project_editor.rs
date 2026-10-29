@@ -458,6 +458,7 @@ pub struct Editor {
     image_edit: Option<image_editor::Draft>,
     paint_edit: Option<paint_editor::Draft>,
     paint_palette: paint_editor::Palette,
+    label_fonts: feature_editor::label::Fonts,
     image_cache: image_editor::Cache,
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
@@ -655,6 +656,7 @@ impl Editor {
             image_edit: None,
             paint_edit: None,
             paint_palette: Default::default(),
+            label_fonts: Default::default(),
             image_cache: image_editor::Cache::default(),
             drawing_edit: None,
             export_edit: None,
@@ -877,6 +879,7 @@ impl Editor {
                         Ok(kept) => {
                             self.status.set(feature_editor::Draft::describe(&kept));
                             draft.apply_pick(p.body, kept);
+                            draft.capture_label_pick(p);
                         }
                         Err(error) => self.status.error(error),
                     }

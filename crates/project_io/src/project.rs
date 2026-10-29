@@ -51,7 +51,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 33: perfis coplanares e eixo em rascunho independente na revolução.
 /// Versão 34: transição entre perfis e correspondência persistida dos furos.
 /// Versão 35: transições guiadas com trajetórias associativas.
-pub const FORMAT_VERSION: u32 = 35;
+/// Versão 36: rótulos com contornos persistidos e cores intrínsecas por face.
+pub const FORMAT_VERSION: u32 = 36;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -79,6 +80,8 @@ struct Manifest {
     appearances: Vec<AppearanceRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     activities: Vec<nator_document::activity::Activity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    label_outlines: Vec<LabelOutlineRecord>,
     parts: Vec<PartRecord>,
     instances: Vec<InstanceRecord>,
     #[serde(default)]
@@ -127,6 +130,16 @@ struct SketchRecordData {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct LabelOutlineRecord {
+    body: u64,
+    path: String,
+}
+fn label_outline_path(body: u64) -> String {
+    format!("labels/{body}.brep")
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AppearanceRecord {
     body: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,6 +148,11 @@ struct AppearanceRecord {
     source_signature: u64,
     mesh_path: Option<String>,
     materials_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    faces_path: Option<String>,
+}
+fn appearance_faces_path(body: u64) -> String {
+    format!("appearances/{body}.faces")
 }
 fn appearance_mesh_path(body: u64) -> String {
     format!("appearances/{body}.mesh")
@@ -180,6 +198,8 @@ struct BodyRecord {
     /// Um nome por face do B-rep, na ordem topológica; vazio em corpos de malha.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     face_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    intrinsic_colors: Vec<Option<[u8; 3]>>,
     /// Face de origem de cada triângulo da malha de um sólido (`faces/<id>.bin`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     faces_path: Option<String>,
@@ -370,9 +390,32 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
     }
     let manifest: Manifest = serde_json::from_value(value).map_err(error)?;
     let mut expected_names = HashSet::from(["manifest.json".to_owned()]);
+    let mut outlines = std::collections::HashMap::new();
+    if manifest.label_outlines.len() > MAX_ELEMENTS {
+        return Err(ImportError("Quantidade de rótulos excessiva.".into()));
+    }
+    for record in manifest.label_outlines {
+        if record.path != label_outline_path(record.body)
+            || !expected_names.insert(record.path.clone())
+            || outlines.insert(record.body, record.path).is_some()
+        {
+            return Err(ImportError(
+                "Contorno de rótulo repetido ou com caminho inválido.".into(),
+            ));
+        }
+    }
     let mut parts = Vec::new();
     let mut total_triangles = 0_usize;
-    for part in manifest.parts {
+    for mut part in manifest.parts {
+        for feature in &mut part.features {
+            if let nator_document::features::Operation::Label { spec, .. } = &mut feature.operation
+            {
+                let path = outlines.remove(&feature.output.0).ok_or_else(|| {
+                    ImportError("Contornos de fonte ausentes para o rótulo.".into())
+                })?;
+                spec.outline = Arc::new(read_entry(&mut archive, &path, 16 * 1024 * 1024)?);
+            }
+        }
         let mut bodies = Vec::new();
         for body in part.bodies {
             // Só aceitamos nomes derivados do identificador; nenhum caminho externo é seguido.
@@ -420,6 +463,12 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 MeshAsset::new(mesh)
             };
             bodies.push(Body {
+                intrinsic_colors: Arc::new(
+                    body.intrinsic_colors
+                        .into_iter()
+                        .map(|c| c.map(RgbColor::new))
+                        .collect(),
+                ),
                 color: body.color_srgb.map(RgbColor::new),
                 brep,
                 face_names: Arc::new(body.face_names),
@@ -459,6 +508,11 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             history_marker: part.history_marker,
             folders: part.folders,
         });
+    }
+    if !outlines.is_empty() {
+        return Err(ImportError(
+            "Contorno de fonte sem operação de rótulo correspondente.".into(),
+        ));
     }
     // A miniatura é opcional e só é conferida quanto ao tamanho e à assinatura PNG.
     let mut images = Vec::new();
@@ -535,9 +589,25 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                 }
                 let materials =
                     read_entry(&mut archive, &materials_path, MAX_SCENE_TRIANGLES as u64)?;
-                (Some(Arc::new(MeshAsset::new(mesh))), Arc::new(materials))
+                let geometry = if let Some(path) = record.faces_path {
+                    if path != appearance_faces_path(record.body)
+                        || !expected_names.insert(path.clone())
+                    {
+                        return Err(ImportError(
+                            "Caminho de faces da aparência inválido.".into(),
+                        ));
+                    }
+                    let faces = decode_faces(
+                        &read_entry(&mut archive, &path, MAX_EXPANDED_BYTES)?,
+                        mesh.triangles().len(),
+                    )?;
+                    MeshAsset::with_faces(mesh, faces).map_err(error)?
+                } else {
+                    MeshAsset::new(mesh)
+                };
+                (Some(Arc::new(geometry)), Arc::new(materials))
             }
-            (None, None) => (None, Arc::new(Vec::new())),
+            (None, None) if record.faces_path.is_none() => (None, Arc::new(Vec::new())),
             _ => return Err(ImportError("Cache de pintura incompleto.".into())),
         };
         appearances.push(nator_document::SurfaceAppearance {
@@ -739,6 +809,21 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
         next_id: document.next_id(),
         name_counters: document.name_counters().clone(),
         activities: document.activities().to_vec(),
+        label_outlines: document
+            .parts()
+            .iter()
+            .flat_map(|p| p.features.iter())
+            .filter(|f| {
+                matches!(
+                    f.operation,
+                    nator_document::features::Operation::Label { .. }
+                )
+            })
+            .map(|f| LabelOutlineRecord {
+                body: f.output.0,
+                path: label_outline_path(f.output.0),
+            })
+            .collect(),
         appearances: document
             .appearances()
             .iter()
@@ -751,6 +836,11 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                     .geometry
                     .as_ref()
                     .map(|_| appearance_mesh_path(appearance.body.0)),
+                faces_path: appearance
+                    .geometry
+                    .as_ref()
+                    .and_then(|g| g.triangle_faces())
+                    .map(|_| appearance_faces_path(appearance.body.0)),
                 materials_path: appearance
                     .geometry
                     .as_ref()
@@ -780,7 +870,19 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                 id: p.id.0,
                 name: p.name.clone(),
                 parameters: p.parameters.clone(),
-                features: p.features.clone(),
+                features: p
+                    .features
+                    .iter()
+                    .cloned()
+                    .map(|mut feature| {
+                        if let nator_document::features::Operation::Label { spec, .. } =
+                            &mut feature.operation
+                        {
+                            spec.outline = Arc::default();
+                        }
+                        feature
+                    })
+                    .collect(),
                 history_marker: p.history_marker,
                 folders: p.folders,
                 sketches: p
@@ -815,6 +917,11 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                         mesh_path: mesh_path(b.id.0),
                         brep_path: b.brep.as_ref().map(|_| format!("breps/{}.brep", b.id.0)),
                         face_names: b.face_names.to_vec(),
+                        intrinsic_colors: b
+                            .intrinsic_colors
+                            .iter()
+                            .map(|c| c.map(RgbColor::channels))
+                            .collect(),
                         faces_path: b.geometry.triangle_faces().map(|_| faces_path(b.id.0)),
                     })
                     .collect(),
@@ -869,6 +976,14 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .start_file("manifest.json", options)
             .map_err(error)?;
         archive.write_all(&bytes)?;
+        for feature in document.parts().iter().flat_map(|p| p.features.iter()) {
+            if let nator_document::features::Operation::Label { spec, .. } = &feature.operation {
+                archive
+                    .start_file(label_outline_path(feature.output.0), options)
+                    .map_err(error)?;
+                archive.write_all(&spec.outline)?;
+            }
+        }
         for appearance in document.appearances() {
             if let Some(geometry) = &appearance.geometry {
                 archive
@@ -894,6 +1009,18 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                     .start_file(appearance_materials_path(appearance.body.0), options)
                     .map_err(error)?;
                 archive.write_all(&appearance.materials)?;
+                if let Some(faces) = geometry.triangle_faces() {
+                    archive
+                        .start_file(appearance_faces_path(appearance.body.0), options)
+                        .map_err(error)?;
+                    let mut bytes = Vec::with_capacity(12 + faces.len() * 4);
+                    bytes.extend_from_slice(FACES_MAGIC);
+                    bytes.extend_from_slice(&(faces.len() as u32).to_le_bytes());
+                    for face in faces {
+                        bytes.extend_from_slice(&face.to_le_bytes());
+                    }
+                    archive.write_all(&bytes)?;
+                }
             }
         }
         for image in document.images() {

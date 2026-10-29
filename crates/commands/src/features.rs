@@ -51,11 +51,99 @@ fn order_holes(
     Ok(())
 }
 
+#[cfg(feature = "occt")]
+fn inherited_colors(
+    doc: &Document,
+    part: PartId,
+    operation: &Operation,
+    result: &Solid,
+    owner: &str,
+) -> Result<Vec<Option<nator_geometry::RgbColor>>, DocumentError> {
+    use std::collections::HashMap;
+    let mut colors = vec![None; result.face_count().map_err(error)?];
+    let mut inputs = operation.inputs();
+    if let Operation::ExtrudeFace { base, .. } = operation {
+        inputs.push(*base);
+    }
+    inputs.sort_unstable_by_key(|id| id.0);
+    inputs.dedup();
+    for input in inputs {
+        let Some(body) = doc.body(input).filter(|b| !b.intrinsic_colors.is_empty()) else {
+            continue;
+        };
+        // Uma pintura uniforme explícita já substituiu as cores próprias.
+        if doc
+            .body_appearance(input)
+            .is_some_and(|a| a.base_color.is_some())
+        {
+            continue;
+        }
+        let (source, bytes) = source(doc, part, input)?;
+        let mut names: HashMap<&str, Option<nator_geometry::RgbColor>> = HashMap::new();
+        for (name, color) in source.face_names().iter().zip(body.intrinsic_colors.iter()) {
+            if name.is_empty() {
+                continue;
+            }
+            names
+                .entry(name)
+                .and_modify(|old| {
+                    if *old != *color {
+                        *old = None
+                    }
+                })
+                .or_insert(*color);
+        }
+        let carry = if let Operation::ExtrudeFace { base, face, .. } = operation {
+            if *base == input {
+                body.intrinsic_colors
+                    .get(face_index(&source, &bytes, face)?)
+                    .copied()
+                    .flatten()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let owner = format!("{owner}:");
+        for (index, color) in colors.iter_mut().enumerate() {
+            if let Some(inherited) = names
+                .get(result.face_names()[index].as_str())
+                .copied()
+                .flatten()
+            {
+                *color = Some(inherited);
+                continue;
+            }
+            if carry.is_some() && result.face_names()[index].starts_with(&owner) {
+                *color = carry;
+                continue;
+            }
+            for (original, candidate) in body.intrinsic_colors.iter().enumerate() {
+                if let Some(candidate) = candidate
+                    && source
+                        .face_common_area(original, result, index)
+                        .map_err(error)?
+                        > 1e-7
+                {
+                    *color = Some(*candidate);
+                    break;
+                }
+            }
+        }
+    }
+    if colors.iter().all(Option::is_none) {
+        colors.clear();
+    }
+    Ok(colors)
+}
+
 /// Resultado CAD de uma operação: malha de exibição, B-rep e nomes estáveis das faces.
 pub(super) struct Built {
     pub mesh: Arc<MeshAsset>,
     pub brep: Arc<Vec<u8>>,
     pub faces: Arc<Vec<String>>,
+    pub intrinsic_colors: Arc<Vec<Option<nator_geometry::RgbColor>>>,
 }
 
 /// Recalcula na ordem as operações ativas da peça. Operações suprimidas, dependentes de uma
@@ -96,6 +184,7 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::Com
         body.geometry = built.mesh;
         body.brep = Some(built.brep);
         body.face_names = built.faces;
+        body.intrinsic_colors = built.intrinsic_colors;
     }
     crate::appearance::rebuild(doc, part)?;
     Ok(())
@@ -351,6 +440,35 @@ pub(super) fn normalize(
             to,
             combine,
         },
+        Operation::Label {
+            base,
+            face,
+            mut spec,
+        } => {
+            let key = spec.shape_key();
+            if spec.outline.is_empty() || spec.outline_key != key {
+                spec.outline = Arc::new(
+                    Solid::text_outline(
+                        &spec.text,
+                        &spec.font_family,
+                        spec.bold,
+                        spec.italic,
+                        spec.underline,
+                    )
+                    .map_err(error)?,
+                );
+                spec.outline_key = key;
+            }
+            let face = stable_face(doc, part, base, face)?;
+            let (solid, bytes) = source(doc, part, base)?;
+            let frame = solid
+                .surface_frame(face_index(&solid, &bytes, &face)?, spec.position, spec.uv)
+                .map_err(error)?;
+            spec.position = frame.origin;
+            spec.normal = nator_geometry::cross(frame.u, frame.v);
+            spec.uv = Some(frame.uv);
+            Operation::Label { base, face, spec }
+        }
         Operation::Sweep {
             start,
             end,
@@ -601,6 +719,7 @@ pub(super) fn construct(
         .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
     let value = |expression: &str| piece.parameters.evaluate(expression, Dimension::Length);
     let owner = body_owner(output);
+    let mut label_colors = None;
     let mut solid = match operation {
         operation @ (Operation::Extrude { combine, .. }
         | Operation::ExtrudeFace { combine, .. }) => {
@@ -613,6 +732,38 @@ pub(super) fn construct(
                     .map_err(error)?,
                 None => extrusion,
             }
+        }
+        Operation::Label { base, face, spec } => {
+            let (solid, bytes) = source(doc, part, *base)?;
+            let (result, faces) = solid
+                .label(
+                    face_index(&solid, &bytes, face)?,
+                    &spec.outline,
+                    nator_kernel::TextPlacement {
+                        point: spec.position,
+                        uv: spec.uv,
+                        size_mm: value(&spec.size)?,
+                        angle_rad: piece
+                            .parameters
+                            .evaluate(&spec.rotation, Dimension::Angle)?,
+                        depth_mm: value(&spec.depth)?,
+                        mode: match spec.mode {
+                            nator_document::features::LabelMode::Surface => {
+                                nator_kernel::TextMode::Surface
+                            }
+                            nator_document::features::LabelMode::Raised => {
+                                nator_kernel::TextMode::Raised
+                            }
+                            nator_document::features::LabelMode::Engraved => {
+                                nator_kernel::TextMode::Engraved
+                            }
+                        },
+                    },
+                    &owner,
+                )
+                .map_err(error)?;
+            label_colors = Some((faces, spec.color));
+            result
         }
         Operation::Sweep {
             start,
@@ -887,7 +1038,22 @@ pub(super) fn construct(
     let faces = Arc::new(solid.face_names().to_vec());
     let (mesh, triangle_faces) = solid.tessellate_with_faces(0.05, 0.25).map_err(error)?;
     let mesh = Arc::new(MeshAsset::with_faces(mesh, triangle_faces)?);
-    Ok(Built { mesh, brep, faces })
+    let mut intrinsic_colors = inherited_colors(doc, part, operation, &solid, &owner)?;
+    if let Some((faces, color)) = label_colors {
+        intrinsic_colors.resize(solid.face_count().map_err(error)?, None);
+        for face in faces {
+            if let Some(value) = intrinsic_colors.get_mut(face) {
+                *value = Some(color);
+            }
+        }
+    }
+    let intrinsic_colors = Arc::new(intrinsic_colors);
+    Ok(Built {
+        mesh,
+        brep,
+        faces,
+        intrinsic_colors,
+    })
 }
 #[cfg(not(feature = "occt"))]
 pub(super) fn construct(

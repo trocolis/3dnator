@@ -22,6 +22,7 @@ pub(super) enum Icon {
     Revolve,
     Loft,
     Sweep,
+    Label,
     Hole,
     Fillet,
     Chamfer,
@@ -452,6 +453,12 @@ fn paint_styled(
             p.line(&[[2., 12.], [22., 12.]], p.ink);
             p.line(&[[12., 2.], [12., 22.]], p.ink);
             p.circle(12., 12., 1.5, p.accent);
+        }
+        Icon::Label => {
+            p.face(&[[2., 4.], [22., 4.], [22., 20.], [2., 20.]], p.fill);
+            p.line(&[[6., 8.], [18., 8.]], p.accent);
+            p.line(&[[12., 8.], [12., 17.]], p.ink);
+            p.line(&[[9., 17.], [15., 17.]], p.ink);
         }
         Icon::Sweep => {
             p.face(&[[2., 15.], [6., 15.], [6., 21.], [2., 21.]], p.fill);

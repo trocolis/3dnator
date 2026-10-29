@@ -22,6 +22,13 @@ impl Solid {
         &self,
         layers: &[(usize, Option<&Solid>)],
     ) -> Result<(Solid, Vec<u32>), KernelError> {
+        self.painted_solid_with_sources(layers)
+            .map(|(solid, materials, _)| (solid, materials))
+    }
+    pub fn painted_solid_with_sources(
+        &self,
+        layers: &[(usize, Option<&Solid>)],
+    ) -> Result<(Solid, Vec<u32>, Vec<u32>), KernelError> {
         if layers.is_empty()
             || layers.len() > 255
             || layers.iter().any(|(face, _)| *face >= self.faces.len())
@@ -46,8 +53,14 @@ impl Solid {
                 layers.len(),
             )
         })?;
-        let materials = partition
-            .origins()?
+        let origins = partition.origins()?;
+        let sources = origins
+            .iter()
+            .map(|o| {
+                u32::try_from(o[1]).map_err(|_| KernelError("Face de origem inválida.".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let materials = origins
             .into_iter()
             .map(|origin| {
                 if origin[2] < 0 || origin[2] as usize > layers.len() {
@@ -57,12 +70,19 @@ impl Solid {
             })
             .collect::<Result<Vec<_>, KernelError>>()?;
         partition.faces = vec![String::new(); materials.len()];
-        Ok((partition, materials))
+        Ok((partition, materials, sources))
     }
     pub fn surface_appearance(
         &self,
         layers: &[(usize, Option<&Solid>)],
     ) -> Result<(Mesh, Vec<u32>), KernelError> {
+        self.surface_appearance_with_sources(layers)
+            .map(|(mesh, materials, _)| (mesh, materials))
+    }
+    pub fn surface_appearance_with_sources(
+        &self,
+        layers: &[(usize, Option<&Solid>)],
+    ) -> Result<(Mesh, Vec<u32>, Vec<u32>), KernelError> {
         if layers.is_empty()
             || layers.len() > 255
             || layers.iter().any(|(face, _)| *face >= self.faces.len())
@@ -89,6 +109,15 @@ impl Solid {
         })?;
         let origins = partition.origins()?;
         let (mesh, faces) = partition.tessellate_with_faces(0.02, 0.2)?;
+        let sources = faces
+            .iter()
+            .map(|f| {
+                origins
+                    .get(*f as usize)
+                    .and_then(|o| u32::try_from(o[1]).ok())
+                    .ok_or_else(|| KernelError("Face de origem da aparência ausente.".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let materials = faces
             .iter()
             .map(|face| {
@@ -102,7 +131,7 @@ impl Solid {
                 Ok(material as u32)
             })
             .collect::<Result<Vec<_>, KernelError>>()?;
-        Ok((mesh, materials))
+        Ok((mesh, materials, sources))
     }
 }
 

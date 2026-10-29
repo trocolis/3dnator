@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.10.0 — 29/10/2026
+
+- Nova ferramenta Rótulo em Acabamento: texto com fontes do sistema, tamanho, negrito/itálico/sublinhado, cor, rotação, posição e arraste sobre faces planas ou curvas; modos superficial colorido, relevo e gravação com profundidade.
+- Contornos de letras persistidos no projeto permitem reabrir, mover, redimensionar e recolorir sem a fonte original. Prévia em segundo plano, edição pela linha do tempo e desfazer/refazer. O STEP conserva letras e cores por face no mesmo sólido.
+- Cores próprias por face sobrevivem ao recálculo, podem ser substituídas por Pintar e são preservadas com os vínculos de faces dos caches de pintura. Integração adaptativa de volume evita falsos erros ao subdividir superfícies curvas com contornos de texto.
+- Formato interno 36; etapa local sem push ou release. Campos flutuantes de medidas permanecem pendentes por solicitação do usuário.
+
 ## 0.9.0 — 29/10/2026
 
 - Nova Transição guiada entre perfis: guia automática tangente aos planos, arco por eixo selecionado ou trajetória de linhas/arcos de um rascunho. A seleção gráfica captura a cadeia conectada e o recálculo acompanha suas entidades. Furos conservam correspondência e o núcleo verifica autointerferência.

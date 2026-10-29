@@ -82,6 +82,38 @@ fn key(command: &Command) -> String {
 }
 
 impl Editor {
+    pub(super) fn normalized_label_preview(
+        &self,
+        command: &Command,
+    ) -> Option<nator_document::features::LabelSpec> {
+        let (ready_key, prepared) = self.preview.ready.as_ref()?;
+        if *ready_key != key(command) || prepared.revision() != self.current().session.revision() {
+            return None;
+        }
+        let output = match command {
+            Command::EditFeature { output, .. } => *output,
+            _ => match prepared.effect() {
+                Effect::Imported { body, .. } => body,
+                _ => return None,
+            },
+        };
+        prepared
+            .document()
+            .parts()
+            .iter()
+            .flat_map(|p| &p.features)
+            .find_map(|f| {
+                if f.output != output {
+                    return None;
+                }
+                if let nator_document::features::Operation::Label { spec, .. } = &f.operation {
+                    Some(spec.clone())
+                } else {
+                    None
+                }
+            })
+    }
+
     /// Chamado a cada quadro pelo painel aberto com o comando que o OK aplicaria.
     pub(super) fn preview_command(
         &mut self,

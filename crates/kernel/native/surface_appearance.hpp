@@ -130,8 +130,8 @@ extern "C" Shape* nator_painted_solid(const Shape* body,const std::size_t* faces
             if (!closed.IsDone() || !BRepCheck_Analyzer(closed.Solid()).IsValid())
                 throw std::runtime_error("Sólido pintado inválido para exportação STEP.");
             GProp_GProps before,after;
-            BRepGProp::VolumeProperties(solid.Current(),before);
-            BRepGProp::VolumeProperties(closed.Solid(),after);
+            BRepGProp::VolumeProperties(solid.Current(),before,1e-10);
+            BRepGProp::VolumeProperties(closed.Solid(),after,1e-10);
             // Volume em mm³: limite absoluto para peças pequenas e relativo para
             // modelos grandes, rejeitando qualquer alteração material do sólido.
             if (std::abs(before.Mass()-after.Mass())>std::max(1e-7,std::abs(before.Mass())*1e-9))

@@ -73,3 +73,5 @@ Esta lista resume famílias de licenças das dependências Rust; não é um inve
 - **BSD-2-Clause / BSD-3-Clause / ISC:** Utilizadas por módulos específicos de tratamento de ponto flutuante e chamadas de sistema.
 - **Boost Software License 1.0 (BSL-1.0):** Utilizada por rotinas numéricas e de hashing.
 - **Unlicense / 0BSD:** Dependências de domínio público ou sem restrições.
+
+Rótulos usam o gerenciador de fontes e o construtor de contornos do OCCT (TKService/TKV3d e FreeType do SDK). Não há fonte incorporada ao aplicativo; famílias instaladas no sistema são escolhidas pelo usuário. O projeto guarda somente os contornos geométricos produzidos, sem distribuir arquivos de fontes.

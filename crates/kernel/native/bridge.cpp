@@ -577,7 +577,7 @@ Shape* nator_half_space(const Shape* body, const double* origin, const double* n
 bool nator_properties(const Shape* body, double* output) noexcept {
     return guarded([&] {
         GProp_GProps volume;
-        BRepGProp::VolumeProperties(body->value, volume);
+        BRepGProp::VolumeProperties(body->value, volume, 1e-10);
         GProp_GProps surface;
         BRepGProp::SurfaceProperties(body->value, surface);
         const gp_Pnt center = volume.CentreOfMass();
@@ -687,7 +687,7 @@ bool nator_distance(const Shape* a, const Shape* b, double* output) noexcept {
 bool nator_volume(const Shape* body, double* volume) noexcept {
     return guarded([&] {
         GProp_GProps properties;
-        BRepGProp::VolumeProperties(body->value, properties);
+        BRepGProp::VolumeProperties(body->value, properties, 1e-10);
         *volume = properties.Mass();
     });
 }
@@ -889,7 +889,7 @@ bool nator_common_volume(const Shape* left, const Shape* right, double* output) 
         BRepAlgoAPI_Common common(left->value, right->value);
         if (!common.IsDone()) throw std::runtime_error("Falha ao consultar a interseção dos sólidos.");
         GProp_GProps properties;
-        BRepGProp::VolumeProperties(common.Shape(), properties);
+        BRepGProp::VolumeProperties(common.Shape(), properties, 1e-10);
         *output = std::abs(properties.Mass());
     });
 }
@@ -1027,3 +1027,5 @@ Shape* nator_brep_read(const char* data, std::size_t size) noexcept {
 #include "opposite_face.hpp"
 
 #include "transitions.hpp"
+
+#include "labels.hpp"

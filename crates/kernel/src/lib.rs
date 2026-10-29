@@ -31,6 +31,31 @@ pub use native::{
     Solid, StepAssembly, StepBody, StepOccurrence, StepPart, projected_edges, version,
 };
 
+/// Base tangente e parâmetros da superfície, em coordenadas do sólido.
+#[derive(Debug, Clone, Copy)]
+pub struct SurfaceFrame {
+    pub origin: [f64; 3],
+    pub u: [f64; 3],
+    pub v: [f64; 3],
+    pub uv: [f64; 2],
+}
+#[derive(Debug, Clone, Copy)]
+pub enum TextMode {
+    Surface,
+    Raised,
+    Engraved,
+}
+/// Posição no sólido, tamanho/profundidade em mm e rotação no plano em radianos.
+#[derive(Debug, Clone, Copy)]
+pub struct TextPlacement {
+    pub point: [f64; 3],
+    pub uv: Option<[f64; 2]>,
+    pub size_mm: f64,
+    pub angle_rad: f64,
+    pub depth_mm: f64,
+    pub mode: TextMode,
+}
+
 /// Curvas tridimensionais exatas que compõem uma trajetória, em milímetros.
 #[derive(Debug, Clone, Copy)]
 pub enum GuideCurve {

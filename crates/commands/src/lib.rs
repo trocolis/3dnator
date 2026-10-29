@@ -1032,6 +1032,7 @@ fn add_feature(
     doc.add_body(
         part,
         nator_document::Body {
+            intrinsic_colors: built.intrinsic_colors,
             id: output,
             name: body_name,
             geometry: built.mesh,

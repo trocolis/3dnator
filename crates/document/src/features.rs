@@ -5,6 +5,8 @@
 //! origem desaparece, o recálculo falha com uma mensagem pedindo nova seleção; nenhuma outra
 //! região, face ou aresta é escolhida no lugar.
 use super::*;
+mod labels;
+pub use labels::{LabelMode, LabelSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -257,6 +259,11 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holes: Option<Vec<HolePair>>,
     },
+    Label {
+        base: BodyId,
+        face: FaceRef,
+        spec: LabelSpec,
+    },
     Boolean {
         base: BodyId,
         tool: BodyId,
@@ -486,6 +493,7 @@ impl Operation {
             Self::Fillet { base, .. }
             | Self::Chamfer { base, .. }
             | Self::Shell { base, .. }
+            | Self::Label { base, .. }
             | Self::Transform { base, .. }
             | Self::Hole { base, .. }
             | Self::Pattern { base, .. }
@@ -687,6 +695,12 @@ impl Feature {
                             *face = remap_face_name(face, bodies);
                         }
                     }
+                }
+            }
+            Operation::Label { base, face, .. } => {
+                body(base)?;
+                if let FaceRef::Named(name) = face {
+                    *name = remap_face_name(name, bodies);
                 }
             }
             Operation::Shell {
@@ -980,6 +994,12 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                         ));
                     }
                 }
+            }
+            Operation::Label { face, spec, .. } => {
+                if let FaceRef::Named(name) = face {
+                    validate_face_name(name)?;
+                }
+                spec.validate(&part.parameters)?;
             }
             Operation::Shell {
                 thickness,
@@ -1332,6 +1352,7 @@ mod tests {
     fn chain() -> Result<Part, Box<dyn Error>> {
         let asset = Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?));
         let body = |id: u64| Body {
+            intrinsic_colors: Default::default(),
             id: BodyId(id),
             name: format!("Corpo {id}"),
             geometry: Arc::clone(&asset),

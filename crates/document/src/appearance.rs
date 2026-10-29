@@ -34,7 +34,7 @@ impl SurfacePaint {
             .chain(self.boundaries.iter().map(|b| &b.mask))
     }
 }
-mod color_serde {
+pub(crate) mod color_serde {
     use nator_geometry::RgbColor;
     use serde::{Deserialize, Serialize};
     pub fn serialize<S: serde::Serializer>(
@@ -104,6 +104,9 @@ impl SurfaceAppearance {
         if let Some(geometry) = &self.geometry {
             if self.source_signature != features::signature(bytes)
                 || geometry.mesh().triangles().len() != self.materials.len()
+                || geometry
+                    .triangle_faces()
+                    .is_some_and(|faces| faces.iter().any(|f| *f as usize >= body.face_names.len()))
                 || self
                     .materials
                     .iter()

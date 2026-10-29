@@ -1,6 +1,17 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    Label,
+    LabelContent,
+    LabelFont,
+    LabelSize,
+    LabelBold,
+    LabelItalic,
+    LabelUnderline,
+    LabelMode,
+    LabelRaised,
+    LabelEngraved,
+    LabelHint,
     Paint,
     PaintColor,
     PaintSurfaces,
@@ -745,6 +756,19 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::Label => "Rótulo",
+        Text::LabelContent => "Texto",
+        Text::LabelFont => "Fonte do sistema",
+        Text::LabelSize => "Tamanho",
+        Text::LabelBold => "Negrito",
+        Text::LabelItalic => "Itálico",
+        Text::LabelUnderline => "Sublinhado",
+        Text::LabelMode => "Tipo de rótulo",
+        Text::LabelRaised => "Relevo",
+        Text::LabelEngraved => "Gravação",
+        Text::LabelHint => {
+            "Selecione uma superfície e arraste o marcador para posicionar o texto. O rótulo acompanha a curvatura; STEP conserva geometria e cores."
+        }
         Text::Paint => "Pintar",
         Text::PaintColor => "Cor RGB",
         Text::PaintSurfaces => "Superfícies selecionadas",

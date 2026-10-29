@@ -427,6 +427,7 @@ impl Editor {
                 let gizmo = origin_chosen
                     || self.paint_interaction(ui, &response)
                     || self.reference_image_model_gesture(ui, &response)
+                    || self.label_gizmo(ui, &response)
                     || self.extrusion_gizmo(ui, &response)
                     || self.section_gizmo(ui, &response)
                     || self.move_gizmo(ui, &response)

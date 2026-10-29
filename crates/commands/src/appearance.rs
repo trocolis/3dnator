@@ -155,13 +155,23 @@ pub(super) fn step_body(
             .copied()
             .zip(prepared.tools.iter().map(Option::as_ref))
             .collect::<Vec<_>>();
-        let (solid, materials) = prepared.solid.painted_solid(&input).map_err(error)?;
+        let (solid, materials, sources) = prepared
+            .solid
+            .painted_solid_with_sources(&input)
+            .map_err(error)?;
         let colors = materials
             .into_iter()
-            .map(|material| {
+            .enumerate()
+            .map(|(index, material)| {
                 if material == 0 {
                     // A pintura uniforme tem precedência sobre cores de ocorrências.
-                    base_color
+                    base_color.or_else(|| {
+                        sources
+                            .get(index)
+                            .and_then(|source| record.intrinsic_colors.get(*source as usize))
+                            .copied()
+                            .flatten()
+                    })
                 } else {
                     Some(prepared.layers[material as usize - 1].color)
                 }
@@ -172,9 +182,11 @@ pub(super) fn step_body(
         let solid = nator_kernel::Solid::from_brep(brep, None)
             .and_then(|s| s.transformed(record.placement))
             .map_err(error)?;
-        let colors = base_color
-            .map(|c| vec![Some(c); solid.face_names().len()])
-            .unwrap_or_default();
+        let colors = if let Some(color) = base_color {
+            vec![Some(color); solid.face_count().map_err(error)?]
+        } else {
+            record.intrinsic_colors.to_vec()
+        };
         (solid, colors)
     };
     Ok(nator_kernel::StepBody {
@@ -206,8 +218,8 @@ pub(super) fn build(
         .into_iter()
         .zip(tools.iter().map(|s| s.as_ref()))
         .collect::<Vec<_>>();
-    let (mesh, materials) = solid
-        .surface_appearance(&input)
+    let (mesh, materials, sources) = solid
+        .surface_appearance_with_sources(&input)
         .map_err(|e| DocumentError(e.to_string()))?;
     // O kernel operou em coordenadas da peça. O cache volta ao referencial local
     // do corpo para receber seu posicionamento exatamente uma vez na cena.
@@ -223,7 +235,7 @@ pub(super) fn build(
         base_color: doc.body_appearance(body).and_then(|a| a.base_color),
         layers: normalized,
         source_signature: signature(&bytes),
-        geometry: Some(Arc::new(MeshAsset::new(mesh))),
+        geometry: Some(Arc::new(MeshAsset::with_faces(mesh, sources)?)),
         materials: Arc::new(materials.into_iter().map(|m| m as u8).collect()),
     })
 }
@@ -262,26 +274,40 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), DocumentEr
 pub(super) fn uniform_color(doc: &Document, body: BodyId) -> Option<nator_geometry::RgbColor> {
     let record = doc.body(body)?;
     let Some(appearance) = doc.body_appearance(body) else {
+        if record.intrinsic_colors.iter().any(Option::is_some) {
+            return None;
+        }
         return record.color;
     };
     if appearance.geometry.is_none() {
         return appearance.base_color.or(record.color);
     }
-    let color = |material: &u8| {
-        if *material == 0 {
+    let color = |index: usize, material: u8| {
+        if material == 0 {
             appearance
                 .base_color
+                .or_else(|| {
+                    appearance
+                        .geometry
+                        .as_ref()
+                        .and_then(|g| g.triangle_faces())
+                        .and_then(|faces| faces.get(index))
+                        .and_then(|face| record.intrinsic_colors.get(*face as usize))
+                        .copied()
+                        .flatten()
+                })
                 .or(record.color)
                 .unwrap_or(nator_geometry::RgbColor::NEUTRAL)
         } else {
-            appearance.layers[usize::from(*material) - 1].color
+            appearance.layers[usize::from(material) - 1].color
         }
     };
-    let first = color(appearance.materials.first()?);
+    let first = color(0, *appearance.materials.first()?);
     appearance
         .materials
         .iter()
-        .all(|m| color(m) == first)
+        .enumerate()
+        .all(|(i, m)| color(i, *m) == first)
         .then_some(first)
 }
 #[cfg(feature = "occt")]
@@ -295,7 +321,7 @@ pub(super) fn inherit(
     use crate::features::{face_index, source};
     use nator_document::features::{FaceRef, Operation, body_owner, signature};
     if let Some(color) = uniform_color(doc, input) {
-        if doc.body_appearance(input).is_some() {
+        if doc.body_appearance(input).is_some() && !matches!(operation, Operation::Label { .. }) {
             crate::painting::set_body_color(doc, output, color)?;
         }
         return Ok(());
@@ -333,6 +359,9 @@ pub(super) fn inherit(
             .map_err(|e| DocumentError(e.to_string()))?
         {
             let name = &result.face_names()[index];
+            if matches!(operation, Operation::Label { .. }) && *name == format!("{owner}label") {
+                continue;
+            }
             let generated = carry_new && name.starts_with(&owner);
             let inherited = original
                 .face_common_area(original_face, &result, index)

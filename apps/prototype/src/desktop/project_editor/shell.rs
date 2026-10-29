@@ -220,6 +220,7 @@ impl Action {
                 SolidTool::Revolve => Icon::Revolve,
                 SolidTool::Loft => Icon::Loft,
                 SolidTool::Sweep => Icon::Sweep,
+                SolidTool::Label => Icon::Label,
                 SolidTool::Hole => Icon::Hole,
                 SolidTool::Fillet => Icon::Fillet,
                 SolidTool::Chamfer => Icon::Chamfer,
@@ -336,6 +337,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Revolve),
     Action::Solid(SolidTool::Loft),
     Action::Solid(SolidTool::Sweep),
+    Action::Solid(SolidTool::Label),
     Action::Solid(SolidTool::Fillet),
     Action::Solid(SolidTool::Chamfer),
     Action::Solid(SolidTool::Shell),
@@ -1367,6 +1369,7 @@ impl Editor {
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
                         Action::Paint,
+                        Action::Solid(SolidTool::Label),
                     ],
                 );
                 self.ribbon_group_with(ui, T::ModifyGroup, 4, |editor, ui| {

@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Rótulos em superfícies — 29/10/2026
+
+- Etapa local 0.10.0, formato 36, sem push/release. Superficial colorido, relevo e gravação em faces planas e cilíndricas; fontes do sistema, estilos, posição, rotação e arraste. STEP mantém letras e cores por face em um sólido.
+- Aprovados 360 testes com OCCT, 264 sem OCCT e 46 ensaios gráficos seriais. Formatação e Clippy com todos os alvos/avisos negados aprovados nas duas configurações. Logs em `target/codex-validation/labels-20261029/`.
+- Regressões conferem conservação/adição/remoção de volume nos três modos, contornos de texto Unicode/negrito/itálico/sublinhado, histórico, rejeição atômica de posição fora da face, UV, fonte ausente na reabertura, salvamento/reabertura com cores próprias e pintura parcial, precedência de pintura posterior e STEP gravado/relido. Ensaio gráfico seleciona a face, arrasta o marcador, escolhe relevo, confirma e reabre a edição.
+- Projeção local pela normal, com recorte nos limites e furos da face; não é um embrulho de texto ao redor de toda uma superfície periódica. Pontos singulares e falhas geométricas são recusados. Windows não executado localmente.
+- Encerrada esta etapa por solicitação do usuário; campos flutuantes de medidas continuam pendentes em `AJUSTES.md`.
+
 ## Transição guiada e seleção sem nomes — 29/10/2026
 
 - Etapa local 0.9.0, formato 35, sem push/release. Guias automática, por eixo e por cadeia de linhas/arcos; furos, orientação nas extremidades, conectividade e autointerferência são verificados no núcleo.

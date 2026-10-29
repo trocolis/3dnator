@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 35
+# Formato de projeto — versão interna 36
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 35; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 36; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -12,9 +12,15 @@ faces/<body_id>.bin       (somente corpos sólidos CAD, opcional)
 images/<image_id>.rgba    (imagens de referência, opcional)
 appearances/<body_id>.mesh       (cache de pintura, opcional)
 appearances/<body_id>.materials  (um byte por triângulo do cache)
+appearances/<body_id>.faces      (face original por triângulo do cache, opcional)
+labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 36, `Label {base, face, spec}` guarda texto de uma linha (até 128 caracteres), família, negrito/itálico/sublinhado, expressões de tamanho/profundidade/rotação, cor RGB e modo (`Surface`, `Raised`, `Engraved`). Posição é local à peça; UV normalizado acompanha o apoio. A normal é uma dica de apresentação e o núcleo sempre recalcula a base tangente. `label_outlines` mapeia cada operação ao caminho `labels/<output>.brep` (até 16 MiB); `outline_key` identifica texto/família/estilo. O manifesto não duplica os bytes. Sem alteração do conteúdo/estilo, o recálculo usa os contornos salvos e não consulta fontes. Caminhos, duplicatas, ausência de contornos e referências sem operação são recusados.
+
+Corpos podem ter `intrinsic_colors`, vazio ou com uma cor opcional por face do B-rep. São cores próprias do rótulo, herdadas por operações posteriores; pintura explícita prevalece. Cache de aparência pode ter `faces_path`, com o mesmo cabeçalho binário das faces do corpo, referindo-se às faces originais mesmo após recorte de pintura. Isso preserva a associação das cores próprias no viewport e no STEP. Fontes do sistema não são incorporadas ao projeto.
 
 Desde a versão 35, `Sweep {start, end, route, holes}` usa dois perfis (`ProfileRef`) e correspondência de furos como `Loft`. `SweepRoute` aceita `Automatic` (Bézier cúbica tangente aos planos), `Axis {sketch, line, reverse}` (arco entre centros no mesmo raio/altura em torno de uma linha coplanar ao perfil inicial) ou `Sketch {sketch, entities}` (cadeia aberta de linhas/arcos). Na captura de uma entidade, a cadeia conectada é expandida uma vez e persistida por IDs. Não há ramificações ou círculos fechados; planos dos perfis devem ser perpendiculares à guia nas extremidades. Guia e perfis são associativos, protegidos contra exclusão e remapeados ao clonar. O núcleo verifica autointerferência e preserva os furos.
 

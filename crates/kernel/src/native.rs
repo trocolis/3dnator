@@ -20,6 +20,7 @@ use std::{
     rc::Rc,
 };
 mod annotation;
+mod labels;
 mod projection;
 mod section;
 mod step;
