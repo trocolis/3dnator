@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 28
+# Formato de projeto — versão interna 29
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 28; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 29; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -16,13 +16,19 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 
 ## Manifesto
 
+Desde a versão 29, cada camada de pintura pode guardar `boundaries`, uma lista de `{ "mask": { "sketch": id, "region": RegionRef }, "inside": bool }`. As condições são combinadas por interseção: `inside = true` conserva a célula; `false` conserva seu complemento na face. Isso identifica automaticamente células de vários rascunhos visíveis/coplanares, inclusive o exterior dos contornos e furos. `mask` anterior continua legível. Cada camada aceita até 64 condições e o corpo até 255 camadas; material continua sendo um byte por triângulo.
+
+`base_color_srgb` opcional em `appearances` registra a pintura do corpo inteiro. Essa cor prevalece sobre a cor importada da ocorrência e não exige camada/cache por face; nesse caso, `layers` pode estar vazio e os caminhos de cache são nulos. Novas operações conservam a cor uniforme e transferem pinturas localizadas às faces geometricamente herdadas; extrusões também transferem a pintura do apoio às faces novas. Referências por nome só são usadas quando únicas. Faces sem nome ou com nome repetido usam `FaceRef::Index` com assinatura do B-rep para representar precisamente o clique, sem escolher arbitrariamente outra face.
+
+A cor personalizada da interface não pertence ao projeto nem ao desfazer: fica em `paint-color.json`, junto ao diretório de estado do aplicativo (ao lado da pasta de recuperação). É um array JSON de três bytes RGB, limitado a 64 bytes na leitura. A gravação é serializada e atômica; escolher uma cor predefinida não substitui a preferência personalizada.
+
 Desde a versão 28, `until` em `Extrude`/`ExtrudeFace` aceita três referências de limite: `{"body": id, "face": FaceRef}` conserva a representação anterior; `{"sketch": id}` usa o plano de outro rascunho; `{"work_plane": id}` usa um plano de trabalho. Todas pertencem à mesma peça. Editar o plano ou mover o rascunho limite recalcula a extrusão; clonar remapeia os identificadores. Não é permitido excluir um rascunho/plano ainda usado como limite. O prisma é recortado pelo plano inteiro, inclusive quando inclinado; um plano paralelo à direção da extrusão é recusado.
 
 Comprimento zero é somente um estado transitório do painel para apresentar a seta de arraste; nenhuma operação de espessura zero é salva. Ao unir uma extrusão de rascunho sobre uma face, os contornos internos coplanares ao início são prolongados como furos no novo material. O contorno externo pode ultrapassar o corpo de apoio; cortes e extrusões isoladas conservam seus próprios perfis.
 
-Desde a versão 27, `appearances` opcional guarda uma entrada por corpo pintado: `body`, `layers`, `source_signature`, `mesh_path` e `materials_path`. Cada camada contém uma `FaceRef`, uma cor sRGB `[r, g, b]` e `mask` opcional com `sketch`/`region` (`RegionRef`, inclusive `Multiple`). O rascunho deve pertencer à peça do corpo. A camada posterior prevalece dentro de sua área. O limite é 64 camadas por corpo; o rascunho usado não pode ser excluído enquanto houver pintura dependente.
+Desde a versão 27, `appearances` opcional guarda uma entrada por corpo pintado: `body`, `layers`, `source_signature`, `mesh_path` e `materials_path`. Cada camada contém uma `FaceRef`, uma cor sRGB `[r, g, b]` e `mask` opcional com `sketch`/`region` (`RegionRef`, inclusive `Multiple`). O rascunho deve pertencer à peça do corpo. A camada posterior prevalece dentro de sua área. O limite atual é 255 camadas por corpo; o rascunho usado não pode ser excluído enquanto houver pintura dependente.
 
-A malha de aparência usa o mesmo cabeçalho/payload de `meshes`, em coordenadas locais do corpo, sem substituir o B-rep ou a malha original. O arquivo de materiais contém exatamente um byte por triângulo: zero herda a cor do corpo/ocorrência, e N usa a cor da camada N−1. Os dois caminhos devem estar presentes juntos ou ser nulos. Caminhos são derivados do ID e o leitor confere assinatura do B-rep, contagem de materiais, índices e limites geométricos. Assim o projeto reabre com as cores mesmo sem OCCT; recalcular a delimitação exige esse núcleo. Copiar/clonar remapeia corpos, faces nomeadas e rascunhos; os caches são compartilhados em memória. STEP/STL continuam exportando a geometria original; os recortes de aparência e cores por face não são exportados.
+A malha de aparência usa o mesmo cabeçalho/payload de `meshes`, em coordenadas locais do corpo, sem substituir o B-rep ou a malha original. O arquivo de materiais contém exatamente um byte por triângulo: zero herda a cor de base da aparência ou do corpo/ocorrência, e N usa a cor da camada N−1. Os dois caminhos devem estar presentes juntos ou ser nulos. Caminhos são derivados do ID e o leitor confere assinatura do B-rep, contagem de materiais, índices e limites geométricos. Assim o projeto reabre com as cores mesmo sem OCCT; recalcular a delimitação exige esse núcleo. Copiar/clonar remapeia corpos, faces nomeadas e rascunhos; os caches são compartilhados em memória. STEP/STL continuam exportando a geometria original; os recortes de aparência e cores por face não são exportados.
 
 Desde a versão 26, `name_counters` opcional no manifesto guarda a última sequência usada por tipo (`Part`, `Body`, `Sketch`, `WorkPlane`, `Image`). São contadores de criação independentes dos IDs globais e dos nomes editáveis. Renomear ou excluir não os reduz; desfazer/refazer restaura o estado correspondente. Na leitura de versões antigas, a sequência inicial usa a quantidade existente e os sufixos padrão ainda presentes. Nomes próprios e nomes importados são preservados.
 
@@ -127,6 +133,8 @@ As variantes `Index` (`RegionRef::Index`, `EdgeRef::Index`, `FaceRef::Index`) gu
 Quando a origem de uma referência desaparece ou fica ambígua, o recálculo falha com uma mensagem pedindo nova seleção. Nenhuma outra região, aresta ou face é escolhida no lugar.
 
 ## Migrações
+
+- 28 → 29: condições automáticas de célula em `boundaries` e `base_color_srgb` opcionais na aparência. Campos ausentes conservam a pintura anterior; cache continua com material de um byte por triângulo.
 
 - 27 → 28: limites de extrusão por rascunho/plano de trabalho; limites de face preservam a representação e o significado anteriores. Zero permanece transitório, sem geometria persistida.
 

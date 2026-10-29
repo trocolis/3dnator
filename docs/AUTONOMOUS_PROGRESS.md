@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Refinamento de Pintar e correções de referência/cor — 29/10/2026
+
+- Balde de tinta com seleção múltipla por cliques, corpo inteiro por duplo clique e delimitação automática das células dos rascunhos visíveis sobre a face. Painel reduzido a superfícies e paleta; duas linhas de predefinições e personalizada hexadecimal persistente, independente da cor ativa.
+- Referências de pintura deixam de depender de nomes ambíguos: nomes únicos ou índices com assinatura representam a superfície exata. Cor de base para corpo inteiro e transferência de pinturas às faces herdadas/novas da extrusão corrigem o reinício de cores após modelar. Formato 29 mantém leitura dos anteriores.
+- Aprovados 335 testes com OCCT, 257 sem OCCT, 39 ensaios gráficos, formatação e Clippy nas duas configurações. Captura `paint-bucket.png` conferida em `target/codex-validation/paint-bucket-20261029/`. Preferência real não alterada pelos testes. Sem release, publicação remota ou validação Windows.
+
 ## Refinamento da extrusão e preservação de furos — 29/10/2026
 
 - Distância inicial zero com guia independente do prisma, seta visível/arrastável e confirmação bloqueada em zero. Seleção de várias áreas permanece ativa; clicar em outro plano define o limite sem substituir os perfis iniciais. Limites por face, plano de rascunho e plano de trabalho são recalculados e persistidos no formato 28.

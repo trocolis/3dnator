@@ -4,7 +4,7 @@ use nator_geometry::{Mesh, Placement, RgbColor, Topology};
 use std::{collections::HashSet, error::Error, fmt, sync::Arc};
 pub mod appearance;
 pub mod assembly;
-pub use appearance::{PaintMask, SurfaceAppearance, SurfacePaint};
+pub use appearance::{PaintBoundary, PaintMask, SurfaceAppearance, SurfacePaint};
 pub mod drawing;
 pub mod features;
 pub mod images;
@@ -643,7 +643,7 @@ impl Document {
             .appearances
             .iter()
             .flat_map(|a| &a.layers)
-            .any(|l| l.mask.as_ref().is_some_and(|m| m.sketch == id))
+            .any(|l| l.masks().any(|m| m.sketch == id))
         {
             return Err(DocumentError(
                 "O rascunho delimita uma pintura; remova essa pintura antes de excluí-lo.".into(),
@@ -738,7 +738,7 @@ impl Document {
             if appearance
                 .layers
                 .iter()
-                .any(|l| l.mask.as_ref().is_some_and(|m| m.sketch == id))
+                .any(|l| l.masks().any(|m| m.sketch == id))
             {
                 appearance.geometry = None;
                 appearance.materials = Arc::default();
@@ -1118,7 +1118,12 @@ impl Document {
                     .triangles
                     .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
                 group.creases.extend_from_slice(geometry.creases());
-                let fallback = occurrence_color.or(body.color).unwrap_or(RgbColor::NEUTRAL);
+                let fallback = self
+                    .body_appearance(body.id)
+                    .and_then(|a| a.base_color)
+                    .or(occurrence_color)
+                    .or(body.color)
+                    .unwrap_or(RgbColor::NEUTRAL);
                 if let Some(appearance) = appearance {
                     group.colors.extend(appearance.materials.iter().map(|m| {
                         if *m == 0 {

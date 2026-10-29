@@ -229,11 +229,7 @@ impl Editor {
             let revision = self.current().session.revision();
             let mode = self.pick_mode;
             let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-            let awaiting = self
-                .paint_edit
-                .as_ref()
-                .map(|_| feature_editor::Awaiting::Face)
-                .or_else(|| self.feature_edit.as_ref().and_then(|d| d.awaiting()));
+            let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
             let extrusion = self
                 .feature_edit
                 .as_ref()

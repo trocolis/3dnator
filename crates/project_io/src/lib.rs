@@ -396,3 +396,6 @@ mod tests {
         Ok(())
     }
 }
+
+mod preferences;
+pub use preferences::{read_color_preference, write_color_preference};

@@ -204,6 +204,10 @@ pub(super) fn reference(
                 _ => Overlay::default(),
             }
         }
+        feature_editor::Kept::Face(FaceRef::Index { index, .. }) => u32::try_from(*index)
+            .ok()
+            .map(|i| face(body, pose, i))
+            .unwrap_or_default(),
         feature_editor::Kept::Face(FaceRef::Named(name)) => face_index(body, name)
             .map(|f| face(body, pose, f))
             .unwrap_or_default(),
@@ -620,8 +624,37 @@ impl Editor {
                 }
             }
         }
+        if let Some(draft) = self
+            .paint_edit
+            .as_ref()
+            .filter(|d| d.tab == self.current().id)
+        {
+            let document = self.current().session.document().clone();
+            if let Ok(placement) = sketch_scene::part_placement(self.current(), draft.part) {
+                for target in &draft.targets {
+                    if let Some(body) = document.body(target.body()) {
+                        let pose = placement.compose(body.placement).unwrap_or(placement);
+                        let mut overlay = match target {
+                            nator_commands::painting::Target::Body(_) => {
+                                body_outline(&mut self.highlight_cache, body, pose)
+                            }
+                            nator_commands::painting::Target::Face { face, .. } => reference(
+                                &mut self.highlight_cache,
+                                body,
+                                pose,
+                                &feature_editor::Kept::Face(face.clone()),
+                            ),
+                        };
+                        // O contorno indica seleção sem cobrir a cor real da prévia.
+                        overlay.triangles.clear();
+                        selected.extend(overlay);
+                    }
+                }
+            }
+        }
         // Face ou aresta escolhida com o modo de seleção, na peça em construção.
         if self.feature_edit.is_none()
+            && self.paint_edit.is_none()
             && self.current().plane_pick.is_none()
             && let Some(pick) = self.current().picked.clone()
             && self.current().active_part == Some(pick.part)

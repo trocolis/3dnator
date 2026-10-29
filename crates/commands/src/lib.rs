@@ -6,6 +6,7 @@ pub mod export;
 pub mod extrusion;
 mod features;
 pub mod measure;
+pub mod painting;
 pub mod point_snap;
 pub mod sketch_projection;
 use nator_document::{
@@ -17,6 +18,10 @@ use std::{collections::VecDeque, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    PaintSurfaces {
+        targets: Vec<painting::Target>,
+        color: nator_geometry::RgbColor,
+    },
     PaintSurface {
         body: BodyId,
         paint: nator_document::SurfacePaint,
@@ -363,6 +368,7 @@ impl Rebuilds {
 impl Command {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::PaintSurfaces { .. } => "Pintar superfícies",
             Self::PaintSurface { .. } => "Pintar superfície",
             Self::ClearSurfacePaint { .. } => "Restaurar aparência da superfície",
             Self::AddReferenceImage { .. } => "Adicionar imagem de referência",
@@ -428,12 +434,13 @@ impl Command {
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
         match self {
+            Self::PaintSurfaces { targets, color } => painting::apply(doc, targets, color)?,
             Self::PaintSurface { body, paint } => {
                 let mut layers = doc
                     .body_appearance(body)
                     .map(|a| a.layers.clone())
                     .unwrap_or_default();
-                if layers.len() >= 64 {
+                if layers.len() >= 255 {
                     return Err(DocumentError("Limite de pinturas atingido.".into()).into());
                 }
                 layers.push(paint);
@@ -452,7 +459,11 @@ impl Command {
                     })
                     .unwrap_or_default();
                 if layers.is_empty() {
-                    doc.remove_surface_appearance(body);
+                    if let Some(color) = doc.body_appearance(body).and_then(|a| a.base_color) {
+                        painting::set_body_color(doc, body, color)?;
+                    } else {
+                        doc.remove_surface_appearance(body);
+                    }
                 } else {
                     let appearance = appearance::build(doc, body, layers)?;
                     doc.set_surface_appearance(appearance)?;
@@ -760,7 +771,21 @@ impl Command {
                 validate_name(&name)?;
                 doc.body_mut(id)?.name = name;
             }
-            Self::SetBodyColor { id, color } => doc.body_mut(id)?.color = color,
+            Self::SetBodyColor { id, color } => {
+                doc.body_mut(id)?.color = color;
+                if let Some(mut appearance) = doc
+                    .body_appearance(id)
+                    .filter(|a| a.base_color.is_some())
+                    .cloned()
+                {
+                    appearance.base_color = color;
+                    if appearance.layers.is_empty() && color.is_none() {
+                        doc.remove_surface_appearance(id);
+                    } else {
+                        doc.set_surface_appearance(appearance)?;
+                    }
+                }
+            }
             Self::SetSketchVisibility { id, visible } => doc.sketch_mut(id)?.visible = visible,
             Self::SetBodyVisibility { id, visible } => doc.body_mut(id)?.visible = visible,
             Self::SetInstanceVisibility { id, visible } => doc.instance_mut(id)?.visible = visible,
@@ -949,7 +974,13 @@ fn add_feature(
             doc.next_name_number(nator_document::ElementKind::Body) - 1
         )
     });
-    let color = source.and_then(|b| b.color);
+    let appearance_source = operation.inputs().first().copied().or(match &operation {
+        nator_document::features::Operation::ExtrudeFace { base, .. } => Some(*base),
+        _ => None,
+    });
+    let color = appearance_source
+        .and_then(|id| appearance::uniform_color(doc, id))
+        .or_else(|| source.and_then(|b| b.color));
     doc.add_body(
         part,
         nator_document::Body {
@@ -963,6 +994,9 @@ fn add_feature(
             color,
         },
     )?;
+    if let Some(input) = appearance_source {
+        appearance::inherit(doc, part, input, output, &operation)?;
+    }
     for input in operation.inputs() {
         doc.body_mut(input)?.visible = false;
     }

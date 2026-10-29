@@ -4,6 +4,12 @@ Estrutura aprovada para um workspace Rust. O incremento 0.3.0 implementa `geomet
 
 ## Módulos
 
+`commands::painting` consulta as superfícies/células no trabalhador, usando referências de face únicas ou índice com assinatura quando o nome é repetido. Rascunhos visíveis coplanares fornecem condições de inclusão/exclusão; `commands::appearance` combina os prismas por Common/Cut. Um comando pinta toda a seleção de forma atômica, construindo uma aparência por corpo. Corpo inteiro usa `base_color`, sem uma camada por face; essa cor sobrepõe a cor da ocorrência na cena.
+
+`paint_editor` mantém uma fila independente de cliques: atualizações da cena e o primeiro clique não bloqueiam o segundo clique do duplo clique. A fila respeita revisão e cancelamento. O painel contém apenas lista de superfícies e paleta, com duas linhas de predefinições e a cor personalizada independente. `project_io::preferences` persiste a preferência RGB com substituição atômica; um trabalhador serializa gravações e termina antes do fechamento do editor. Testes/capturas usam uma paleta em memória para não alterar as preferências reais.
+
+Novos corpos do histórico conservam a cor uniforme da entrada. `appearance::inherit` consulta sobreposição exata das faces para transferir pinturas localizadas, sem resolver nomes ambíguos pela ordem ou proximidade. Faces novas de extrusão recebem a pintura da face de apoio; regiões consumidas não são pintadas em outra face. Referências sem identidade única permanecem vinculadas à assinatura da geometria.
+
 `extrusion::guide` calcula o apoio da seta independentemente da construção do sólido. O trabalhador de prévia entrega uma guia vazia para comprimento zero, sem preparar comando nem sinalizar erro; o painel bloqueia a confirmação nesse estado. A seleção de perfis continua ativa durante o arraste. Planos de origens diferentes nunca são misturados no perfil: uma escolha fora do plano inicial vira `ExtrusionLimit`, referenciando face, rascunho ou plano de trabalho da mesma peça.
 
 `kernel::Solid::support_holes` extruda os contornos internos de faces coplanares ao início de uma saliência. `commands::extrusion::tool` subtrai esses prismas somente no modo Unir de perfis de rascunho, antes de aplicar o plano limite. As curvas são exatas; o contorno externo do apoio não restringe a expansão do perfil. Os nomes das faces temporárias mantêm o dono remapeável na clonagem. Zero, consultas de plano e booleanas continuam fora da thread da interface.

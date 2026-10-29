@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### Balde de tinta, seleção múltipla e conservação de cores
+
+- Pintar usa ícone de balde e painel com somente superfícies e cores. Cliques alternam superfícies/células; duplo clique seleciona o corpo inteiro, com fila de consultas que conserva cliques durante a atualização da prévia. OK publica todas as escolhas em uma ação de desfazer/refazer.
+- Delimitação automática pelos rascunhos visíveis sobre a face: regiões internas/externas, furos e interseções entre vários desenhos, sem campo manual de rascunho. Dois conjuntos de oito cores predefinidas e cor personalizada RGB hexadecimal independente, salva entre ferramentas, projetos e reinícios do aplicativo.
+- Corrigida a referência ambígua ao pintar faces com o mesmo nome no histórico: a pintura usa o índice exato com assinatura quando não há um nome único. Corpo inteiro usa uma cor de base que também prevalece sobre a cor da ocorrência, sem depender do número de faces.
+- Corrigida a perda de cor após extrudar: o resultado conserva a cor uniforme e pinturas localizadas são transferidas às superfícies herdadas e às faces novas do apoio. Formato interno 29 acrescenta condições de célula e cor de base opcionais, mantendo leitura dos anteriores; aplicativo 0.3.0 em desenvolvimento.
+
 ### Extrusão a partir de zero, planos limite e furos do apoio
 
 - Novas extrusões começam em 0 mm, com seta de arraste visível antes de existir um prisma. Zero é um estado transitório sem erro de prévia; a confirmação fica desabilitada até haver comprimento. A seta permanece disponível durante a seleção de várias áreas e as pontas dos dois lados ficam separadas em zero.

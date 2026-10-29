@@ -3,11 +3,12 @@
 pub enum Text {
     Paint,
     PaintColor,
-    PaintBoundary,
-    PaintWholeFace,
+    PaintSurfaces,
+    PaintWholeBody,
+    PaintCustom,
+    Surface,
     PaintPickHint,
     PaintInvalidHex,
-    PaintNoAreas,
     ProjectionVertex,
     ProjectionEdge,
     ProjectionArea,
@@ -720,12 +721,13 @@ pub fn text(key: Text) -> &'static str {
     match key {
         Text::Paint => "Pintar",
         Text::PaintColor => "Cor RGB",
-        Text::PaintBoundary => "Delimitar pelo rascunho",
-        Text::PaintWholeFace => "Face inteira",
+        Text::PaintSurfaces => "Superfícies selecionadas",
+        Text::PaintWholeBody => "Todas as superfícies",
+        Text::PaintCustom => "Personalizada",
+        Text::Surface => "Superfície",
         Text::PaintPickHint => {
-            "Clique na face que deseja pintar. Selecione um rascunho e suas áreas para delimitar a pintura."
+            "Clique para adicionar ou retirar superfícies. Duplo clique seleciona o corpo inteiro. Rascunhos visíveis delimitam a região automaticamente."
         }
-        Text::PaintNoAreas => "O rascunho não contém áreas fechadas.",
         Text::PaintInvalidHex => "Informe uma cor no formato #RRGGBB.",
         Text::ProjectionVertex => "Vértice",
         Text::ProjectionEdge => "Aresta",

@@ -261,13 +261,13 @@ fn paint_styled(
     let p = &pen;
     match icon {
         Icon::Paint => {
-            // Pincel com cerdas verdes e cabo preto, na mesma grade dos demais ícones.
-            p.line(
-                &[[7., 16.], [17., 4.], [20., 7.], [10., 19.], [7., 16.]],
-                p.ink,
-            );
-            p.line(
-                &[[7., 16.], [4., 17.], [3., 22.], [9., 21.], [10., 19.]],
+            // Balde inclinado: aro preto, tinta verde escorrendo e alça curva.
+            p.face(&[[3., 11.], [11., 3.], [19., 11.], [11., 19.]], p.fill);
+            p.line(&[[3., 11.], [11., 14.], [19., 11.]], p.ink);
+            p.line(&[[7., 7.], [6., 4.], [8., 2.], [11., 2.], [15., 6.]], p.ink);
+            p.line(&[[11., 19.], [16., 16.], [19., 12.]], p.accent);
+            p.face(
+                &[[20., 14.], [18., 19.], [19., 22.], [22., 22.], [23., 19.]],
                 p.accent,
             );
         }

@@ -157,7 +157,7 @@ impl Document {
                 }
             }
             // A cópia pode estar em outra posição relativamente ao rascunho.
-            if appearance.layers.iter().any(|l| l.mask.is_some()) {
+            if appearance.layers.iter().any(|l| l.masks().next().is_some()) {
                 appearance.geometry = None;
                 appearance.materials = Arc::new(Vec::new());
             }
@@ -298,7 +298,11 @@ impl Document {
                 if let super::features::FaceRef::Named(name) = &mut layer.face {
                     *name = super::features::remap_face_name(name, &body_map);
                 }
-                if let Some(mask) = &mut layer.mask {
+                for mask in layer
+                    .mask
+                    .iter_mut()
+                    .chain(layer.boundaries.iter_mut().map(|b| &mut b.mask))
+                {
                     mask.sketch = sketch_map[&mask.sketch];
                 }
             }

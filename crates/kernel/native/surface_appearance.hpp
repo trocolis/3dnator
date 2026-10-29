@@ -4,7 +4,7 @@
 extern "C" {
 Shape* nator_surface_appearance(const Shape* body,const std::size_t* faces,const Shape* const* tools,std::size_t count) noexcept {
     return build([&](Shape& output) {
-        if (count==0 || count>64) throw std::runtime_error("Quantidade de pinturas inválida.");
+        if (count==0 || count>255) throw std::runtime_error("Quantidade de pinturas inválida.");
         const auto original=map_of(body->value,TopAbs_FACE);
         struct Piece {TopoDS_Face face; int source; int material;};
         std::vector<Piece> pieces;
@@ -48,4 +48,18 @@ Shape* nator_surface_appearance(const Shape* body,const std::size_t* faces,const
         }
     });
 }
+}
+
+// Sobreposição exata para transferir pintura somente às faces que descendem da
+// superfície pintada. Não resolve nomes repetidos por proximidade ou por ordem.
+extern "C" bool nator_face_common_area(const Shape* first,std::size_t a,const Shape* second,std::size_t b,double* output) noexcept {
+    return guarded([&] {
+        const auto left=map_of(first->value,TopAbs_FACE);
+        const auto right=map_of(second->value,TopAbs_FACE);
+        if (a>=static_cast<std::size_t>(left.Extent()) || b>=static_cast<std::size_t>(right.Extent())) throw std::runtime_error("Face de pintura inexistente.");
+        BRepAlgoAPI_Common common(left(static_cast<int>(a)+1),right(static_cast<int>(b)+1));
+        if (!common.IsDone()) throw std::runtime_error("Não foi possível transferir a pintura entre superfícies.");
+        GProp_GProps properties;BRepGProp::SurfaceProperties(common.Shape(),properties);
+        *output=properties.Mass();
+    });
 }

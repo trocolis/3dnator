@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Balde de tinta, células automáticas e conservação de cor — 29/10/2026
+
+- **335 testes com OCCT e 257 sem OCCT aprovados**. Novas regressões verificam pintura dentro/fora de contornos e furos, interseções/complementos de dois rascunhos, áreas analíticas, nomes repetidos de faces sem referência ambígua, falha atômica de seleção inválida e confirmação de várias superfícies. Condições persistem e são remapeadas ao clonar.
+- Conservação de pinturas localizadas e de cor uniforme após extrusões aprovada, inclusive com cor de ocorrência diferente. Cores e novas condições persistem no formato 29. Preferência personalizada aprovada por gravação/substituição atômica, leitura após reabrir e manutenção independente das predefinições.
+- **39 ensaios gráficos seriais GL/llvmpipe aprovados**. O fluxo Pintar usa o botão real, digita hexadecimal, escolhe predefinição preservando a personalizada, cancela sem alterar o documento, seleciona duas superfícies/células sem campos manuais, confirma uma revisão, faz duplo clique sem aguardar a primeira consulta e pinta o corpo inteiro com desfazer/refazer.
+- Formatação e Clippy com todos os alvos/avisos negados aprovados nas duas configurações. Captura `paint-bucket.png` inspecionada: balde na faixa/cabeçalho, duas seções, duas linhas de cores e personalizada hexadecimal. A captura abriu diretamente o artefato de formato 27, verificando a compatibilidade visual. Logs e artefatos em `target/codex-validation/paint-bucket-20261029/`.
+- Aplicativo 0.3.0 em desenvolvimento; formato 29 com leitura dos anteriores. Windows e janela nativa não exercitados localmente; sem release ou publicação remota.
+
 ## Extrusão em zero, planos limite e furos existentes — 29/10/2026
 
 - **330 testes com OCCT e 255 sem OCCT aprovados**. Novas regressões verificam guia em zero sem operação publicável, limites associativos por rascunho e plano de trabalho, recálculo após deslocá-los, proteção contra exclusão e clonagem. Limites de face antigos continuam funcionando, inclusive inclinados.

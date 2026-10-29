@@ -6858,10 +6858,11 @@ mod tests {
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn paint_panel_picks_faces_previews_hex_and_masks_and_cancels_atomically()
     -> Result<(), Box<dyn Error>> {
+        use nator_commands::painting::Target;
         let context = egui::Context::default();
-        let mut solid = nator_kernel::Solid::cuboid([0., 0., 0.], [20., 20., 5.])?;
+        let mut solid = nator_kernel::Solid::cuboid([0.; 3], [20., 20., 5.])?;
         let (mesh, faces) = solid.tessellate_with_faces(0.05, 0.2)?;
-        let mut document = Document::new("Painel Pintar")?;
+        let mut document = Document::new("Balde de tinta")?;
         let (part, body) = document.add_mesh(
             None,
             "Placa".into(),
@@ -6872,7 +6873,13 @@ mod tests {
             &nator_document::features::body_owner(body),
             solid.face_count()?,
         ));
-        let mut mask = Sketch::new("Limite", Plane::xy());
+        let mut mask = Sketch::new(
+            "Delimitação",
+            Plane {
+                origin: [0., 0., 5.],
+                ..Plane::xy()
+            },
+        );
         mask.add_rectangle([2., 2.], [10., 10.], false)?;
         document.add_sketch(Some(part), mask)?;
         let mut editor =
@@ -6885,83 +6892,132 @@ mod tests {
         settle(&mut editor, &context)?;
         let paint = label_position(&mut editor, &context, text(T::Paint))?;
         click(&mut editor, &context, paint)?;
-        assert!(editor.paint_edit.is_some());
         let revision = editor.current().session.revision();
-        let at = sketch_scene::project(
-            &editor.viewport.camera,
-            editor.display_bounds(),
-            editor.canvas_rect,
-            [7., 7., 5.],
-        )
-        .ok_or("Face fora da tela")?;
-        click(&mut editor, &context, at)?;
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while editor.paint_edit.as_ref().is_none_or(|d| d.face.is_none()) {
-            if Instant::now() > deadline {
-                return Err(format!("Face não escolhida: {}", editor.status).into());
-            }
-            frame(&mut editor, &context, vec![])?;
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let draft = editor.paint_edit.as_mut().ok_or("Painel ausente")?;
-        draft.hex = "#1248AC".into();
-        draft.rgb = [18, 72, 172];
-        let wait_preview = |editor: &mut Editor| -> Result<(), Box<dyn Error>> {
+        let at = |e: &Editor, p| {
+            sketch_scene::project(&e.viewport.camera, e.display_bounds(), e.canvas_rect, p)
+                .ok_or("Superfície fora da tela")
+        };
+        let inside = at(&editor, [7., 7., 5.])?;
+        click(&mut editor, &context, inside)?;
+        let wait_selection = |e: &mut Editor, count: usize| -> Result<(), Box<dyn Error>> {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                frame(editor, &context, vec![])?;
-                let command = editor
+                frame(e, &context, vec![])?;
+                if e.paint_edit
+                    .as_ref()
+                    .is_some_and(|d| d.targets.len() == count && d.selection_ready())
+                {
+                    return Ok(());
+                }
+                if Instant::now() > deadline {
+                    return Err(format!(
+                        "Seleção de pintura não terminou ({}): {}; alvos: {:?}",
+                        count,
+                        e.status,
+                        e.paint_edit.as_ref().map(|d| &d.targets)
+                    )
+                    .into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        wait_selection(&mut editor, 1).map_err(|e| format!("primeiro clique: {e}"))?;
+        assert!(
+            matches!(&editor.paint_edit.as_ref().ok_or("Painel ausente")?.targets[0],Target::Face{boundaries,..} if boundaries.len()==1 && boundaries[0].inside)
+        );
+        let custom = label_position(&mut editor, &context, "#3EAF66")?;
+        click(&mut editor, &context, custom)?;
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+                egui::Event::Text("#1248AC".into()),
+            ],
+        )?;
+        assert_eq!(editor.paint_palette.custom, [18, 72, 172]);
+        let wait_preview = |e: &mut Editor| -> Result<(), Box<dyn Error>> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                frame(e, &context, vec![])?;
+                let command = e
                     .paint_edit
                     .as_ref()
                     .and_then(|d| d.command())
-                    .ok_or("Comando incompleto")?;
-                match editor.preview_status(&command) {
+                    .ok_or("Comando ausente")?;
+                match e.preview_status(&command) {
                     live_preview::PreviewStatus::Ready => return Ok(()),
-                    live_preview::PreviewStatus::Failed(e) => return Err(e.to_string().into()),
+                    live_preview::PreviewStatus::Failed(error) => {
+                        return Err(error.to_string().into());
+                    }
                     _ => {}
                 }
                 if Instant::now() > deadline {
-                    return Err("Prévia de pintura não terminou".into());
+                    return Err("Prévia não terminou".into());
                 }
                 std::thread::sleep(Duration::from_millis(5));
             }
         };
         wait_preview(&mut editor)?;
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 820.),
+                )),
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        let red = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect)
+                    if rect.fill == egui::Color32::from_rgb(220, 65, 65)
+                        && (25. ..=28.).contains(&rect.rect.width()) =>
+                {
+                    Some(rect.rect.center())
+                }
+                _ => None,
+            })
+            .ok_or("Cor predefinida ausente")?;
+        output.textures_delta.clear();
+        click(&mut editor, &context, red)?;
+        assert_eq!(editor.paint_palette.custom, [18, 72, 172]);
+        assert!(
+            matches!(editor.paint_edit.as_ref().and_then(|d|d.command()),Some(Command::PaintSurfaces{color,..}) if color.channels()==[220,65,65])
+        );
         assert_eq!(editor.current().session.revision(), revision);
-        assert!(editor.current().session.document().appearances().is_empty());
         let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
         click(&mut editor, &context, cancel)?;
         settle(&mut editor, &context)?;
-        assert!(editor.paint_edit.is_none());
         assert!(editor.current().session.document().appearances().is_empty());
         editor.open_paint();
         frame(&mut editor, &context, vec![])?;
-        click(&mut editor, &context, at)?;
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while editor.paint_edit.as_ref().is_none_or(|d| d.face.is_none()) {
-            if Instant::now() > deadline {
-                return Err("Face não escolhida na segunda pintura".into());
-            }
-            frame(&mut editor, &context, vec![])?;
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        // Escolher o rascunho e a região pelos controles do painel.
-        let whole = label_position(&mut editor, &context, text(T::PaintWholeFace))?;
-        click(&mut editor, &context, whole)?;
-        let sketch = label_position(&mut editor, &context, "Limite")?;
-        click(&mut editor, &context, sketch)?;
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let area = loop {
-            if let Ok(at) = label_position(&mut editor, &context, "Área 1") {
-                break at;
-            }
-            if Instant::now() > deadline {
-                return Err("Área da pintura não apareceu".into());
-            }
-            frame(&mut editor, &context, vec![])?;
-            std::thread::sleep(Duration::from_millis(5));
-        };
-        click(&mut editor, &context, area)?;
+        assert_eq!(
+            editor.paint_edit.as_ref().ok_or("Painel ausente")?.hex,
+            "#1248AC"
+        );
+        let outside = at(&editor, [1., 1., 5.])?;
+        click(&mut editor, &context, outside)?;
+        wait_selection(&mut editor, 1).map_err(|e| format!("região exterior: {e}"))?;
+        assert!(
+            matches!(&editor.paint_edit.as_ref().ok_or("Painel ausente")?.targets[0],Target::Face{boundaries,..} if boundaries.len()==1 && !boundaries[0].inside)
+        );
+        let side = at(&editor, [10., 0., 2.5])?;
+        click(&mut editor, &context, side)?;
+        wait_selection(&mut editor, 2).map_err(|e| format!("segunda superfície: {e}"))?;
         wait_preview(&mut editor)?;
         let ok = label_position(&mut editor, &context, text(T::Ok))?;
         click(&mut editor, &context, ok)?;
@@ -6978,11 +7034,44 @@ mod tests {
             .document()
             .body_appearance(body)
             .ok_or("Pintura ausente")?;
-        assert!(appearance.layers[0].mask.is_some());
-        assert_eq!(appearance.layers[0].color.channels(), [62, 175, 102]);
+        assert_eq!(appearance.layers.len(), 2);
+        assert_eq!(appearance.layers[0].color.channels(), [18, 72, 172]);
+        editor.open_paint();
+        frame(&mut editor, &context, vec![])?;
+        let inside = at(&editor, [7., 7., 5.])?;
+        // Os dois cliques entram sem aguardar a primeira consulta geométrica.
+        click(&mut editor, &context, inside)?;
+        click(&mut editor, &context, inside)?;
+        wait_selection(&mut editor, 1).map_err(|e| format!("duplo clique: {e}"))?;
+        assert_eq!(
+            editor.paint_edit.as_ref().ok_or("Painel ausente")?.targets,
+            vec![Target::Body(body)]
+        );
+        wait_preview(&mut editor)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), revision + 2);
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .body_appearance(body)
+                .is_some_and(|a| a.layers.is_empty())
+        );
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(body)
+                .ok_or("Corpo ausente")?
+                .color
+                .map(|c| c.channels()),
+            Some([18, 72, 172])
+        );
         assert!(editor.current_mut().session.undo());
-        assert!(editor.current().session.document().appearances().is_empty());
-        assert!(editor.current_mut().session.redo());
         assert!(
             editor
                 .current()
@@ -6991,6 +7080,7 @@ mod tests {
                 .body_appearance(body)
                 .is_some()
         );
+        assert!(editor.current_mut().session.redo());
         Ok(())
     }
 

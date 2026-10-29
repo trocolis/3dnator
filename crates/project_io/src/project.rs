@@ -44,7 +44,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 26: sequências de criação, imagens RGBA incorporadas e múltiplas áreas na extrusão.
 /// Versão 27: pinturas por face e malhas de aparência com materiais por triângulo.
 /// Versão 28: limites de extrusão por planos de rascunho ou trabalho.
-pub const FORMAT_VERSION: u32 = 28;
+/// Versão 29: células automáticas de pintura, com interseções e complementos.
+pub const FORMAT_VERSION: u32 = 29;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -120,6 +121,8 @@ struct SketchRecordData {
 #[serde(deny_unknown_fields)]
 struct AppearanceRecord {
     body: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_color_srgb: Option<[u8; 3]>,
     layers: Vec<nator_document::SurfacePaint>,
     source_signature: u64,
     mesh_path: Option<String>,
@@ -531,6 +534,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         };
         appearances.push(nator_document::SurfaceAppearance {
             body: BodyId(record.body),
+            base_color: record.base_color_srgb.map(RgbColor::new),
             layers: record.layers,
             source_signature: record.source_signature,
             geometry,
@@ -728,6 +732,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
             .iter()
             .map(|appearance| AppearanceRecord {
                 body: appearance.body.0,
+                base_color_srgb: appearance.base_color.map(RgbColor::channels),
                 layers: appearance.layers.clone(),
                 source_signature: appearance.source_signature,
                 mesh_path: appearance

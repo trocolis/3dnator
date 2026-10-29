@@ -454,6 +454,7 @@ pub struct Editor {
     feature_edit: Option<feature_editor::Draft>,
     image_edit: Option<image_editor::Draft>,
     paint_edit: Option<paint_editor::Draft>,
+    paint_palette: paint_editor::Palette,
     image_cache: image_editor::Cache,
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
@@ -601,7 +602,14 @@ impl Editor {
             .wgpu_render_state
             .clone()
             .ok_or("Renderizador wgpu indisponível.")?;
-        Self::from_gpu(gpu, &context.egui_ctx, Document::new(text(T::Untitled))?)
+        let mut editor = Self::from_gpu(gpu, &context.egui_ctx, Document::new(text(T::Untitled))?)?;
+        let path = recovery_directory()
+            .parent()
+            .map(|p| p.join("paint-color.json"));
+        if let Some(path) = path {
+            editor.paint_palette = paint_editor::Palette::load(path);
+        }
+        Ok(editor)
     }
 
     fn from_gpu(
@@ -642,6 +650,7 @@ impl Editor {
             feature_edit: None,
             image_edit: None,
             paint_edit: None,
+            paint_palette: Default::default(),
             image_cache: image_editor::Cache::default(),
             drawing_edit: None,
             export_edit: None,
@@ -851,22 +860,6 @@ impl Editor {
                     .is_some_and(|t| t.session.revision() == revision);
                 // Com um painel esperando, o clique pertence ao campo de seleção ativo.
                 let consumed = topology.is_some();
-                if current
-                    && let (Some(result), Some(pick), Some(draft)) =
-                        (topology.as_ref(), pick.as_ref(), self.paint_edit.as_mut())
-                    && draft.tab == tab
-                {
-                    match result {
-                        Ok(_) if pick.part != draft.part => {
-                            self.status.warning(text(T::PickOtherPart))
-                        }
-                        Ok(feature_editor::Kept::Face(face)) => {
-                            draft.face = Some((pick.body, face.clone()))
-                        }
-                        Err(error) => self.status.error(error),
-                        _ => {}
-                    }
-                }
                 if current
                     && let (Some(result), Some(p), Some(draft)) =
                         (topology, pick.as_ref(), self.feature_edit.as_mut())

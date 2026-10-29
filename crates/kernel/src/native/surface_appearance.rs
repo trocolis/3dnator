@@ -15,7 +15,7 @@ impl Solid {
         layers: &[(usize, Option<&Solid>)],
     ) -> Result<(Mesh, Vec<u32>), KernelError> {
         if layers.is_empty()
-            || layers.len() > 64
+            || layers.len() > 255
             || layers.iter().any(|(face, _)| *face >= self.faces.len())
         {
             return Err(KernelError("Seleção de pintura inválida.".into()));
@@ -54,5 +54,34 @@ impl Solid {
             })
             .collect::<Result<Vec<_>, KernelError>>()?;
         Ok((mesh, materials))
+    }
+}
+
+unsafe extern "C" {
+    fn nator_face_common_area(
+        first: *const c_void,
+        a: usize,
+        second: *const c_void,
+        b: usize,
+        output: *mut f64,
+    ) -> bool;
+}
+impl Solid {
+    pub fn face_common_area(&self, a: usize, other: &Self, b: usize) -> Result<f64, KernelError> {
+        let mut area = 0.;
+        // SAFETY: sólidos vivos na mesma thread, saída exclusiva com um double;
+        // a ponte confere ambos os índices antes de consultar as faces.
+        if !unsafe {
+            nator_face_common_area(
+                self.pointer.as_ptr(),
+                a,
+                other.pointer.as_ptr(),
+                b,
+                &mut area,
+            )
+        } {
+            return Err(last_error());
+        }
+        Ok(area)
     }
 }

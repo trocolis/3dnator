@@ -3,7 +3,7 @@
 //! seleção e exportação geométrica. Material zero herda a cor do corpo/ocorrência.
 use super::*;
 use features::{FaceRef, RegionRef};
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaintMask {
     pub sketch: SketchId,
@@ -12,10 +12,27 @@ pub struct PaintMask {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfacePaint {
+    /// Interseções/complementos das células detectadas no clique. O campo legado
+    /// mask continua legível; novos cliques não precisam escolher um rascunho.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundaries: Vec<PaintBoundary>,
     pub face: FaceRef,
     pub mask: Option<PaintMask>,
     #[serde(with = "color_serde")]
     pub color: RgbColor,
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaintBoundary {
+    pub mask: PaintMask,
+    pub inside: bool,
+}
+impl SurfacePaint {
+    pub fn masks(&self) -> impl Iterator<Item = &PaintMask> {
+        self.mask
+            .iter()
+            .chain(self.boundaries.iter().map(|b| &b.mask))
+    }
 }
 mod color_serde {
     use nator_geometry::RgbColor;
@@ -37,6 +54,8 @@ mod color_serde {
 /// A malha derivada é um cache persistido para abrir o projeto sem executar OCCT.
 pub struct SurfaceAppearance {
     pub body: BodyId,
+    /// Cor do balde aplicada ao corpo inteiro; prevalece sobre a cor da ocorrência.
+    pub base_color: Option<RgbColor>,
     pub layers: Vec<SurfacePaint>,
     pub source_signature: u64,
     pub geometry: Option<Arc<MeshAsset>>,
@@ -57,7 +76,7 @@ impl SurfaceAppearance {
             .brep
             .as_ref()
             .ok_or_else(|| DocumentError("Pintura de superfícies exige um corpo CAD.".into()))?;
-        if self.layers.is_empty() || self.layers.len() > 64 {
+        if (self.layers.is_empty() && self.base_color.is_none()) || self.layers.len() > 255 {
             return Err(DocumentError("Quantidade de pinturas inválida.".into()));
         }
         for layer in &self.layers {
@@ -68,7 +87,12 @@ impl SurfaceAppearance {
                 }
                 _ => {}
             }
-            if let Some(mask) = &layer.mask {
+            if layer.boundaries.len() > 64 {
+                return Err(DocumentError(
+                    "Quantidade de delimitações de pintura excessiva.".into(),
+                ));
+            }
+            for mask in layer.masks() {
                 if !part.sketches.iter().any(|s| s.id == mask.sketch) {
                     return Err(DocumentError(
                         "O rascunho da pintura deve pertencer à peça do corpo.".into(),
