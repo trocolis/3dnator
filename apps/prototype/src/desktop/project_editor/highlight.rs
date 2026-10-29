@@ -4,8 +4,9 @@
 //! a pré-seleção, que muda a cada movimento do cursor e não pode reconstruir a cena.
 //!
 //! A geometria vem da malha de exibição, com a face de origem de cada triângulo: é só
-//! apresentação. As referências gravadas continuam sendo nomes de faces do B-rep.
+//! apresentação. Referências persistidas usam nomes únicos ou índices com assinatura do B-rep.
 use super::*;
+mod native_edges;
 use nator_document::{
     Body,
     assembly::Pick,
@@ -69,6 +70,7 @@ type Creases = Vec<([Point3; 2], Point3)>;
 pub(super) struct Cache {
     creases: HashMap<usize, Arc<Creases>>,
     adjacency: HashMap<usize, Arc<Adjacency>>,
+    native_edges: native_edges::NativeEdges,
 }
 impl Cache {
     fn key(body: &Body) -> usize {
@@ -204,6 +206,9 @@ pub(super) fn reference(
     kept: &feature_editor::Kept,
 ) -> Overlay {
     match kept {
+        feature_editor::Kept::Edge(EdgeRef::Index { index, signature }) => {
+            cache.native_edges.overlay(body, pose, *index, *signature)
+        }
         feature_editor::Kept::Edge(EdgeRef::Between([a, b])) => {
             match (face_index(body, a), face_index(body, b)) {
                 (Some(a), Some(b)) => edge(cache, body, pose, [a, b]),
@@ -221,7 +226,6 @@ pub(super) fn reference(
             reference(cache, body, pose, &feature_editor::Kept::Face(face.clone()))
         }
         feature_editor::Kept::Body(_) => body_outline(cache, body, pose),
-        _ => Overlay::default(),
     }
 }
 
@@ -536,15 +540,11 @@ impl Editor {
                 return Default::default();
             }
             return match awaiting {
-                feature_editor::Awaiting::Edge => match document.edge_at(pick) {
-                    Ok(EdgeRef::Between([a, b])) => {
-                        match (face_index(body, &a), face_index(body, &b)) {
-                            (Some(f), Some(g)) => {
-                                (edge(cache, body, pose, [f, g]), format!("{a} × {b}"))
-                            }
-                            _ => Default::default(),
-                        }
-                    }
+                feature_editor::Awaiting::Edge => match document.edge_faces_at(pick) {
+                    Ok([a, b]) => (
+                        edge(cache, body, pose, [a as u32, b as u32]),
+                        format!("#{} × #{}", a + 1, b + 1),
+                    ),
                     _ => Default::default(),
                 },
                 feature_editor::Awaiting::Face => match face_of(pick) {
@@ -591,13 +591,8 @@ impl Editor {
             navigation::PickMode::Edge => {
                 let mut snapped = pick.clone();
                 navigation::snap_pick(&mut snapped, navigation::PickMode::Edge);
-                let overlay = match document.edge_at(pick) {
-                    Ok(EdgeRef::Between([a, b])) => {
-                        match (face_index(body, &a), face_index(body, &b)) {
-                            (Some(f), Some(g)) => edge(cache, body, pose, [f, g]),
-                            _ => Overlay::default(),
-                        }
-                    }
+                let overlay = match document.edge_faces_at(pick) {
+                    Ok([a, b]) => edge(cache, body, pose, [a as u32, b as u32]),
                     // Malhas: a aresta do triângulo mais próxima do cursor.
                     _ => Overlay {
                         segments: vec![([snapped.vertices[0], snapped.vertices[1]], None)],
@@ -640,6 +635,16 @@ impl Editor {
                 sketch_scene::part_placement(self.current(), draft.part()),
             ) {
                 let pose = placement.compose(base.placement).unwrap_or(placement);
+                self.highlight_cache.native_edges.prepare(
+                    &base,
+                    draft.references().filter_map(|r| match r {
+                        feature_editor::Kept::Edge(EdgeRef::Index { index, signature }) => {
+                            Some((*index, *signature))
+                        }
+                        _ => None,
+                    }),
+                    ui.ctx(),
+                );
                 for kept in draft.references() {
                     selected.extend(reference(&mut self.highlight_cache, &base, pose, kept));
                 }
@@ -693,14 +698,9 @@ impl Editor {
                     .and_then(|faces| faces.get(pick.triangle).copied());
                 selected.extend(match (self.pick_mode, face_of) {
                     (navigation::PickMode::Face, Some(f)) => face(body, pose, f),
-                    (navigation::PickMode::Edge, Some(_)) => match document.edge_at(&pick) {
-                        Ok(EdgeRef::Between([a, b])) => {
-                            match (face_index(body, &a), face_index(body, &b)) {
-                                (Some(f), Some(g)) => {
-                                    edge(&mut self.highlight_cache, body, pose, [f, g])
-                                }
-                                _ => Overlay::default(),
-                            }
+                    (navigation::PickMode::Edge, Some(_)) => match document.edge_faces_at(&pick) {
+                        Ok([a, b]) => {
+                            edge(&mut self.highlight_cache, body, pose, [a as u32, b as u32])
                         }
                         _ => Overlay::default(),
                     },

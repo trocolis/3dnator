@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 34
+# Formato de projeto — versão interna 35
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 34; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 35; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -15,6 +15,10 @@ appearances/<body_id>.materials  (um byte por triângulo do cache)
 ```
 
 ## Manifesto
+
+Desde a versão 35, `Sweep {start, end, route, holes}` usa dois perfis (`ProfileRef`) e correspondência de furos como `Loft`. `SweepRoute` aceita `Automatic` (Bézier cúbica tangente aos planos), `Axis {sketch, line, reverse}` (arco entre centros no mesmo raio/altura em torno de uma linha coplanar ao perfil inicial) ou `Sketch {sketch, entities}` (cadeia aberta de linhas/arcos). Na captura de uma entidade, a cadeia conectada é expandida uma vez e persistida por IDs. Não há ramificações ou círculos fechados; planos dos perfis devem ser perpendiculares à guia nas extremidades. Guia e perfis são associativos, protegidos contra exclusão e remapeados ao clonar. O núcleo verifica autointerferência e preserva os furos.
+
+Faces sem nome único usam `FaceRef::Index` com assinatura do B-rep em todos os seletores de face. Arestas sem um par único de nomes são localizadas por distância exata ao clique no worker e guardam `EdgeRef::Index` com assinatura; o realce das referências é calculado em segundo plano. Uma mudança de B-rep não reaproveita silenciosamente o mesmo índice. Essa política usa representações já existentes, sem outro incremento de formato.
 
 Desde a versão 34, `Loft {start, end, ruled, holes}` referencia duas áreas (`ProfileRef`) em planos diferentes. Furos são pareados inicialmente por ordem de criação e persistidos em `HolePair` com IDs dos contornos. Alterar suas cotas conserva a correspondência; substituir/remover um furo exige atualizá-la explicitamente. O núcleo constrói a transição externa e subtrai transições dos furos, rejeitando cruzamentos ou furos que saiam do volume externo. Contornos com números diferentes de arestas são compatibilizados pelo OCCT sem poligonização; faces sem origem topológica única usam índice/assinatura. `ruled` escolhe geratrizes retas.
 

@@ -1152,6 +1152,126 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sweep_picks_profile_planes_and_a_curved_sketch_guide() -> Result<(), Box<dyn Error>> {
+        use nator_document::features::{Operation, SweepRoute};
+        use nator_sketch::Curve;
+        let context = egui::Context::default();
+        let mut a = Sketch::new(
+            "Entrada",
+            Plane {
+                origin: [10., 0., 0.],
+                u: [1., 0., 0.],
+                v: [0., 0., 1.],
+            },
+        );
+        a.add_circle([0., 0.], 1., false)?;
+        let mut b = Sketch::new(
+            "Saída",
+            Plane {
+                origin: [0., 10., 0.],
+                u: [0., 1., 0.],
+                v: [0., 0., 1.],
+            },
+        );
+        b.add_circle([0., 0.], 1., false)?;
+        let mut guide = Sketch::new("Guia", Plane::xy());
+        let center = guide.add_point([0., 0.])?;
+        let start = guide.add_point([10., 0.])?;
+        let end = guide.add_point([0., 10.])?;
+        let arc = guide.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: false,
+            },
+            false,
+        )?;
+        let mut doc = Document::new("Guia pelo mouse")?;
+        let (part, a) = doc.add_sketch(None, a)?;
+        let (_, b) = doc.add_sketch(Some(part), b)?;
+        let (_, path) = doc.add_sketch(Some(part), guide)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.open_feature_tool(feature_editor::Tool::Sweep);
+        settle(&mut editor, &context)?;
+        for id in [a, b] {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !matches!(editor.profile_areas(id, &context), Some(Ok(Some(_)))) {
+                if Instant::now() > deadline {
+                    return Err("Áreas não calculadas".into());
+                }
+                frame(&mut editor, &context, vec![])?;
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        for point in [[10., 0., 0.], [0., 10., 0.]] {
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Área fora da tela")?;
+            click(&mut editor, &context, at)?;
+        }
+        frame(&mut editor, &context, vec![])?;
+        let mode = context
+            .data(|data| {
+                data.get_temp::<egui::Rect>(egui::Id::new(("choice_rect", text(T::Sketch))))
+            })
+            .ok_or("Modo de guia ausente")?;
+        click(&mut editor, &context, mode.center())?;
+        assert_eq!(
+            editor.feature_edit.as_ref().and_then(|d| d.field()),
+            Some(feature_editor::Field::SweepPath)
+        );
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [
+                std::f64::consts::FRAC_1_SQRT_2 * 10.,
+                std::f64::consts::FRAC_1_SQRT_2 * 10.,
+                0.,
+            ],
+        )
+        .ok_or("Arco fora da tela")?;
+        click(&mut editor, &context, at)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let draft = editor.feature_edit.as_ref().ok_or("Painel")?;
+        let p = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert!(
+            matches!(draft.preview_key(p),Command::AddFeature {operation:Operation::Sweep {route:SweepRoute::Sketch {sketch,entities},..},..} if sketch==path && entities.contains(&arc))
+        );
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .features
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn loft_picks_two_profiles_in_different_planes_and_previews_a_solid()
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();

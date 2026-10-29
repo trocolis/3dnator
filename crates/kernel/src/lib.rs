@@ -31,6 +31,23 @@ pub use native::{
     Solid, StepAssembly, StepBody, StepOccurrence, StepPart, projected_edges, version,
 };
 
+/// Curvas tridimensionais exatas que compõem uma trajetória, em milímetros.
+#[derive(Debug, Clone, Copy)]
+pub enum GuideCurve {
+    Line {
+        start: [f64; 3],
+        end: [f64; 3],
+    },
+    Arc {
+        start: [f64; 3],
+        middle: [f64; 3],
+        end: [f64; 3],
+    },
+    Cubic {
+        poles: [[f64; 3]; 4],
+    },
+}
+
 /// Propriedades de massa com densidade uniforme, em mm, mm² e mm³.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MassProperties {

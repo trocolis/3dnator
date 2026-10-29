@@ -21,6 +21,7 @@ pub(super) enum Icon {
     Extrude,
     Revolve,
     Loft,
+    Sweep,
     Hole,
     Fillet,
     Chamfer,
@@ -451,6 +452,17 @@ fn paint_styled(
             p.line(&[[2., 12.], [22., 12.]], p.ink);
             p.line(&[[12., 2.], [12., 22.]], p.ink);
             p.circle(12., 12., 1.5, p.accent);
+        }
+        Icon::Sweep => {
+            p.face(&[[2., 15.], [6., 15.], [6., 21.], [2., 21.]], p.fill);
+            p.circle(19., 5., 3., p.accent);
+            p.painter
+                .add(egui::epaint::CubicBezierShape::from_points_stroke(
+                    [p.p(6., 18.), p.p(8., 7.), p.p(11., 7.), p.p(19., 8.)],
+                    false,
+                    egui::Color32::TRANSPARENT,
+                    egui::Stroke::new(1.5, p.ink),
+                ));
         }
         Icon::Loft => {
             p.face(&[[4., 17.], [18., 17.], [21., 21.], [7., 21.]], p.fill);

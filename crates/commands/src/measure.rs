@@ -145,24 +145,26 @@ pub fn topology(doc: &Document, pick: &Pick, edge: bool) -> Result<Topology, Doc
         .and_then(|s| s.transformed(record.placement))
         .map_err(error)?;
     if edge {
-        let EdgeRef::Between(faces) = doc.edge_at(pick)? else {
-            return Err(DocumentError("Aresta sem faces nomeadas.".into()));
+        let reference = crate::topology::edge_at(doc, pick)?;
+        let index = match reference {
+            EdgeRef::Between(ref names) => solid.edge_between(names).map_err(error)?,
+            EdgeRef::Index { index, .. } => index,
         };
-        let measure = solid
-            .edge_measure(solid.edge_between(&faces).map_err(error)?)
-            .map_err(error)?;
+        let faces = solid
+            .edge_face_names(index)
+            .unwrap_or_else(|_| [format!("#{}", index + 1), String::new()]);
+        let measure = solid.edge_measure(index).map_err(error)?;
         Ok(Topology::Edge {
             faces,
             length_mm: measure.length,
             radius_mm: measure.radius,
         })
     } else {
-        let FaceRef::Named(name) = doc.face_at(pick)? else {
-            return Err(DocumentError("Face sem nome estável.".into()));
+        let (index, name) = match doc.face_at(pick)? {
+            FaceRef::Named(name) => (solid.face_named(&name).map_err(error)?, name),
+            FaceRef::Index { index, .. } => (index, format!("#{}", index + 1)),
         };
-        let measure = solid
-            .face_measure(solid.face_named(&name).map_err(error)?)
-            .map_err(error)?;
+        let measure = solid.face_measure(index).map_err(error)?;
         let (radius_mm, planar) = match measure.kind {
             FaceKind::Plane { .. } => (None, true),
             FaceKind::Cylinder { radius } | FaceKind::Sphere { radius } => (Some(radius), false),

@@ -245,7 +245,8 @@ impl Editor {
                 let topology = awaiting.zip(pick.as_ref()).map(|(kind, p)| {
                     match kind {
                         feature_editor::Awaiting::Edge => {
-                            document.edge_at(p).map(feature_editor::Kept::Edge)
+                            nator_commands::topology::edge_at(&document, p)
+                                .map(feature_editor::Kept::Edge)
                         }
                         feature_editor::Awaiting::Face => document.face_at(p).and_then(|face| {
                             if extrusion {

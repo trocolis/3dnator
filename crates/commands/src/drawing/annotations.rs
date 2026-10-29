@@ -82,7 +82,7 @@ pub fn capture_reference(
     if edge {
         Ok(DrawingTopologyRef::Edge(DrawingEdgeRef {
             target,
-            edge: document.edge_at(pick)?,
+            edge: crate::topology::edge_at(document, pick)?,
         }))
     } else {
         Ok(DrawingTopologyRef::Face(DrawingFaceRef {

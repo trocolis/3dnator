@@ -128,7 +128,7 @@ pub(super) fn source(
 }
 
 #[cfg(feature = "occt")]
-fn sketch_of(
+pub(super) fn sketch_of(
     doc: &Document,
     part: PartId,
     id: nator_document::SketchId,
@@ -351,6 +351,47 @@ pub(super) fn normalize(
             to,
             combine,
         },
+        Operation::Sweep {
+            start,
+            end,
+            route,
+            holes,
+        } => {
+            let route = match route {
+                nator_document::features::SweepRoute::Sketch { sketch, entities }
+                    if entities.len() == 1 =>
+                {
+                    let source = sketch_of(doc, part, sketch)?;
+                    nator_document::features::SweepRoute::Sketch {
+                        sketch,
+                        entities: nator_sketch::connected::chain(source, entities[0])
+                            .map_err(error)?,
+                    }
+                }
+                other => other,
+            };
+            let Operation::Loft {
+                start, end, holes, ..
+            } = normalize(
+                doc,
+                part,
+                Operation::Loft {
+                    start,
+                    end,
+                    holes,
+                    ruled: false,
+                },
+            )?
+            else {
+                return Err(DocumentError("Perfis inválidos.".into()));
+            };
+            Operation::Sweep {
+                start,
+                end,
+                route,
+                holes,
+            }
+        }
         Operation::Loft {
             start,
             end,
@@ -572,6 +613,34 @@ pub(super) fn construct(
                     .map_err(error)?,
                 None => extrusion,
             }
+        }
+        Operation::Sweep {
+            start,
+            end,
+            route,
+            holes,
+        } => {
+            let a = sketch_of(doc, part, start.sketch)?;
+            let b = sketch_of(doc, part, end.sketch)?;
+            if nator_document::features::validate_coplanar(a.plane, b.plane).is_ok() {
+                return Err(DocumentError(
+                    "Escolha planos diferentes para a transição guiada.".into(),
+                ));
+            }
+            let mut first = region(a, &start.region)?;
+            let mut last = region(b, &end.region)?;
+            if let Some(pairs) = holes {
+                order_holes(
+                    &mut first,
+                    &pairs.iter().map(|p| p.start.clone()).collect::<Vec<_>>(),
+                )?;
+                order_holes(
+                    &mut last,
+                    &pairs.iter().map(|p| p.end.clone()).collect::<Vec<_>>(),
+                )?;
+            }
+            let curves = crate::sweep::curves(doc, part, (a, &first), (b, &last), route)?;
+            Solid::guided_transition((a, &first), (b, &last), &curves, &owner).map_err(error)?
         }
         Operation::Loft {
             start,

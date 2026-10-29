@@ -326,8 +326,10 @@ fn sketches_on_chamfer_corners_work_without_stable_names() -> Result<()> {
         if !name.is_empty() {
             continue;
         }
-        // A regra de referências estáveis permanece: só o plano fixo é permitido.
-        assert!(session.document().face_at(&pick).is_err());
+        // Sem nome, a assinatura mantém a seleção presa a este B-rep exato.
+        assert!(
+            matches!(session.document().face_at(&pick)?,nator_document::features::FaceRef::Index {index,..} if index==face)
+        );
         let local = Plane::from_normal(
             occurrence.inverse_apply(plane.origin),
             occurrence.inverse_vector(plane.normal()),

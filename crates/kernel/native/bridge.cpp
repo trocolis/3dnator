@@ -19,6 +19,7 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeShape.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -641,6 +642,17 @@ bool nator_face_measure(const Shape* body, std::size_t index, double* output) no
 }
 
 // Medidas de uma aresta (3 doubles): comprimento, tipo (0 reta, 1 círculo, 2 outra) e raio.
+// Distância exata ao clicar uma aresta sem nome estável. A consulta pertence ao
+// worker; a tesselação serve apenas para reduzir o conjunto às faces vizinhas.
+bool nator_edge_distance(const Shape* body,std::size_t index,const double* point,double* distance) noexcept {
+    return guarded([&] {
+        BRepExtrema_DistShapeShape query(edge_at(body,index),BRepBuilderAPI_MakeVertex(gp_Pnt(point[0],point[1],point[2])).Vertex());
+        query.Perform();
+        if (!query.IsDone()) throw std::runtime_error("Não foi possível localizar a aresta selecionada.");
+        *distance=query.Value();
+    });
+}
+
 bool nator_edge_measure(const Shape* body, std::size_t index, double* output) noexcept {
     return guarded([&] {
         const TopoDS_Edge edge = edge_at(body, index);

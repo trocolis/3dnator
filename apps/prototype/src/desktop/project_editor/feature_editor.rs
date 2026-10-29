@@ -14,7 +14,8 @@ use super::{
 };
 use nator_document::features::{
     BooleanMode, Combine, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec, HoleSpec,
-    LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, ThreadSpec, UntilFace, signature,
+    LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, SweepRoute, ThreadSpec, UntilFace,
+    signature,
 };
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
@@ -26,6 +27,7 @@ pub(super) enum Tool {
     Extrude,
     Revolve,
     Loft,
+    Sweep,
     Join,
     Cut,
     Intersect,
@@ -44,6 +46,7 @@ impl Tool {
             Self::Extrude => T::Extrude,
             Self::Revolve => T::Revolve,
             Self::Loft => T::Loft,
+            Self::Sweep => T::Sweep,
             Self::Join | Self::Cut | Self::Intersect => T::CombineTool,
             Self::Fillet => T::Fillet,
             Self::Chamfer => T::Chamfer,
@@ -60,6 +63,7 @@ impl Tool {
             Self::Extrude => Icon::Extrude,
             Self::Revolve => Icon::Revolve,
             Self::Loft => Icon::Loft,
+            Self::Sweep => Icon::Sweep,
             Self::Hole => Icon::Hole,
             Self::Fillet => Icon::Fillet,
             Self::Chamfer => Icon::Chamfer,
@@ -72,12 +76,15 @@ impl Tool {
     }
     /// Ferramentas que partem de um rascunho de perfil.
     fn uses_profile(self) -> bool {
-        matches!(self, Self::Extrude | Self::Revolve | Self::Loft)
+        matches!(
+            self,
+            Self::Extrude | Self::Revolve | Self::Loft | Self::Sweep
+        )
     }
     /// Campo que recebe os primeiros cliques ao abrir o painel.
     fn first_field(self) -> Field {
         match self {
-            Self::Extrude | Self::Revolve | Self::Loft => Field::Profile,
+            Self::Extrude | Self::Revolve | Self::Loft | Self::Sweep => Field::Profile,
             Self::Fillet | Self::Chamfer => Field::Edges,
             Self::Shell => Field::Faces,
             _ => Field::Base,
@@ -129,6 +136,8 @@ pub(super) enum Field {
     CuttingPlane,
     RevolveAxis,
     EndProfile,
+    SweepAxis,
+    SweepPath,
 }
 
 /// Direção da extrusão, como nos CADs de mercado. Os limites gravados continuam sendo
@@ -350,6 +359,7 @@ pub(super) struct Draft {
     additional_profiles: Vec<ProfileRef>,
     end_profile: Option<ProfileRef>,
     ruled: bool,
+    sweep_route: SweepRoute,
     hole_pairs: Option<Vec<nator_document::features::HolePair>>,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
     kept_axis: Option<([f64; 3], [f64; 3])>,
@@ -400,6 +410,7 @@ impl Draft {
             additional_profiles: vec![],
             end_profile: None,
             ruled: false,
+            sweep_route: SweepRoute::Automatic,
             hole_pairs: None,
             kept_axis: None,
             index: 0,
@@ -479,6 +490,19 @@ impl Draft {
                 }
                 d.extrude.to_face = until.is_some();
                 d.until = until;
+            }
+            Operation::Sweep {
+                start,
+                end,
+                route,
+                holes,
+            } => {
+                d.tool = Tool::Sweep;
+                d.sketch = Some(start.sketch);
+                d.kept_region = Some(start.region);
+                d.end_profile = Some(end);
+                d.sweep_route = route;
+                d.hole_pairs = holes;
             }
             Operation::Loft {
                 start,
@@ -725,7 +749,11 @@ impl Draft {
                 Some(Awaiting::Face)
             }
             Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
-            Field::Profile | Field::RevolveAxis | Field::EndProfile => None,
+            Field::Profile
+            | Field::RevolveAxis
+            | Field::EndProfile
+            | Field::SweepAxis
+            | Field::SweepPath => None,
         }
     }
     pub(super) fn choosing_cutting_plane(&self) -> bool {
@@ -769,7 +797,7 @@ impl Draft {
     }
     /// Região do perfil escolhida por clique no rascunho.
     pub(super) fn choose_region(&mut self, sketch: SketchId, region: RegionRef) {
-        if self.tool == Tool::Loft {
+        if matches!(self.tool, Tool::Loft | Tool::Sweep) {
             self.hole_pairs = None;
             if self.field == Some(Field::EndProfile) {
                 self.end_profile = Some(ProfileRef { sketch, region });
@@ -858,12 +886,28 @@ impl Draft {
             .collect()
     }
     pub(super) fn requires_distinct_plane(&self) -> bool {
-        self.tool == Tool::Loft && self.field == Some(Field::EndProfile)
+        matches!(self.tool, Tool::Loft | Tool::Sweep) && self.field == Some(Field::EndProfile)
     }
     pub(super) fn accepts_coplanar_profiles(&self) -> bool {
         self.tool == Tool::Revolve
     }
+    pub(super) fn choose_sweep_path(&mut self, sketch: SketchId, entity: u64) {
+        self.sweep_route = SweepRoute::Sketch {
+            sketch,
+            entities: vec![entity],
+        };
+        self.field = None;
+    }
     pub(super) fn choose_revolve_axis(&mut self, sketch: SketchId, line: u64) {
+        if self.tool == Tool::Sweep {
+            self.sweep_route = SweepRoute::Axis {
+                sketch,
+                line,
+                reverse: false,
+            };
+            self.field = None;
+            return;
+        }
         self.revolve_axis = Some((sketch, line));
         self.kept_axis = None;
         self.field = if self.kept_region.is_none() {
@@ -1056,6 +1100,18 @@ impl Draft {
                     && (!self.extrude.to_face || self.until.is_some())
                     && (self.automatic || self.combine == 0 || self.combine_target.is_some())
             }
+            Tool::Sweep => {
+                self.sketch.is_some()
+                    && self.kept_region.is_some()
+                    && self.end_profile.is_some()
+                    && match &self.sweep_route {
+                        SweepRoute::Automatic => true,
+                        SweepRoute::Axis { sketch, line, .. } => sketch.0 != 0 && *line != 0,
+                        SweepRoute::Sketch { sketch, entities } => {
+                            sketch.0 != 0 && !entities.is_empty()
+                        }
+                    }
+            }
             Tool::Loft => {
                 self.sketch.is_some() && self.kept_region.is_some() && self.end_profile.is_some()
             }
@@ -1163,6 +1219,15 @@ impl Draft {
                     until,
                 }
             }
+            Tool::Sweep => Operation::Sweep {
+                start: ProfileRef { sketch, region },
+                end: self.end_profile.clone().unwrap_or(ProfileRef {
+                    sketch: SketchId(0),
+                    region: RegionRef::Index(0),
+                }),
+                route: self.sweep_route.clone(),
+                holes: self.hole_pairs.clone(),
+            },
             Tool::Loft => Operation::Loft {
                 start: ProfileRef { sketch, region },
                 end: self.end_profile.clone().unwrap_or(ProfileRef {
@@ -1404,7 +1469,7 @@ impl Editor {
                 .map(|b| b.id),
         };
         match tool {
-            Tool::Extrude | Tool::Revolve | Tool::Loft => {
+            Tool::Extrude | Tool::Revolve | Tool::Loft | Tool::Sweep => {
                 d.combine_target = suggestion;
                 d.auto_preferred = suggestion;
             }
@@ -1509,8 +1574,7 @@ impl Editor {
         let revision = self.current().session.revision();
         let document = self.current().session.document().clone();
         self.start(context, None, move || {
-            let topology = document
-                .edge_at(&pick)
+            let topology = nator_commands::topology::edge_at(&document, &pick)
                 .map(Kept::Edge)
                 .map_err(|error| error.to_string());
             Ok(Outcome::Picked {
@@ -1593,7 +1657,7 @@ impl Editor {
                 match d.tool {
                     Tool::Extrude => extrude_panel(ui, &mut d, &part, &regions),
                     Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
-                    Tool::Loft => loft_panel(ui, &mut d, &part, &regions),
+                    Tool::Loft | Tool::Sweep => loft_panel(ui, &mut d, &part, &regions),
                     Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
                     Tool::Fillet | Tool::Chamfer | Tool::Shell => topology_panel(ui, &mut d, &part),
                     Tool::Hole => hole_panel(ui, &mut d, &part, record),
@@ -1691,7 +1755,7 @@ fn profile_rows(
         });
     let selection = panel::selection(
         ui,
-        text(if d.tool == Tool::Loft {
+        text(if matches!(d.tool, Tool::Loft | Tool::Sweep) {
             T::StartProfile
         } else {
             T::ProfileField
@@ -1899,15 +1963,104 @@ fn loft_panel(
         d.end_profile = None;
         d.field = Some(Field::EndProfile);
     }
-    ui.checkbox(&mut d.ruled, text(T::RuledLoft));
+    if d.tool == Tool::Loft {
+        ui.checkbox(&mut d.ruled, text(T::RuledLoft));
+    } else {
+        sweep_controls(ui, d, part);
+    }
     if d.hole_pairs.is_some() && ui.button(text(T::UpdateHolePairs)).clicked() {
         d.hole_pairs = None;
     }
     ui.label(
-        egui::RichText::new(text(T::LoftHint))
-            .small()
-            .color(theme::MUTED),
+        egui::RichText::new(text(if d.tool == Tool::Loft {
+            T::LoftHint
+        } else {
+            T::SweepHint
+        }))
+        .small()
+        .color(theme::MUTED),
     );
+}
+
+fn sweep_controls(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    let mut mode = match d.sweep_route {
+        SweepRoute::Automatic => 0,
+        SweepRoute::Axis { .. } => 1,
+        SweepRoute::Sketch { .. } => 2,
+    };
+    panel::row(ui, text(T::RouteField), |ui| {
+        if panel::choice(
+            ui,
+            &mut mode,
+            &[
+                (0, Icon::Sweep, T::AutomaticRoute),
+                (1, Icon::Line, T::AxisField),
+                (2, Icon::Sketch, T::Sketch),
+            ],
+        ) {
+            d.sweep_route = match mode {
+                1 => SweepRoute::Axis {
+                    sketch: SketchId(0),
+                    line: 0,
+                    reverse: false,
+                },
+                2 => SweepRoute::Sketch {
+                    sketch: SketchId(0),
+                    entities: vec![],
+                },
+                _ => SweepRoute::Automatic,
+            };
+            d.field = match mode {
+                1 => Some(Field::SweepAxis),
+                2 => Some(Field::SweepPath),
+                _ => None,
+            };
+        }
+    });
+    let (field, chosen, sketch) = match &d.sweep_route {
+        SweepRoute::Automatic => return,
+        SweepRoute::Axis { sketch, line, .. } => {
+            (Field::SweepAxis, usize::from(*line != 0), *sketch)
+        }
+        SweepRoute::Sketch { sketch, entities } => (Field::SweepPath, entities.len(), *sketch),
+    };
+    let name = part
+        .sketches
+        .iter()
+        .find(|s| s.id == sketch)
+        .map(|s| s.sketch.name.as_str());
+    let selection = panel::selection(
+        ui,
+        text(if mode == 1 {
+            T::AxisField
+        } else {
+            T::RouteField
+        }),
+        chosen,
+        name,
+        d.field == Some(field),
+    );
+    if selection.activate {
+        d.field = Some(field);
+    }
+    if selection.clear {
+        d.sweep_route = if mode == 1 {
+            SweepRoute::Axis {
+                sketch: SketchId(0),
+                line: 0,
+                reverse: false,
+            }
+        } else {
+            SweepRoute::Sketch {
+                sketch: SketchId(0),
+                entities: vec![],
+            }
+        };
+        d.field = Some(field);
+    }
+    if let SweepRoute::Axis { reverse, .. } = &mut d.sweep_route {
+        ui.checkbox(reverse, text(T::LongArc));
+    }
 }
 
 fn revolve_panel(

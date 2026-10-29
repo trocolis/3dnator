@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.9.0 — 29/10/2026
+
+- Nova Transição guiada entre perfis: guia automática tangente aos planos, arco por eixo selecionado ou trajetória de linhas/arcos de um rascunho. A seleção gráfica captura a cadeia conectada e o recálculo acompanha suas entidades. Furos conservam correspondência e o núcleo verifica autointerferência.
+- Corrigida a seleção de faces sem nome topológico único: usa índice com assinatura exata da geometria. Arestas sem nomes únicos usam distância exata no núcleo; medidas, cotas, realce e ferramentas CAD aceitam essas seleções. Mudanças de geometria exigem nova seleção quando não há identidade estável.
+- Perfis finais/adicionais e guia de rascunho são ocultados na criação bem-sucedida das transições/revoluções, preservando escolhas de visibilidade posteriores durante recálculo. Formato interno 35; etapa local sem push ou release.
+
 ## 0.8.0 — 29/10/2026
 
 - Nova ferramenta Transição entre perfis: duas áreas em rascunhos de planos diferentes, como base retangular e topo circular, com prévia e opção de geratrizes retas.

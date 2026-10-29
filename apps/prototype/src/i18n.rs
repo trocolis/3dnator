@@ -112,6 +112,11 @@ pub enum Text {
     RevolveAxisHint,
     CoplanarProfilesRequired,
     Loft,
+    Sweep,
+    SweepHint,
+    RouteField,
+    AutomaticRoute,
+    LongArc,
     EndProfile,
     StartProfile,
     RuledLoft,
@@ -834,6 +839,13 @@ pub fn text(key: Text) -> &'static str {
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
         Text::FileMenu => "Arquivo",
+        Text::Sweep => "Transição guiada",
+        Text::RouteField => "Trajetória",
+        Text::AutomaticRoute => "Automática",
+        Text::LongArc => "Arco pelo lado oposto",
+        Text::SweepHint => {
+            "Guia automática, arco por eixo no plano inicial ou cadeia aberta de linhas/arcos de um rascunho. Planos dos perfis devem ser perpendiculares à guia nas extremidades."
+        }
         Text::Loft => "Transição entre perfis",
         Text::StartProfile => "Área inicial",
         Text::EndProfile => "Área final",

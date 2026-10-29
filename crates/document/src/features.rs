@@ -164,6 +164,23 @@ pub struct HolePair {
     pub end: Vec<u64>,
 }
 
+/// Guia associativa de uma transição curva. Eixo pertence ao plano inicial;
+/// trajetória referencia uma cadeia aberta de linhas/arcos de outro rascunho.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SweepRoute {
+    Automatic,
+    Axis {
+        sketch: SketchId,
+        line: u64,
+        #[serde(default)]
+        reverse: bool,
+    },
+    Sketch {
+        sketch: SketchId,
+        entities: Vec<u64>,
+    },
+}
+
 /// Aresta usada por arredondamento ou chanfro.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EdgeRef {
@@ -230,6 +247,13 @@ pub enum Operation {
         end: ProfileRef,
         #[serde(default)]
         ruled: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        holes: Option<Vec<HolePair>>,
+    },
+    Sweep {
+        start: ProfileRef,
+        end: ProfileRef,
+        route: SweepRoute,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holes: Option<Vec<HolePair>>,
     },
@@ -497,7 +521,8 @@ impl Operation {
     }
     pub fn uses_sketch(&self, id: SketchId) -> bool {
         self.sketch() == Some(id)
-            || matches!(self,Self::Loft {end,..} if end.sketch==id)
+            || matches!(self,Self::Loft {end,..} | Self::Sweep {end,..} if end.sketch==id)
+            || matches!(self,Self::Sweep {route:SweepRoute::Axis {sketch,..}|SweepRoute::Sketch {sketch,..},..} if *sketch==id)
             || matches!(self,Self::Revolve {additional_profiles,axis_sketch,..} if *axis_sketch==Some(id) || additional_profiles.iter().any(|p|p.sketch==id))
             || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::Split{cutting_plane:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
     }
@@ -509,7 +534,7 @@ impl Operation {
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
-            Self::Loft { start, .. } => Some(start.sketch),
+            Self::Loft { start, .. } | Self::Sweep { start, .. } => Some(start.sketch),
             Self::Extrude { sketch, .. }
             | Self::Revolve { sketch, .. }
             | Self::Hole { sketch, .. } => Some(*sketch),
@@ -592,9 +617,17 @@ impl Feature {
                     limit.remap(bodies, sketches)?;
                 }
             }
-            Operation::Loft { start, end, .. } => {
+            Operation::Loft { start, end, .. } | Operation::Sweep { start, end, .. } => {
                 sketch(&mut start.sketch)?;
                 sketch(&mut end.sketch)?;
+                if let Operation::Sweep {
+                    route:
+                        SweepRoute::Axis { sketch: id, .. } | SweepRoute::Sketch { sketch: id, .. },
+                    ..
+                } = &mut self.operation
+                {
+                    sketch(id)?;
+                }
             }
             Operation::Revolve {
                 sketch: id,
@@ -786,7 +819,40 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
             }
             Operation::Loft {
                 start, end, holes, ..
+            }
+            | Operation::Sweep {
+                start, end, holes, ..
             } => {
+                if let Operation::Sweep { route, .. } = &f.operation {
+                    match route {
+                        SweepRoute::Automatic => {}
+                        SweepRoute::Axis { sketch, line, .. } => {
+                            let axis = part.sketches.iter().find(|s| s.id == *sketch).ok_or_else(
+                                || {
+                                    DocumentError(
+                                        "Rascunho do eixo da transição inexistente.".into(),
+                                    )
+                                },
+                            )?;
+                            axis.sketch
+                                .line(*line)
+                                .map_err(|e| DocumentError(e.to_string()))?;
+                        }
+                        SweepRoute::Sketch { sketch, entities } => {
+                            if entities.is_empty()
+                                || entities.len() > 1024
+                                || !part.sketches.iter().any(|s| {
+                                    s.id == *sketch
+                                        && entities.iter().all(|id| s.sketch.entity(*id).is_ok())
+                                })
+                            {
+                                return Err(DocumentError(
+                                    "Trajetória da transição inexistente ou excessiva.".into(),
+                                ));
+                            }
+                        }
+                    }
+                }
                 if holes.as_ref().is_some_and(|pairs| {
                     pairs.len() > 64
                         || pairs.iter().any(|p| {

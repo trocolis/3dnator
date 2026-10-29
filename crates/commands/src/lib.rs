@@ -10,6 +10,9 @@ pub mod measure;
 pub mod painting;
 pub mod point_snap;
 pub mod sketch_projection;
+#[cfg(feature = "occt")]
+mod sweep;
+pub mod topology;
 use nator_document::{
     BodyId, Document, DocumentError, InstanceId, MeshAsset, PartId, SketchId, WorkPlaneId,
     validate_name,
@@ -1047,7 +1050,26 @@ fn add_feature(
     }
     // Ocultar apenas na criação bem-sucedida da operação. Recalcular não deve
     // apagar a escolha posterior do usuário de mostrar o perfil novamente.
-    if let Some(sketch) = operation.sketch() {
+    let mut profiles = operation.sketch().into_iter().collect::<Vec<_>>();
+    match &operation {
+        nator_document::features::Operation::Loft { end, .. }
+        | nator_document::features::Operation::Sweep { end, .. } => profiles.push(end.sketch),
+        nator_document::features::Operation::Revolve {
+            additional_profiles,
+            ..
+        } => profiles.extend(additional_profiles.iter().map(|p| p.sketch)),
+        _ => {}
+    }
+    if let nator_document::features::Operation::Sweep {
+        route: nator_document::features::SweepRoute::Sketch { sketch, .. },
+        ..
+    } = &operation
+    {
+        profiles.push(*sketch);
+    }
+    profiles.sort_unstable_by_key(|id| id.0);
+    profiles.dedup();
+    for sketch in profiles {
         doc.sketch_mut(sketch)?.visible = false;
     }
     let piece = doc.part_mut(part)?;

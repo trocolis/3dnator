@@ -1,5 +1,12 @@
 # Execução autônoma
 
+## Transição guiada e seleção sem nomes — 29/10/2026
+
+- Etapa local 0.9.0, formato 35, sem push/release. Guias automática, por eixo e por cadeia de linhas/arcos; furos, orientação nas extremidades, conectividade e autointerferência são verificados no núcleo.
+- Aprovados 358 testes com OCCT, 45 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados com e sem OCCT. Regressões conferem volumes de dutos por arco/cadeia, três modos, referências de guia, clone, desfazer/refazer, persistência e rejeição atômica de extremidades inválidas. Ensaio gráfico seleciona perfis, muda o modo de guia, clica o arco e confirma a prévia.
+- Faces sem nome único agora admitem referência por assinatura em todos os seletores; arestas são localizadas por distância exata. Regressão usa corpo e ocorrência rotacionados/deslocados, mede ambos os elementos, arredonda a aresta sem nome e rejeita assinatura incorreta. O realce dessas arestas é calculado em segundo plano. Isso trata o erro anotado em `ERROS.md`, preservado como arquivo do usuário.
+- Logs em `target/codex-validation/sweep-20261029/`. Windows não executado localmente nesta etapa.
+
 ## Transição entre perfis — 29/10/2026
 
 - Etapa local 0.8.0, formato 34, sem push/release. Duas áreas em planos diferentes e opção de geratrizes retas. Curvas preservadas no núcleo OCCT; furos são transições subtraídas com verificação de contenção/cruzamento e correspondência persistida por identidade.

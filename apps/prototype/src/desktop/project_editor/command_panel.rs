@@ -388,6 +388,10 @@ pub(super) fn choice<V: PartialEq + Copy>(
     for (option, icon, label) in options {
         let selected = *value == *option;
         let response = icons::button(ui, *icon, text(*label), false, selected);
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new(("choice_rect", text(*label))), response.rect)
+        });
         if response.clicked() && !selected {
             *value = *option;
             changed = true;

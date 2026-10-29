@@ -1,4 +1,6 @@
-# Protótipo 0.8.0 — CAD paramétrico
+# Protótipo 0.9.0 — CAD paramétrico
+
+**Transição guiada** liga duas áreas em planos diferentes. Trajetória Automática cria uma guia cúbica tangente aos planos; Eixo usa uma linha coplanar à entrada e requer centros no mesmo raio/altura, com opção do arco pelo lado oposto; Rascunho permite clicar numa linha/arco e captura a cadeia aberta conectada. A guia deve terminar nos planos das áreas e ser perpendicular a eles nas extremidades. Furos seguem a mesma correspondência da Transição entre perfis. Os rascunhos usados são ocultados ao criar a operação e podem ser mostrados novamente pela árvore.
 
 **Transição entre perfis**, na criação de peças, liga uma Área inicial e uma Área final em rascunhos de planos diferentes. Clique nas áreas pelo viewport; o segundo campo é ativado após a primeira escolha. Retângulo para círculo e perfis com furos são suportados. Furos precisam existir nos dois perfis e correspondem inicialmente por ordem de criação; a ligação fica salva por identidade. Se substituir um contorno, edite a operação e use Atualizar correspondência dos furos. Geratrizes retas oferece uma transição regrada. Prévia, desfazer/refazer, parâmetros, persistência e STEP usam o sólido exato.
 

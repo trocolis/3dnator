@@ -56,6 +56,7 @@ pub(super) fn operation_icon(operation: &Operation) -> Icon {
         Operation::Extrude { .. } | Operation::ExtrudeFace { .. } => Icon::Extrude,
         Operation::Revolve { .. } => Icon::Revolve,
         Operation::Loft { .. } => Icon::Loft,
+        Operation::Sweep { .. } => Icon::Sweep,
         Operation::Hole { .. } => Icon::Hole,
         Operation::Fillet { .. } => Icon::Fillet,
         Operation::Chamfer { .. } => Icon::Chamfer,

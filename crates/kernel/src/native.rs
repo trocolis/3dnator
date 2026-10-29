@@ -104,6 +104,12 @@ unsafe extern "C" {
     fn nator_mirror(body: *const c_void, origin: *const f64, normal: *const f64) -> *mut c_void;
     fn nator_properties(body: *const c_void, output: *mut f64) -> bool;
     fn nator_face_measure(body: *const c_void, index: usize, output: *mut f64) -> bool;
+    fn nator_edge_distance(
+        body: *const c_void,
+        index: usize,
+        point: *const f64,
+        distance: *mut f64,
+    ) -> bool;
     fn nator_edge_measure(body: *const c_void, index: usize, output: *mut f64) -> bool;
     fn nator_distance(a: *const c_void, b: *const c_void, output: *mut f64) -> bool;
     fn nator_half_space(body: *const c_void, origin: *const f64, normal: *const f64)
@@ -896,6 +902,29 @@ impl Solid {
             _ => FaceKind::Other,
         };
         Ok(FaceMeasure { area: out[0], kind })
+    }
+
+    /// Índice da aresta exata mais próxima, restrito às faces junto ao clique.
+    pub fn closest_edge(&self, faces: [usize; 2], point: Point3) -> Result<usize, KernelError> {
+        coordinates(point)?;
+        let mut best: Option<(f64, usize)> = None;
+        for (index, adjacent) in self.adjacency()?.iter().enumerate() {
+            if !faces.iter().all(|f| adjacent.contains(&(*f as i32))) {
+                continue;
+            }
+            let mut distance = 0.;
+            // SAFETY: sólido e ponto vivos, saída exclusiva e índice da adjacência.
+            if !unsafe {
+                nator_edge_distance(self.pointer.as_ptr(), index, point.as_ptr(), &mut distance)
+            } {
+                return Err(last_error());
+            }
+            if best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, index));
+            }
+        }
+        best.map(|(_, index)| index)
+            .ok_or_else(|| KernelError("As faces escolhidas não têm uma aresta comum.".into()))
     }
 
     pub fn edge_measure(&self, index: usize) -> Result<EdgeMeasure, KernelError> {

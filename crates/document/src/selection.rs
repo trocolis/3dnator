@@ -1,11 +1,7 @@
-//! Conversão de um clique na área 3D em referência topológica estável.
-//!
-//! A malha de exibição de um sólido guarda a face do B-rep de cada triângulo. Um clique
-//! sobre uma face identifica essa face pelo nome; para arestas, a fronteira mais próxima
-//! entre a face clicada e uma face vizinha define o par de nomes. Assim a seleção já nasce
-//! como referência por origem, sem índices topológicos.
-//! Consultas que não criam vínculos podem obter um índice transitório desta geometria,
-//! sem exigir um nome; esse índice nunca deve entrar no histórico paramétrico.
+//! Seleção topológica pela malha com origem de faces. Nomes únicos conservam
+//! identidade no recálculo; faces sem nome único usam índice + assinatura do
+//! B-rep, exigindo nova seleção se a geometria mudar. Arestas exatas sem nome
+//! são resolvidas na camada de comandos; a malha fornece seu par de faces.
 use super::*;
 use assembly::Pick;
 use features::{EdgeRef, FaceRef};
@@ -60,7 +56,7 @@ fn segment_distance(p: Point3, a: Point3, b: Point3) -> f64 {
 impl Document {
     /// Índice transitório da face do B-rep sob o clique, válido só para esta geometria.
     /// Serve para consultas que capturam valores (como um plano fixo de rascunho).
-    /// Referências persistentes devem continuar usando `face_at`, por nome estável.
+    /// Referências persistentes usam `face_at`, com nome ou assinatura do B-rep.
     pub fn face_index_at(&self, pick: &Pick) -> Result<usize, DocumentError> {
         let (_, faces) = solid(self, pick)?;
         Ok(faces[pick.triangle] as usize)
@@ -69,11 +65,34 @@ impl Document {
     /// Face do sólido sob o clique.
     pub fn face_at(&self, pick: &Pick) -> Result<FaceRef, DocumentError> {
         let (body, faces) = solid(self, pick)?;
-        face_name(body, faces[pick.triangle]).map(FaceRef::Named)
+        let index = faces[pick.triangle] as usize;
+        Ok(match face_name(body, index as u32) {
+            Ok(name) if body.face_names.iter().filter(|n| **n == name).count() == 1 => {
+                FaceRef::Named(name)
+            }
+            _ => FaceRef::Index {
+                index,
+                signature: features::signature(
+                    body.brep.as_deref().map(Vec::as_slice).unwrap_or_default(),
+                ),
+            },
+        })
     }
 
     /// Aresta do B-rep mais próxima do clique entre a face clicada e uma face vizinha.
     pub fn edge_at(&self, pick: &Pick) -> Result<EdgeRef, DocumentError> {
+        let body = self
+            .body(pick.body)
+            .ok_or_else(|| DocumentError("Corpo selecionado inexistente.".into()))?;
+        let [a, b] = self.edge_faces_at(pick)?;
+        Ok(EdgeRef::Between([
+            face_name(body, a as u32)?,
+            face_name(body, b as u32)?,
+        ]))
+    }
+    /// Par transitório de faces junto à aresta mais próxima. Não exige nome;
+    /// serve ao realce e à consulta exata de aresta no núcleo, fora da interface.
+    pub fn edge_faces_at(&self, pick: &Pick) -> Result<[usize; 2], DocumentError> {
         let (body, faces) = solid(self, pick)?;
         let mesh = body.geometry.mesh();
         let pose = pick
@@ -112,10 +131,7 @@ impl Document {
         let (_, other) = best.ok_or_else(|| {
             DocumentError("A face selecionada não faz fronteira com outra face.".into())
         })?;
-        Ok(EdgeRef::Between([
-            face_name(body, clicked)?,
-            face_name(body, other)?,
-        ]))
+        Ok([clicked as usize, other as usize])
     }
 }
 
@@ -193,16 +209,20 @@ mod tests {
     }
 
     #[test]
-    fn transient_queries_allow_unnamed_faces_but_persistent_references_do_not()
+    fn unnamed_faces_use_geometry_signature_and_allow_transient_edge_pairs()
     -> Result<(), Box<dyn Error>> {
         let (mut doc, body) = cube()?;
         let mut names = (*doc.body(body).ok_or("Corpo ausente")?.face_names).clone();
         names[1].clear();
         doc.body_mut(body)?.face_names = Arc::new(names);
         let pick = pick_at(&doc, body, 2, [0.5, 0.05, 1.]);
-        // Consultas transitórias continuam possíveis; vínculos persistentes exigem nome.
+        // Referências por assinatura não escolhem outra face após recálculo.
         assert_eq!(doc.face_index_at(&pick)?, 1);
-        assert!(doc.face_at(&pick).is_err());
+        assert!(matches!(
+            doc.face_at(&pick)?,
+            FaceRef::Index { index: 1, .. }
+        ));
+        assert_eq!(doc.edge_faces_at(&pick)?, [1, 2]);
         assert!(doc.edge_at(&pick).is_err());
         let mut invalid = pick.clone();
         invalid.triangle = usize::MAX;
