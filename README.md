@@ -1,6 +1,6 @@
 # 3dnator
 
-Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos. O protótipo 0.3.0 já percorre o fluxo da primeira peça utilizável: rascunho cotado por parâmetros, extrusão, furos, arredondamentos, alteração de cota com recálculo, salvamento, reabertura e exportação STEP/STL, com o núcleo OCCT validado no Linux.
+Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos. O protótipo 0.3.0-alpha.1 já percorre o fluxo da primeira peça utilizável: rascunho cotado por parâmetros, extrusão, furos, arredondamentos, alteração de cota com recálculo, salvamento, reabertura e exportação STEP/STL, com o núcleo OCCT validado no Linux.
 
 O projeto é de código aberto, sob a [licença MIT](LICENSE) para o código próprio. Dependências e recursos de terceiros mantêm suas respectivas licenças. O código está publicado em <https://github.com/trocolis/3dnator>.
 
@@ -203,3 +203,7 @@ As seções seguintes descrevem o escopo completo aprovado.
 ## Versionamento do projeto
 
 Versões X.Y.Z e commits descritivos conforme [AGENTS.md](AGENTS.md). As decisões acima descrevem o escopo desejado, não uma lista de recursos já entregues.
+
+## Pré-release
+
+Pacotes Linux Flatpak e instalador Windows EXE em [Releases](https://github.com/trocolis/3dnator/releases). Instruções e limitações em [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). As versões alpha são experimentais; mantenha cópias dos projetos importantes.

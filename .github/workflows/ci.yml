@@ -55,7 +55,7 @@ jobs:
       - name: Preparar SDK OCCT
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libxkbcommon-dev libwayland-dev libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-application-framework-dev
+          sudo apt-get install -y cmake libxkbcommon-dev libwayland-dev libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-ocaf-dev
       - run: cargo clippy --workspace --all-targets --features occt --locked -- -D warnings
       - run: cargo test --workspace --features occt --locked
       - run: cargo build -p nator-prototype --features occt --locked

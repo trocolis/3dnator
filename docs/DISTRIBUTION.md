@@ -1,6 +1,29 @@
 # Empacotamento para Linux e Windows
 
-Os scripts criam pacotes com o executável e as bibliotecas do OCCT. Ainda são pacotes de validação: a compatibilidade com Windows e Ubuntu precisa ser demonstrada nos runners correspondentes antes de uma distribuição pública. Executar em ambiente limpo no mesmo Linux não demonstra portabilidade entre distribuições.
+Os scripts criam pacotes com o executável e as bibliotecas do OCCT. O workflow **Empacotar pré-release** (`.github/workflows/prerelease.yml`) compila a versão do Cargo no Linux e Windows, roda os testes com OCCT e prepara Flatpak e instalador EXE. A publicação no GitHub é deliberada, somente depois de conferir ambos os artefatos. Executar em ambiente limpo no mesmo Linux não demonstra portabilidade entre distribuições.
+
+## Instalar a pré-release
+
+Baixe os arquivos na [página de releases](https://github.com/trocolis/3dnator/releases) e confira o SHA-256 publicado. São pacotes experimentais, sem assinatura de código do aplicativo.
+
+- **Linux x86_64:** instale o bundle com `flatpak install --user ./3dnator-0.3.0-alpha.1-linux-x86_64.flatpak`. Execute `flatpak run io.github.trocolis.ThreeDnator`. O runtime Freedesktop 25.08 vem do Flathub; o bundle informa essa origem. Se necessário, configure primeiro `flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`. O aplicativo recebe acesso aos arquivos do hospedeiro para abrir/salvar projetos e exportações, além de GPU, Wayland e X11; não solicita rede.
+- **Windows x64:** execute `3dnator-0.3.0-alpha.1-windows-x64-setup.exe`. O instalador solicita privilégios administrativos e inclui o redistribuível oficial Microsoft Visual C++ x64, com assinatura verificada durante a geração. OCCT e suas DLLs ficam adjacentes ao aplicativo. O executável do 3Dnator e o instalador ainda não têm certificado de assinatura próprio.
+
+A versão exibida pelo aplicativo corresponde ao Cargo e à tag `v0.3.0-alpha.1`. O formato de projeto permanece 29. Pinturas por face/região são exportadas em STEP; a importação dessas cores no documento continua pendente.
+
+## Gerar Flatpak e EXE
+
+Execute manualmente **Empacotar pré-release** na revisão a distribuir. O workflow não publica nem altera tags. O job Linux compila em Ubuntu 24.04 e verifica o carregamento/ensaios no **Platform** Freedesktop 25.08, sem depender do SDK; o job Windows valida a pasta relocada com PATH limpo e a instalação silenciosa do EXE. Cada artefato inclui seu SHA-256. A geração usa `scripts/collect_licenses.py` para textos e inventário das crates resolvidas (incluindo fontes) e `scripts/collect_native_licenses.py` para metadados/licenças dos pacotes do SDK. O inventário é mais amplo que os binários vinculados; `NATIVE_DEPENDENCIES.txt` distingue as bibliotecas efetivas.
+
+Localmente, com Platform e Sdk Freedesktop 25.08 instalados e um executável compilado com ABI compatível:
+
+```sh
+python3 scripts/collect_licenses.py dist/release-licenses/rust
+python3 scripts/collect_native_licenses.py dist/release-licenses/native
+bash scripts/package_flatpak.sh target/release/nator-prototype dist/3dnator-0.3.0-alpha.1-linux-x86_64.flatpak 0.3.0-alpha.1 dist/release-licenses
+```
+
+O coletor nativo Linux usa `dpkg-query` e copyrights do Ubuntu; o Windows usa o prefixo e o cache conda. A geração recusa destinos existentes. A instalação local do Flatpak não é feita pelo script; os ensaios operam na árvore de build. A publicação só deve usar artefatos do mesmo commit da tag.
 
 ## Dependências e limites
 

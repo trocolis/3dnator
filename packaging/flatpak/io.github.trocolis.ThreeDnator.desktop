@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=3Dnator
+Comment=CAD paramétrico para peças mecânicas
+Exec=3dnator
+Icon=io.github.trocolis.ThreeDnator
+Terminal=false
+Categories=Graphics;3DGraphics;Engineering;
+StartupWMClass=3dnator

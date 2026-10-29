@@ -1,6 +1,12 @@
 # Histórico de mudanças
 
-## Não lançado — 0.3.0 em desenvolvimento
+## Não lançado
+
+## 0.3.0-alpha.1 — 29/10/2026
+
+- Primeira pré-release de distribuição: pacote Flatpak Linux x86_64 e instalador EXE Windows x64, ambos com OCCT e versão identificada no aplicativo.
+- Compilação e validação dos pacotes pelo GitHub Actions, com verificações de integridade SHA-256 e textos de licença. Corrigido o nome do pacote OCAF usado pela CI Ubuntu.
+- Inclui os refinamentos de rascunho, extrusão, pintura e exportação STEP descritos abaixo. Versão experimental; formato de projeto 29.
 
 ### STEP com regiões pintadas e exportação pela árvore
 

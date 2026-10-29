@@ -1292,7 +1292,7 @@ dependencies = [
 
 [[package]]
 name = "nator-commands"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "nator-document",
  "nator-drawing",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "nator-document"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "nator-drawing",
  "nator-geometry",
@@ -1316,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "nator-drawing"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "ab_glyph",
  "epaint_default_fonts",
@@ -1327,11 +1327,11 @@ dependencies = [
 
 [[package]]
 name = "nator-geometry"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 
 [[package]]
 name = "nator-kernel"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "nator-geometry",
  "nator-sketch",
@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "nator-project-io"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "nator-document",
  "nator-geometry",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "nator-prototype"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "eframe",
  "image",
@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "nator-renderer"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "nator-geometry",
  "wgpu",
@@ -1383,7 +1383,7 @@ dependencies = [
 
 [[package]]
 name = "nator-sketch"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 dependencies = [
  "nator-geometry",
  "serde",

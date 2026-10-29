@@ -1,0 +1,132 @@
+name: Empacotar pré-release
+
+# A publicação da release é deliberada, após conferir ambos os artefatos.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: prerelease-linux
+      - name: Preparar SDK nativo e runtime Flatpak
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libxkbcommon-dev libwayland-dev libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-visualization-dev libocct-ocaf-dev flatpak
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      - name: Validar e compilar
+        run: |
+          cargo test --workspace --features occt --locked
+          cargo build -p nator-prototype --release --features occt --locked
+          python3 -c 'import tomllib; print("APP_VERSION=" + tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])' >> "$GITHUB_ENV"
+      - name: Reunir textos de licença
+        run: |
+          python3 scripts/collect_licenses.py dist/licenses/rust
+          python3 scripts/collect_native_licenses.py dist/licenses/native
+      - name: Gerar e validar Flatpak no runtime
+        run: |
+          bash scripts/package_flatpak.sh target/release/nator-prototype "dist/3dnator-$APP_VERSION-linux-x86_64.flatpak" "$APP_VERSION" dist/licenses
+          cd dist
+          sha256sum "3dnator-$APP_VERSION-linux-x86_64.flatpak" > SHA256SUMS-linux.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prerelease-flatpak
+          path: |
+            dist/*.flatpak
+            dist/SHA256SUMS-linux.txt
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: prerelease-windows
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: nator
+          python-version: '3.12'
+      - name: Preparar SDK OCCT 7.x
+        run: conda install -y -c conda-forge 'occt>=7.8,<8' cmake
+      - name: Validar e compilar
+        run: |
+          export CMAKE_PREFIX_PATH="$CONDA_PREFIX/Library"
+          export PATH="$CONDA_PREFIX/Library/bin:$PATH"
+          echo "NATOR_OCCT_BIN=$(cygpath -w "$CONDA_PREFIX/Library/bin")" >> "$GITHUB_ENV"
+          cargo test --workspace --features occt --locked
+          cargo build -p nator-prototype --release --features occt --locked
+          python -c 'import tomllib; print("APP_VERSION=" + tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])' >> "$GITHUB_ENV"
+          python scripts/collect_licenses.py dist/licenses/rust
+          python scripts/collect_native_licenses.py dist/licenses/native --conda-prefix "$CONDA_PREFIX"
+      - name: Empacotar e validar sem o SDK no PATH
+        shell: pwsh
+        run: |
+          ./scripts/test_package_windows.ps1
+          ./scripts/package_windows.ps1 -BinPath target/release/nator-prototype.exe -OcctBinDir "$env:NATOR_OCCT_BIN" -OutputDir dist/windows
+          Copy-Item -LiteralPath dist/licenses -Destination dist/windows/licenses/dependencies -Recurse
+          Move-Item -LiteralPath dist/windows -Destination dist/windows-relocado
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+          & './dist/windows-relocado/3dnator.exe' --version
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao carregar o pacote.' }
+          & './dist/windows-relocado/3dnator.exe' --validate dist/validation/kernel
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no ensaio OCCT.' }
+          & './dist/windows-relocado/3dnator.exe' --validate-part dist/validation/part
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no ensaio da peça.' }
+          & './dist/windows-relocado/3dnator.exe' --validate-step dist/validation/step
+          if ($LASTEXITCODE -ne 0) { throw 'Falha no ensaio STEP.' }
+      - name: Gerar instalador EXE e testar instalação silenciosa
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile dist/vc_redist.x64.exe
+          $Signature = Get-AuthenticodeSignature dist/vc_redist.x64.exe
+          if ($Signature.Status -ne 'Valid' -or $Signature.SignerCertificate.Subject -notlike '*Microsoft Corporation*') { throw 'Assinatura do redistribuível Microsoft inválida.' }
+          $Compiler = 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $Compiler)) { throw 'Compilador Inno Setup ausente no runner.' }
+          & $Compiler "/DAppVersion=$env:APP_VERSION" "/DAppNumericVersion=$($env:APP_VERSION.Split('-')[0])" "/DPackageDir=$((Resolve-Path dist/windows-relocado).Path)" "/DRedistPath=$((Resolve-Path dist/vc_redist.x64.exe).Path)" "/O$((Resolve-Path dist).Path)" packaging/windows/3dnator.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao compilar o instalador.' }
+          $Installer = (Get-Item "dist/3dnator-$env:APP_VERSION-windows-x64-setup.exe").FullName
+          $InstallDir = Join-Path $env:RUNNER_TEMP '3dnator-installed'
+          $Process = Start-Process -FilePath $Installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$InstallDir") -Wait -PassThru
+          if ($Process.ExitCode -ne 0) { throw "Instalação falhou: $($Process.ExitCode)" }
+          $PreviousPath = $env:PATH
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+          & "$InstallDir/3dnator.exe" --validate dist/validation/installed
+          if ($LASTEXITCODE -ne 0) { throw 'O aplicativo instalado não carregou sem o SDK.' }
+          $env:PATH = $PreviousPath
+          $Hash = (Get-FileHash $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$Hash  $(Split-Path $Installer -Leaf)" | Set-Content -Encoding utf8 dist/SHA256SUMS-windows.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prerelease-windows
+          path: |
+            dist/*-setup.exe
+            dist/SHA256SUMS-windows.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prerelease-windows-validation
+          path: dist/validation/
+          if-no-files-found: warn
