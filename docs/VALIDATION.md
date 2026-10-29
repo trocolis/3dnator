@@ -1,5 +1,10 @@
 # Validação local do protótipo
 
+## Loft e correspondência circular — 29/10/2026
+
+- Correção 0.12.2: correspondência de círculos por direções dos vértices e frações de perímetro, mantendo arcos exatos. Duas seções usam geratrizes retas por padrão; opção salva permanece respeitada. Comparação de comportamento com `loft_with_rails` e `loft_section_loops` do SolidCraft local, sem incorporar sua implementação.
+- Dois testes nativos verificam volume analítico de cones com bases giradas, simetria nos eixos de retângulo/círculo nos dois modos e plano inclinado. Três regressões de comandos verificam furos, edição, persistência e STEP. Formatação e Clippy com OCCT aprovados; logs `loft-*` em `target/codex-validation/adjustments-20261029/`.
+
 ## Seleção de módulos STEP — 29/10/2026
 
 - Correção 0.12.1: raiz selecionada após importar e ao clicar no viewport, com correspondência de ocorrências por ID/posicionamento; filhos continuam selecionáveis na árvore. 51 ensaios gráficos, 26 testes do documento e ensaio optativo `imported_module_occt` aprovados. Regressão gráfica grava/lê um STEP compartilhado, clica na segunda ocorrência e move só esse conjunto; rejeição de caminhos coincidentes é coberta no documento.

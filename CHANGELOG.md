@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.12.2 — 29/10/2026
+
+- Loft alinha costuras circulares aos vértices/direções do outro perfil e compatibiliza círculos em planos com bases diferentes, evitando torção por parametrização arbitrária. Contornos côncavos usam frações de perímetro quando as direções não são monotônicas; círculos permanecem arcos exatos.
+- Novas transições de duas áreas usam geratrizes retas por padrão, conforme o comportamento observado no SolidCraft local. A opção continua editável e o modo salvo de projetos existentes é preservado.
+- Regressões de simetria retângulo/círculo, cone circular com bases giradas, plano inclinado, furos, recálculo, persistência e STEP. Etapa local sem push/release; formato mantido em 36.
+
 ## 0.12.1 — 29/10/2026
 
 - Seleção no viewport da Montagem passa a escolher a raiz do conjunto, incluindo importações STEP, preservando a seleção explícita de componentes internos pela árvore. A importação seleciona suas novas raízes, em vez do primeiro corpo interno. Janela, realce e origem de alinhamento acompanham a hierarquia.

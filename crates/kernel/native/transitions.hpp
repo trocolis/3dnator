@@ -18,12 +18,15 @@ TopoDS_Wire transition_wire(const Shape* profile,std::size_t index) {
     throw std::runtime_error("Contorno de furo inexistente na transição.");
 }
 }
+
+#include "loft_alignment.hpp"
 extern "C" Shape* nator_loft_wire(const Shape* first,const Shape* last,std::size_t wire,bool ruled) noexcept {
     return build([&](Shape& output) {
         BRepOffsetAPI_ThruSections loft(true,ruled,1e-7);
         loft.CheckCompatibility(true);
-        loft.AddWire(transition_wire(first,wire));
-        loft.AddWire(transition_wire(last,wire));
+        const auto sections=loft_aligned_wires(transition_wire(first,wire),transition_wire(last,wire));
+        loft.AddWire(sections.first);
+        loft.AddWire(sections.second);
         loft.Build();
         if (!loft.IsDone()) throw std::runtime_error("Não foi possível criar a transição entre os contornos.");
         output.value=loft.Shape();

@@ -417,7 +417,7 @@ impl Draft {
             revolve_axis: None,
             additional_profiles: vec![],
             end_profile: None,
-            ruled: false,
+            ruled: true,
             sweep_route: SweepRoute::Automatic,
             hole_pairs: None,
             kept_axis: None,
