@@ -1,5 +1,11 @@
 # Validação local do protótipo
 
+## Casca passante — 29/10/2026
+
+- Etapa local 0.5.0, formato 31, sem push/release. Casca substitui Furo na faixa/busca; operações antigas de Furo permanecem editáveis.
+- Aprovados 350 testes com OCCT, 41 ensaios gráficos seriais, formatação e Clippy com todos os alvos/avisos negados com e sem OCCT. Regressões conferem volumes de duto retangular/circular, saída lateral explícita, recálculo da espessura, atomicidade, desfazer/refazer, clone e salvamento/reabertura. Corpo com degraus é recusado na busca automática; a saída deve ser escolhida.
+- Logs em `target/codex-validation/through-shell-20261029/`. Validação Linux/OCCT 7.9.3; Windows não executado localmente nesta etapa.
+
 ## Histórico contextual e barra de título — 29/10/2026
 
 - Versão local 0.4.0, formato de projeto 30, sem publicação remota. Barra Novo/Abrir/Salvar/Configurações e linha do tempo de montagem/peça/rascunho com referências persistidas; controles paramétricos da peça preservados.

@@ -236,6 +236,11 @@ pub enum Operation {
         additional_faces: Vec<FaceRef>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         outward: bool,
+        /// Remove também uma saída. Ausente: primeira face oposta única.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_face: Option<FaceRef>,
     },
     Transform {
         base: BodyId,
@@ -575,10 +580,14 @@ impl Feature {
                 base,
                 face,
                 additional_faces,
+                exit_face,
                 ..
             } => {
                 body(base)?;
-                for face in std::iter::once(face).chain(additional_faces) {
+                for face in std::iter::once(face)
+                    .chain(additional_faces)
+                    .chain(exit_face)
+                {
                     if let FaceRef::Named(name) = face {
                         *name = remap_face_name(name, bodies);
                     }
@@ -757,12 +766,16 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 thickness,
                 face,
                 additional_faces,
+                exit_face,
                 ..
             } => {
                 if additional_faces.len() >= MAX_OCCURRENCES {
                     return Err(DocumentError("Faces demais na casca.".into()));
                 }
-                for face in std::iter::once(face).chain(additional_faces) {
+                for face in std::iter::once(face)
+                    .chain(additional_faces)
+                    .chain(exit_face)
+                {
                     if let FaceRef::Named(name) = face {
                         validate_face_name(name)?;
                     }

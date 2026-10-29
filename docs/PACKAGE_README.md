@@ -1,6 +1,6 @@
 # Executar o 3dnator
 
-Versão de desenvolvimento 0.4.0. O 3dnator usa Open CASCADE Technology (OCCT) para construir sólidos CAD. O código próprio usa a licença MIT; avisos e fontes das dependências estão em `THIRD_PARTY.md`, e os textos OCCT em `licenses/OCCT/`.
+Versão de desenvolvimento 0.5.0. O 3dnator usa Open CASCADE Technology (OCCT) para construir sólidos CAD. O código próprio usa a licença MIT; avisos e fontes das dependências estão em `THIRD_PARTY.md`, e os textos OCCT em `licenses/OCCT/`.
 
 No Flatpak, execute `flatpak run io.github.trocolis.ThreeDnator`; no Windows, use o instalador EXE. Nos pacotes portáteis de validação, siga as instruções abaixo.
 

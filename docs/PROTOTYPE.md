@@ -1,4 +1,6 @@
-# Protótipo 0.4.0 — CAD paramétrico
+# Protótipo 0.5.0 — CAD paramétrico
+
+Na aba Peça, **Casca** substitui a ferramenta Furo. Selecione as faces de entrada e ajuste espessura/direção. **Transpassar (criar duto)** acrescenta **Face de saída**: clique no campo e escolha outra face do mesmo corpo. Sem saída explícita, a ferramenta procura a primeira face oposta única de uma abertura plana; saídas ambíguas ou aberturas curvas exigem seleção explícita. Furos existentes continuam editáveis na linha do tempo.
 
 Ao desenhar, capturar um vértice cria uma **junção forte**; capturar um cruzamento ou o interior de uma curva cria uma **junção fraca**. **F** alterna a força do próximo clique, indicada por um cadeado na prévia. A forte mantém a relação ao editar; a fraca somente conserva o posicionamento inicial. Junções fortes têm ponto/anel verde-azulado; fracas, círculo vazio.
 

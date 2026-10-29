@@ -46,7 +46,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 28: limites de extrusão por planos de rascunho ou trabalho.
 /// Versão 29: células automáticas de pintura, com interseções e complementos.
 /// Versão 30: atividades semânticas por contexto.
-pub const FORMAT_VERSION: u32 = 30;
+/// Versão 31: casca passante e referência opcional da face de saída.
+pub const FORMAT_VERSION: u32 = 31;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

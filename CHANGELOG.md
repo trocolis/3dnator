@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.5.0 — 29/10/2026
+
+- Casca substitui Furo na faixa de criação e na busca; furos existentes conservam histórico e edição.
+- Casca oferece Transpassar e seleção independente de uma face de saída do mesmo corpo. Sem saída explícita, raios interiores localizam a primeira face oposta única; corpos com degraus/ramificações pedem seleção quando há ambiguidade. A saída explícita prevalece e pode formar dutos entre faces adjacentes.
+- Espessura paramétrica, desfazer/refazer, clonagem e persistência conservam as aberturas. Formato interno 31, compatível com os anteriores; etapa local sem push ou release.
+
 ## 0.4.0 — 29/10/2026
 
 - Barra de título com Novo, Abrir, Salvar e Configurações; Salvar oferece Salvar como/Importar/Exportar no menu de contexto. Recuperação e precisão ficam nas configurações.

@@ -121,6 +121,7 @@ pub(super) enum Field {
     ToolBody,
     Target,
     UntilFace,
+    ExitFace,
 }
 
 /// Eixo da revolução: um eixo do plano do rascunho ou uma linha do rascunho.
@@ -360,6 +361,8 @@ pub(super) struct Draft {
     chamfer_angle: Option<String>,
     /// Casca com paredes para fora do sólido original.
     outward: bool,
+    through_shell: bool,
+    exit_face: Option<FaceRef>,
     /// Resultado da extrusão: 0 novo corpo, 1 união, 2 corte, 3 interseção com `combine_target`.
     combine: usize,
     combine_target: Option<BodyId>,
@@ -396,6 +399,8 @@ impl Draft {
             field: Some(tool.first_field()),
             chamfer_angle: None,
             outward: false,
+            through_shell: false,
+            exit_face: None,
             combine: 0,
             combine_target: None,
             until: None,
@@ -522,6 +527,8 @@ impl Draft {
                 thickness,
                 additional_faces,
                 outward,
+                through,
+                exit_face,
             } => {
                 d.tool = Tool::Shell;
                 d.base = Some(base);
@@ -529,6 +536,8 @@ impl Draft {
                 d.extra_topology = additional_faces.into_iter().map(Kept::Face).collect();
                 d.size = thickness;
                 d.outward = outward;
+                d.through_shell = through;
+                d.exit_face = exit_face;
             }
             Operation::Hole {
                 base,
@@ -674,7 +683,7 @@ impl Draft {
         }
         match self.field? {
             Field::Edges => Some(Awaiting::Edge),
-            Field::Faces | Field::UntilFace => Some(Awaiting::Face),
+            Field::Faces | Field::UntilFace | Field::ExitFace => Some(Awaiting::Face),
             Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
             Field::Profile => None,
         }
@@ -770,6 +779,12 @@ impl Draft {
             return;
         }
         match (self.field, kept) {
+            (Some(Field::ExitFace), Kept::Face(face)) => {
+                if self.base == Some(body) {
+                    self.exit_face = Some(face);
+                    self.field = None;
+                }
+            }
             (Some(Field::Profile), Kept::Face(face)) if self.tool == Tool::Extrude => {
                 self.choose_face_profile(body, face);
             }
@@ -812,6 +827,7 @@ impl Draft {
                 if self.base != Some(body) {
                     // Outro corpo: as escolhas anteriores deixam de valer.
                     self.base = Some(body);
+                    self.exit_face = None;
                     self.kept_topology = Some(kept);
                     self.extra_topology.clear();
                 } else if self.kept_topology.as_ref() == Some(&kept) {
@@ -1056,6 +1072,8 @@ impl Draft {
                     })
                     .collect(),
                 outward: self.outward,
+                through: self.through_shell,
+                exit_face: self.exit_face.clone(),
             },
             Tool::Hole => {
                 Operation::Hole {
@@ -1847,6 +1865,34 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
             });
         }
     }
+    if d.tool == Tool::Shell {
+        ui.checkbox(&mut d.through_shell, text(T::ThroughShell));
+        if d.through_shell {
+            let description = d
+                .exit_face
+                .as_ref()
+                .map(|f| describe_topology(&Kept::Face(f.clone())));
+            let selection = panel::selection(
+                ui,
+                text(T::ExitFace),
+                usize::from(d.exit_face.is_some()),
+                description.as_deref(),
+                d.field == Some(Field::ExitFace),
+            );
+            if selection.activate {
+                d.field = Some(Field::ExitFace);
+            }
+            if selection.clear {
+                d.exit_face = None;
+                d.field = Some(Field::ExitFace);
+            }
+            ui.label(
+                egui::RichText::new(text(T::AutomaticExitHint))
+                    .small()
+                    .color(theme::MUTED),
+            );
+        }
+    }
     egui::CollapsingHeader::new(text(T::AdvancedGroup))
         .id_salt("topology_advanced")
         .show(ui, |ui| {
@@ -2028,6 +2074,23 @@ fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_exit_is_independent_from_openings_and_stays_in_the_same_body() {
+        let mut draft = Draft::new(1, PartId(1), Tool::Shell);
+        let entry = FaceRef::Named("base:end".into());
+        let exit = FaceRef::Named("base:start".into());
+        draft.apply_pick(BodyId(2), Kept::Face(entry.clone()));
+        draft.through_shell = true;
+        draft.field = Some(Field::ExitFace);
+        draft.apply_pick(BodyId(3), Kept::Face(exit.clone()));
+        assert!(draft.exit_face.is_none());
+        draft.apply_pick(BodyId(2), Kept::Face(exit.clone()));
+        assert_eq!(draft.exit_face, Some(exit));
+        assert_eq!(draft.kept_topology, Some(Kept::Face(entry)));
+        assert!(draft.extra_topology.is_empty());
+        assert!(draft.complete());
+    }
 
     #[test]
     fn extrusion_limits_round_trip_through_the_panel_directions() {

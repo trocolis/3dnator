@@ -332,7 +332,6 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Paint,
     Action::Solid(SolidTool::Extrude),
     Action::Solid(SolidTool::Revolve),
-    Action::Solid(SolidTool::Hole),
     Action::Solid(SolidTool::Fillet),
     Action::Solid(SolidTool::Chamfer),
     Action::Solid(SolidTool::Shell),
@@ -1352,7 +1351,7 @@ impl Editor {
                     &[
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
-                        Action::Solid(SolidTool::Hole),
+                        Action::Solid(SolidTool::Shell),
                     ],
                 );
                 self.ribbon_group(
@@ -1361,7 +1360,6 @@ impl Editor {
                     &[
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
-                        Action::Solid(SolidTool::Shell),
                         Action::Paint,
                     ],
                 );

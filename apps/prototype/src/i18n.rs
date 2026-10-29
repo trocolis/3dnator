@@ -107,6 +107,9 @@ pub enum Text {
     #[allow(dead_code)]
     FileMenu,
     SettingsMenu,
+    ThroughShell,
+    ExitFace,
+    AutomaticExitHint,
     SketchXZ,
     SketchYZ,
     SearchTools,
@@ -818,6 +821,11 @@ pub fn text(key: Text) -> &'static str {
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
         Text::FileMenu => "Arquivo",
+        Text::ThroughShell => "Transpassar (criar duto)",
+        Text::ExitFace => "Face de saída",
+        Text::AutomaticExitHint => {
+            "Sem seleção: usar a primeira face oposta única. Escolha a saída no mesmo corpo."
+        }
         Text::SettingsMenu => "Configurações",
         Text::SketchXZ => "Rascunho XZ",
         Text::SketchYZ => "Rascunho YZ",

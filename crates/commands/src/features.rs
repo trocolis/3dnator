@@ -362,6 +362,8 @@ pub(super) fn normalize(
             thickness,
             additional_faces,
             outward,
+            through,
+            exit_face,
         } => Operation::Shell {
             face: stable_face(doc, part, base, face)?,
             additional_faces: additional_faces
@@ -371,6 +373,10 @@ pub(super) fn normalize(
             base,
             thickness,
             outward,
+            through,
+            exit_face: exit_face
+                .map(|f| stable_face(doc, part, base, f))
+                .transpose()?,
         },
         other => other,
     })
@@ -389,8 +395,10 @@ fn stable_face(
     let (solid, bytes) = source(doc, part, base)?;
     same_geometry(&bytes, signature)?;
     Ok(match solid.face_name(index) {
-        Ok(name) => FaceRef::Named(name.to_owned()),
-        Err(_) => FaceRef::Index { index, signature },
+        Ok(name) if solid.face_named(name).is_ok_and(|found| found == index) => {
+            FaceRef::Named(name.to_owned())
+        }
+        _ => FaceRef::Index { index, signature },
     })
 }
 
@@ -515,12 +523,26 @@ pub(super) fn construct(
             thickness,
             additional_faces,
             outward,
+            through,
+            exit_face,
         } => {
             let (solid, bytes) = source(doc, part, *base)?;
-            let faces = std::iter::once(face)
+            let mut faces = std::iter::once(face)
                 .chain(additional_faces)
                 .map(|f| face_index(&solid, &bytes, f))
                 .collect::<Result<Vec<_>, _>>()?;
+            if *through {
+                let exit = match exit_face {
+                    Some(face) => face_index(&solid, &bytes, face)?,
+                    None => solid.opposite_face(faces[0]).map_err(error)?,
+                };
+                if faces.contains(&exit) {
+                    return Err(DocumentError(
+                        "A saída deve ser diferente das faces de entrada.".into(),
+                    ));
+                }
+                faces.push(exit);
+            }
             solid
                 .shell(&faces, value(thickness)?, *outward, &owner)
                 .map_err(error)?

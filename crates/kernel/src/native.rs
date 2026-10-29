@@ -57,6 +57,7 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn nator_boolean(a: *const c_void, b: *const c_void, mode: i32) -> *mut c_void;
     fn nator_transform(body: *const c_void, matrix: *const f64) -> *mut c_void;
+    fn nator_opposite_face(body: *const c_void, index: usize, output: *mut usize) -> bool;
     fn nator_shell(
         body: *const c_void,
         faces: *const usize,
@@ -511,9 +512,18 @@ impl Solid {
         result.ok_or_else(|| KernelError("Padrão vazio.".into()))
     }
 
-    /// Casca para dentro, removendo a face `face`.
-    /// Casca com as faces `faces` removidas e paredes de `thickness` mm, para dentro ou para
-    /// fora do sólido. As faces deslocadas recebem o sufixo `:inner` ou `:outer`.
+    /// Primeira saída única, contra a normal externa de uma abertura plana.
+    pub fn opposite_face(&self, face: usize) -> Result<usize, KernelError> {
+        let mut output = 0;
+        // SAFETY: sólido vivo e ponteiro exclusivo de saída; a ponte valida o índice.
+        if !unsafe { nator_opposite_face(self.pointer.as_ptr(), face, &mut output) } {
+            return Err(last_error());
+        }
+        Ok(output)
+    }
+
+    /// Casca com faces removidas e paredes de `thickness` mm, para dentro ou
+    /// para fora. Faces deslocadas recebem o sufixo `:inner` ou `:outer`.
     pub fn shell(
         &self,
         faces: &[usize],
