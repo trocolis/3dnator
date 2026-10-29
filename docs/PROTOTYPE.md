@@ -1,4 +1,4 @@
-# Protótipo 0.3.0 — CAD paramétrico
+# Protótipo 0.3.0-alpha.1 — CAD paramétrico
 
 Ao desenhar, capturar um vértice cria uma **junção forte**; capturar um cruzamento ou o interior de uma curva cria uma **junção fraca**. **F** alterna a força do próximo clique, indicada por um cadeado na prévia. A forte mantém a relação ao editar; a fraca somente conserva o posicionamento inicial. Junções fortes têm ponto/anel verde-azulado; fracas, círculo vazio.
 
@@ -149,7 +149,7 @@ O SDK OCCT continua opcional e externo. A ponte usa CMake e bibliotecas comparti
 
 A ponte foi compilada e validada no Linux com OCCT 7.9.3 (pacote `opencascade` do Arch). Em Arch Linux, `sudo pacman -S opencascade` instala um SDK compatível. Sem acesso de administrador, o pacote oficial pode ser extraído em uma pasta local e indicado por `OpenCASCADE_DIR` (`<prefixo>/usr/lib/cmake/opencascade`) e `LD_LIBRARY_PATH` (`<prefixo>/usr/lib`), desde que as dependências do pacote já estejam instaladas no sistema.
 
-A receita prevista para Ubuntu 24.04 usa `cmake`, `libocct-data-exchange-dev` e `libocct-modeling-algorithms-dev` (OCCT 7.6). O workflow Windows usa conda-forge com `occt>=7.8,<8`, CMake e MSVC. Essas duas receitas ainda não foram executadas.
+A receita prevista para Ubuntu 24.04 usa `cmake`, `libocct-data-exchange-dev` e `libocct-modeling-algorithms-dev` (OCCT 7.6). O workflow Windows usa conda-forge com `occt>=7.8,<8`, CMake e MSVC. A geração da pré-release `0.3.0-alpha.1` aprovou testes e ensaios CLI nas duas plataformas, além do pacote Flatpak no runtime e da instalação silenciosa do EXE. Evidências e limites em [VALIDATION.md](VALIDATION.md). A interação em janela nativa Windows permanece pendente.
 
 ```sh
 cargo run -p nator-prototype --no-default-features --features occt --locked -- --validate validation-output/occt-run-001

@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## Publicação da pré-release 0.3.0-alpha.1 — 29/10/2026
+
+- Commits enviados para `main`, tag `v0.3.0-alpha.1` no commit `b3a2679` e [pré-release](https://github.com/trocolis/3dnator/releases/tag/v0.3.0-alpha.1) com Flatpak Linux x86_64, instalador EXE Windows x64 e SHA-256. Versão sincronizada no Cargo/lock e documentação; formato 29 preservado.
+- Geração/validação pelo [workflow de distribuição](https://github.com/trocolis/3dnator/actions/runs/40863699458), com 341 testes OCCT por plataforma, runtime Flatpak e instalação silenciosa do EXE. Resolvidas as diferenças de API OCCT 7.6, linker MSVC/Bash, carregador SVG do Ubuntu e coleta do inventário conda no Windows.
+- Flatpak baixado, hash/importação/extração conferidos e captura egui/wgpu/Vulkan inspecionada sem instalar o app. Pacotes incluem bibliotecas dinâmicas e inventários/textos de licença; instalador incorpora redistribuível oficial Microsoft com assinatura verificada. Aplicativo/instalador sem assinatura própria; fluxo gráfico Windows e hardware de referência ainda precisam de validação manual.
+
 ## STEP com pintura por região e exportação pela árvore — 29/10/2026
 
 - Exportação STEP conserva cores sRGB por face e células de rascunho, usando as mesmas máscaras da exibição. Subdivisões são costuradas numa cópia de cada sólido, com conferência de fechamento, validade e volume, incluindo furos e cavidades. Origem/material acompanha as faces modificadas; cor explícita preserva precedência e faces sem pintura mantêm herança de corpo/ocorrência.

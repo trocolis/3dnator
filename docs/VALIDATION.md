@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Pré-release 0.3.0-alpha.1 — 29/10/2026
+
+- Flatpak Linux x86_64 e instalador EXE Windows x64 gerados do commit `b3a2679`, marcado como `v0.3.0-alpha.1`. [Execução de distribuição aprovada](https://github.com/trocolis/3dnator/actions/runs/40863699458): 341 testes com OCCT em cada plataforma, ensaios CAD/primeira peça/STEP e verificação do pacote Windows relocado com PATH sem SDK. Instalação silenciosa do EXE e ensaio CAD do aplicativo instalado aprovados. A [CI Ubuntu](https://github.com/trocolis/3dnator/actions/runs/40860408248) também passou com OCCT 7.6 e sem OCCT (257 testes).
+- Bundle Flatpak testado no Platform Freedesktop 25.08, sem depender do SDK de compilação. Arquivo baixado teve SHA-256 conferido e foi importado/extraído num repositório temporário, sem instalação no sistema. O aplicativo extraído exibiu `0.3.0-alpha.1` com OCCT e gerou captura 1280 × 820 pelo Vulkan/Intel UHD Graphics, inspecionada visualmente. Evidências em `target/codex-validation/prerelease-publish/`.
+- Bibliotecas dinâmicas, textos de licença das crates/fontes e inventários dos pacotes nativos acompanham os pacotes. O instalador contém o redistribuível v14 x64 oficial, cuja assinatura Microsoft é conferida no workflow; aplicativo/instalador não têm assinatura própria. Os hashes dos dois arquivos foram comparados aos produzidos pelos jobs e reunidos em `SHA256SUMS.txt`.
+- [Pré-release publicada](https://github.com/trocolis/3dnator/releases/tag/v0.3.0-alpha.1), com formato de projeto 29. A instalação/interação gráfica em uma máquina Windows de usuário, a máquina de referência e os demais critérios de aceite manual continuam pendentes. A captura Linux não representa teste de janela nativa Windows.
+
 ## Exportação STEP das regiões pintadas e menus da árvore — 29/10/2026
 
 - **341 testes com OCCT e 257 sem OCCT aprovados**, além dos **40 ensaios gráficos seriais**. Formatação, `git diff --check` e Clippy com todos os alvos/avisos negados aprovados nas duas configurações. Logs em `target/codex-validation/step-colors-20261029/`.
