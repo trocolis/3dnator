@@ -1038,13 +1038,8 @@ impl Editor {
             return true;
         };
         let active = self.current().active_part;
-        let item = if active == Some(pick.part) {
-            Selection::Body {
-                part: pick.part,
-                id: pick.body,
-            }
-        } else {
-            Selection::Instance(pick.instance)
+        let Some(item) = self.current().selection_for_pick(&pick) else {
+            return true;
         };
         let document = self.current().session.document().clone();
         let mode = self.pick_mode;
@@ -1225,14 +1220,7 @@ impl Editor {
                 }
                 d.to.as_ref()?;
                 let delta = d.delta()?;
-                let item = if tab.active_part == Some(from.part) {
-                    Selection::Body {
-                        part: from.part,
-                        id: from.body,
-                    }
-                } else {
-                    Selection::Instance(from.instance)
-                };
+                let item = tab.selection_for_pick(from)?;
                 let targets = if d.targets.is_empty() {
                     vec![item]
                 } else {

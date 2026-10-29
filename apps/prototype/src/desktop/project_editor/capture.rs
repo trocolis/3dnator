@@ -1240,6 +1240,164 @@ mod tests {
     }
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn imported_module_viewport_picks_the_root_and_preserves_other_occurrences()
+    -> Result<(), Box<dyn Error>> {
+        use nator_kernel::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart};
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("modulo.step");
+        StepAssembly {
+            parts: vec![
+                StepPart {
+                    name: "Módulo".into(),
+                    bodies: vec![],
+                },
+                StepPart {
+                    name: "Placa".into(),
+                    bodies: vec![StepBody {
+                        name: "Corpo".into(),
+                        solid: Solid::cuboid([0.; 3], [10.; 3])?,
+                        color: None,
+                        face_colors: vec![],
+                    }],
+                },
+            ],
+            instances: vec![
+                StepOccurrence {
+                    part: 1,
+                    parent: Some(0),
+                    name: "Componente".into(),
+                    placement: Placement::new([5., 0., 0.], [0.; 3])?,
+                    color: None,
+                },
+                StepOccurrence {
+                    part: 0,
+                    parent: None,
+                    name: "Primeiro".into(),
+                    placement: Placement::new([20., 0., 0.], [0.; 3])?,
+                    color: None,
+                },
+                StepOccurrence {
+                    part: 0,
+                    parent: None,
+                    name: "Segundo".into(),
+                    placement: Placement::new([80., 0., 0.], [0.; 3])?,
+                    color: None,
+                },
+            ],
+        }
+        .write(&path)?;
+        let context = egui::Context::default();
+        let doc = Document::new("Módulos importados")?;
+        let prepared = PreparedCommand::new(
+            doc.clone(),
+            0,
+            Command::ImportStep {
+                path,
+                destination: None,
+                name: "Módulo".into(),
+            },
+        )?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.commit_prepared(editor.current().id, prepared);
+        settle(&mut editor, &context)?;
+        let roots = editor
+            .current()
+            .session
+            .document()
+            .instances()
+            .iter()
+            .filter(|i| i.parent.is_none())
+            .map(|i| i.id)
+            .collect::<Vec<_>>();
+        assert_eq!(roots.len(), 2);
+        for root in &roots {
+            assert!(editor.current().is_selected(Selection::Instance(*root)));
+        }
+        let root = roots[1];
+        let before = editor.current().session.document().occurrences()?;
+        let leaf = before
+            .iter()
+            .find(|o| {
+                o.path.first() == Some(&root)
+                    && editor
+                        .current()
+                        .session
+                        .document()
+                        .instance(o.instance)
+                        .and_then(|i| editor.current().session.document().part(i.part))
+                        .is_some_and(|p| !p.bodies.is_empty())
+            })
+            .ok_or("Filho")?;
+        let point = leaf.placement.apply([5., 5., 10.]);
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            point,
+        )
+        .ok_or("Clique")?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        assert!(
+            editor.current().is_selected(Selection::Instance(root)),
+            "root={root:?}; selected={:?}; pick={:?}; point={point:?}; at={at:?}; occurrences={before:?}",
+            editor.current().selected,
+            editor.current().picked
+        );
+        assert!(
+            !editor
+                .current()
+                .is_selected(Selection::Instance(leaf.instance))
+        );
+        assert!(editor.selected_pick().is_some());
+        editor.open_move();
+        editor.set_move_for_capture([12., 0., 0.], [0.; 3]);
+        frame(&mut editor, &context, vec![])?;
+        settle(&mut editor, &context)?;
+        assert!(
+            editor.assembly_panel.is_some(),
+            "Painel fechado: {}; active={:?}",
+            editor.status,
+            editor.current().active_part
+        );
+        let ok = label_position(&mut editor, &context, text(T::Ok)).map_err(|e| {
+            format!(
+                "{e}; status={}; active={:?}; panel={}",
+                editor.status,
+                editor.current().active_part,
+                editor.assembly_panel.is_some()
+            )
+        })?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let after = editor.current().session.document().occurrences()?;
+        for old in &before {
+            let new = after
+                .iter()
+                .find(|o| o.path == old.path)
+                .ok_or("Ocorrência")?;
+            let delta = if old.path.first() == Some(&root) {
+                [12., 0., 0.]
+            } else {
+                [0.; 3]
+            };
+            assert!(
+                nator_geometry::norm(nator_geometry::sub(
+                    new.placement.apply([0.; 3]),
+                    nator_geometry::add(old.placement.apply([0.; 3]), delta)
+                )) < 1e-7
+            );
+        }
+        assert!(editor.current_mut().session.undo());
+        assert!(editor.current_mut().session.redo());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn move_assemblies_from_tree_and_ribbon_preserves_children_and_offers_modes_in_properties()
     -> Result<(), Box<dyn Error>> {
         use nator_geometry::{norm, sub};

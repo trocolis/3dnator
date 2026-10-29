@@ -562,17 +562,28 @@ impl Editor {
         // Fora da peça em construção, a unidade é o componente inteiro.
         if !construction {
             let mut overlay = Overlay::default();
-            if let Some(part) = document.part(pick.part) {
-                for b in part.shown_bodies() {
-                    let pose = pick
-                        .placement
-                        .compose(b.placement)
-                        .unwrap_or(pick.placement);
-                    overlay.extend(body_outline(cache, b, pose));
+            let occurrence = document.occurrence_at(pick).ok();
+            let root = occurrence
+                .as_ref()
+                .and_then(|o| o.path.first())
+                .copied()
+                .unwrap_or(pick.instance);
+            if let Ok(occurrences) = document.occurrences() {
+                for occurrence in occurrences.iter().filter(|o| o.path.first() == Some(&root)) {
+                    if let Some(part) = document
+                        .instance(occurrence.instance)
+                        .and_then(|i| document.part(i.part))
+                    {
+                        for body in part.shown_bodies() {
+                            if let Ok(pose) = occurrence.placement.compose(body.placement) {
+                                overlay.extend(body_outline(cache, body, pose));
+                            }
+                        }
+                    }
                 }
             }
             let name = document
-                .instance(pick.instance)
+                .instance(root)
                 .map(|i| i.name.clone())
                 .unwrap_or_default();
             return (overlay, name);

@@ -890,13 +890,8 @@ impl Editor {
                 {
                     if let Some(mut p) = pick {
                         navigation::snap_pick(&mut p, mode);
-                        let item = if target.active_part == Some(p.part) {
-                            Selection::Body {
-                                part: p.part,
-                                id: p.body,
-                            }
-                        } else {
-                            Selection::Instance(p.instance)
+                        let Some(item) = target.selection_for_pick(&p) else {
+                            return;
                         };
                         if additive {
                             target.toggle(item);
@@ -1174,6 +1169,28 @@ impl Editor {
         let mut consumed = false;
         let active_tab = self.current().id;
         if let Some(target) = self.find_tab(tab) {
+            let imported_roots = if matches!(command.effect(), Effect::Imported { .. }) {
+                let new_parts = command
+                    .document()
+                    .parts()
+                    .iter()
+                    .filter(|p| target.session.document().part(p.id).is_none())
+                    .map(|p| p.id)
+                    .collect::<HashSet<_>>();
+                command
+                    .document()
+                    .instances()
+                    .iter()
+                    .filter(|i| {
+                        target.session.document().instance(i.id).is_none()
+                            && i.parent.is_none_or(|p| !new_parts.contains(&p))
+                    })
+                    .map(|i| Selection::Instance(i.id))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+
             match target.session.commit(command) {
                 Ok(effect) => {
                     if let Some(work) = target.sketch_edit.as_mut()
@@ -1202,7 +1219,11 @@ impl Editor {
                         created = Some((part, sketch));
                     }
                     if let Effect::Imported { part, body } = effect {
-                        target.select(Some(Selection::Body { part, id: body }));
+                        if target.active_part.is_none() && !imported_roots.is_empty() {
+                            target.select_many(imported_roots, false);
+                        } else {
+                            target.select(Some(Selection::Body { part, id: body }));
+                        }
                         consumed = target.sketch_edit.as_ref().is_some_and(|w| {
                             target
                                 .session

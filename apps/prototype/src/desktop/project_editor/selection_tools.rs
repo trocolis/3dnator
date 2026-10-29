@@ -39,19 +39,47 @@ pub(super) struct SelectionGestures {
     pub press: Option<Press>,
 }
 
+impl Tab {
+    /// Na montagem, cliques no modelo escolhem o conjunto da raiz. Componentes
+    /// internos continuam acessíveis explicitamente pela árvore.
+    pub(super) fn selection_for_pick(&self, pick: &Pick) -> Option<Selection> {
+        if self.active_part == Some(pick.part) {
+            return Some(Selection::Body {
+                part: pick.part,
+                id: pick.body,
+            });
+        }
+        if self.active_part.is_some() {
+            return Some(Selection::Instance(pick.instance));
+        }
+        self.session
+            .document()
+            .occurrence_at(pick)
+            .ok()?
+            .path
+            .first()
+            .copied()
+            .map(Selection::Instance)
+    }
+}
 impl Editor {
     /// Um clique antigo não é reaproveitado se o elemento saiu da seleção.
     pub(super) fn selected_pick(&self) -> Option<&Pick> {
         let pick = self.current().picked.as_ref()?;
-        let item = if self.current().active_part == Some(pick.part) {
-            Selection::Body {
+        let tab = self.current();
+        let selected = if tab.active_part == Some(pick.part) {
+            tab.is_selected(Selection::Body {
                 part: pick.part,
                 id: pick.body,
-            }
+            })
         } else {
-            Selection::Instance(pick.instance)
+            tab.session.document().occurrence_at(pick).is_ok_and(|o| {
+                o.path
+                    .iter()
+                    .any(|id| tab.is_selected(Selection::Instance(*id)))
+            })
         };
-        self.current().is_selected(item).then_some(pick)
+        selected.then_some(pick)
     }
 
     /// A seleção é o estado neutro: cancelar uma ferramenta não apaga os alvos
@@ -238,6 +266,7 @@ impl Editor {
         };
         let active = self.current().active_part;
         let mut items = Vec::new();
+        let mut assembly = std::collections::BTreeMap::new();
         for occurrence in occurrences
             .iter()
             .filter(|o| self.current().view.pickable(o))
@@ -273,6 +302,21 @@ impl Editor {
                 } else {
                     window.contains_rect(projected)
                 };
+                if active.is_none() {
+                    if let Some(root) = occurrence.path.first() {
+                        assembly
+                            .entry(root.0)
+                            .and_modify(|value: &mut bool| {
+                                *value = if crossing {
+                                    *value || chosen
+                                } else {
+                                    *value && chosen
+                                }
+                            })
+                            .or_insert(chosen);
+                    }
+                    continue;
+                }
                 if !chosen {
                     continue;
                 }
@@ -291,6 +335,11 @@ impl Editor {
                 }
             }
         }
+        items.extend(
+            assembly
+                .into_iter()
+                .filter_map(|(id, chosen)| chosen.then_some(Selection::Instance(InstanceId(id)))),
+        );
         items
     }
 
@@ -405,13 +454,8 @@ impl Editor {
                 .take()
                 .and_then(|o| o.picks.get(index).cloned())
         {
-            let item = if self.current().active_part == Some(pick.part) {
-                Selection::Body {
-                    part: pick.part,
-                    id: pick.body,
-                }
-            } else {
-                Selection::Instance(pick.instance)
+            let Some(item) = self.current().selection_for_pick(&pick) else {
+                return;
             };
             if context.input(|i| i.modifiers.ctrl || i.modifiers.command) {
                 self.current_mut().toggle(item);

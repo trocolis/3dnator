@@ -1,5 +1,10 @@
 # Validação local do protótipo
 
+## Seleção de módulos STEP — 29/10/2026
+
+- Correção 0.12.1: raiz selecionada após importar e ao clicar no viewport, com correspondência de ocorrências por ID/posicionamento; filhos continuam selecionáveis na árvore. 51 ensaios gráficos, 26 testes do documento e ensaio optativo `imported_module_occt` aprovados. Regressão gráfica grava/lê um STEP compartilhado, clica na segunda ocorrência e move só esse conjunto; rejeição de caminhos coincidentes é coberta no documento.
+- STEP TP4056 indicado pelo usuário: 20 peças, 22 instâncias, 151 corpos; todos acompanham a transformação da raiz sem alterar posições locais. Repetir com `NATOR_STEP_REGRESSION=/caminho/modelo.step cargo test -p nator-commands --features occt --locked --test imported_module_occt -- --ignored --nocapture`. Arquivo de terceiros não incorporado ao repositório. Logs em `target/codex-validation/adjustments-20261029/assembly-*` e `tp4056-final.log`.
+
 ## Movimento de conjuntos e modos no painel — 29/10/2026
 
 - Etapa local 0.12.0, formato mantido em 36, sem push/release. Entrar na aba Montagem encerra a edição de corpos; Mover pela árvore assume o contexto dos alvos. O pivô e o contorno do manipulador incluem a subárvore visível, mesmo sem corpo na peça principal. Pai e filho selecionados recebem uma transformação única.

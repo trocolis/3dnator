@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.12.1 — 29/10/2026
+
+- Seleção no viewport da Montagem passa a escolher a raiz do conjunto, incluindo importações STEP, preservando a seleção explícita de componentes internos pela árvore. A importação seleciona suas novas raízes, em vez do primeiro corpo interno. Janela, realce e origem de alinhamento acompanham a hierarquia.
+- Ocorrências de filhos compartilhados são identificadas pelo ID e posicionamento; caminhos coincidentes ambíguos exigem a árvore. Testado com o STEP TP4056 indicado pelo usuário (20 peças, 22 instâncias, 151 corpos), movimentos rígidos de todos os descendentes, outra ocorrência preservada e desfazer/refazer.
+- Etapa local: 51 ensaios gráficos, 26 testes do documento e ensaio externo aprovados; Clippy com OCCT e formatação aprovados. Sem push/release.
+
 ## 0.12.0 — 29/10/2026
 
 - Corrigido o movimento de conjuntos com subpeças: entrar na aba Montagem encerra a edição de corpos, e o movimento atua na instância com toda a hierarquia. Selecionar pai e filho não aplica o deslocamento duas vezes. Pivô e contorno de arraste incluem os descendentes, mesmo quando a peça principal não tem corpo próprio.

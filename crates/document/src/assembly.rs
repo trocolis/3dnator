@@ -16,6 +16,23 @@ pub struct Occurrence {
     pub placement: Placement,
 }
 impl Document {
+    /// Identifica a ocorrência visível pelo ID da definição e seu posicionamento.
+    /// Um filho repetido em conjuntos coincidentes é ambíguo sem o caminho da árvore.
+    pub fn occurrence_at(&self, pick: &Pick) -> Result<Occurrence, DocumentError> {
+        let mut matching = self
+            .occurrences()?
+            .into_iter()
+            .filter(|o| o.instance == pick.instance && o.placement == pick.placement);
+        let found = matching.next().ok_or_else(|| {
+            DocumentError("A ocorrência selecionada não está mais visível.".into())
+        })?;
+        if matching.next().is_some() {
+            return Err(DocumentError(
+                "Ocorrência ambígua: selecione o componente pela árvore.".into(),
+            ));
+        }
+        Ok(found)
+    }
     pub fn groups(&self) -> &[Group] {
         &self.groups
     }
@@ -592,6 +609,44 @@ const SPACING: (f64, f64) = (5., 100.);
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pick_occurrence_distinguishes_repeated_children_and_rejects_coincident_paths()
+    -> Result<(), Box<dyn Error>> {
+        let mut doc = Document::new("Ocorrências")?;
+        let root = doc.create_part("Conjunto".into())?;
+        let first = doc.instances()[0].id;
+        let (child, body) = doc.add_mesh(
+            None,
+            "Filho".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let leaf = doc
+            .instances()
+            .iter()
+            .find(|i| i.part == child)
+            .ok_or("Filho")?
+            .id;
+        doc.reparent(leaf, Some(root))?;
+        let pose = Placement::new([100., 0., 0.], [0.; 3])?;
+        let second = doc.add_instance(root, None, pose)?;
+        let mut pick = Pick {
+            instance: leaf,
+            part: child,
+            body,
+            triangle: 0,
+            point: [0.; 3],
+            normal: [0., 0., 1.],
+            vertices: [[0.; 3]; 3],
+            placement: pose,
+        };
+        assert_eq!(doc.occurrence_at(&pick)?.path, vec![second, leaf]);
+        pick.placement = Placement::default();
+        assert_eq!(doc.occurrence_at(&pick)?.path, vec![first, leaf]);
+        doc.instance_mut(second)?.placement = Placement::default();
+        assert!(doc.occurrence_at(&pick).is_err());
+        Ok(())
+    }
+
     #[test]
     fn instances_share_definitions_but_clones_and_groups_are_independent()
     -> Result<(), Box<dyn Error>> {

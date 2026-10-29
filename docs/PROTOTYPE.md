@@ -1,4 +1,4 @@
-# Protótipo 0.12.0 — CAD paramétrico
+# Protótipo 0.12.1 — CAD paramétrico
 
 **Mover** abre diretamente o painel com **Modo de movimento**: Livre, Face a face, Aresta a aresta ou Vértice a vértice. O modo Livre usa o manipulador e os campos de translação/rotação. Os demais pedem origem e destino na área 3D e preservam o elemento escolhido para mover; uma referência em uma subpeça pode alinhar o conjunto inteiro. Trocar de modo descarta a prévia anterior e mantém os alvos. Na Montagem, mover uma instância leva seus descendentes; selecionar simultaneamente pai e filho não duplica o movimento. O pivô considera os corpos da hierarquia, incluindo conjuntos sem corpo próprio. O menu Mover da árvore assume o contexto do elemento clicado. Entrar na aba Montagem encerra a edição da peça e converte a seleção de corpos em ocorrências quando a origem está identificada; se houver várias instâncias sem uma origem identificada, selecione a ocorrência na árvore.
 
