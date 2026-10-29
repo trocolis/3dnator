@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Exportação STEP das regiões pintadas e menus da árvore — 29/10/2026
+
+- **341 testes com OCCT e 257 sem OCCT aprovados**, além dos **40 ensaios gráficos seriais**. Formatação, `git diff --check` e Clippy com todos os alvos/avisos negados aprovados nas duas configurações. Logs em `target/codex-validation/step-colors-20261029/`.
+- Cinco novas regressões gravam e releem STEP pela ponte XCAF: áreas analíticas das cores em células com furo; corpos rotacionados/deslocados; três escopos; máscaras sobrepostas com interseção/complemento que alcançam arestas; furo passante; superfície cilíndrica; casca interna de cavidade; casca periódica de face única. Quantidade de sólidos, validade, fechamento, volume e origem/material das faces são conferidos. Definições compartilhadas e cores de ocorrência continuam presentes; cor de base explícita e herança das faces sem pintura são distinguidas. Vetor de cores com contagem incompatível é recusado antes de gravar.
+- Projeto pintado salvo/reaberto antes da exportação, sem depender da malha colorida. O B-rep e a revisão do documento permanecem intactos. STL continua usando a geometria original e sem cores. Menus oferecem os dois formatos por corpo/peça; compilação desktop aprovada. O diálogo nativo de arquivos e outros leitores CAD não foram exercitados.
+- Aplicativo 0.3.0 em desenvolvimento e formato interno 29 preservados. Importação das cores por face no documento e execução Windows permanecem pendentes; sem release ou publicação remota.
+
 ## Realce de células em Peça e Pintar — 29/10/2026
 
 - **336 testes com OCCT e 257 sem OCCT aprovados**. A regressão do núcleo compara a área destacada com os recortes da pintura: retângulo menos círculo, círculo interno e complemento da face. Verifica coordenadas de montagem após translação/rotação, nomes repetidos de faces e ausência de alterações no documento/aparência.

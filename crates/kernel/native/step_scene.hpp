@@ -1,4 +1,4 @@
-// Intercâmbio XCAF: nomes, cores de sólidos e definições compartilhadas de montagem.
+// Intercâmbio XCAF: nomes, cores por sólido/face e definições compartilhadas de montagem.
 // Incluído após a ponte para reutilizar Shape e a conversão centralizada de exceções.
 #pragma once
 #include <STEPCAFControl_Reader.hxx>
@@ -20,6 +20,7 @@ struct StepBody {
     std::string name;
     TopoDS_Shape shape;
     std::array<int, 3> color{-1, -1, -1};
+    std::vector<std::array<int,3>> face_colors;
 };
 struct StepPart { std::string name; std::vector<StepBody> bodies; };
 struct StepOccurrence {
@@ -122,7 +123,18 @@ StepScene* nator_step_scene_read(const char* path) noexcept {
                         double r, g, b; specific.Values(r, g, b, Quantity_TOC_sRGB);
                         color = {int(std::lround(r*255)),int(std::lround(g*255)),int(std::lround(b*255))};
                     }
-                    bodies.push_back({step_name(label), solid, color});
+                    std::vector<std::array<int,3>> face_colors;
+                    const auto faces=map_of(solid,TopAbs_FACE);
+                    for (int f=1;f<=faces.Extent();++f) {
+                        auto rgb=std::array<int,3>{-1,-1,-1};
+                        Quantity_Color surface;
+                        if (colors->GetColor(faces(f),XCAFDoc_ColorSurf,surface) || colors->GetColor(faces(f),XCAFDoc_ColorGen,surface)) {
+                            double r,g,b; surface.Values(r,g,b,Quantity_TOC_sRGB);
+                            rgb={int(std::lround(r*255)),int(std::lround(g*255)),int(std::lround(b*255))};
+                        }
+                        face_colors.push_back(rgb);
+                    }
+                    bodies.push_back({step_name(label), solid, color, std::move(face_colors)});
                 }
                 if (bodies.empty()) throw std::runtime_error("STEP contém uma peça sem sólidos; superfícies abertas não são suportadas.");
                 scene->parts[index].bodies = std::move(bodies);
@@ -153,6 +165,13 @@ Shape* nator_step_body(const StepScene* scene, std::size_t part, std::size_t bod
         return b.shape;
     });
 }
+bool nator_step_face_colors(const StepScene* scene,std::size_t part,std::size_t body,int* colors,std::size_t count) noexcept {
+    return guarded([&] {
+        const auto& b=scene->parts.at(part).bodies.at(body);
+        if (count!=b.face_colors.size()) throw std::runtime_error("Contagem de cores STEP incompatível.");
+        for (std::size_t f=0;f<count;++f) std::copy(b.face_colors[f].begin(),b.face_colors[f].end(),colors+f*3);
+    });
+}
 bool nator_step_instance(const StepScene* scene, std::size_t index, std::size_t* part, std::int64_t* parent, double* matrix, int* color) noexcept {
     return guarded([&] {
         const auto& i = scene->instances.at(index);
@@ -164,8 +183,14 @@ bool nator_step_instance(const StepScene* scene, std::size_t index, std::size_t*
 bool nator_step_add_part(StepScene* scene, const char* name) noexcept {
     return guarded([&] { scene->parts.push_back({name,{}}); });
 }
-bool nator_step_add_body(StepScene* scene, std::size_t part, const Shape* body, const char* name, const int* color) noexcept {
-    return guarded([&] { scene->parts.at(part).bodies.push_back({name,body->value,{color[0],color[1],color[2]}}); });
+bool nator_step_add_body(StepScene* scene, std::size_t part, const Shape* body, const char* name, const int* color, const int* face_colors,std::size_t count) noexcept {
+    return guarded([&] {
+        const auto faces=map_of(body->value,TopAbs_FACE);
+        if (count && count!=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Contagem de cores STEP incompatível.");
+        StepBody result{name,body->value,{color[0],color[1],color[2]}, {}};
+        for (std::size_t f=0;f<count;++f) result.face_colors.push_back({face_colors[f*3],face_colors[f*3+1],face_colors[f*3+2]});
+        scene->parts.at(part).bodies.push_back(std::move(result));
+    });
 }
 bool nator_step_add_instance(StepScene* scene, std::size_t part, std::int64_t parent, const char* name, const double* m, const int* color) noexcept {
     return guarded([&] {
@@ -179,6 +204,16 @@ bool nator_step_scene_write(const StepScene* scene, const char* path) noexcept {
         auto shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
         auto colors = XCAFDoc_DocumentTool::ColorTool(doc->Main());
         std::vector<TDF_Label> labels;
+        const auto paint_body=[&](const TDF_Label& label,const StepBody& body) {
+            set_step_color(colors,label,body.color);
+            const auto faces=map_of(body.shape,TopAbs_FACE);
+            for (std::size_t f=0;f<body.face_colors.size();++f) {
+                if (body.face_colors[f][0]<0) continue;
+                const auto sub=shapes->AddSubShape(label,faces(static_cast<int>(f)+1));
+                if (sub.IsNull()) throw std::runtime_error("Não foi possível associar a cor à face STEP.");
+                set_step_color(colors,sub,body.face_colors[f]);
+            }
+        };
         // Uma definição com componentes é um conjunto XCAF; corpos próprios entram
         // nele como componentes sólidos nomeados. A geometria compartilhada é gravada uma vez.
         for (std::size_t p = 0; p < scene->parts.size(); ++p) {
@@ -187,12 +222,12 @@ bool nator_step_scene_write(const StepScene* scene, const char* path) noexcept {
             TDF_Label label;
             if (!assembly && part.bodies.size() == 1) {
                 label = shapes->AddShape(part.bodies[0].shape, false);
-                set_step_color(colors,label,part.bodies[0].color);
+                paint_body(label,part.bodies[0]);
             } else {
                 label = shapes->NewShape();
                 for (const auto& body : part.bodies) {
                     const auto child = shapes->AddShape(body.shape,false);
-                    set_step_name(child,body.name); set_step_color(colors,child,body.color);
+                    set_step_name(child,body.name); paint_body(child,body);
                     shapes->AddComponent(label,child,TopLoc_Location());
                 }
             }

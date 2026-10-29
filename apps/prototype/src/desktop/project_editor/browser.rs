@@ -40,6 +40,7 @@ pub(super) enum MenuAction {
     Rename(RenameTarget, String),
     Group,
     Export(Selection),
+    ExportStep(nator_commands::export::StepScope),
 }
 
 /// Estado da aba usado pelos menus.
@@ -77,6 +78,15 @@ pub(super) fn instance_menu(
         }
     } else if item(ui, Icon::Cube, T::EditPart) {
         action = Some(MenuAction::Activate(instance.part));
+    }
+    ui.separator();
+    if item(ui, Icon::Export, T::ExportStep) {
+        action = Some(MenuAction::ExportStep(
+            nator_commands::export::StepScope::Part(instance.part),
+        ));
+    }
+    if item(ui, Icon::Export, T::Export) {
+        action = Some(MenuAction::Export(target));
     }
     ui.separator();
     if item(ui, Icon::Move, T::MoveCopyTool) {
@@ -222,6 +232,13 @@ pub(super) fn body_menu(
             visible: !body.visible,
         })));
     }
+    ui.add_enabled_ui(body.brep.is_some(), |ui| {
+        if item(ui, Icon::Export, T::ExportStep) {
+            action = Some(MenuAction::ExportStep(
+                nator_commands::export::StepScope::Body(body.id),
+            ));
+        }
+    });
     if item(ui, Icon::Export, T::Export) {
         action = Some(MenuAction::Export(target));
     }
@@ -394,8 +411,9 @@ impl Editor {
             MenuAction::Group => self.group_selection(context),
             MenuAction::Export(item) => {
                 self.current_mut().select(Some(item));
-                self.open_export();
+                self.open_export_target(item);
             }
+            MenuAction::ExportStep(scope) => self.export_step(context, tab, scope),
         }
     }
 

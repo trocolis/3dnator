@@ -118,6 +118,7 @@ fn fixture() -> Result<StepAssembly> {
                     name: "Bloco azul".into(),
                     solid: Solid::cuboid([0.; 3], [10., 20., 30.])?,
                     color: Some(BLUE),
+                    face_colors: Vec::new(),
                 }],
             },
         ],
@@ -318,5 +319,12 @@ fn step_export_rejects_visible_meshes_and_cycles_before_writing() -> Result<()> 
     });
     assert!(scene.write(&path).is_err());
     assert!(!path.exists());
+    let mut scene = fixture()?;
+    scene.parts[2].bodies[0].face_colors = vec![Some(RED)];
+    assert!(scene.write(&path).is_err());
+    assert!(
+        !path.exists(),
+        "Cores incompatíveis devem falhar antes de gravar"
+    );
     Ok(())
 }

@@ -4,16 +4,21 @@ use nator_document::{BodyId, Document, DocumentError, PartId, SurfaceAppearance,
 #[cfg(feature = "occt")]
 use std::sync::Arc;
 #[cfg(feature = "occt")]
-pub(super) fn build(
+struct Prepared {
+    solid: nator_kernel::Solid,
+    bytes: Arc<Vec<u8>>,
+    faces: Vec<usize>,
+    tools: Vec<Option<nator_kernel::Solid>>,
+    layers: Vec<SurfacePaint>,
+}
+#[cfg(feature = "occt")]
+fn prepare(
     doc: &Document,
     body: BodyId,
     layers: Vec<SurfacePaint>,
-) -> Result<SurfaceAppearance, DocumentError> {
+) -> Result<Prepared, DocumentError> {
     use crate::features::{face_index, region, source};
-    use nator_document::{
-        MeshAsset,
-        features::{FaceRef, signature},
-    };
+    use nator_document::features::FaceRef;
     let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
     let part = doc
         .parts()
@@ -116,11 +121,94 @@ pub(super) fn build(
         tools.push(tool);
         normalized.push(layer);
     }
+    Ok(Prepared {
+        solid,
+        bytes,
+        faces,
+        tools,
+        layers: normalized,
+    })
+}
+
+/// Exibição e STEP usam as mesmas máscaras exatas e a mesma ordem de sobreposição.
+/// Somente o STEP costura as subdivisões numa cópia fechada do sólido de origem.
+#[cfg(feature = "occt")]
+pub(super) fn step_body(
+    doc: &Document,
+    body: BodyId,
+) -> Result<nator_kernel::StepBody, DocumentError> {
+    let record = doc
+        .body(body)
+        .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+    let brep = record.brep.as_ref().ok_or_else(|| DocumentError(
+        "O escopo contém corpos de malha. Use STL ou selecione apenas sólidos CAD para exportar STEP.".into(),
+    ))?;
+    let appearance = doc.body_appearance(body);
+    let base_color = appearance.and_then(|a| a.base_color);
+    let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
+    let (solid, face_colors) = if let Some(appearance) = appearance.filter(|a| !a.layers.is_empty())
+    {
+        let prepared = prepare(doc, body, appearance.layers.clone())?;
+        let input = prepared
+            .faces
+            .iter()
+            .copied()
+            .zip(prepared.tools.iter().map(Option::as_ref))
+            .collect::<Vec<_>>();
+        let (solid, materials) = prepared.solid.painted_solid(&input).map_err(error)?;
+        let colors = materials
+            .into_iter()
+            .map(|material| {
+                if material == 0 {
+                    // A pintura uniforme tem precedência sobre cores de ocorrências.
+                    base_color
+                } else {
+                    Some(prepared.layers[material as usize - 1].color)
+                }
+            })
+            .collect();
+        (solid, colors)
+    } else {
+        let solid = nator_kernel::Solid::from_brep(brep, None)
+            .and_then(|s| s.transformed(record.placement))
+            .map_err(error)?;
+        let colors = base_color
+            .map(|c| vec![Some(c); solid.face_names().len()])
+            .unwrap_or_default();
+        (solid, colors)
+    };
+    Ok(nator_kernel::StepBody {
+        name: record.name.clone(),
+        solid,
+        color: base_color.or(record.color),
+        face_colors,
+    })
+}
+
+#[cfg(feature = "occt")]
+pub(super) fn build(
+    doc: &Document,
+    body: BodyId,
+    layers: Vec<SurfacePaint>,
+) -> Result<SurfaceAppearance, DocumentError> {
+    use nator_document::{MeshAsset, features::signature};
+    let Prepared {
+        solid,
+        bytes,
+        faces,
+        tools,
+        layers: normalized,
+    } = prepare(doc, body, layers)?;
+    let record = doc
+        .body(body)
+        .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
     let input = faces
         .into_iter()
         .zip(tools.iter().map(|s| s.as_ref()))
         .collect::<Vec<_>>();
-    let (mesh, materials) = solid.surface_appearance(&input).map_err(error)?;
+    let (mesh, materials) = solid
+        .surface_appearance(&input)
+        .map_err(|e| DocumentError(e.to_string()))?;
     // O kernel operou em coordenadas da peça. O cache volta ao referencial local
     // do corpo para receber seu posicionamento exatamente uma vez na cena.
     let vertices = mesh

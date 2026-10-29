@@ -1523,17 +1523,25 @@ impl Editor {
             return;
         };
         let document = tab.session.document().clone();
-        let name = document
-            .name()
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
+        let name = match scope {
+            nator_commands::export::StepScope::Body(id) => {
+                document.body(id).map(|b| b.name.as_str())
+            }
+            nator_commands::export::StepScope::Part(id) => {
+                document.part(id).map(|p| p.name.as_str())
+            }
+            nator_commands::export::StepScope::Assembly => Some(document.name()),
+        }
+        .unwrap_or(document.name())
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
         self.start(context, None, move || {
             let Some(mut path) = rfd::FileDialog::new()
                 .add_filter(text(T::StepFilter), &["step", "stp"])

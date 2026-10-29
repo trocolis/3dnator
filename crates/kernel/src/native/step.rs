@@ -11,6 +11,9 @@ pub struct StepBody {
     pub name: String,
     pub solid: Solid,
     pub color: Option<RgbColor>,
+    /// Vazio ou uma entrada por face do B-rep. Ausência mantém a herança da
+    /// cor de corpo/ocorrência; presença é uma pintura explícita da superfície.
+    pub face_colors: Vec<Option<RgbColor>>,
 }
 pub struct StepPart {
     pub name: String,
@@ -43,6 +46,13 @@ unsafe extern "C" {
         body: usize,
         color: *mut i32,
     ) -> *mut c_void;
+    fn nator_step_face_colors(
+        scene: *const c_void,
+        part: usize,
+        body: usize,
+        colors: *mut i32,
+        count: usize,
+    ) -> bool;
     fn nator_step_instance(
         scene: *const c_void,
         index: usize,
@@ -58,6 +68,8 @@ unsafe extern "C" {
         body: *const c_void,
         name: *const c_char,
         color: *const i32,
+        face_colors: *const i32,
+        face_count: usize,
     ) -> bool;
     fn nator_step_add_instance(
         scene: *mut c_void,
@@ -226,10 +238,27 @@ impl StepAssembly {
                 })?;
                 solid.faces = vec![String::new(); solid.face_count()?];
                 solid.volume()?;
+                let mut face_rgb = vec![[-1; 3]; solid.faces.len()];
+                // SAFETY: três canais por face, buffer exclusivo do tamanho
+                // conferido pela ponte e índices obtidos das contagens da cena.
+                check(unsafe {
+                    nator_step_face_colors(
+                        scene.pointer(),
+                        part,
+                        body,
+                        face_rgb.as_mut_ptr().cast(),
+                        solid.faces.len(),
+                    )
+                })?;
+                let face_colors = face_rgb
+                    .into_iter()
+                    .map(color)
+                    .collect::<Result<Vec<_>, _>>()?;
                 bodies.push(StepBody {
                     name: scene.name(part, body, 1)?,
                     solid,
                     color: color(rgb)?,
+                    face_colors,
                 });
             }
             parts.push(StepPart {
@@ -280,8 +309,20 @@ impl StepAssembly {
             // SAFETY: texto vive durante a chamada e é copiado para a cena.
             check(unsafe { nator_step_add_part(scene.pointer(), name.as_ptr()) })?;
             for body in &part.bodies {
+                if !body.face_colors.is_empty()
+                    && body.face_colors.len() != body.solid.face_count()?
+                {
+                    return Err(KernelError(
+                        "Cores STEP incompatíveis com as faces do corpo.".into(),
+                    ));
+                }
                 let name = checked_name(&body.name)?;
                 let rgb = channels(body.color);
+                let face_rgb = body
+                    .face_colors
+                    .iter()
+                    .flat_map(|c| channels(*c))
+                    .collect::<Vec<_>>();
                 // SAFETY: cena e sólido vivos; nome e três canais são copiados.
                 check(unsafe {
                     nator_step_add_body(
@@ -290,6 +331,8 @@ impl StepAssembly {
                         body.solid.pointer.as_ptr(),
                         name.as_ptr(),
                         rgb.as_ptr(),
+                        face_rgb.as_ptr(),
+                        body.face_colors.len(),
                     )
                 })?;
             }

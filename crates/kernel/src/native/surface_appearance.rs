@@ -1,5 +1,5 @@
-//! A partição de aparência não retorna um sólido de modelagem: somente uma
-//! malha de exibição e o índice de material por triângulo atravessam a fronteira.
+//! Partições de aparência para exibição e para uma cópia sólida de intercâmbio.
+//! O sólido original nunca é alterado; os índices identificam a última camada.
 use super::*;
 unsafe extern "C" {
     fn nator_surface_appearance(
@@ -8,8 +8,57 @@ unsafe extern "C" {
         tools: *const *const c_void,
         count: usize,
     ) -> *mut c_void;
+    fn nator_painted_solid(
+        body: *const c_void,
+        faces: *const usize,
+        tools: *const *const c_void,
+        count: usize,
+    ) -> *mut c_void;
 }
 impl Solid {
+    /// Subdivide e costura as faces mantendo volume e cascas fechadas. Materiais
+    /// são por face (0 = base, 1..=255 = camada), na ordem de `face_count`.
+    pub fn painted_solid(
+        &self,
+        layers: &[(usize, Option<&Solid>)],
+    ) -> Result<(Solid, Vec<u32>), KernelError> {
+        if layers.is_empty()
+            || layers.len() > 255
+            || layers.iter().any(|(face, _)| *face >= self.faces.len())
+        {
+            return Err(KernelError("Seleção de pintura inválida.".into()));
+        }
+        let faces = layers.iter().map(|(face, _)| *face).collect::<Vec<_>>();
+        let tools = layers
+            .iter()
+            .map(|(_, tool)| {
+                tool.map(|s| s.pointer.as_ptr().cast_const())
+                    .unwrap_or(std::ptr::null())
+            })
+            .collect::<Vec<_>>();
+        // SAFETY: buffers e sólidos vivos nesta thread até o retorno. A ponte
+        // devolve uma cópia exclusiva; exceções geométricas viram KernelError.
+        let mut partition = Self::from_pointer(unsafe {
+            nator_painted_solid(
+                self.pointer.as_ptr(),
+                faces.as_ptr(),
+                tools.as_ptr(),
+                layers.len(),
+            )
+        })?;
+        let materials = partition
+            .origins()?
+            .into_iter()
+            .map(|origin| {
+                if origin[2] < 0 || origin[2] as usize > layers.len() {
+                    return Err(KernelError("Índice de material inválido.".into()));
+                }
+                Ok(origin[2] as u32)
+            })
+            .collect::<Result<Vec<_>, KernelError>>()?;
+        partition.faces = vec![String::new(); materials.len()];
+        Ok((partition, materials))
+    }
     pub fn surface_appearance(
         &self,
         layers: &[(usize, Option<&Solid>)],

@@ -89,6 +89,30 @@ fn describe(files: &[export::File]) -> String {
 }
 
 impl Editor {
+    /// O menu da árvore exporta a definição clicada, em coordenadas da peça,
+    /// independentemente da seleção anterior ou da posição de sua ocorrência.
+    pub(super) fn open_export_target(&mut self, selection: Selection) {
+        self.open_export();
+        if let Some(draft) = &mut self.export_edit {
+            match selection {
+                Selection::Body { id, part } => {
+                    draft.body = Some(id);
+                    draft.part = Some(part);
+                    draft.scope = 0;
+                }
+                Selection::Instance(id) => {
+                    draft.body = None;
+                    draft.part = self
+                        .tabs
+                        .iter()
+                        .find(|t| t.id == draft.tab)
+                        .and_then(|t| t.session.document().instance(id))
+                        .map(|i| i.part);
+                    draft.scope = 1;
+                }
+            }
+        }
+    }
     pub(super) fn open_export(&mut self) {
         let (body, part) = match self.current().selection {
             Some(Selection::Body { id, part }) => (Some(id), Some(part)),

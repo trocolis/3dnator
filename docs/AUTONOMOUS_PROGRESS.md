@@ -1,5 +1,11 @@
 # Execução autônoma
 
+## STEP com pintura por região e exportação pela árvore — 29/10/2026
+
+- Exportação STEP conserva cores sRGB por face e células de rascunho, usando as mesmas máscaras da exibição. Subdivisões são costuradas numa cópia de cada sólido, com conferência de fechamento, validade e volume, incluindo furos e cavidades. Origem/material acompanha as faces modificadas; cor explícita preserva precedência e faces sem pintura mantêm herança de corpo/ocorrência.
+- Menus de contexto dos corpos e peças oferecem STEP e STL. Nome sugerido STEP vem do elemento clicado; painel STL abre no escopo correto e mantém qualidade/resumo. Corpo de malha tem STEP desabilitado.
+- Aprovados 341 testes com OCCT, 257 sem OCCT, 40 ensaios gráficos, formatação e Clippy nas duas configurações. Cinco regressões de pintura STEP com releitura XCAF; logs em `target/codex-validation/step-colors-20261029/`. Importação de cores por face no documento, diálogo nativo e Windows não exercitados nesta entrega. Aplicativo 0.3.0 em desenvolvimento e formato 29 preservados; sem release ou publicação remota.
+
 ## Destaque das áreas delimitadas por rascunhos — 29/10/2026
 
 - Seleção de faces em Peça e ferramenta Pintar destacam somente a célula sob o cursor, com o mesmo recorte da pintura: furos, interseções e exterior dos contornos. Perfis livres continuam disponíveis na peça; Pintar exige apoio. Cálculo em trabalhador único, cache por cena/raio e reaproveitamento da célula, respeitando rascunhos ocultos e oclusão por outros corpos.

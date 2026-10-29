@@ -27,18 +27,8 @@ pub fn step_scene(
     doc: &Document,
     scope: StepScope,
 ) -> Result<nator_kernel::StepAssembly, DocumentError> {
-    use nator_kernel::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart};
-    let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
-    let body_data = |body: &nator_document::Body| -> Result<StepBody, DocumentError> {
-        let brep = body.brep.as_ref().ok_or_else(|| DocumentError("O escopo contém corpos de malha. Use STL ou selecione apenas sólidos CAD para exportar STEP.".into()))?;
-        Ok(StepBody {
-            name: body.name.clone(),
-            solid: Solid::from_brep(brep, None)
-                .and_then(|s| s.transformed(body.placement))
-                .map_err(error)?,
-            color: body.color,
-        })
-    };
+    use nator_kernel::{StepAssembly, StepOccurrence, StepPart};
+    let body_data = |body: &nator_document::Body| crate::appearance::step_body(doc, body.id);
     if let StepScope::Body(id) = scope {
         let body = doc
             .body(id)

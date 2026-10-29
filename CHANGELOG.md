@@ -2,6 +2,13 @@
 
 ## Não lançado — 0.3.0 em desenvolvimento
 
+### STEP com regiões pintadas e exportação pela árvore
+
+- STEP exporta cores sRGB por face e áreas delimitadas por rascunhos, respeitando furos, interseções, exclusões e a ordem das pinturas. As subdivisões são costuradas numa cópia do sólido; fechamento, validade e volume são conferidos antes da gravação, sem alterar o documento ou criar um corpo por região.
+- Exportações por corpo, peça e montagem preservam posições e definições compartilhadas. Pinturas explícitas por superfície e cor de base conservam sua precedência; superfícies sem pintura continuam herdando cores de corpo/ocorrência.
+- Menus de contexto de corpos e peças oferecem Exportar STEP e Exportar STL. STEP sugere o nome do elemento; STL abre com o corpo ou os corpos da peça clicada como escopo, mantendo a escolha de qualidade e o resumo. STEP fica desabilitado para corpos de malha.
+- Aplicativo 0.3.0 em desenvolvimento e formato interno 29 preservados. STL mantém a geometria original e não carrega cores; a importação STEP no documento continua limitada às cores uniformes de corpo/ocorrência.
+
 ### Destaque das áreas de rascunho em Peça e Pintar
 
 - Passar o mouse na seleção de faces da peça ou em Pintar destaca somente a célula delimitada pelos rascunhos visíveis sobre a face, incluindo furos, interseções e a região exterior. O realce usa o mesmo recorte exato aplicado pela pintura; não tinge a face inteira quando há uma delimitação.
