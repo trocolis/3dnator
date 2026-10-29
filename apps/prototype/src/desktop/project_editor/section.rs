@@ -68,6 +68,7 @@ pub(super) struct SectionDraft {
     tab: u64,
     previous: Option<Section>,
     dragging: Option<(egui::Pos2, f64)>,
+    floating: distance_arrow::Input,
 }
 
 /// Primeiro ponto do lado visível do corte, na ordem de distância.
@@ -86,6 +87,11 @@ impl Tab {
 }
 
 impl Editor {
+    pub(super) fn section_input_active(&self) -> bool {
+        self.section_edit
+            .as_ref()
+            .is_some_and(|d| d.floating.active())
+    }
     pub(super) fn cancel_section_tool(&mut self) {
         if let Some(draft) = self.section_edit.take()
             && let Some(tab) = self.find_tab(draft.tab)
@@ -128,6 +134,7 @@ impl Editor {
             tab,
             previous,
             dragging: None,
+            floating: Default::default(),
         });
     }
 
@@ -153,7 +160,7 @@ impl Editor {
             },
             self.canvas_rect,
             Footer::None,
-            true,
+            draft.floating.valid(),
             |ui| {
                 panel::row(ui, text(T::PlaneField), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.;
@@ -270,6 +277,9 @@ impl Editor {
             egui::vec2(0., -1.)
         };
         let tip = start + direction * 70.;
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(egui::Id::new("section_tip"), tip));
         let pointer = ui.input(|i| i.pointer.interact_pos());
         let hovered = pointer.is_some_and(|p| {
             let d = tip - start;
@@ -302,9 +312,11 @@ impl Editor {
             && hovered
             && let Some(p) = pointer
         {
+            draft.floating.begin(section.offset, p);
             draft.dragging = Some((p, section.offset));
         }
         if let (Some((origin, offset)), Some(p)) = (draft.dragging, pointer)
+            && !draft.floating.typing
             && per_mm.length_sq() > 1e-9
         {
             // O deslocamento cresce no sentido da normal sem inversão.
@@ -321,7 +333,35 @@ impl Editor {
         {
             draft.dragging = None;
         }
-        hovered || dragging
+        let offset = self
+            .current()
+            .section
+            .map(|s| s.offset)
+            .unwrap_or(section.offset);
+        let mut value = None;
+        let mut blocked = false;
+        if let Some(draft) = self.section_edit.as_mut() {
+            let edit = draft.floating.show(
+                ui,
+                "section",
+                rect,
+                offset,
+                dragging || draft.dragging.is_some(),
+                T::DistanceField,
+                |s| panel::parse_number(s, panel::Quantity::Length).filter(|v| v.abs() <= 1e7),
+            );
+            value = edit.value;
+            blocked = edit.blocked;
+            if edit.finished {
+                draft.dragging = None;
+            }
+        }
+        if let Some(value) = value
+            && let Some(section) = &mut self.current_mut().section
+        {
+            section.offset = value;
+        }
+        hovered || dragging || blocked
     }
 }
 

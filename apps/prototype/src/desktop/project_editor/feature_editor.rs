@@ -20,6 +20,7 @@ use nator_document::features::{
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
 pub(super) mod label;
+mod measure;
 mod revolve;
 
 /// Ferramentas do painel.
@@ -395,6 +396,7 @@ pub(super) struct Draft {
     fixed_plane: Option<nator_sketch::Plane>,
     label: LabelSpec,
     label_drag: Option<label::Drag>,
+    measure: measure::Interaction,
 }
 impl Draft {
     fn new(tab: u64, part: PartId, tool: Tool) -> Self {
@@ -442,6 +444,7 @@ impl Draft {
             fixed_plane: None,
             label: Default::default(),
             label_drag: None,
+            measure: Default::default(),
         }
     }
     pub fn edit(tab: u64, part: PartId, feature: Feature) -> Self {
@@ -785,6 +788,9 @@ impl Draft {
         self.fixed_plane = fixed;
         self.field = None;
     }
+    pub(super) fn arrow_input_active(&self) -> bool {
+        self.extrusion_input_active() || self.measure.input.active()
+    }
     pub(super) fn field(&self) -> Option<Field> {
         self.field
     }
@@ -1113,6 +1119,9 @@ impl Draft {
 
     /// Seleções obrigatórias ainda vazias impedem o OK.
     fn complete(&self) -> bool {
+        if !self.extrusion_input_valid() || !self.measure.input.valid() {
+            return false;
+        }
         match self.tool {
             Tool::Extrude => {
                 (self.face_profile.is_some()

@@ -7,6 +7,8 @@ use nator_commands::extrusion::Guide;
 pub(super) struct Interaction {
     pub(super) guide: Option<Guide>,
     drag: Option<Drag>,
+    input: distance_arrow::Input,
+    input_start: bool,
 }
 struct Drag {
     motion: distance_arrow::Drag,
@@ -40,6 +42,12 @@ impl ExtrudeDraft {
     }
 }
 impl Draft {
+    pub(super) fn extrusion_input_active(&self) -> bool {
+        self.interaction.input.active()
+    }
+    pub(super) fn extrusion_input_valid(&self) -> bool {
+        self.interaction.input.valid()
+    }
     #[cfg(all(test, feature = "occt"))]
     pub(in crate::desktop::project_editor) fn extrusion_state(&self) -> Option<(Guide, usize)> {
         Some((self.interaction.guide?, self.combine))
@@ -106,8 +114,7 @@ impl Editor {
         response: &egui::Response,
         d: &mut Draft,
     ) -> bool {
-        if d.tool != Tool::Extrude || !matches!(d.field, None | Some(Field::Profile)) || self.busy()
-        {
+        if d.tool != Tool::Extrude || !matches!(d.field, None | Some(Field::Profile)) {
             return false;
         }
         let Some(g) = d.interaction.guide else {
@@ -197,6 +204,10 @@ impl Editor {
                     .y
                     .clamp(response.rect.top() + 18., response.rect.bottom() - 18.),
             );
+            #[cfg(all(test, feature = "occt"))]
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(egui::Id::new(("extrusion_tip", start)), position)
+            });
             let over = pointer.is_some_and(|p| p.distance(position) < 16.);
             hovered |= over;
             let sign = if distance < 0. || (start && distance.abs() < 1e-7) {
@@ -225,6 +236,15 @@ impl Editor {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         if let Some((initial, start)) = active_handle {
+            let measure = if d.extrude.direction == Direction::OneSide {
+                initial - from
+            } else {
+                initial
+            };
+            d.interaction
+                .input
+                .begin(measure, pointer.unwrap_or(origin));
+            d.interaction.input_start = start;
             d.interaction.drag = ui.input(|i| i.pointer.press_origin()).map(|pointer| Drag {
                 motion: distance_arrow::Drag {
                     pointer,
@@ -236,7 +256,9 @@ impl Editor {
             });
         }
         let dragging = d.interaction.drag.is_some();
-        if let Some(drag) = &d.interaction.drag {
+        if let Some(drag) = &d.interaction.drag
+            && !d.interaction.input.typing
+        {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             if let Some(pointer) = pointer {
                 let value = drag.motion.value(pointer);
@@ -251,7 +273,46 @@ impl Editor {
         {
             d.interaction.drag = None;
         }
-        hovered || dragging
+        let (a, b) = d.extrude.limits();
+        let length = |s: &str| {
+            part.parameters
+                .evaluate(s, nator_document::parameters::Dimension::Length)
+                .ok()
+        };
+        let current_from = length(&a).unwrap_or(from);
+        let current_to = length(&b).unwrap_or(to);
+        let endpoint = if d.interaction.input_start {
+            current_from
+        } else {
+            current_to
+        };
+        let measure = if d.extrude.direction == Direction::OneSide {
+            endpoint - current_from
+        } else {
+            endpoint
+        };
+        let edit = d.interaction.input.show(
+            ui,
+            "extrusion",
+            response.rect,
+            measure,
+            dragging,
+            T::DistanceField,
+            |s| length(s).filter(|v| v.abs() <= 1e7),
+        );
+        if let Some(value) = edit.value {
+            let endpoint = if d.extrude.direction == Direction::OneSide {
+                current_from + value
+            } else {
+                value
+            };
+            d.extrude
+                .set_mouse_endpoint(endpoint, d.interaction.input_start, current_from);
+        }
+        if edit.finished {
+            d.interaction.drag = None;
+        }
+        hovered || dragging || edit.blocked
     }
 }
 

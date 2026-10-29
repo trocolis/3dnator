@@ -174,6 +174,7 @@ impl Editor {
         work.select_tool(Tool::Select);
         work.tool_panel_open = false;
         work.active_action = Some(action);
+        work.operation.floating = Default::default();
         work.operation.selecting = work.selected.is_empty();
         work.operation.focus = action == Action::Offset && !work.selected.is_empty();
         if action == Action::Offset
@@ -399,7 +400,7 @@ impl Editor {
                     candidate(&source, work, action, &parameters)
                 };
                 match result {
-                    Ok(_) => true,
+                    Ok(_) => work.operation.floating.valid(),
                     Err(message) => {
                         ui.label(egui::RichText::new(message).small().color(theme::DANGER));
                         false

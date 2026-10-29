@@ -274,3 +274,6 @@ O ensaio de interação do rascunho usa eventos egui e um adaptador wgpu (físic
 ```sh
 cargo test -p nator-prototype --features occt sketch_workflow_keeps -- --ignored
 ```
+
+
+Os manipuladores de medida têm campo flutuante durante e após o arraste. Começar a digitar suspende a variação pelo cursor; Enter fixa a medida e mantém o painel aberto para OK. Esc no campo restaura a medida anterior ao gesto. O teclado pertence ao campo enquanto ele estiver aberto, inclusive durante arrastes; uma entrada inválida não confirma o comando. O campo é comum à extrusão, às medidas de acabamento, às setas de rascunho, ao plano deslocado, à seção e aos eixos/anéis de movimento.

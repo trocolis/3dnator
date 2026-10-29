@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Campos flutuantes de medida — 29/10/2026
+
+- Etapa local 0.11.0, formato mantido em 36, sem push/release. Campos junto ao cursor em extrusão, acabamento de sólidos, setas de rascunho, plano deslocado, seção e eixos/anéis de movimento. Novas setas de raio/chanfro/espessura usam as referências selecionadas como apoio visual; o comando CAD exato calcula o resultado.
+- Aprovados 360 testes com OCCT, 264 sem OCCT e 49 ensaios gráficos seriais. Formatação e Clippy com todos os alvos/avisos negados aprovados com e sem OCCT. Logs em `target/codex-validation/floating-20261029/` (`gpu-final.log` contém a bateria gráfica final).
+- Novos ensaios exercitam digitação durante a pressão da seta, Enter sem publicar documento, suspensão do movimento depois de digitar, raio/chanfro/casca, rejeição de valores negativos inválidos, correção da entrada e Esc restaurando o início do gesto. Outro ensaio cobre plano deslocado negativo, corte de seção e translação por eixo, todos com medida fixada por Enter e confirmação independente.
+- Regressão de deslocamento duplo do rascunho digita 6 mm após soltar a segunda seta e confere ambos os lados. Ensaios existentes de cantos e deslocamentos agora verificam que Enter fixa a medida e OK publica uma única alteração. Foco é recuperado após soltar a seta; atalhos globais não interceptam o campo ativo. Windows não executado localmente.
+- Todos os itens de `AJUSTES.md` concluídos.
+
 ## Rótulos em superfícies — 29/10/2026
 
 - Etapa local 0.10.0, formato 36, sem push/release. Superficial colorido, relevo e gravação em faces planas e cilíndricas; fontes do sistema, estilos, posição, rotação e arraste. STEP mantém letras e cores por face em um sólido.

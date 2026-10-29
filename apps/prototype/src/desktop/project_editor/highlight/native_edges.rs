@@ -4,7 +4,7 @@ use super::*;
 type Curves = HashMap<usize, Vec<Point3>>;
 type Key = (usize, Vec<(usize, u64)>);
 #[derive(Default)]
-pub(super) struct NativeEdges {
+pub(in crate::desktop::project_editor) struct NativeEdges {
     key: Option<Key>,
     curves: Curves,
     running: Option<Receiver<Curves>>,

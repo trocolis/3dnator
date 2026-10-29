@@ -102,6 +102,8 @@ pub(super) struct MoveDraft {
     pivot: Pivot,
     mode: MoveMode,
     drag: Option<GizmoDrag>,
+    floating: distance_arrow::Input,
+    floating_handle: Option<Handle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -489,13 +491,17 @@ impl MoveDraft {
             pivot: Pivot::Center,
             mode: MoveMode::MoveOrCopy(false),
             drag: None,
+            floating: Default::default(),
+            floating_handle: None,
         }
     }
 
     fn numbers_valid(&self) -> bool {
-        self.translation_inputs
-            .iter()
-            .all(|i| i.is_valid(panel::Quantity::Length))
+        self.floating.valid()
+            && self
+                .translation_inputs
+                .iter()
+                .all(|i| i.is_valid(panel::Quantity::Length))
             && self
                 .rotation_inputs
                 .iter()
@@ -504,6 +510,9 @@ impl MoveDraft {
 }
 
 impl Editor {
+    pub(super) fn move_input_active(&self) -> bool {
+        matches!(&self.assembly_panel,Some(Panel::Move(d)) if d.floating.active())
+    }
     /// O painel determina o tipo real de captura, inclusive ao trocar o tipo no
     /// próprio painel; não depende do modo geral de inspeção do viewport.
     pub(super) fn alignment_pick_mode(&self) -> Option<navigation::PickMode> {
@@ -744,7 +753,7 @@ impl Editor {
     pub(super) fn assembly_pick(&mut self, response: &egui::Response) -> bool {
         let waiting = match &self.assembly_panel {
             // Fora do campo Objetos, o clique escolhe um ponto (para o pivô).
-            Some(Panel::Move(d)) => d.drag.is_none(),
+            Some(Panel::Move(d)) => d.drag.is_none() && d.floating.valid(),
             Some(Panel::Align(d)) => d.field.is_some(),
             Some(Panel::Pattern(d)) => d.picking,
             Some(Panel::Mirror(d)) => d.picking,
@@ -1105,6 +1114,11 @@ impl Editor {
                 })
                 .collect::<Vec<_>>()
         });
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new("move_tips"), tips);
+            data.insert_temp(egui::Id::new("move_center"), center);
+        });
         let pointer = ui.input(|i| i.pointer.interact_pos());
         let distance_to = |points: &[egui::Pos2], p: egui::Pos2| {
             points
@@ -1183,6 +1197,12 @@ impl Editor {
             return false;
         };
         if pressed && let (Some(handle), Some(start)) = (hovered, pointer) {
+            draft.floating_handle = Some(handle);
+            match handle {
+                Handle::Axis(k) => draft.floating.begin(draft.translation[k], start),
+                Handle::Ring(k) => draft.floating.begin(draft.rotation[k], start),
+                Handle::Free => draft.floating = Default::default(),
+            }
             let angle = (start - center).angle();
             draft.drag = Some(GizmoDrag {
                 handle,
@@ -1192,7 +1212,9 @@ impl Editor {
                 angle,
             });
         }
-        if let (Some(drag), Some(position)) = (&draft.drag, pointer) {
+        if let (Some(drag), Some(position)) = (&draft.drag, pointer)
+            && !draft.floating.typing
+        {
             match drag.handle {
                 Handle::Axis(k) => {
                     if let Some(tip) = tips[k] {
@@ -1262,6 +1284,34 @@ impl Editor {
         if !down {
             draft.drag = None;
         }
+        let mut floating_blocked = false;
+        if let Some(handle) = draft.floating_handle {
+            let (value, quantity, label) = match handle {
+                Handle::Axis(k) => (
+                    draft.translation[k],
+                    panel::Quantity::Length,
+                    T::DistanceField,
+                ),
+                Handle::Ring(k) => (draft.rotation[k], panel::Quantity::Angle, T::RotationField),
+                Handle::Free => (0., panel::Quantity::Length, T::DistanceField),
+            };
+            let edit = draft
+                .floating
+                .show(ui, "move", rect, value, dragging, label, |s| {
+                    panel::parse_number(s, quantity).filter(|v| v.abs() <= 1e7)
+                });
+            if let Some(value) = edit.value {
+                match handle {
+                    Handle::Axis(k) => draft.translation[k] = value,
+                    Handle::Ring(k) => draft.rotation[k] = value,
+                    Handle::Free => {}
+                }
+            }
+            if edit.finished {
+                draft.drag = None;
+            }
+            floating_blocked = edit.blocked;
+        }
         // Contorno dos elementos na posição atual, sem esperar a prévia.
         if dragging && let Some(delta) = world_delta(pivot, draft.translation, draft.rotation) {
             let document = self.current().session.document().clone();
@@ -1305,7 +1355,7 @@ impl Editor {
                 highlight::Look::Selected,
             );
         }
-        hovered.is_some() || dragging
+        hovered.is_some() || dragging || floating_blocked
     }
 }
 

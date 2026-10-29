@@ -1,6 +1,8 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    ArrowInvalidValue,
+    ArrowValueHint,
     Label,
     LabelContent,
     LabelFont,
@@ -756,6 +758,8 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::ArrowInvalidValue => "Informe uma medida válida para esta ferramenta.",
+        Text::ArrowValueHint => "Enter fixa a medida · Esc restaura · OK conclui",
         Text::Label => "Rótulo",
         Text::LabelContent => "Texto",
         Text::LabelFont => "Fonte do sistema",

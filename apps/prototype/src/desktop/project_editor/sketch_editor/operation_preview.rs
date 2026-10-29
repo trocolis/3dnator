@@ -248,12 +248,18 @@ impl Cache {
     }
 }
 
+impl Workspace {
+    pub(in crate::desktop::project_editor) fn arrow_input_active(&self) -> bool {
+        self.active_action.is_some_and(supported) && self.operation.floating.active()
+    }
+}
 pub(super) struct Interaction {
     pub cache: Cache,
     pub selecting: bool,
     pub whole_chain: bool,
     pub seed: Option<u64>,
     pub handle_drag: Option<operation_handles::Drag>,
+    pub floating: distance_arrow::Input,
     pub focus: bool,
     pub second_side: bool,
     pub confirm: bool,
@@ -268,6 +274,7 @@ impl Default for Interaction {
             whole_chain: true,
             seed: None,
             handle_drag: None,
+            floating: Default::default(),
             focus: false,
             second_side: false,
             confirm: false,
@@ -378,7 +385,7 @@ pub(super) fn canvas(
         blocked: action == EditAction::Offset,
         ..Default::default()
     };
-    if !enabled {
+    if !enabled && !work.operation.floating.active() {
         return result;
     }
     if action == EditAction::Offset
@@ -416,7 +423,44 @@ pub(super) fn canvas(
             ui, response, frame, painter, source, work, parameters, action,
         );
         result.blocked |= handles.blocked;
-        if let Some(position) = handles.position
+        if work.operation.floating.active() || work.operation.handle_drag.is_some() {
+            let expression = if work.operation.second_side {
+                &mut work.offset_second_expression
+            } else {
+                &mut work.dimension_expression
+            };
+            let parse = |s: &str| {
+                parameters
+                    .evaluate(s, nator_document::parameters::Dimension::Length)
+                    .ok()
+                    .filter(|v| {
+                        v.abs() <= 1e7
+                            && (*v > 0.
+                                || (action == EditAction::Offset
+                                    && work.offset_mode
+                                        == nator_sketch::modifications::OffsetMode::Normal))
+                    })
+            };
+            let value = parse(expression).unwrap_or(1.);
+            let edit = work.operation.floating.show(
+                ui,
+                "sketch_measure",
+                frame.rect,
+                value,
+                work.operation.handle_drag.is_some(),
+                T::SketchValue,
+                parse,
+            );
+            if let Some(value) = edit.value {
+                *expression = format!("{value} mm");
+                work.operation.confirm = false;
+            }
+            if edit.finished {
+                work.operation.handle_drag = None;
+                work.operation.focus = false;
+            }
+            result.blocked |= edit.blocked;
+        } else if let Some(position) = handles.position
             && floating(ui, position, work)
         {
             work.operation.confirm = true;

@@ -70,7 +70,7 @@ type Creases = Vec<([Point3; 2], Point3)>;
 pub(super) struct Cache {
     creases: HashMap<usize, Arc<Creases>>,
     adjacency: HashMap<usize, Arc<Adjacency>>,
-    native_edges: native_edges::NativeEdges,
+    pub(super) native_edges: native_edges::NativeEdges,
 }
 impl Cache {
     fn key(body: &Body) -> usize {

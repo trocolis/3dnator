@@ -9,7 +9,7 @@
 - [x] Adicionar um mode de extrusão que é selecionada duas áreas em planos não paralelos, gerando uma forma curva, o eixo pode ser definido por uma linha em um dos planos, ou altomático. diga se esse modo caba mais como um novo tipo de Revolução?
 - [x] A Ferramenta Dividir deve ter duas entradas, o corpo a ser dividido e o plano de divisão, que pode ser uma face do corpo, um plano projetado ou um plano de origem, deve ser selecionado com o mouse.
 - [x] Adicionar uma ferramenta em Acabamento, Para cria rótulo, para adicionar um texto em uma superficie, no seu painel de propriedeade, deve ter o texto, configurações de fonte, tamanho, tipo, negrito, sublinhado, cor e etc, posião, deve ser possível arrastar com o mouse pela superfice, a superfice não perecisa ser plana, usar fontes do sistema, verificar a possibilidade de exportação para step.
-- [ ] Toadas as ferramentas que as medidas podem ser ajustadas arrantando a ceta, o valor deve aparecer em um fild flutuante ao lado do cursor, deve ser possível digitar o valor e confirmar apertando Enter, isso deva valer para Extrusão, aredonadamento, chanfro e etc.
+- [x] Toadas as ferramentas que as medidas podem ser ajustadas arrantando a ceta, o valor deve aparecer em um fild flutuante ao lado do cursor, deve ser possível digitar o valor e confirmar apertando Enter, isso deva valer para Extrusão, aredonadamento, chanfro e etc.
 
 
 ## Definições aprovadas
@@ -21,4 +21,4 @@
 - Linha do tempo de Montagem e Rascunho: listar e editar, sem reordenação/retorno a etapas neste incremento.
 - Trabalhar em etapas com versões e commits locais; sem push ou publicação de release.
 
-- Etapa de rótulos concluída na versão 0.10.0. Campos flutuantes de medidas permanecem pendentes; não iniciar por enquanto, conforme solicitado.
+- Etapas concluídas localmente: rótulos (0.10.0) e campos flutuantes de medida (0.11.0). Todos os itens acima foram atendidos.

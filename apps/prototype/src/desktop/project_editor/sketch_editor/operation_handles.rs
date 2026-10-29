@@ -128,6 +128,7 @@ pub(super) fn update(
             });
             work.operation.focus = false;
             work.operation.second_side = is_second && work.offset_mode == OffsetMode::Double;
+            work.operation.floating.begin(value, pointer);
             work.operation.handle_drag = Some(Drag {
                 motion: distance_arrow::Drag {
                     pointer,
@@ -139,7 +140,9 @@ pub(super) fn update(
             });
         }
     }
-    if let Some(drag) = &work.operation.handle_drag {
+    if let Some(drag) = &work.operation.handle_drag
+        && !work.operation.floating.typing
+    {
         result.blocked = true;
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         if let Some(pointer) = pointer {
@@ -157,12 +160,11 @@ pub(super) fn update(
                 ui.ctx().request_repaint();
             }
         }
-        if response.drag_stopped_by(egui::PointerButton::Primary)
-            || !ui.input(|i| i.pointer.primary_down())
-        {
-            work.operation.handle_drag = None;
-            work.operation.focus = true;
-        }
+    }
+    if work.operation.handle_drag.is_some() && !ui.input(|i| i.pointer.primary_down()) {
+        work.operation.floating.focus();
+        work.operation.handle_drag = None;
+        work.operation.focus = false;
     }
     result
 }

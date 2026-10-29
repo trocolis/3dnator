@@ -83,7 +83,19 @@ impl Editor {
             }
             return;
         }
-        if context.egui_wants_keyboard_input()
+        if self
+            .feature_edit
+            .as_ref()
+            .is_some_and(|d| d.arrow_input_active())
+            || self.offset_input_active()
+            || self.section_input_active()
+            || self.move_input_active()
+            || self
+                .current()
+                .sketch_edit
+                .as_ref()
+                .is_some_and(|w| w.arrow_input_active())
+            || context.egui_wants_keyboard_input()
             || self
                 .current()
                 .sketch_edit
@@ -429,6 +441,7 @@ impl Editor {
                     || self.reference_image_model_gesture(ui, &response)
                     || self.label_gizmo(ui, &response)
                     || self.extrusion_gizmo(ui, &response)
+                    || self.feature_measure_gizmo(ui, &response)
                     || self.section_gizmo(ui, &response)
                     || self.move_gizmo(ui, &response)
                     || self.offset_plane_gizmo(ui, &response);

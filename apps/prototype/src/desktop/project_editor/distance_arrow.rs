@@ -1,6 +1,8 @@
 //! Padrão visual dos manipuladores de medida: haste fina e ponta de seta.
 //! O alvo de arraste é a ponta, sem esfera que possa sugerir um vértice real.
 use super::*;
+mod input;
+pub(super) use input::Input;
 
 pub(super) struct Arrow {
     pub origin: egui::Pos2,

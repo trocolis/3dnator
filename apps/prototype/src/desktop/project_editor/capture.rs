@@ -1150,6 +1150,350 @@ mod tests {
     use nator_document::features::{Operation, RegionRef};
     use nator_sketch::{Plane, Sketch};
 
+    fn arrow_key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+    fn replace_arrow_text(
+        editor: &mut Editor,
+        context: &egui::Context,
+        text: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        frame(
+            editor,
+            context,
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+                egui::Event::Text(text.into()),
+            ],
+        )?;
+        Ok(())
+    }
+    fn press_arrow(
+        editor: &mut Editor,
+        context: &egui::Context,
+        at: egui::Pos2,
+    ) -> Result<(), Box<dyn Error>> {
+        frame(
+            editor,
+            context,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        )?;
+        Ok(())
+    }
+    fn release_arrow(
+        editor: &mut Editor,
+        context: &egui::Context,
+        at: egui::Pos2,
+    ) -> Result<(), Box<dyn Error>> {
+        frame(
+            editor,
+            context,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        )?;
+        Ok(())
+    }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn floating_planes_sections_and_move_axes_keep_enter_separate_from_ok()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut doc = Document::new("Deslocamentos flutuantes")?;
+        let (part, body) = doc.add_mesh(
+            None,
+            "Peça".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        editor.open_offset_plane();
+        editor.set_offset_base(Plane::xy(), text(T::CurrentBase).into());
+        frame(&mut editor, &context, vec![])?;
+        let tip = context
+            .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("offset_plane_tip")))
+            .ok_or("Seta do plano")?;
+        press_arrow(&mut editor, &context, tip)?;
+        release_arrow(&mut editor, &context, tip)?;
+        replace_arrow_text(&mut editor, &context, "-3,5 mm")?;
+        frame(&mut editor, &context, vec![arrow_key(egui::Key::Enter)])?;
+        assert_eq!(editor.work_plane_edit.as_ref().ok_or("Plano")?.offset, -3.5);
+        assert_eq!(editor.current().session.revision(), 0);
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .work_planes[0]
+                .plane
+                .offset,
+            -3.5
+        );
+        let revision = editor.current().session.revision();
+        editor.open_section();
+        frame(&mut editor, &context, vec![])?;
+        let tip = context
+            .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("section_tip")))
+            .ok_or("Seta do corte")?;
+        press_arrow(&mut editor, &context, tip)?;
+        release_arrow(&mut editor, &context, tip)?;
+        replace_arrow_text(&mut editor, &context, "4,25 mm")?;
+        frame(&mut editor, &context, vec![arrow_key(egui::Key::Enter)])?;
+        assert_eq!(editor.current().section.ok_or("Seção")?.offset, 4.25);
+        assert_eq!(editor.current().session.revision(), revision);
+        assert!(editor.section_edit.is_some());
+        editor.cancel_section_tool();
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        editor.open_move();
+        frame(&mut editor, &context, vec![])?;
+        let tips = context
+            .data(|d| d.get_temp::<[Option<egui::Pos2>; 3]>(egui::Id::new("move_tips")))
+            .ok_or("Eixos")?;
+        let tip = tips[0].ok_or("Eixo X")?;
+        press_arrow(&mut editor, &context, tip)?;
+        release_arrow(&mut editor, &context, tip)?;
+        replace_arrow_text(&mut editor, &context, "12,5 mm")?;
+        frame(&mut editor, &context, vec![arrow_key(egui::Key::Enter)])?;
+        assert!(editor.assembly_panel.is_some());
+        assert_eq!(editor.current().session.revision(), revision);
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert!(
+            (editor
+                .current()
+                .session
+                .document()
+                .body(body)
+                .ok_or("Corpo")?
+                .placement
+                .translation_mm()[0]
+                - 12.5)
+                .abs()
+                < 1e-8
+        );
+        assert_eq!(editor.current().session.revision(), revision + 1);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn floating_extrusion_value_types_during_drag_and_enter_only_fixes_the_measure()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Perfil", Plane::xy());
+        sketch.add_rectangle([-5., -5.], [5., 5.], false)?;
+        let mut document = Document::new("Medida flutuante")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        editor
+            .feature_edit
+            .as_mut()
+            .ok_or("Painel")?
+            .choose_region(id, RegionRef::Index(0));
+        wait_extrusion_guide(&mut editor, &context)?;
+        frame(&mut editor, &context, vec![])?;
+        let tip = context
+            .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new(("extrusion_tip", false))))
+            .ok_or("Seta")?;
+        press_arrow(&mut editor, &context, tip)?;
+        replace_arrow_text(&mut editor, &context, "7,5 mm")?;
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                egui::Event::PointerMoved(tip + egui::vec2(30., -30.)),
+                arrow_key(egui::Key::Enter),
+            ],
+        )?;
+        release_arrow(&mut editor, &context, tip + egui::vec2(50., -50.))?;
+        wait_feature_preview(&mut editor, &context)?;
+        let guide = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .ok_or("Prévia")?
+            .0;
+        assert!((guide.to - 7.5).abs() < 1e-8, "Distância: {}", guide.to);
+        assert_eq!(editor.current().session.revision(), 0);
+        assert!(editor.feature_edit.is_some());
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), 1);
+        let body = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .bodies
+            .last()
+            .ok_or("Corpo")?;
+        assert!(
+            (nator_kernel::Solid::from_brep(body.brep.as_ref().ok_or("B-rep")?, None)?.volume()?
+                - 750.)
+                .abs()
+                < 1e-6
+        );
+        Ok(())
+    }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn floating_fillet_chamfer_and_shell_reject_invalid_values_and_escape_restores_the_gesture()
+    -> Result<(), Box<dyn Error>> {
+        use nator_document::features::{EdgeRef, FaceRef, signature};
+        let context = egui::Context::default();
+        let mut solid = nator_kernel::Solid::cuboid([-10., -10., 0.], [20., 20., 10.])?;
+        solid.name_faces_by_index("base")?;
+        let (mesh, faces) = solid.tessellate_with_faces(0.1, 0.2)?;
+        let mut doc = Document::new("Raio e distância")?;
+        let (part, body) = doc.add_mesh(
+            None,
+            "Bloco".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        let bytes = solid.to_brep()?;
+        let sig = signature(&bytes);
+        doc.body_mut(body)?.brep = Some(Arc::new(bytes));
+        doc.body_mut(body)?.face_names = Arc::new(solid.face_names().to_vec());
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        for tool in [
+            feature_editor::Tool::Fillet,
+            feature_editor::Tool::Chamfer,
+            feature_editor::Tool::Shell,
+        ] {
+            editor.open_feature_tool(tool);
+            let kept = if tool == feature_editor::Tool::Shell {
+                feature_editor::Kept::Face(FaceRef::Named(solid.face_names()[0].clone()))
+            } else {
+                feature_editor::Kept::Edge(EdgeRef::Index {
+                    index: 0,
+                    signature: sig,
+                })
+            };
+            editor
+                .feature_edit
+                .as_mut()
+                .ok_or("Painel")?
+                .apply_pick(body, kept);
+            wait_feature_preview(&mut editor, &context)?;
+            frame(&mut editor, &context, vec![])?;
+            let tip = context
+                .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("feature_measure_tip")))
+                .ok_or("Seta")?;
+            press_arrow(&mut editor, &context, tip)?;
+            release_arrow(&mut editor, &context, tip)?;
+            assert_eq!(
+                context.memory(|m| m.focused()),
+                Some(egui::Id::new(("arrow_value", "feature_measure"))),
+                "Foco da seta {tool:?}, ponta={tip:?}, canvas={:?}",
+                editor.canvas_rect
+            );
+            replace_arrow_text(&mut editor, &context, "-1 mm")?;
+            frame(&mut editor, &context, vec![arrow_key(egui::Key::Enter)])?;
+            assert!(
+                editor.feature_edit.is_some(),
+                "Valor inválido confirmou {tool:?}"
+            );
+            assert_eq!(editor.current().session.revision(), 0);
+            replace_arrow_text(&mut editor, &context, "1,25 mm")?;
+            frame(&mut editor, &context, vec![arrow_key(egui::Key::Enter)])?;
+            wait_feature_preview(&mut editor, &context)?;
+            let command = editor.feature_edit.as_ref().ok_or("Painel")?.preview_key(
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .part(part)
+                    .ok_or("Peça")?,
+            );
+            assert!(format!("{command:?}").contains("1.25 mm"), "{command:?}");
+            let tip = context
+                .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("feature_measure_tip")))
+                .ok_or("Seta")?;
+            press_arrow(&mut editor, &context, tip)?;
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(tip + egui::vec2(15., -15.))],
+            )?;
+            frame(&mut editor, &context, vec![arrow_key(egui::Key::Escape)])?;
+            release_arrow(&mut editor, &context, tip)?;
+            let command = editor
+                .feature_edit
+                .as_ref()
+                .ok_or("Esc deve manter a ferramenta")?
+                .preview_key(
+                    editor
+                        .current()
+                        .session
+                        .document()
+                        .part(part)
+                        .ok_or("Peça")?,
+                );
+            assert!(format!("{command:?}").contains("1.25 mm"), "{command:?}");
+            editor.cancel_feature_tool();
+            settle(&mut editor, &context)?;
+        }
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn label_selects_a_face_drags_and_preserves_style_in_the_timeline() -> Result<(), Box<dyn Error>>
@@ -6685,6 +7029,7 @@ mod tests {
         let p = at(&editor, [0., 0., 0.])?;
         let q = at(&editor, [0., -1., 0.])?;
         drag_operation_arrow(&mut editor, &context, 0, q - p)?;
+        frame(&mut editor, &context, vec![key(egui::Key::Enter)])?;
         frame(
             &mut editor,
             &context,
@@ -6922,6 +7267,7 @@ mod tests {
         wait_sketch_operation(&mut editor, &context)?;
         assert_eq!(editor.current().session.revision(), 0);
         drag_operation_arrow(&mut editor, &context, 1, unit * 5.)?;
+        replace_arrow_text(&mut editor, &context, "6 mm")?;
         wait_sketch_operation(&mut editor, &context)?;
         frame(
             &mut editor,
@@ -6938,6 +7284,11 @@ mod tests {
             frame(&mut editor, &context, vec![])?;
         }
         settle(&mut editor, &context)?;
+        assert_eq!(editor.current().session.revision(), 0);
+        wait_sketch_operation(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
         assert_eq!(editor.current().session.revision(), 1);
         let sketch = &editor
             .current()
@@ -6952,7 +7303,7 @@ mod tests {
             .map(|e| sketch.line(e.id).map(|(a, _)| a[1]))
             .collect::<Result<Vec<_>, _>>()?;
         assert!(
-            ys.iter().any(|v| (*v - 3.).abs() < 1e-4) && ys.iter().any(|v| (*v + 5.).abs() < 1e-4),
+            ys.iter().any(|v| (*v - 3.).abs() < 1e-4) && ys.iter().any(|v| (*v + 6.).abs() < 1e-4),
             "Deslocamentos: {ys:?}"
         );
         Ok(())
@@ -7199,6 +7550,10 @@ mod tests {
             for _ in 0..4 {
                 frame(&mut editor, &context, vec![])?;
             }
+            settle(&mut editor, &context)?;
+            assert_eq!(editor.current().session.revision(), 0);
+            let ok = label_position(&mut editor, &context, text(T::Ok))?;
+            click(&mut editor, &context, ok)?;
             settle(&mut editor, &context)?;
             assert_eq!(editor.current().session.revision(), 1, "{}", editor.status);
             let sketch = &editor

@@ -43,6 +43,7 @@ pub(super) struct Draft {
     pub(super) offset: f64,
     input: panel::NumberInput,
     drag: Option<Drag>,
+    floating: distance_arrow::Input,
     /// Plano existente em edição e sua definição ao abrir; `None` cria um plano novo.
     editing: Option<(WorkPlaneId, WorkPlane)>,
 }
@@ -56,6 +57,11 @@ impl Draft {
 }
 
 impl Editor {
+    pub(super) fn offset_input_active(&self) -> bool {
+        self.work_plane_edit
+            .as_ref()
+            .is_some_and(|d| d.floating.active())
+    }
     pub(super) fn open_offset_plane(&mut self) {
         if self.busy() || self.current().sketch_edit.is_some() {
             return;
@@ -82,6 +88,7 @@ impl Editor {
             offset: DEFAULT_OFFSET,
             input: panel::NumberInput::default(),
             drag: None,
+            floating: Default::default(),
             editing: None,
         });
         self.pick_offset_base();
@@ -127,6 +134,7 @@ impl Editor {
             offset: plane.offset,
             input: panel::NumberInput::default(),
             drag: None,
+            floating: Default::default(),
             editing: Some((id, plane)),
         });
         self.status.set(text(self.offset_plane_hint()));
@@ -312,7 +320,7 @@ impl Editor {
                         };
                     }
                 });
-                draft.input.is_valid(quantity)
+                draft.input.is_valid(quantity) && draft.floating.valid()
             },
         );
         if outcome.cancel {
@@ -437,6 +445,9 @@ impl Editor {
             handle.x.clamp(rect.left() + 18., rect.right() - 18.),
             handle.y.clamp(rect.top() + 18., rect.bottom() - 18.),
         );
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(egui::Id::new("offset_plane_tip"), handle));
         let pointer = ui.input(|i| i.pointer.interact_pos());
         let hovered = !dragging && pointer.is_some_and(|p| p.distance(handle) < 14.);
         if let Some(points) = patch(target) {
@@ -483,6 +494,7 @@ impl Editor {
             && ui.input(|i| i.pointer.primary_pressed())
             && let Some(pointer) = pointer
         {
+            draft.floating.begin(draft.offset, pointer);
             draft.drag = Some(Drag {
                 pointer,
                 initial: draft.offset,
@@ -490,7 +502,9 @@ impl Editor {
                 pixels_per_mm,
             });
         }
-        if let (Some(drag), Some(pointer)) = (&draft.drag, pointer) {
+        if let (Some(drag), Some(pointer)) = (&draft.drag, pointer)
+            && !draft.floating.typing
+        {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             let value = drag.initial
                 + f64::from((pointer - drag.pointer).dot(drag.axis) / drag.pixels_per_mm);
@@ -501,10 +515,26 @@ impl Editor {
             ui.ctx().request_repaint();
         }
         let active = hovered || draft.drag.is_some();
+        let dragging_now = draft.drag.is_some();
         if !ui.input(|i| i.pointer.primary_down()) {
             draft.drag = None;
         }
-        active
+        let edit = draft.floating.show(
+            ui,
+            "offset_plane",
+            rect,
+            draft.offset,
+            dragging_now,
+            T::DistanceField,
+            |s| panel::parse_number(s, panel::Quantity::Length).filter(|v| v.abs() <= MAX_OFFSET),
+        );
+        if let Some(value) = edit.value {
+            draft.offset = value;
+        }
+        if edit.finished {
+            draft.drag = None;
+        }
+        active || edit.blocked
     }
 }
 

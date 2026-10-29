@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.11.0 — 29/10/2026
+
+- Campos flutuantes junto ao cursor nas setas de extrusão, raio/chanfro/casca, deslocamento e cantos do rascunho, plano deslocado, seção e eixos/anéis de Mover/Copiar. A medida pode ser digitada durante ou após o arraste, com unidades e vírgula decimal; Enter fixa o valor da prévia e OK conclui a operação.
+- Novas setas para ajustar raio de arredondamento, distância do chanfro e espessura da casca em sólidos. Esc no campo restaura o início do gesto; valores inválidos bloqueiam a confirmação e mantêm o campo para correção. Digitar interrompe o ajuste pelo movimento do mouse.
+- Foco e edição dos campos permanecem disponíveis durante a preparação da cena. Etapa local, sem push/release; formato do projeto continua 36. Última pendência de `AJUSTES.md` atendida.
+
 ## 0.10.0 — 29/10/2026
 
 - Nova ferramenta Rótulo em Acabamento: texto com fontes do sistema, tamanho, negrito/itálico/sublinhado, cor, rotação, posição e arraste sobre faces planas ou curvas; modos superficial colorido, relevo e gravação com profundidade.
