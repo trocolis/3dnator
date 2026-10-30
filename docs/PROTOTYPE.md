@@ -1,4 +1,4 @@
-# Protótipo 0.15.0 — CAD paramétrico
+# Protótipo 0.16.0 — CAD paramétrico
 
 A grade do rascunho serve como referência de captura: linhas, cruzamentos, pontos médios e centros de células atraem o cursor. O passo acompanha o zoom e a geometria existente mantém prioridade. Alt libera o cursor. A captura posiciona o ponto sem criar fixações ou vínculos permanentes com a grade.
 

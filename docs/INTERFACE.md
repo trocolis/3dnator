@@ -223,7 +223,7 @@ Operações de construção, montagem, reparo e modificação de rascunho mantê
 
 **S** abre a busca de ferramentas; nomes sem acento encontram os rótulos portugueses. Enter executa o primeiro resultado habilitado e Esc fecha a busca. Os atalhos existentes Ctrl+S, Ctrl+Z e Ctrl+Shift+Z/Ctrl+Y foram mantidos. Os campos de texto conservam a entrada normal de letras.
 
-Os ícones são vetoriais, desenhados em uma grade de 24 unidades pelo egui, sem fonte de símbolos ou dependência de imagens externas. Nomes completos ficam nos tooltips e na semântica de acessibilidade, incluindo botões sem texto. Botões aceitam foco e ativação por teclado; ferramentas indisponíveis respeitam o estado de processamento, o contexto da peça e a disponibilidade do núcleo.
+Os ícones são vetoriais, desenhados em uma grade de 24 unidades pelo egui, sem fonte de símbolos ou dependência de imagens externas. O traço principal tem 2 unidades, com pontas e junções arredondadas; formas sólidas recebem preenchimento tonal e a ação principal usa uma única cor de destaque — azul nas ferramentas de sólido e montagem, verde no rascunho e violeta nas referências. O mesmo desenho é usado de 16 a 27 pontos na interface, sem detalhes que desapareçam nos botões compactos ou na árvore; a folha de contato da captura amplia até 46 pontos. Nomes completos ficam nos tooltips e na semântica de acessibilidade, incluindo botões sem texto. Botões aceitam foco e ativação por teclado; ferramentas indisponíveis respeitam o estado de processamento, o contexto da peça e a disponibilidade do núcleo.
 
 O fundo claro do renderizador e do rascunho usa a mesma paleta dos painéis. Cores de seleção, erro, aviso, restrição e medição foram ajustadas para esse contraste. O esmaecimento das peças de referência usa a cor efetiva do fundo, preservando a transparência.
 
@@ -244,7 +244,7 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 ## Código e validação visual
 
 - `apps/prototype/src/desktop/project_editor/theme.rs`: paleta, tipografia e medidas.
-- `icons.rs`: desenhos originais e widgets de ícone/linha de árvore.
+- `icons.rs`: catálogo de ícones, folha de contato e widgets de ícone/linha de árvore; `icons/draw.rs`: traço, geometria e paleta de cada desenho.
 - `shell.rs`: barra superior, faixa por tarefa, busca e histórico visual.
 - `window_frame.rs`: controles da janela, arraste e redimensionamento sem decoração nativa.
 - `view_cube.rs`: geometria de apresentação, seleção e interação do navegador de orientação, com pintura recortada.
@@ -256,10 +256,11 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
-Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `cell-hover`, `paint-hover`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `repair`, `recovery`, `insert`, `mesh-import`, `menu-new-part`, `menu-move`, `menu-copy`, `reference-align`, `reference-sketch`, `copy-beside`, `tree-folders`, `part-menu-move`, `measure`, `sketch-line-input`, `sketch-circle-input`, `sketch-rectangle-input`, `extrude-face`, `extrude-cut`, `extrude-zero`, `paint`), que não alteram o projeto de origem:
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `cell-hover`, `paint-hover`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `repair`, `recovery`, `insert`, `mesh-import`, `menu-new-part`, `menu-move`, `menu-copy`, `reference-align`, `reference-sketch`, `copy-beside`, `tree-folders`, `part-menu-move`, `measure`, `sketch-line-input`, `sketch-circle-input`, `sketch-rectangle-input`, `extrude-face`, `extrude-cut`, `extrude-zero`, `paint`, `icons`), que não alteram o projeto de origem:
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude
+cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator icones.png icons 1920 1200
 cargo run -p nator-prototype --features occt -- --render-project-preview projeto.3dnator modelo.png
 cargo run -p nator-prototype --features occt -- --render-sketch-preview projeto.3dnator rascunho.png
 cargo run -p nator-prototype --features occt -- --render-project-preview projeto.3dnator compacto.png 900 600

@@ -1,6 +1,7 @@
 //! Ícones vetoriais originais do 3dnator, desenhados em uma grade lógica de 24 unidades.
 //! Não dependem de fontes de símbolos nem de bitmaps: o mesmo desenho permanece nítido
-//! com escala de interface e DPI diferentes. A cor distingue o sólido da ação em azul.
+//! com escala de interface e DPI diferentes. O traço escuro estrutura o objeto e uma
+//! única cor de ação distingue sólido, rascunho e referência.
 use super::{egui, theme};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,63 +117,123 @@ pub(super) enum Icon {
     Project,
     Home,
 }
+mod draw;
 
-/// Elementos geométricos mantêm proporção e traço em qualquer tamanho de botão.
-struct Pen<'a> {
-    painter: &'a egui::Painter,
-    rect: egui::Rect,
-    ink: egui::Color32,
-    accent: egui::Color32,
-    fill: egui::Color32,
-}
-impl Pen<'_> {
-    fn p(&self, x: f32, y: f32) -> egui::Pos2 {
-        self.rect.min + egui::vec2(x, y) * (self.rect.width() / 24.)
-    }
-    fn line(&self, points: &[[f32; 2]], color: egui::Color32) {
-        self.painter.add(egui::Shape::line(
-            points.iter().map(|p| self.p(p[0], p[1])).collect(),
-            egui::Stroke::new((self.rect.width() / 24. * 1.5).max(1.), color),
-        ));
-    }
-    fn face(&self, points: &[[f32; 2]], fill: egui::Color32) {
-        self.painter.add(egui::Shape::convex_polygon(
-            points.iter().map(|p| self.p(p[0], p[1])).collect(),
-            fill,
-            egui::Stroke::new((self.rect.width() / 24. * 1.3).max(1.), self.ink),
-        ));
-    }
-    fn circle(&self, x: f32, y: f32, radius: f32, color: egui::Color32) {
-        self.painter.circle_stroke(
-            self.p(x, y),
-            radius * self.rect.width() / 24.,
-            egui::Stroke::new(1.5, color),
-        );
-    }
-    fn arrow(&self, from: [f32; 2], to: [f32; 2]) {
-        self.line(&[from, to], self.accent);
-        let d = egui::vec2(to[0] - from[0], to[1] - from[1]).normalized();
-        let side = egui::vec2(-d.y, d.x);
-        let end = egui::vec2(to[0], to[1]);
-        let a = end - d * 3. + side * 2.;
-        let b = end - d * 3. - side * 2.;
-        self.line(&[[a.x, a.y], to, [b.x, b.y]], self.accent);
-    }
-    fn cube(&self) {
-        self.face(&[[3., 8.], [12., 3.], [21., 8.], [12., 13.]], self.fill);
-        self.face(
-            &[[3., 8.], [12., 13.], [12., 22.], [3., 17.]],
-            egui::Color32::from_rgb(167, 192, 214),
-        );
-        self.face(
-            &[[12., 13.], [21., 8.], [21., 17.], [12., 22.]],
-            egui::Color32::from_rgb(107, 162, 209),
-        );
-    }
-}
+/// Todos os ícones, na ordem do enum, para a folha de revisão visual.
+const ALL: &[Icon] = &[
+    Icon::New,
+    Icon::Open,
+    Icon::Save,
+    Icon::SaveAs,
+    Icon::Settings,
+    Icon::Undo,
+    Icon::Redo,
+    Icon::Import,
+    Icon::Export,
+    Icon::Sketch,
+    Icon::SketchProject,
+    Icon::Image,
+    Icon::Paint,
+    Icon::Extrude,
+    Icon::Revolve,
+    Icon::Loft,
+    Icon::Sweep,
+    Icon::Label,
+    Icon::Hole,
+    Icon::Fillet,
+    Icon::Chamfer,
+    Icon::Shell,
+    Icon::Boolean,
+    Icon::Split,
+    Icon::Move,
+    Icon::Mirror,
+    Icon::Pattern,
+    Icon::Measure,
+    Icon::Parameters,
+    Icon::Drawing,
+    Icon::Fit,
+    Icon::Cube,
+    Icon::Front,
+    Icon::Top,
+    Icon::Side,
+    Icon::Perspective,
+    Icon::Eye,
+    Icon::EyeOff,
+    Icon::Close,
+    Icon::Minimize,
+    Icon::Maximize,
+    Icon::Restore,
+    Icon::RotateClockwise,
+    Icon::RotateCounterclockwise,
+    Icon::Search,
+    Icon::Check,
+    Icon::LockClosed,
+    Icon::LockOpen,
+    Icon::Select,
+    Icon::Line,
+    Icon::LineSymmetric,
+    Icon::LineConstruction,
+    Icon::LineInfinite,
+    Icon::Rectangle,
+    Icon::RectangleCenter,
+    Icon::RectangleInclined,
+    Icon::Circle,
+    Icon::CircleDiameter,
+    Icon::CircleTangent,
+    Icon::Arc,
+    Icon::Trim,
+    Icon::SketchOffset,
+    Icon::SketchFillet,
+    Icon::SketchChamfer,
+    Icon::SketchMirror,
+    Icon::CircularPattern,
+    Icon::RectangularPattern,
+    Icon::Dimension,
+    Icon::ConstraintHorizontalVertical,
+    Icon::ConstraintCoincident,
+    Icon::ConstraintTangent,
+    Icon::ConstraintEqual,
+    Icon::ConstraintParallel,
+    Icon::ConstraintPerpendicular,
+    Icon::SnapMidpoint,
+    Icon::SnapCenter,
+    Icon::Folder,
+    Icon::First,
+    Icon::Previous,
+    Icon::Next,
+    Icon::Last,
+    Icon::Delete,
+    Icon::Warning,
+    Icon::OneSide,
+    Icon::TwoSides,
+    Icon::Symmetric,
+    Icon::ToFace,
+    Icon::Flip,
+    Icon::Align,
+    Icon::Group,
+    Icon::Section,
+    Icon::Copy,
+    Icon::FaceToFace,
+    Icon::EdgeToEdge,
+    Icon::PointToPoint,
+    Icon::ReferenceSketch,
+    Icon::StepFile,
+    Icon::StlFile,
+    Icon::Join,
+    Icon::CutBody,
+    Icon::IntersectBody,
+    Icon::NewBody,
+    Icon::Part,
+    Icon::Edit,
+    Icon::Origin,
+    Icon::OffsetPlane,
+    Icon::WorkPlane,
+    Icon::Project,
+    Icon::Home,
+];
 
 pub(super) fn paint(painter: &egui::Painter, rect: egui::Rect, icon: Icon, enabled: bool) {
-    paint_with_ink(painter, rect, icon, enabled, theme::INK);
+    draw::paint(painter, rect, icon, enabled, theme::INK, false);
 }
 pub(super) fn paint_with_ink(
     painter: &egui::Painter,
@@ -181,7 +242,7 @@ pub(super) fn paint_with_ink(
     enabled: bool,
     ink: egui::Color32,
 ) {
-    paint_styled(painter, rect, icon, enabled, ink, false);
+    draw::paint(painter, rect, icon, enabled, ink, false);
 }
 /// `dark` adapta destaque, preenchimento e estado desabilitado à barra escura da janela,
 /// onde os tons pensados para o fundo claro perdem contraste.
@@ -193,837 +254,13 @@ fn paint_styled(
     ink: egui::Color32,
     dark: bool,
 ) {
-    // Ferramentas e indicadores do rascunho compartilham contorno preto e ação
-    // verde. O mesmo desenho/paleta aparece na faixa, nos painéis e no canvas.
-    let constraint = matches!(
-        icon,
-        Icon::ConstraintHorizontalVertical
-            | Icon::ConstraintCoincident
-            | Icon::ConstraintTangent
-            | Icon::ConstraintEqual
-            | Icon::ConstraintParallel
-            | Icon::ConstraintPerpendicular
-    );
-    let sketch = matches!(
-        icon,
-        Icon::Line
-            | Icon::LineSymmetric
-            | Icon::LineConstruction
-            | Icon::LineInfinite
-            | Icon::Rectangle
-            | Icon::RectangleCenter
-            | Icon::RectangleInclined
-            | Icon::Circle
-            | Icon::CircleDiameter
-            | Icon::CircleTangent
-            | Icon::Arc
-            | Icon::Trim
-            | Icon::SketchOffset
-            | Icon::SketchProject
-            | Icon::Paint
-            | Icon::Image
-            | Icon::SketchFillet
-            | Icon::SketchChamfer
-            | Icon::SketchMirror
-            | Icon::CircularPattern
-            | Icon::RectangularPattern
-            | Icon::Dimension
-            | Icon::SnapMidpoint
-            | Icon::SnapCenter
-            | Icon::LockClosed
-            | Icon::LockOpen
-    );
-    let sketch = sketch || constraint;
-    let accent = match (sketch, dark) {
-        (true, false) => theme::GREEN,
-        (true, true) => egui::Color32::from_rgb(110, 204, 154),
-        (false, false) => theme::ACCENT,
-        (false, true) => egui::Color32::from_rgb(124, 188, 248),
-    };
-    let disabled = egui::Color32::from_gray(if dark { 112 } else { 165 });
-    let pen = Pen {
-        painter,
-        rect,
-        ink: if enabled {
-            if sketch && !dark {
-                egui::Color32::BLACK
-            } else {
-                ink
-            }
-        } else {
-            disabled
-        },
-        accent: if enabled { accent } else { disabled },
-        fill: match (enabled, dark) {
-            (true, false) if sketch => egui::Color32::from_rgb(225, 244, 232),
-            (true, false) => egui::Color32::from_rgb(204, 225, 243),
-            (true, true) => egui::Color32::from_rgb(70, 104, 146),
-            (false, false) => egui::Color32::from_gray(226),
-            (false, true) => egui::Color32::from_gray(72),
-        },
-    };
-    let p = &pen;
-    match icon {
-        Icon::Settings => {
-            p.circle(12., 12., 6., p.ink);
-            p.circle(12., 12., 2., p.accent);
-            for tooth in 0..8 {
-                let angle = tooth as f32 * std::f32::consts::FRAC_PI_4;
-                let (s, c) = angle.sin_cos();
-                p.line(
-                    &[[12. + 6. * c, 12. + 6. * s], [12. + 10. * c, 12. + 10. * s]],
-                    p.ink,
-                );
-            }
-        }
-        Icon::Paint => {
-            // Balde inclinado: aro preto, tinta verde escorrendo e alça curva.
-            p.face(&[[3., 11.], [11., 3.], [19., 11.], [11., 19.]], p.fill);
-            p.line(&[[3., 11.], [11., 14.], [19., 11.]], p.ink);
-            p.line(&[[7., 7.], [6., 4.], [8., 2.], [11., 2.], [15., 6.]], p.ink);
-            p.line(&[[11., 19.], [16., 16.], [19., 12.]], p.accent);
-            p.face(
-                &[[20., 14.], [18., 19.], [19., 22.], [22., 22.], [23., 19.]],
-                p.accent,
-            );
-        }
-        Icon::Image => {
-            p.line(
-                &[[2., 4.], [22., 4.], [22., 20.], [2., 20.], [2., 4.]],
-                p.ink,
-            );
-            p.circle(7., 9., 2., p.accent);
-            p.line(
-                &[[3., 18.], [10., 12.], [14., 16.], [18., 11.], [22., 16.]],
-                p.accent,
-            );
-        }
-        Icon::Home => {
-            p.line(&[[3., 11.], [12., 3.], [21., 11.]], p.ink);
-            p.line(
-                &[
-                    [5., 10.],
-                    [5., 21.],
-                    [10., 21.],
-                    [10., 14.],
-                    [14., 14.],
-                    [14., 21.],
-                    [19., 21.],
-                    [19., 10.],
-                ],
-                p.ink,
-            );
-        }
-        Icon::Cube
-        | Icon::Extrude
-        | Icon::Hole
-        | Icon::Fillet
-        | Icon::Chamfer
-        | Icon::Shell
-        | Icon::Boolean
-        | Icon::Split => {
-            p.cube();
-            match icon {
-                Icon::Extrude => p.arrow([12., 13.], [12., 1.]),
-                Icon::Hole | Icon::Shell => {
-                    p.circle(12., 8., if icon == Icon::Hole { 2.5 } else { 4. }, p.ink);
-                }
-                Icon::Fillet => {
-                    p.line(&[[12., 13.], [16., 12.5], [19., 14.], [21., 17.]], p.accent)
-                }
-                Icon::Chamfer => p.line(&[[12., 16.], [17., 10.]], p.accent),
-                Icon::Boolean => p.face(&[[1., 15.], [7., 12.], [13., 15.], [7., 19.]], p.fill),
-                Icon::Split => p.line(&[[2., 20.], [21., 2.]], p.accent),
-                _ => {}
-            }
-        }
-        Icon::New | Icon::Drawing | Icon::SaveAs => {
-            p.line(
-                &[
-                    [16., 3.],
-                    [5., 3.],
-                    [5., 21.],
-                    [20., 21.],
-                    [20., 7.],
-                    [16., 3.],
-                    [16., 8.],
-                    [20., 8.],
-                ],
-                p.ink,
-            );
-            if icon == Icon::Drawing {
-                p.line(
-                    &[[8., 11.], [16., 11.], [16., 16.], [8., 16.], [8., 11.]],
-                    p.accent,
-                );
-                p.line(&[[8., 18.], [17., 18.]], p.ink);
-            } else if icon == Icon::New {
-                p.line(&[[9., 14.], [16., 14.]], p.accent);
-                p.line(&[[12.5, 10.5], [12.5, 17.5]], p.accent);
-            } else {
-                p.line(&[[10., 17.], [17., 10.]], p.accent);
-            }
-        }
-        Icon::Open | Icon::Folder => {
-            p.face(
-                &[
-                    [3., 6.],
-                    [9., 6.],
-                    [11., 8.],
-                    [21., 8.],
-                    [21., 19.],
-                    [3., 19.],
-                ],
-                p.fill,
-            );
-            p.line(&[[3., 11.], [21., 11.]], p.ink);
-        }
-        Icon::Save => {
-            p.face(
-                &[[4., 3.], [18., 3.], [21., 6.], [21., 21.], [4., 21.]],
-                p.fill,
-            );
-            p.face(
-                &[[8., 3.], [16., 3.], [16., 9.], [8., 9.]],
-                egui::Color32::WHITE,
-            );
-            p.face(
-                &[[8., 14.], [17., 14.], [17., 21.], [8., 21.]],
-                egui::Color32::WHITE,
-            );
-        }
-        Icon::Undo | Icon::Redo => {
-            let mirror = |x| if icon == Icon::Redo { 24. - x } else { x };
-            let points: Vec<_> = [[5., 9.], [13., 9.], [18., 11.], [20., 16.]]
-                .map(|v| [mirror(v[0]), v[1]])
-                .to_vec();
-            p.line(&points, p.ink);
-            p.line(
-                &[[mirror(10.), 4.], [mirror(5.), 9.], [mirror(10.), 14.]],
-                p.accent,
-            );
-        }
-        Icon::Import | Icon::Export => {
-            p.line(&[[3., 15.], [3., 21.], [21., 21.], [21., 15.]], p.ink);
-            if icon == Icon::Import {
-                p.arrow([12., 2.], [12., 16.]);
-            } else {
-                p.arrow([12., 16.], [12., 2.]);
-            }
-        }
-        Icon::Sketch => {
-            p.line(&[[3., 5.], [3., 21.], [19., 21.]], p.ink);
-            p.face(
-                &[[7., 16.], [9., 10.], [18., 1.], [22., 5.], [13., 14.]],
-                p.fill,
-            );
-            p.line(&[[9., 10.], [13., 14.]], p.accent);
-        }
-        Icon::SketchProject => {
-            p.face(&[[2., 16.], [15., 16.], [22., 22.], [9., 22.]], p.fill);
-            p.line(&[[5., 3.], [17., 3.], [17., 9.]], p.ink);
-            p.arrow([5., 7.], [9., 18.]);
-            p.arrow([17., 10.], [19., 18.]);
-            p.line(&[[9., 18.], [19., 18.]], p.accent);
-        }
-        Icon::LockClosed | Icon::LockOpen => {
-            let offset = if icon == Icon::LockOpen { 5. } else { 0. };
-            p.line(
-                &[
-                    [7. + offset, 12.],
-                    [7. + offset, 6.],
-                    [9. + offset, 3.],
-                    [15. + offset, 3.],
-                    [17. + offset, 6.],
-                    [17. + offset, 10.],
-                ],
-                p.ink,
-            );
-            p.face(&[[5., 11.], [19., 11.], [19., 22.], [5., 22.]], p.fill);
-            p.circle(12., 15., 1.3, p.accent);
-            p.line(&[[12., 16.], [12., 19.]], p.accent);
-        }
-        Icon::SnapMidpoint => {
-            p.line(&[[2., 18.], [22., 18.]], p.ink);
-            p.face(&[[7., 13.], [17., 13.], [12., 5.]], p.fill);
-            p.line(&[[12., 16.], [12., 21.]], p.accent);
-        }
-        Icon::SnapCenter => {
-            p.circle(12., 12., 7., p.accent);
-            p.line(&[[2., 12.], [22., 12.]], p.ink);
-            p.line(&[[12., 2.], [12., 22.]], p.ink);
-            p.circle(12., 12., 1.5, p.accent);
-        }
-        Icon::Label => {
-            p.face(&[[2., 4.], [22., 4.], [22., 20.], [2., 20.]], p.fill);
-            p.line(&[[6., 8.], [18., 8.]], p.accent);
-            p.line(&[[12., 8.], [12., 17.]], p.ink);
-            p.line(&[[9., 17.], [15., 17.]], p.ink);
-        }
-        Icon::Sweep => {
-            p.face(&[[2., 15.], [6., 15.], [6., 21.], [2., 21.]], p.fill);
-            p.circle(19., 5., 3., p.accent);
-            p.painter
-                .add(egui::epaint::CubicBezierShape::from_points_stroke(
-                    [p.p(6., 18.), p.p(8., 7.), p.p(11., 7.), p.p(19., 8.)],
-                    false,
-                    egui::Color32::TRANSPARENT,
-                    egui::Stroke::new(1.5, p.ink),
-                ));
-        }
-        Icon::Loft => {
-            p.face(&[[4., 17.], [18., 17.], [21., 21.], [7., 21.]], p.fill);
-            p.circle(12., 5., 3.5, p.accent);
-            p.line(&[[4., 17.], [8.5, 5.]], p.ink);
-            p.line(&[[21., 21.], [15.5, 5.]], p.ink);
-        }
-        Icon::Revolve => {
-            p.line(&[[12., 2.], [12., 22.]], p.ink);
-            p.line(
-                &[
-                    [14., 5.],
-                    [19., 8.],
-                    [21., 12.],
-                    [19., 17.],
-                    [14., 19.],
-                    [7., 18.],
-                    [4., 15.],
-                ],
-                p.accent,
-            );
-            p.arrow([4., 15.], [4., 9.]);
-            p.face(&[[7., 7.], [11., 7.], [11., 17.], [7., 17.]], p.fill);
-        }
-        Icon::Move => {
-            for point in [[12., 2.], [22., 12.], [12., 22.], [2., 12.]] {
-                p.arrow([12., 12.], point);
-            }
-        }
-        Icon::Mirror => {
-            p.line(&[[12., 2.], [12., 22.]], p.accent);
-            p.face(&[[3., 19.], [9., 6.], [9., 19.]], p.fill);
-            p.face(&[[15., 6.], [21., 19.], [15., 19.]], p.fill);
-        }
-        Icon::Pattern | Icon::RectangularPattern => {
-            for x in [3., 14.] {
-                for y in [3., 14.] {
-                    p.face(
-                        &[[x, y], [x + 6., y], [x + 6., y + 6.], [x, y + 6.]],
-                        if icon == Icon::RectangularPattern {
-                            p.accent.gamma_multiply(0.35)
-                        } else {
-                            p.fill
-                        },
-                    );
-                }
-            }
-        }
-        Icon::Measure => {
-            p.face(&[[3., 17.], [17., 3.], [22., 8.], [8., 22.]], p.fill);
-            for i in 0..4 {
-                let x = 7. + i as f32 * 3.;
-                p.line(
-                    &[[x, 17. - i as f32 * 3.], [x - 2., 15. - i as f32 * 3.]],
-                    p.ink,
-                );
-            }
-        }
-        Icon::Parameters => {
-            for (y, x) in [(5., 8.), (12., 16.), (19., 10.)] {
-                p.line(&[[3., y], [21., y]], p.ink);
-                p.face(
-                    &[
-                        [x - 2., y - 2.],
-                        [x + 2., y - 2.],
-                        [x + 2., y + 2.],
-                        [x - 2., y + 2.],
-                    ],
-                    p.fill,
-                );
-            }
-        }
-        Icon::Fit => {
-            for (x, y, dx, dy) in [
-                (3., 3., 1., 1.),
-                (21., 3., -1., 1.),
-                (3., 21., 1., -1.),
-                (21., 21., -1., -1.),
-            ] {
-                p.line(&[[x, y + dy * 5.], [x, y], [x + dx * 5., y]], p.ink);
-            }
-            p.face(&[[9., 9.], [15., 9.], [15., 15.], [9., 15.]], p.fill);
-        }
-        Icon::Front | Icon::Top | Icon::Side => {
-            p.cube();
-            let face = match icon {
-                Icon::Front => vec![[3., 8.], [12., 13.], [12., 22.], [3., 17.]],
-                Icon::Top => vec![[3., 8.], [12., 3.], [21., 8.], [12., 13.]],
-                _ => vec![[12., 13.], [21., 8.], [21., 17.], [12., 22.]],
-            };
-            p.face(&face, p.accent);
-        }
-        Icon::Perspective => {
-            p.face(&[[3., 5.], [21., 2.], [21., 22.], [3., 19.]], p.fill);
-            p.line(&[[3., 5.], [13., 10.], [21., 2.]], p.ink);
-            p.line(&[[13., 10.], [13., 20.]], p.ink);
-        }
-        Icon::Eye | Icon::EyeOff => {
-            p.line(
-                &[
-                    [2., 12.],
-                    [6., 7.],
-                    [12., 5.],
-                    [18., 7.],
-                    [22., 12.],
-                    [18., 17.],
-                    [12., 19.],
-                    [6., 17.],
-                    [2., 12.],
-                ],
-                p.ink,
-            );
-            p.circle(12., 12., 3., p.accent);
-            if icon == Icon::EyeOff {
-                p.line(&[[3., 3.], [21., 21.]], p.ink);
-            }
-        }
-        Icon::RotateClockwise | Icon::RotateCounterclockwise => {
-            let mirror = if icon == Icon::RotateClockwise {
-                1.
-            } else {
-                -1.
-            };
-            let points: Vec<_> = (0..=24)
-                .map(|i| {
-                    let angle = (-0.8 + i as f32 / 24. * 1.6) * std::f32::consts::PI;
-                    [12. + mirror * 8. * angle.cos(), 12. + 8. * angle.sin()]
-                })
-                .collect();
-            p.line(&points, p.ink);
-            if let [.., a, b] = points.as_slice() {
-                p.arrow(*a, *b);
-            }
-        }
-        Icon::Minimize => p.line(&[[5., 17.], [19., 17.]], p.ink),
-        Icon::Maximize => p.line(
-            &[[5., 5.], [19., 5.], [19., 19.], [5., 19.], [5., 5.]],
-            p.ink,
-        ),
-        Icon::Restore => {
-            p.line(&[[8., 4.], [20., 4.], [20., 16.], [17., 16.]], p.ink);
-            p.line(
-                &[[4., 8.], [16., 8.], [16., 20.], [4., 20.], [4., 8.]],
-                p.ink,
-            );
-        }
-        Icon::Close => {
-            p.line(&[[6., 6.], [18., 18.]], p.ink);
-            p.line(&[[18., 6.], [6., 18.]], p.ink);
-        }
-        Icon::Search => {
-            p.circle(10., 10., 6., p.ink);
-            p.line(&[[15., 15.], [21., 21.]], p.ink);
-        }
-        Icon::Check => p.line(&[[4., 12.], [10., 18.], [21., 5.]], theme::GREEN),
-        Icon::Select => p.line(
-            &[
-                [5., 2.],
-                [5., 20.],
-                [10., 16.],
-                [14., 22.],
-                [17., 20.],
-                [13., 14.],
-                [20., 13.],
-                [5., 2.],
-            ],
-            p.ink,
-        ),
-        Icon::Line => {
-            p.line(&[[4., 19.], [20., 4.]], p.accent);
-            p.circle(4., 19., 2., p.ink);
-            p.circle(20., 4., 2., p.ink);
-        }
-        Icon::LineSymmetric => {
-            // O apoio central separa duas metades iguais, com setas opostas.
-            p.arrow([12., 12.], [3., 20.]);
-            p.arrow([12., 12.], [21., 4.]);
-            p.circle(12., 12., 2., p.ink);
-            p.line(&[[8., 4.], [16., 20.]], p.ink);
-        }
-        Icon::LineConstruction | Icon::LineInfinite => {
-            let color = p.accent;
-            for (a, b) in [(3., 7.), (10., 14.), (17., 21.)] {
-                p.line(&[[a, 24. - a], [b, 24. - b]], color);
-            }
-            if icon == Icon::LineConstruction {
-                p.circle(3., 21., 1.5, color);
-                p.circle(21., 3., 1.5, color);
-            } else {
-                p.line(&[[1., 18.], [1., 23.], [6., 23.]], color);
-                p.line(&[[18., 1.], [23., 1.], [23., 6.]], color);
-            }
-        }
-        Icon::Rectangle => p.face(&[[3., 5.], [21., 5.], [21., 19.], [3., 19.]], p.fill),
-        Icon::RectangleCenter => {
-            p.face(&[[3., 5.], [21., 5.], [21., 19.], [3., 19.]], p.fill);
-            p.line(&[[3., 5.], [21., 19.]], p.accent);
-            p.line(&[[3., 19.], [21., 5.]], p.accent);
-            p.circle(12., 12., 2., p.ink);
-        }
-        Icon::RectangleInclined => {
-            p.face(&[[2., 11.], [16., 3.], [22., 13.], [8., 21.]], p.fill);
-            // O primeiro lado e o marcador de ângulo reto revelam a construção.
-            p.line(&[[2., 11.], [16., 3.]], p.accent);
-            p.line(&[[12.5, 5.], [14.5, 8.5], [18., 6.5]], p.ink);
-            p.circle(2., 11., 1.5, p.ink);
-            p.circle(16., 3., 1.5, p.ink);
-        }
-        Icon::Circle => {
-            p.circle(12., 12., 9., p.accent);
-            p.line(&[[10., 12.], [14., 12.]], p.ink);
-            p.line(&[[12., 10.], [12., 14.]], p.ink);
-        }
-        Icon::CircleDiameter => {
-            p.circle(12., 12., 9., p.accent);
-            p.line(&[[5.6, 18.4], [18.4, 5.6]], p.ink);
-            p.circle(5.6, 18.4, 1.7, p.ink);
-            p.circle(18.4, 5.6, 1.7, p.ink);
-        }
-        Icon::CircleTangent => {
-            // Duas retas perpendiculares e os dois pontos de tangência.
-            p.line(&[[3., 2.], [3., 21.], [22., 21.]], p.ink);
-            p.circle(11., 13., 8., p.accent);
-            p.circle(3., 13., 1.5, p.ink);
-            p.circle(11., 21., 1.5, p.ink);
-        }
-        Icon::Arc => {
-            let points: Vec<_> = (0..=20)
-                .map(|i| {
-                    let a = i as f32 / 20. * std::f32::consts::PI;
-                    [12. + 9. * a.cos(), 16. - 9. * a.sin()]
-                })
-                .collect();
-            p.line(&points, p.accent);
-            p.circle(3., 16., 1.5, p.ink);
-            p.circle(21., 16., 1.5, p.ink);
-        }
-        Icon::Trim => {
-            p.circle(6., 18., 3., p.ink);
-            p.circle(18., 18., 3., p.ink);
-            p.line(&[[7., 15.], [19., 3.]], p.accent);
-            p.line(&[[17., 15.], [5., 3.]], p.accent);
-        }
-        Icon::SketchOffset => {
-            p.line(&[[3., 19.], [3., 8.], [8., 3.], [20., 3.]], p.ink);
-            p.line(&[[8., 21.], [8., 11.], [11., 8.], [22., 8.]], p.accent);
-            p.arrow([13., 16.], [20., 16.]);
-        }
-        Icon::SketchChamfer => {
-            p.line(&[[4., 3.], [4., 14.], [10., 20.], [21., 20.]], p.ink);
-            p.line(&[[4., 14.], [10., 20.]], p.accent);
-        }
-        Icon::SketchFillet => {
-            // Mesmo canto inferior esquerdo do Chanfrar; somente o trecho
-            // transformado é verde, seguindo a referência visual do usuário.
-            p.line(&[[4., 3.], [4., 14.]], p.ink);
-            p.line(&[[10., 20.], [21., 20.]], p.ink);
-            let points: Vec<_> = (0..=12)
-                .map(|i| {
-                    let angle = std::f32::consts::PI - i as f32 / 12. * std::f32::consts::FRAC_PI_2;
-                    [10. + 6. * angle.cos(), 14. + 6. * angle.sin()]
-                })
-                .collect();
-            p.line(&points, p.accent);
-        }
-        Icon::SketchMirror => {
-            p.line(&[[12., 2.], [12., 22.]], p.ink);
-            p.face(&[[3., 18.], [8., 7.], [8., 18.]], p.accent);
-            p.line(&[[21., 18.], [16., 7.], [16., 18.], [21., 18.]], p.accent);
-        }
-        Icon::CircularPattern => {
-            for i in 0..6 {
-                let angle = i as f32 * std::f32::consts::TAU / 6.;
-                p.circle(12. + 8. * angle.cos(), 12. + 8. * angle.sin(), 2., p.accent);
-            }
-            p.circle(12., 12., 1., p.ink);
-        }
-        Icon::Dimension => {
-            p.line(&[[3., 3.], [3., 21.]], p.ink);
-            p.line(&[[21., 3.], [21., 21.]], p.ink);
-            p.line(&[[4., 12.], [20., 12.]], p.accent);
-            p.arrow([9., 12.], [4., 12.]);
-            p.arrow([15., 12.], [20., 12.]);
-        }
-        Icon::ConstraintHorizontalVertical => p.line(&[[5., 3.], [5., 19.], [21., 19.]], p.accent),
-        Icon::ConstraintCoincident => {
-            p.line(&[[3., 19.], [10., 12.], [21., 17.]], p.ink);
-            p.circle(10., 12., 3., p.accent);
-        }
-        Icon::ConstraintTangent => {
-            p.circle(12., 13., 6., p.accent);
-            p.line(&[[2., 7.], [22., 7.]], p.ink);
-        }
-        Icon::ConstraintEqual => {
-            p.line(&[[4., 8.], [20., 8.]], p.accent);
-            p.line(&[[4., 16.], [20., 16.]], p.accent);
-        }
-        Icon::ConstraintParallel => {
-            p.line(&[[4., 19.], [12., 4.]], p.accent);
-            p.line(&[[12., 20.], [20., 5.]], p.accent);
-        }
-        Icon::ConstraintPerpendicular => {
-            p.line(&[[3., 19.], [21., 19.]], p.accent);
-            p.line(&[[12., 3.], [12., 19.]], p.accent);
-            p.line(&[[12., 14.], [17., 14.], [17., 19.]], p.ink);
-        }
-        // Controles de reprodução da linha do tempo: barra indica o limite do histórico.
-        Icon::First | Icon::Last => {
-            let mirror = |x: f32| if icon == Icon::Last { 24. - x } else { x };
-            p.line(&[[mirror(5.), 5.], [mirror(5.), 19.]], p.ink);
-            p.face(
-                &[[mirror(19.), 5.], [mirror(8.), 12.], [mirror(19.), 19.]],
-                p.fill,
-            );
-        }
-        Icon::Previous | Icon::Next => {
-            let mirror = |x: f32| if icon == Icon::Next { 24. - x } else { x };
-            p.face(
-                &[[mirror(17.), 5.], [mirror(6.), 12.], [mirror(17.), 19.]],
-                p.fill,
-            );
-        }
-        Icon::Delete => {
-            p.line(&[[4., 6.], [20., 6.]], p.ink);
-            p.line(&[[9., 6.], [9., 3.], [15., 3.], [15., 6.]], p.ink);
-            p.face(&[[6., 6.], [18., 6.], [17., 21.], [7., 21.]], p.fill);
-            p.line(&[[10., 10.], [10., 17.]], p.accent);
-            p.line(&[[14., 10.], [14., 17.]], p.accent);
-        }
-        Icon::Warning => {
-            p.face(
-                &[[12., 2.], [22., 21.], [2., 21.]],
-                egui::Color32::from_rgb(255, 226, 160),
-            );
-            p.line(&[[12., 8.], [12., 15.]], theme::WARNING);
-            p.circle(12., 18., 0.8, theme::WARNING);
-        }
-        // Direções da extrusão: o plano do perfil é a linha horizontal.
-        Icon::OneSide | Icon::TwoSides | Icon::Symmetric => {
-            let base = if icon == Icon::OneSide { 19. } else { 14. };
-            p.line(&[[3., base], [21., base]], p.ink);
-            p.arrow([12., base], [12., 3.]);
-            match icon {
-                Icon::TwoSides => p.arrow([12., base], [12., 19.]),
-                Icon::Symmetric => p.arrow([12., base], [12., 24.]),
-                _ => {}
-            }
-        }
-        Icon::ToFace => {
-            p.line(&[[3., 20.], [21., 20.]], p.ink);
-            p.face(&[[3., 3.], [21., 3.], [21., 6.], [3., 6.]], p.fill);
-            p.arrow([12., 20.], [12., 7.]);
-        }
-        Icon::Flip => {
-            p.arrow([8., 18.], [8., 4.]);
-            p.arrow([16., 6.], [16., 20.]);
-        }
-        // Resultado de operações entre corpos.
-        Icon::Join | Icon::CutBody | Icon::IntersectBody => {
-            let left = [[3., 6.], [14., 6.], [14., 17.], [3., 17.]];
-            match icon {
-                Icon::Join => {
-                    p.face(
-                        &[
-                            [3., 6.],
-                            [14., 6.],
-                            [14., 10.],
-                            [21., 10.],
-                            [21., 21.],
-                            [10., 21.],
-                            [10., 17.],
-                            [3., 17.],
-                        ],
-                        p.fill,
-                    );
-                    p.line(&[[15., 15.5], [19., 15.5]], p.accent);
-                    p.line(&[[17., 13.5], [17., 17.5]], p.accent);
-                }
-                Icon::CutBody => {
-                    p.face(&left, p.fill);
-                    p.line(
-                        &[[10., 10.], [21., 10.], [21., 21.], [10., 21.], [10., 10.]],
-                        p.accent,
-                    );
-                    p.face(
-                        &[[10., 10.], [14., 10.], [14., 17.], [10., 17.]],
-                        egui::Color32::WHITE,
-                    );
-                }
-                _ => {
-                    p.line(
-                        &[[3., 6.], [14., 6.], [14., 17.], [3., 17.], [3., 6.]],
-                        p.ink,
-                    );
-                    p.line(
-                        &[[10., 10.], [21., 10.], [21., 21.], [10., 21.], [10., 10.]],
-                        p.ink,
-                    );
-                    p.face(&[[10., 10.], [14., 10.], [14., 17.], [10., 17.]], p.accent);
-                }
-            }
-        }
-        Icon::Align => {
-            p.face(&[[3., 3.], [10., 3.], [10., 10.], [3., 10.]], p.fill);
-            p.face(&[[14., 14.], [21., 14.], [21., 21.], [14., 21.]], p.fill);
-            p.arrow([10., 10.], [14., 14.]);
-            p.line(&[[3., 12.], [21., 12.]], p.ink);
-        }
-        Icon::Group => {
-            p.line(&[[2., 6.], [2., 2.], [6., 2.]], p.accent);
-            p.line(&[[18., 2.], [22., 2.], [22., 6.]], p.accent);
-            p.line(&[[22., 18.], [22., 22.], [18., 22.]], p.accent);
-            p.line(&[[6., 22.], [2., 22.], [2., 18.]], p.accent);
-            p.face(&[[5., 6.], [12., 6.], [12., 12.], [5., 12.]], p.fill);
-            p.face(&[[12., 12.], [19., 12.], [19., 18.], [12., 18.]], p.fill);
-        }
-        Icon::Section => {
-            p.cube();
-            p.face(
-                &[[1., 13.], [14., 6.], [23., 11.], [10., 18.]],
-                egui::Color32::from_rgba_unmultiplied(196, 82, 64, 120),
-            );
-            p.line(
-                &[[1., 13.], [14., 6.], [23., 11.], [10., 18.], [1., 13.]],
-                egui::Color32::from_rgb(160, 60, 48),
-            );
-        }
-        Icon::Copy => {
-            p.face(&[[8., 3.], [20., 3.], [20., 16.], [8., 16.]], p.fill);
-            p.face(
-                &[[4., 8.], [16., 8.], [16., 21.], [4., 21.]],
-                egui::Color32::WHITE,
-            );
-            p.line(&[[7., 12.], [13., 12.]], p.accent);
-            p.line(&[[7., 16.], [13., 16.]], p.accent);
-        }
-        // Mover por alinhamento: o elemento móvel (preenchido) encontra o destino.
-        Icon::FaceToFace => {
-            p.face(&[[2., 6.], [10., 6.], [10., 18.], [2., 18.]], p.fill);
-            p.face(
-                &[[14., 6.], [22., 6.], [22., 18.], [14., 18.]],
-                egui::Color32::WHITE,
-            );
-            p.line(&[[10., 12.], [14., 12.]], p.accent);
-            p.line(&[[12., 3.], [12., 21.]], p.accent);
-        }
-        Icon::EdgeToEdge => {
-            p.line(&[[3., 20.], [11., 4.]], p.ink);
-            p.line(&[[13., 20.], [21., 4.]], p.accent);
-            p.arrow([7., 12.], [15., 12.]);
-        }
-        Icon::PointToPoint => {
-            p.circle(5., 17., 2.5, p.ink);
-            p.circle(19., 7., 2.5, p.accent);
-            p.arrow([7., 15.], [16., 9.]);
-        }
-        // Rascunho de referência: lápis com plano tracejado na cor das referências.
-        Icon::ReferenceSketch => {
-            let violet = if enabled {
-                theme::REFERENCE
-            } else {
-                egui::Color32::from_gray(165)
-            };
-            p.line(&[[3., 21.], [21., 21.]], violet);
-            p.line(&[[3., 21.], [3., 5.]], violet);
-            p.face(
-                &[[7., 16.], [9., 10.], [18., 1.], [22., 5.], [13., 14.]],
-                p.fill,
-            );
-            p.line(&[[9., 10.], [13., 14.]], violet);
-        }
-        Icon::StepFile | Icon::StlFile => {
-            p.line(
-                &[
-                    [15., 3.],
-                    [5., 3.],
-                    [5., 21.],
-                    [19., 21.],
-                    [19., 7.],
-                    [15., 3.],
-                    [15., 7.],
-                    [19., 7.],
-                ],
-                p.ink,
-            );
-            if icon == Icon::StepFile {
-                p.face(&[[8., 11.], [12., 9.], [16., 11.], [12., 13.]], p.fill);
-                p.face(&[[8., 11.], [12., 13.], [12., 18.], [8., 16.]], p.accent);
-            } else {
-                p.face(&[[8., 17.], [12., 9.], [16., 17.]], p.fill);
-                p.line(&[[12., 9.], [12., 17.]], p.accent);
-            }
-        }
-        Icon::Part => {
-            // Componente: bloco com o marcador de peça no canto.
-            p.cube();
-            p.face(&[[15., 15.], [22., 15.], [22., 22.], [15., 22.]], p.fill);
-            p.line(&[[15., 18.5], [22., 18.5]], p.accent);
-        }
-        Icon::Edit => {
-            p.face(
-                &[[15., 4.], [20., 9.], [9., 20.], [4., 20.], [4., 15.]],
-                p.fill,
-            );
-            p.line(&[[13., 6.], [18., 11.]], p.ink);
-            p.line(&[[4., 15.], [9., 20.]], p.accent);
-        }
-        Icon::Origin => {
-            p.line(&[[5., 19.], [21., 19.]], p.ink);
-            p.line(&[[5., 19.], [5., 3.]], p.ink);
-            p.line(&[[5., 19.], [15., 9.]], p.accent);
-            p.circle(5., 19., 2.5, p.accent);
-        }
-        // Plano-base em contorno, plano novo preenchido acima e o deslocamento entre eles.
-        Icon::OffsetPlane => {
-            p.line(
-                &[[2., 21.], [7., 15.], [22., 15.], [17., 21.], [2., 21.]],
-                p.ink,
-            );
-            p.face(&[[2., 10.], [7., 4.], [22., 4.], [17., 10.]], p.fill);
-            p.arrow([12., 19.], [12., 8.]);
-        }
-        Icon::WorkPlane => {
-            p.face(&[[2., 18.], [8., 7.], [22., 7.], [16., 18.]], p.fill);
-            p.line(&[[9., 12.5], [15., 12.5]], p.accent);
-        }
-        Icon::Project => {
-            p.line(
-                &[
-                    [16., 3.],
-                    [5., 3.],
-                    [5., 21.],
-                    [20., 21.],
-                    [20., 7.],
-                    [16., 3.],
-                ],
-                p.ink,
-            );
-            p.face(&[[8., 12.], [12.5, 10.], [17., 12.], [12.5, 14.]], p.fill);
-            p.face(&[[8., 12.], [12.5, 14.], [12.5, 18.], [8., 16.]], p.fill);
-            p.face(&[[12.5, 14.], [17., 12.], [17., 16.], [12.5, 18.]], p.fill);
-        }
-        Icon::NewBody => {
-            p.cube();
-            p.face(
-                &[[14., 14.], [22., 14.], [22., 22.], [14., 22.]],
-                egui::Color32::WHITE,
-            );
-            p.line(&[[18., 15.5], [18., 20.5]], p.accent);
-            p.line(&[[15.5, 18.], [20.5, 18.]], p.accent);
-        }
-    }
+    draw::paint(painter, rect, icon, enabled, ink, dark);
 }
 
+/// Folha de contato dos ícones, usada pela captura de revisão visual.
+pub(super) fn preview_sheet(ui: &mut egui::Ui) {
+    draw::preview_sheet(ui);
+}
 /// A faixa usa medidas próprias; os botões maiores dos painéis de opções
 /// conservam sua dimensão para não alterar as ferramentas de desenho.
 pub(super) const RIBBON_BUTTON_SIZE: egui::Vec2 = egui::vec2(72., 54.);

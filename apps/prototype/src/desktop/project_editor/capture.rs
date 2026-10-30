@@ -24,6 +24,7 @@ pub(crate) fn render_project_at_size(
         },
         |_, _| Vec::new(),
         |_| true,
+        false,
     )
 }
 
@@ -84,11 +85,12 @@ pub(crate) fn render_ui_scenario(
         | "extrude-zero"
         | "extrude-face"
         | "status-dialog"
+        | "icons"
         | "extrude-cut" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog, icons."
                     .into(),
             );
         }
@@ -292,6 +294,7 @@ pub(crate) fn render_ui_scenario(
                     })
                 }
         },
+        scenario == "icons",
     )
 }
 
@@ -363,6 +366,10 @@ fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    // A folha de contato substitui o editor inteiro; não depende do projeto.
+    if scenario == "icons" {
+        return Ok(());
+    }
     if matches!(scenario, "paint" | "paint-hover") {
         editor.shell.tab = shell::RibbonTab::Model;
         editor.open_paint();
@@ -984,6 +991,7 @@ fn render_with(
     setup: impl FnOnce(&mut Editor) -> Result<(), Box<dyn Error>>,
     events: impl Fn(&Editor, usize) -> Vec<egui::Event>,
     ready: impl Fn(&Editor) -> bool,
+    sheet: bool,
 ) -> Result<(), Box<dyn Error>> {
     if !(900..=3840).contains(&size[0]) || !(600..=2160).contains(&size[1]) {
         return Err("A captura aceita largura de 900 a 3840 e altura de 600 a 2160 pixels.".into());
@@ -1073,7 +1081,13 @@ fn render_with(
             events: events(&editor, frame),
             ..Default::default()
         };
-        let mut output = context.run_ui(input, |ui| editor.draw(ui));
+        let mut output = context.run_ui(input, |ui| {
+            if sheet {
+                icons::preview_sheet(ui);
+            } else {
+                editor.draw(ui);
+            }
+        });
         let shapes = context.tessellate(output.shapes, output.pixels_per_point);
         let descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: size,
@@ -6923,6 +6937,7 @@ mod tests {
                         .as_ref()
                         .is_some_and(|w| w.projected_region_count() == 1)
                 },
+                false,
             )?;
         }
         Ok(())
@@ -7044,6 +7059,7 @@ mod tests {
                     },
                     |_, _| vec![],
                     |_| true,
+                    false,
                 )?;
             }
             // O botão mostra a ação oposta ao estado: abrir o forte, fechar o fraco.

@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.16.0 — 30/10/2026
+
+- Ícones da interface redesenhados sobre a mesma grade de 24 unidades: traço uniforme de 2 unidades, pontas e junções arredondadas, preenchimentos tonais e uma única cor de ação por contexto. A geometria foi simplificada para continuar legível de 16 a 46 pontos, da árvore à faixa e aos painéis.
+- Arquivos, modelagem, rascunho, montagem, vista, janela, reprodução da linha do tempo e acessórios passam pelo mesmo sistema visual; o rascunho conserva preto/verde e referências conservam o violeta. O estado desabilitado e a barra escura da janela usam paletas próprias, sem perder contraste.
+- Novo cenário de captura `icons` desenha a folha de contato de todos os ícones, com amostra da barra escura; `--render-ui-scenario` aceita largura e altura opcionais para revisão em alta resolução. Formato `.3dnator` mantido em 37; etapa local sem push/release.
+- Nenhuma dependência ou recurso gráfico externo foi adicionado: os desenhos continuam vetoriais e próprios do 3dnator.
+
 ## 0.15.0 — 30/10/2026
 
 - Confirmar Extrusão com distância zero subdivide as faces coplanares pelo perfil de rascunho. A partição ocorre no B-rep exato, preserva o volume, os furos e a pintura, e aceita várias áreas no mesmo plano. A base é persistida explicitamente; contatos ambíguos ou perdidos e perfis sem uma divisão nova são recusados atomicamente.
