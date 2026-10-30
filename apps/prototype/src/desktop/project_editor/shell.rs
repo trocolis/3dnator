@@ -1353,54 +1353,52 @@ impl Editor {
                 self.ribbon_group(ui, &[Action::ExportStl, Action::ExportStep]);
             }
             RibbonTab::Sketch => {
-                if self.current().sketch_edit.is_none() {
-                    // A aba Rascunho é fixa; sem edição ativa ela inicia um novo rascunho.
-                    self.ribbon_group(ui, &[Action::NewSketch]);
-                } else {
-                    self.sketch_section(
-                        ui,
-                        &[
-                            Action::SketchTool(sketch_editor::Tool::Line),
-                            Action::SketchTool(sketch_editor::Tool::Rectangle),
-                            Action::SketchTool(sketch_editor::Tool::Circle),
-                            Action::SketchTool(sketch_editor::Tool::Arc),
-                            Action::SketchTool(sketch_editor::Tool::Project),
-                            Action::SketchImage,
-                        ],
-                        &[
-                            Action::SketchTool(sketch_editor::Tool::Select),
-                            Action::SketchTool(sketch_editor::Tool::Line),
-                            Action::SketchTool(sketch_editor::Tool::Rectangle),
-                            Action::SketchTool(sketch_editor::Tool::Circle),
-                            Action::SketchTool(sketch_editor::Tool::Arc),
-                            Action::SketchTool(sketch_editor::Tool::Project),
-                            Action::SketchImage,
-                        ],
-                    );
-                    self.sketch_section(
-                        ui,
-                        &[
-                            Action::SketchTool(sketch_editor::Tool::Trim),
-                            Action::SketchEdit(SketchEdit::Offset),
-                            Action::SketchEdit(SketchEdit::Fillet),
-                            Action::SketchEdit(SketchEdit::Chamfer),
-                            Action::SketchEdit(SketchEdit::Mirror),
-                            Action::SketchTool(sketch_editor::Tool::Dimension),
-                        ],
-                        &[
-                            Action::SketchTool(sketch_editor::Tool::Trim),
-                            Action::SketchEdit(SketchEdit::Offset),
-                            Action::SketchEdit(SketchEdit::Fillet),
-                            Action::SketchEdit(SketchEdit::Chamfer),
-                            Action::SketchEdit(SketchEdit::Extend),
-                            Action::SketchEdit(SketchEdit::Mirror),
-                            Action::SketchTool(sketch_editor::Tool::Dimension),
-                            Action::SketchEdit(SketchEdit::Delete),
-                        ],
-                    );
-                    let exit = [Action::FinishSketch, Action::CancelSketch];
-                    self.sketch_section(ui, &exit, &[]);
-                }
+                // A aba Rascunho mantém o ferramental completo visível fora da edição;
+                // os botões ficam desativados até existir um rascunho em edição.
+                self.ribbon_group(ui, &[Action::NewSketch]);
+                self.sketch_section(
+                    ui,
+                    &[
+                        Action::SketchTool(sketch_editor::Tool::Line),
+                        Action::SketchTool(sketch_editor::Tool::Rectangle),
+                        Action::SketchTool(sketch_editor::Tool::Circle),
+                        Action::SketchTool(sketch_editor::Tool::Arc),
+                        Action::SketchTool(sketch_editor::Tool::Project),
+                        Action::SketchImage,
+                    ],
+                    &[
+                        Action::SketchTool(sketch_editor::Tool::Select),
+                        Action::SketchTool(sketch_editor::Tool::Line),
+                        Action::SketchTool(sketch_editor::Tool::Rectangle),
+                        Action::SketchTool(sketch_editor::Tool::Circle),
+                        Action::SketchTool(sketch_editor::Tool::Arc),
+                        Action::SketchTool(sketch_editor::Tool::Project),
+                        Action::SketchImage,
+                    ],
+                );
+                self.sketch_section(
+                    ui,
+                    &[
+                        Action::SketchTool(sketch_editor::Tool::Trim),
+                        Action::SketchEdit(SketchEdit::Offset),
+                        Action::SketchEdit(SketchEdit::Fillet),
+                        Action::SketchEdit(SketchEdit::Chamfer),
+                        Action::SketchEdit(SketchEdit::Mirror),
+                        Action::SketchTool(sketch_editor::Tool::Dimension),
+                    ],
+                    &[
+                        Action::SketchTool(sketch_editor::Tool::Trim),
+                        Action::SketchEdit(SketchEdit::Offset),
+                        Action::SketchEdit(SketchEdit::Fillet),
+                        Action::SketchEdit(SketchEdit::Chamfer),
+                        Action::SketchEdit(SketchEdit::Extend),
+                        Action::SketchEdit(SketchEdit::Mirror),
+                        Action::SketchTool(sketch_editor::Tool::Dimension),
+                        Action::SketchEdit(SketchEdit::Delete),
+                    ],
+                );
+                let exit = [Action::FinishSketch, Action::CancelSketch];
+                self.sketch_section(ui, &exit, &[]);
             }
         }
     }

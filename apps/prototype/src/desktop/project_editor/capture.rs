@@ -3663,6 +3663,36 @@ mod tests {
                 "nome de seção visível: {caption}"
             );
         }
+        editor.shell.tab = shell::RibbonTab::Sketch;
+        let mut sketch_labels = Vec::new();
+        for _ in 0..2 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440., 900.),
+                    )),
+                    time: Some(context.input(|i| i.time) + 1. / 60.),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            sketch_labels = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+        }
+        for tool in [text(T::Line), text(T::FinishSketchShort), text(T::Cancel)] {
+            assert!(
+                sketch_labels.iter().any(|label| label == tool),
+                "ferramenta de rascunho oculta fora da edição: {tool}"
+            );
+        }
         Ok(())
     }
 

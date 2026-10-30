@@ -4,7 +4,7 @@
 
 ## 0.17.0 — 30/10/2026
 
-- A faixa passa a ter quatro abas fixas, na ordem **Montagem**, **Construção**, **Rascunho** e **Inspecionar**. A antiga aba Peça foi renomeada para Construção; Rascunho continua disponível sem edição ativa e, nesse estado, oferece **Novo rascunho**.
+- A faixa passa a ter quatro abas fixas, na ordem **Montagem**, **Construção**, **Rascunho** e **Inspecionar**. A antiga aba Peça foi renomeada para Construção; Rascunho continua disponível sem edição ativa e, nesse estado, mantém todo o ferramental visível e desativado, com **Novo rascunho** habilitado.
 - Os nomes das seções deixaram de aparecer no rodapé dos grupos. A faixa ficou mais compacta e os grupos continuam separados; as ferramentas secundárias (Selecionar do Criar, Estender e Excluir do Modificar) ficam num botão compacto de menu (chevron) à direita do grupo.
 - Novo cenário de captura `rascunho-tab` mostra a aba sem edição ativa. Teste gráfico opcional confere as quatro abas e a ausência dos nomes de seção; a altura uniforme da faixa entre abas continua coberta.
 - Formato `.3dnator` mantido em 37; etapa local sem push/release.
