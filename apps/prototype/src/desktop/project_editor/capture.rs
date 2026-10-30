@@ -87,11 +87,13 @@ pub(crate) fn render_ui_scenario(
         | "status-dialog"
         | "icons"
         | "rascunho-tab"
+        | "sketch-line-panel"
+        | "sketch-project-panel"
         | "extrude-cut" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog, icons, rascunho-tab."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
         }
@@ -374,6 +376,18 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
     // A aba Rascunho é fixa; sem edição ativa ela oferece o início de um rascunho.
     if scenario == "rascunho-tab" {
         editor.shell.tab = shell::RibbonTab::Sketch;
+        return Ok(());
+    }
+    // Painéis de ferramenta para revisão visual das opções compactas.
+    if scenario == "sketch-line-panel" || scenario == "sketch-project-panel" {
+        open_first_sketch(editor)?;
+        if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
+            work.select_tool(if scenario == "sketch-project-panel" {
+                sketch_editor::Tool::Project
+            } else {
+                sketch_editor::Tool::Line
+            });
+        }
         return Ok(());
     }
     if matches!(scenario, "paint" | "paint-hover") {
@@ -3815,9 +3829,6 @@ mod tests {
                     T::SketchLineType
                 }),
             )?;
-            if tool != Tool::Trim {
-                label_position(&mut editor, &context, text(T::SketchMeasurements))?;
-            }
             for hint in [
                 T::SketchContinuousLineHint,
                 T::SketchRectangleNormalHint,
@@ -5378,8 +5389,7 @@ mod tests {
                 [-25., 45.],
             ),
         ] {
-            let choice = label_position(&mut editor, &context, text(label))?;
-            click(&mut editor, &context, choice)?;
+            click_choice(&mut editor, &context, label)?;
             assert_eq!(
                 editor
                     .current()
@@ -5455,7 +5465,7 @@ mod tests {
         sketch.add_point([-100., -100.])?;
         sketch.add_point([100., 100.])?;
         sketch.add_line([35., 35.], [65., 35.], false)?;
-        sketch.add_line([50., 20.], [50., 50.], false)?;
+        sketch.add_line([50., 20.], [50., 60.], false)?;
         let mut document = Document::new("Gestos de desenho")?;
         let (part, id) = document.add_sketch(None, sketch)?;
         let mut editor =
@@ -5476,8 +5486,7 @@ mod tests {
             Ok(())
         };
         let choose = |editor: &mut Editor, label| -> Result<(), Box<dyn Error>> {
-            let position = label_position(editor, &context, text(label))?;
-            click(editor, &context, position)
+            click_choice(editor, &context, label)
         };
         let point = |editor: &mut Editor, p: [f64; 2]| -> Result<(), Box<dyn Error>> {
             let position = sketch_scene::project(
@@ -5610,7 +5619,7 @@ mod tests {
         assert!((radius - 10.).abs() < 1e-5);
         choose(&mut editor, T::SketchCircleTangent)?;
         point(&mut editor, [40., 35.])?;
-        point(&mut editor, [50., 25.])?;
+        point(&mut editor, [50., 60.])?;
         assert!(drawing(&editor));
         point(&mut editor, [55., 40.])?;
         assert!(!drawing(&editor));
@@ -7424,8 +7433,7 @@ mod tests {
         click(&mut editor, &context, axis_label + egui::vec2(125., 0.))?;
         let position = at(&editor, [0., 10., 0.])?;
         click(&mut editor, &context, position)?;
-        let construction = label_position(&mut editor, &context, text(T::Construction))?;
-        click(&mut editor, &context, construction)?;
+        click_choice(&mut editor, &context, T::Construction)?;
         let ok = label_position(&mut editor, &context, text(T::Ok))?;
         click(&mut editor, &context, ok)?;
         settle(&mut editor, &context)?;
@@ -7443,8 +7451,7 @@ mod tests {
         click(&mut editor, &context, position)?;
         editor.open_sketch_action(&context, nator_sketch::edit::Action::Offset);
         frame(&mut editor, &context, vec![])?;
-        let double = label_position(&mut editor, &context, text(T::SketchOffsetDouble))?;
-        click(&mut editor, &context, double)?;
+        click_choice(&mut editor, &context, T::SketchOffsetDouble)?;
         label_position(&mut editor, &context, text(T::SketchOffsetSecond))?;
         let value = label_position(&mut editor, &context, "20 mm")?;
         click(&mut editor, &context, value)?;
@@ -8118,8 +8125,7 @@ mod tests {
         click(&mut editor, &context, p)?;
         editor.open_sketch_action(&context, nator_sketch::edit::Action::Offset);
         frame(&mut editor, &context, vec![])?;
-        let double = label_position(&mut editor, &context, text(T::SketchOffsetDouble))?;
-        click(&mut editor, &context, double)?;
+        click_choice(&mut editor, &context, T::SketchOffsetDouble)?;
         // A medida só muda ao arrastar a ponta, sem confirmar por clique no vazio.
         // A primeira entrada recebe 2 mm para manter ambas as setas no canvas.
         let value_field = egui::Id::new("sketch_offset_distance");

@@ -494,9 +494,11 @@ impl Editor {
             command_panel::Footer::None,
             !self.busy(),
             |ui| {
-                ui.text_edit_singleline(&mut draft.image.name);
+                command_panel::row(ui, text(T::ParameterName), |ui| {
+                    ui.text_edit_singleline(&mut draft.image.name);
+                });
                 if draft.placing {
-                    ui.label(text(T::ImageDrawHint));
+                    command_panel::hint(ui, text(T::ImageDrawHint));
                 }
                 for (value, label) in draft
                     .image
@@ -513,7 +515,7 @@ impl Editor {
                         );
                     });
                 }
-                ui.label(text(T::ImageLocalPosition));
+                command_panel::hint(ui, text(T::ImageLocalPosition));
                 for (value, label) in draft.image.origin.iter_mut().zip(["X (mm)", "Y (mm)"]) {
                     command_panel::row(ui, label, |ui| {
                         ui.add(egui::DragValue::new(value).speed(0.1).range(-1e9..=1e9));
@@ -521,13 +523,16 @@ impl Editor {
                 }
                 if let Some(sketch) = self.current().session.document().sketch(draft.image.sketch) {
                     let p = sketch.sketch.plane.world(draft.image.origin);
-                    ui.label(format!(
-                        "{}: {}, {}, {}",
-                        text(T::ImagePosition),
-                        nator_drawing::format_mm(p[0]),
-                        nator_drawing::format_mm(p[1]),
-                        nator_drawing::format_mm(p[2])
-                    ));
+                    command_panel::hint(
+                        ui,
+                        &format!(
+                            "{}: {}, {}, {}",
+                            text(T::ImagePosition),
+                            nator_drawing::format_mm(p[0]),
+                            nator_drawing::format_mm(p[1]),
+                            nator_drawing::format_mm(p[2])
+                        ),
+                    );
                 }
                 ui.add(
                     egui::Slider::new(&mut transparency, 0. ..=100.)

@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Painéis compactos do rascunho — 30/10/2026
+
+- Etapa 0.18.0, formato `.3dnator` mantido em 37. Traço, modo de linha/retângulo/círculo, modo de deslocamento e filtro de Projetar usam os mesmos botões compactos de 30 × 30 pontos dos painéis de Mover e Extrusão, em linhas rotuladas, com a dica de cada opção no tooltip.
+- As medições do rascunho passam a usar a coluna de rótulos dos demais painéis; as dicas ficam pequenas, quebradas na largura do painel. O Projetar ganha botão principal; a imagem usa linha de nome e dicas padronizadas; o Aparar deixa de repetir um botão já selecionado.
+- Capturas inspecionadas em `target/validation/panels-20261030/`: `linha2.png`, `deslocamento2.png` e `projetar.png`. Os cenários `sketch-line-panel` e `sketch-project-panel` produzem os painéis da Linha e do Projetar.
+- Aprovados 266 testes sem OCCT e 366 com OCCT; formatação e Clippy com todos os alvos e avisos negados nas duas configurações. Os ensaios gráficos de modos de desenho, espelhar/deslocar, deslocamento duplo, linha, projeto, imagem e painel transacional passaram.
+
 ## Abas fixas e faixa sem nomes de seção — 30/10/2026
 
 - Etapa 0.17.0, formato `.3dnator` mantido em 37. A faixa passa a ter quatro abas fixas na ordem Montagem, Construção, Rascunho e Inspecionar; a antiga aba Peça foi renomeada para Construção. Sem edição ativa, Rascunho mantém as ferramentas visíveis e desativadas, com **Novo rascunho** habilitado, e continua selecionável.

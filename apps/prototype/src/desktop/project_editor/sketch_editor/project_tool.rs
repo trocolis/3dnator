@@ -2,6 +2,7 @@
 //! coordenadas projetadas são locais ao rascunho. Consultas e materialização
 //! rodam em trabalhadores, e nenhuma escolha publica uma revisão por si só.
 use super::*;
+use crate::desktop::project_editor::command_panel as panel;
 use nator_commands::sketch_projection::{self, Element, Kind};
 
 #[derive(Default)]
@@ -41,15 +42,30 @@ impl Cache {
         self.selected.len()
     }
     pub(super) fn settings(&mut self, ui: &mut egui::Ui) {
-        for (filter, label) in [
-            (None, T::SketchProjectAll),
-            (Some(Kind::Plane), T::SketchProjectPlanes),
-            (Some(Kind::Edge), T::SketchProjectEdges),
-            (Some(Kind::Vertex), T::SketchProjectVertices),
-        ] {
-            ui.radio_value(&mut self.filter, filter, text(label));
-        }
-        ui.separator();
+        panel::row(ui, text(T::SketchProjectFilter), |ui| {
+            panel::choice(
+                ui,
+                &mut self.filter,
+                &[
+                    (None, icons::Icon::Cube, T::SketchProjectAll),
+                    (
+                        Some(Kind::Plane),
+                        icons::Icon::WorkPlane,
+                        T::SketchProjectPlanes,
+                    ),
+                    (
+                        Some(Kind::Edge),
+                        icons::Icon::EdgeToEdge,
+                        T::SketchProjectEdges,
+                    ),
+                    (
+                        Some(Kind::Vertex),
+                        icons::Icon::PointToPoint,
+                        T::SketchProjectVertices,
+                    ),
+                ],
+            );
+        });
         ui.label(format!(
             "{}: {}",
             text(T::ProjectionSelected),
@@ -85,15 +101,22 @@ impl Cache {
         if let Some(index) = remove {
             self.selected.retain(|i| *i != index);
         }
-        ui.label(text(T::ProjectionPickHint));
+        panel::hint(ui, text(T::ProjectionPickHint));
         ui.horizontal(|ui| {
+            let finish = egui::Button::new(
+                egui::RichText::new(text(T::ProjectionFinish))
+                    .strong()
+                    .color(egui::Color32::WHITE),
+            )
+            .fill(theme::ACCENT)
+            .min_size(egui::vec2(64., 26.));
             if ui
                 .add_enabled(
                     !self.selected.is_empty()
                         && self.applying.is_none()
                         && self.running.is_none()
                         && self.click.is_none(),
-                    egui::Button::new(text(T::ProjectionFinish)),
+                    finish,
                 )
                 .clicked()
             {

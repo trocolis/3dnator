@@ -400,6 +400,42 @@ pub(super) fn choice<V: PartialEq + Copy>(
     changed
 }
 
+/// Como `choice`, mas cada opção tem uma dica própria; o rótulo continua no
+/// nome acessível e no tooltip curto do botão compacto.
+pub(super) fn choice_hints<V: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut V,
+    options: &[(V, Icon, T, T)],
+) -> bool {
+    let mut changed = false;
+    ui.spacing_mut().item_spacing.x = 2.;
+    for (option, icon, label, hint) in options {
+        let selected = *value == *option;
+        let response =
+            icons::button(ui, *icon, text(*label), false, selected).on_hover_text(text(*hint));
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new(("choice_rect", text(*label))), response.rect)
+        });
+        if response.clicked() && !selected {
+            *value = *option;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Texto auxiliar curto no mesmo tom dos demais painéis.
+pub(super) fn hint(ui: &mut egui::Ui, message: &str) {
+    // O conteúdo rola em ambas as direções; sem um teto explícito o rótulo
+    // herdaria a largura "infinita" da área rolável e escaparia do painel.
+    let width = ui.available_width().min(WIDTH - 24.);
+    ui.scope(|ui| {
+        ui.set_max_width(width);
+        ui.add(egui::Label::new(egui::RichText::new(message).small().color(theme::MUTED)).wrap());
+    });
+}
+
 /// Campo de expressão dimensional (aceita parâmetros e unidades).
 pub(super) fn expression(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
     ui.add(

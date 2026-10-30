@@ -60,6 +60,7 @@ pub enum Text {
     SketchMirrorAxis,
     SketchMirrorAxisHint,
     SketchOffsetDouble,
+    SketchOffsetMode,
     SketchOffsetSecond,
     SketchOffsetPerSide,
     SketchChamfer,
@@ -79,6 +80,7 @@ pub enum Text {
     PointOnCurve,
     SketchProjectHint,
     SketchProjectAll,
+    SketchProjectFilter,
     SketchProjectPlanes,
     SketchProjectEdges,
     SketchProjectVertices,
@@ -463,7 +465,6 @@ pub enum Text {
     SketchSweep,
     SketchDynamicWidth,
     SketchDynamicHeight,
-    SketchMeasurements,
     SketchValueLocked,
     SketchDynamicHint,
     SketchLineMode,
@@ -957,7 +958,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchSweep => "Abertura",
         Text::SketchDynamicWidth => "Largura",
         Text::SketchDynamicHeight => "Altura",
-        Text::SketchMeasurements => "Medidas",
         Text::SketchValueLocked => {
             "Medida travada pela digitação. Apague o campo para voltar a seguir o cursor."
         }
@@ -1019,6 +1019,7 @@ pub fn text(key: Text) -> &'static str {
             "Clique em uma face plana, aresta, arco ou vértice do componente; Esc encerra"
         }
         Text::SketchProjectAll => "Todos os elementos",
+        Text::SketchProjectFilter => "Filtrar",
         Text::SketchProjectPlanes => "Faces e áreas",
         Text::SketchProjectEdges => "Arestas e arcos",
         Text::SketchProjectVertices => "Vértices",
@@ -1039,6 +1040,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchMirrorAxis => "Eixo de espelhamento",
         Text::SketchMirrorAxisHint => "Escolha a linha no campo Eixo de espelhamento.",
         Text::SketchOffsetDouble => "Dupla",
+        Text::SketchOffsetMode => "Modo de deslocamento",
         Text::SketchOffsetSecond => "Distância do segundo lado",
         Text::SketchOffsetPerSide => "A distância informada é aplicada igualmente a cada lado.",
         Text::DimensionReferenceReadOnly => {

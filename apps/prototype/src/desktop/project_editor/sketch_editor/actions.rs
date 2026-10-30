@@ -229,11 +229,7 @@ impl Editor {
             panel::Footer::None,
             !busy,
             |ui| {
-                ui.label(
-                    egui::RichText::new(text(hint(action)))
-                        .small()
-                        .color(theme::MUTED),
-                );
+                panel::hint(ui, text(hint(action)));
                 let count = if action == Action::Dimension && work.constraint.is_some() {
                     1
                 } else {
@@ -280,32 +276,13 @@ impl Editor {
                     }
                 }
                 if matches!(action, Action::Mirror | Action::Offset) {
-                    ui.label(text(T::SketchLineType));
-                    ui.horizontal(|ui| {
-                        for (kind, label) in [
-                            (LineType::Normal, T::SketchLineNormal),
-                            (LineType::Construction, T::Construction),
-                            (LineType::Infinite, T::SketchLineInfinite),
-                        ] {
-                            if icons::button(
-                                ui,
-                                line_tools::icon(kind),
-                                text(label),
-                                true,
-                                work.operation_line_type == kind,
-                            )
-                            .clicked()
-                            {
-                                work.operation_line_type = kind;
-                            }
-                        }
-                    });
+                    line_tools::line_type_row(ui, &mut work.operation_line_type, true);
                 }
                 if matches!(action, Action::Fillet | Action::Chamfer) {
-                    ui.label(text(T::SketchOffsetMouseHint));
+                    panel::hint(ui, text(T::SketchOffsetMouseHint));
                 }
                 if action == Action::Offset {
-                    ui.label(text(T::SketchOffsetMouseHint));
+                    panel::hint(ui, text(T::SketchOffsetMouseHint));
                     if ui
                         .checkbox(&mut work.operation.whole_chain, text(T::SketchWholeChain))
                         .changed()
@@ -319,21 +296,21 @@ impl Editor {
                         };
                     }
                     use nator_sketch::modifications::OffsetMode;
-                    ui.horizontal(|ui| {
-                        for (mode, label) in [
-                            (OffsetMode::Normal, T::SketchLineNormal),
-                            (OffsetMode::Double, T::SketchOffsetDouble),
-                            (OffsetMode::Symmetric, T::Symmetric),
-                        ] {
-                            if ui
-                                .selectable_value(&mut work.offset_mode, mode, text(label))
-                                .changed()
-                            {
-                                work.operation.second_side = false;
-                                work.operation.handle_drag = None;
-                            }
-                        }
+                    let changed = panel::row(ui, text(T::SketchOffsetMode), |ui| {
+                        panel::choice(
+                            ui,
+                            &mut work.offset_mode,
+                            &[
+                                (OffsetMode::Normal, Icon::OneSide, T::SketchLineNormal),
+                                (OffsetMode::Double, Icon::TwoSides, T::SketchOffsetDouble),
+                                (OffsetMode::Symmetric, Icon::Symmetric, T::Symmetric),
+                            ],
+                        )
                     });
+                    if changed {
+                        work.operation.second_side = false;
+                        work.operation.handle_drag = None;
+                    }
                 }
                 if action.needs_value() {
                     let angular = action == Action::Dimension
@@ -367,7 +344,7 @@ impl Editor {
                         });
                     } else if work.offset_mode == nator_sketch::modifications::OffsetMode::Symmetric
                     {
-                        ui.label(text(T::SketchOffsetPerSide));
+                        panel::hint(ui, text(T::SketchOffsetPerSide));
                     }
                 }
                 if action.is_pattern() {

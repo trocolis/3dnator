@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.18.0 — 30/10/2026
+
+- Os painéis das ferramentas de rascunho passam a usar os mesmos seletores compactos de ícone dos painéis de Mover, Extrusão e Alinhar: traço, modo de linha/retângulo/círculo, modo de deslocamento e filtro de Projetar ocupam uma linha rotulada, com dica por opção no tooltip.
+- Medições do rascunho alinham-se à coluna de rótulos dos demais painéis; dicas são pequenas, quebradas na largura do painel e aparecem no mesmo lugar. O painel Projetar ganha botão principal, o painel de imagem usa linhas rotuladas e o Aparar deixa de repetir um botão já selecionado.
+- Novos cenários `sketch-line-panel` e `sketch-project-panel` permitem revisar os painéis compactos; o ensaio de modos de desenho foi ajustado ao canvas mais alto.
+- Formato `.3dnator` mantido em 37; etapa local sem push/release.
+
 ## 0.17.0 — 30/10/2026
 
 - A faixa passa a ter quatro abas fixas, na ordem **Montagem**, **Construção**, **Rascunho** e **Inspecionar**. A antiga aba Peça foi renomeada para Construção; Rascunho continua disponível sem edição ativa e, nesse estado, mantém todo o ferramental visível e desativado, com **Novo rascunho** habilitado.

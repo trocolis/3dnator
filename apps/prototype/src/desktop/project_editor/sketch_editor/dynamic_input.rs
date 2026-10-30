@@ -1,6 +1,7 @@
 //! Campos independentes sobre o canvas, sem janela ou caixa compartilhada.
 //! A medida segue o mouse até ser digitada; Tab alterna campos, Enter confirma.
 use super::*;
+use crate::desktop::project_editor::command_panel as panel;
 use nator_document::parameters::{Dimension, Parameters};
 use nator_sketch::drafting::{self, Preview, Primitive};
 
@@ -77,42 +78,33 @@ impl Input {
     /// Painel e canvas editam a mesma expressão. Campos livres acompanham o
     /// mouse; digitar trava a medida e apagar devolve seu controle ao cursor.
     pub(super) fn panel(&mut self, ui: &mut egui::Ui, primitive: Primitive, anchor_count: usize) {
-        egui::Grid::new("sketch_measurements")
-            .num_columns(2)
-            .spacing([8., 6.])
-            .show(ui, |ui| {
-                for &index in self.indices(primitive, anchor_count) {
-                    let label = text(field_label(primitive, anchor_count, index));
-                    ui.label(label);
-                    let id = panel_field_id(index);
-                    if !self.locked[index] && ui.memory(|memory| memory.has_focus(id)) {
-                        select_text(ui.ctx(), id, &self.fields[index]);
-                    }
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.fields[index])
-                            .id(id)
-                            .desired_width(114.)
-                            .hint_text(if primitive.angular(index) { "°" } else { "mm" }),
-                    );
-                    if response.gained_focus() && !response.changed() {
-                        select_text(ui.ctx(), id, &self.fields[index]);
-                    }
-                    if response.changed() {
-                        self.locked[index] = !self.fields[index].trim().is_empty();
-                        self.focus = false;
-                        ui.ctx().request_repaint();
-                    }
-                    response.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::TextEdit,
-                            ui.is_enabled(),
-                            label,
-                        )
-                    });
-                    response.on_hover_text(text(T::SketchValueLocked));
-                    ui.end_row();
+        for &index in self.indices(primitive, anchor_count) {
+            let label = text(field_label(primitive, anchor_count, index));
+            panel::row(ui, label, |ui| {
+                let id = panel_field_id(index);
+                if !self.locked[index] && ui.memory(|memory| memory.has_focus(id)) {
+                    select_text(ui.ctx(), id, &self.fields[index]);
                 }
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.fields[index])
+                        .id(id)
+                        .desired_width(150.)
+                        .hint_text(if primitive.angular(index) { "°" } else { "mm" }),
+                );
+                if response.gained_focus() && !response.changed() {
+                    select_text(ui.ctx(), id, &self.fields[index]);
+                }
+                if response.changed() {
+                    self.locked[index] = !self.fields[index].trim().is_empty();
+                    self.focus = false;
+                    ui.ctx().request_repaint();
+                }
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label)
+                });
+                response.on_hover_text(text(T::SketchValueLocked));
             });
+        }
     }
     fn indices(&self, primitive: Primitive, anchor_count: usize) -> &'static [usize] {
         if primitive == Primitive::InclinedRectangle && anchor_count == 2 {
