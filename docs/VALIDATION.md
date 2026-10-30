@@ -1,5 +1,9 @@
 # Validação local do protótipo
 
+## Captura pela grade — 30/10/2026
+
+- Etapa 0.13.0: 68 testes de rascunho e 52 ensaios gráficos aprovados, com formatação e Clippy com OCCT. Cobertura de cruzamentos, meios, centros, linhas, prioridade geométrica, guias combinadas e suspensão por Alt. Logs `grid-*` em `target/codex-validation/adjustments-20261029/`. Formato mantido em 36; sem push/release.
+
 ## Loft e correspondência circular — 29/10/2026
 
 - Correção 0.12.2: correspondência de círculos por direções dos vértices e frações de perímetro, mantendo arcos exatos. Duas seções usam geratrizes retas por padrão; opção salva permanece respeitada. Comparação de comportamento com `loft_with_rails` e `loft_section_loops` do SolidCraft local, sem incorporar sua implementação.

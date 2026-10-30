@@ -973,9 +973,22 @@ impl Editor {
         let center = frame.cursor(response.rect.center()).unwrap_or([0., 0.]);
         let step = 10_f64.powf((60. / pixels_per_mm).log10().round());
         let radius = f64::from(response.rect.width().max(response.rect.height())) / pixels_per_mm;
+        let corners = [
+            response.rect.left_top(),
+            response.rect.right_top(),
+            response.rect.left_bottom(),
+            response.rect.right_bottom(),
+        ]
+        .into_iter()
+        .filter_map(|p| frame.cursor(p))
+        .collect::<Vec<_>>();
         for axis in 0..2 {
-            for i in -15..=15 {
-                let coordinate = (center[axis] / step).round() * step + f64::from(i) * step;
+            let low = corners.iter().map(|p| p[axis]).fold(center[axis], f64::min);
+            let high = corners.iter().map(|p| p[axis]).fold(center[axis], f64::max);
+            let from = (low / step).floor().max(center[axis] / step - 128.) as i64 - 1;
+            let to = (high / step).ceil().min(center[axis] / step + 128.) as i64 + 1;
+            for i in from..=to {
+                let coordinate = i as f64 * step;
                 let (a, b) = if axis == 0 {
                     (
                         [coordinate, center[1] - radius],
@@ -1173,7 +1186,7 @@ impl Editor {
             if suspended {
                 None
             } else {
-                snapping::find_with_references(
+                let exact = snapping::find_with_references(
                     &sketch,
                     point,
                     8. / pixels_per_mm,
@@ -1182,7 +1195,10 @@ impl Editor {
                     &work.references.points,
                 )
                 .ok()
-                .flatten()
+                .flatten();
+                snapping::with_grid(exact, point, 8. / pixels_per_mm, step)
+                    .ok()
+                    .flatten()
             }
         });
         if hover.is_some() || suspended || work.drawing.locked[1] || work.anchors.is_empty() {
@@ -1247,7 +1263,31 @@ impl Editor {
             }
             if let Some(position) = frame.screen(snap.point) {
                 painter.circle_stroke(position, 5., egui::Stroke::new(1.5, theme::WARNING));
-                if work.primitive().is_some() {
+                let grid_label = match snap.kind {
+                    Kind::GridIntersection => Some(T::GridIntersection),
+                    Kind::GridMidpoint => Some(T::GridMidpoint),
+                    Kind::GridCenter => Some(T::GridCenter),
+                    Kind::GridLine => Some(T::GridLine),
+                    _ => None,
+                };
+                if let Some(label) = grid_label {
+                    painter.text(
+                        position + egui::vec2(12., 12.),
+                        egui::Align2::LEFT_TOP,
+                        text(label),
+                        egui::FontId::proportional(11.),
+                        theme::MUTED,
+                    );
+                }
+                if work.primitive().is_some()
+                    && !matches!(
+                        snap.kind,
+                        Kind::GridIntersection
+                            | Kind::GridMidpoint
+                            | Kind::GridCenter
+                            | Kind::GridLine
+                    )
+                {
                     let strong = work.junction_override.unwrap_or_else(|| {
                         nator_sketch::junctions::default_strong(Some(snap.kind))
                     });
@@ -1291,7 +1331,9 @@ impl Editor {
             use nator_sketch::indicators::{Indicator, Kind as IndicatorKind};
             if let Some(snap) = &snap {
                 let kind = match snap.kind {
-                    Kind::Midpoint(_) | Kind::CurveMidpoint(_) => Some(IndicatorKind::Midpoint),
+                    Kind::Midpoint(_) | Kind::CurveMidpoint(_) | Kind::GridMidpoint => {
+                        Some(IndicatorKind::Midpoint)
+                    }
                     Kind::Center(point) => {
                         let linked = sketch
                             .entities
@@ -1303,7 +1345,7 @@ impl Editor {
                             });
                         linked.then_some(IndicatorKind::Center)
                     }
-                    Kind::RegionCenter => Some(IndicatorKind::Center),
+                    Kind::RegionCenter | Kind::GridCenter => Some(IndicatorKind::Center),
                     _ => None,
                 };
                 if let Some(kind) = kind {

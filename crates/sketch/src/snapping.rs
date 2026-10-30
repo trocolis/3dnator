@@ -11,6 +11,10 @@ pub enum Kind {
     Intersection,
     Projected,
     Alignment,
+    GridIntersection,
+    GridMidpoint,
+    GridCenter,
+    GridLine,
 }
 #[derive(Debug, Clone)]
 pub struct Snap {
@@ -37,6 +41,95 @@ impl Tracker {
     }
     pub fn references(&self) -> &[Point2] {
         &self.references
+    }
+}
+
+/// Captura a grade visível no plano. Usada somente quando não há geometria
+/// ou guia exata: a grade posiciona e não cria vínculos dirigentes.
+pub fn grid(cursor: Point2, tolerance: f64, step: f64) -> Result<Option<Snap>> {
+    if cursor.iter().any(|v| !v.is_finite())
+        || !tolerance.is_finite()
+        || tolerance <= 0.
+        || !step.is_finite()
+        || step <= 0.
+    {
+        return Err(SketchError(
+            "Parâmetros de captura da grade inválidos.".into(),
+        ));
+    }
+    let near = cursor.map(|v| (v / step).round() * step);
+    let middle = cursor.map(|v| ((v / step).floor() + 0.5) * step);
+    let points = [
+        (near, Kind::GridIntersection),
+        ([near[0], middle[1]], Kind::GridMidpoint),
+        ([middle[0], near[1]], Kind::GridMidpoint),
+        (middle, Kind::GridCenter),
+    ];
+    let tolerance = tolerance.min(step * 0.22);
+    if let Some((point, kind)) = points
+        .into_iter()
+        .filter(|(p, _)| distance(*p, cursor) <= tolerance)
+        .min_by(|(a, _), (b, _)| distance(*a, cursor).total_cmp(&distance(*b, cursor)))
+    {
+        return Ok(Some(Snap {
+            point,
+            kind,
+            guides: vec![],
+        }));
+    }
+    let lines = [
+        (
+            [near[0], cursor[1]],
+            vec![(
+                [near[0], cursor[1] - step / 2.],
+                [near[0], cursor[1] + step / 2.],
+            )],
+        ),
+        (
+            [cursor[0], near[1]],
+            vec![(
+                [cursor[0] - step / 2., near[1]],
+                [cursor[0] + step / 2., near[1]],
+            )],
+        ),
+    ];
+    Ok(lines
+        .into_iter()
+        .filter(|(p, _)| distance(*p, cursor) <= tolerance)
+        .min_by(|(a, _), (b, _)| distance(*a, cursor).total_cmp(&distance(*b, cursor)))
+        .map(|(point, guides)| Snap {
+            point,
+            kind: Kind::GridLine,
+            guides,
+        }))
+}
+
+/// Combina a grade com guias de alinhamento sem deslocar um apoio geométrico.
+pub fn with_grid(
+    exact: Option<Snap>,
+    cursor: Point2,
+    tolerance: f64,
+    step: f64,
+) -> Result<Option<Snap>> {
+    match exact {
+        Some(mut snap) if snap.kind == Kind::Alignment => {
+            if let Some(grid) = grid(snap.point, tolerance, step)? {
+                let mut point = grid.point;
+                for (a, b) in &snap.guides {
+                    if (a[0] - b[0]).abs() < 1e-9 {
+                        point[0] = snap.point[0];
+                    }
+                    if (a[1] - b[1]).abs() < 1e-9 {
+                        point[1] = snap.point[1];
+                    }
+                }
+                snap.point = point;
+                snap.guides.extend(grid.guides);
+            }
+            Ok(Some(snap))
+        }
+        Some(snap) => Ok(Some(snap)),
+        None => grid(cursor, tolerance, step),
     }
 }
 
@@ -207,6 +300,50 @@ mod tests {
             .ok_or_else(|| SketchError("Ponto médio ausente".into()))?;
         assert_eq!(snap.kind, Kind::CurveMidpoint(arc));
         assert!(distance(snap.point, [10., 0.]) < 1e-9);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+    #[test]
+    fn grid_captures_crossings_segment_midpoints_cells_and_lines_without_constraints()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for (cursor, point, kind) in [
+            ([10.12, 20.05], [10., 20.], Kind::GridIntersection),
+            ([10.09, 15.1], [10., 15.], Kind::GridMidpoint),
+            ([15.1, 20.09], [15., 20.], Kind::GridMidpoint),
+            ([15.1, 15.1], [15., 15.], Kind::GridCenter),
+            ([10.07, 12.4], [10., 12.4], Kind::GridLine),
+            ([-4.95, -4.95], [-5., -5.], Kind::GridCenter),
+        ] {
+            let snap = grid(cursor, 0.2, 10.)?.ok_or("Grade não capturada")?;
+            assert_eq!(snap.kind, kind);
+            assert!(distance(snap.point, point) < 1e-9);
+            assert!(!crate::junctions::default_strong(Some(kind)));
+        }
+        assert!(grid([12.4, 12.4], 0.2, 10.)?.is_none());
+        let guide = Snap {
+            point: [20.1, 5.5],
+            kind: Kind::Alignment,
+            guides: vec![([0., 5.5], [20.1, 5.5])],
+        };
+        let merged = with_grid(Some(guide), [20.1, 5.6], 0.8, 10.)?.ok_or("Guia")?;
+        assert_eq!(merged.point, [20., 5.5]);
+        let exact = Snap {
+            point: [20.1, 5.1],
+            kind: Kind::OnCurve(1),
+            guides: vec![],
+        };
+        assert_eq!(
+            with_grid(Some(exact), [20.1, 5.1], 0.8, 10.)?
+                .ok_or("Geometria")?
+                .point,
+            [20.1, 5.1]
+        );
+        assert!(grid([0., 0.], 0.2, 0.).is_err());
+        assert!(grid([f64::NAN, 0.], 0.2, 10.).is_err());
         Ok(())
     }
 }

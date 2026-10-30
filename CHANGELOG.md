@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.13.0 — 30/10/2026
+
+- Grade do rascunho captura cruzamentos, pontos médios de segmentos, centros das células e linhas, com o mesmo passo adaptativo do desenho. A grade cobre os limites visíveis do plano, com limite de linhas para manter a interação responsiva.
+- A geometria existente tem prioridade. Guias de alinhamento preservam sua coordenada enquanto a outra pode ser capturada pela grade; Alt suspende a atração. Capturas da grade não criam vínculos permanentes nem fixam o desenho.
+- Ensaios de captura em coordenadas positivas/negativas, prioridade geométrica, combinação de guias, desenho real pelo mouse e Alt. Formato mantido em 36; etapa local sem push/release.
+
 ## 0.12.2 — 29/10/2026
 
 - Loft alinha costuras circulares aos vértices/direções do outro perfil e compatibiliza círculos em planos com bases diferentes, evitando torção por parametrização arbitrária. Contornos côncavos usam frações de perímetro quando as direções não são monotônicas; círculos permanecem arcos exatos.

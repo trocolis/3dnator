@@ -1240,6 +1240,83 @@ mod tests {
     }
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_grid_snaps_new_geometry_and_alt_keeps_the_free_cursor() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let mut doc = Document::new("Grade de referência")?;
+        let (part, id) = doc.add_sketch(None, Sketch::new("Grade", Plane::xy()))?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        editor.select_sketch_tool(sketch_editor::Tool::Line);
+        frame(&mut editor, &context, vec![])?;
+        let layout = sketch_scene::Frame {
+            camera: editor.viewport.camera.clone(),
+            bounds: editor.display_bounds(),
+            rect: editor.canvas_rect,
+            placement: Placement::default(),
+            plane: Plane::xy(),
+        };
+        let ppm = layout.pixels_per_mm([0., 0.]);
+        let step = 10_f64.powf((60. / ppm).log10().round());
+        let epsilon = 0.25 / ppm;
+        for point in [
+            [step / 2. + epsilon, step / 2. + epsilon],
+            [step * 2. + epsilon, step / 2. + epsilon],
+            [step * 3. + epsilon, step * 1.27],
+        ] {
+            let at = layout.screen(point).ok_or("Ponto fora da tela")?;
+            click(&mut editor, &context, at)?;
+            settle(&mut editor, &context)?;
+        }
+        settle(&mut editor, &context)?;
+        let record = editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho")?;
+        assert_eq!(record.sketch.entities.len(), 2);
+        let (a, b) = record.sketch.line(record.sketch.entities[0].id)?;
+        assert!(
+            nator_sketch::distance(a, [step / 2., step / 2.]) < 1e-6,
+            "Início: {a:?}, passo {step}"
+        );
+        assert!(
+            nator_sketch::distance(b, [step * 2., step / 2.]) < 1e-6,
+            "Fim: {b:?}, passo {step}"
+        );
+        let (_, end) = record.sketch.line(record.sketch.entities[1].id)?;
+        assert!(
+            nator_sketch::distance(end, [step * 3., step * 1.27]) < 5e-5,
+            "Linha: {end:?}"
+        );
+        let free = [step * 4. + epsilon, step * 1.27];
+        let at = layout.screen(free).ok_or("Cursor")?;
+        click_modified(&mut editor, &context, at, egui::Modifiers::ALT)?;
+        settle(&mut editor, &context)?;
+        let record = editor
+            .current()
+            .session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho")?;
+        let (_, end) = record
+            .sketch
+            .line(record.sketch.entities.last().ok_or("Linha")?.id)?;
+        assert!(
+            (end[0] - free[0]).abs() < 5e-5,
+            "Alt: {end:?}, esperado {free:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn imported_module_viewport_picks_the_root_and_preserves_other_occurrences()
     -> Result<(), Box<dyn Error>> {
         use nator_kernel::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart};
@@ -4784,7 +4861,8 @@ mod tests {
             let first = position(&editor, center)? + egui::vec2(2., 2.);
             click(&mut editor, &context, first)?;
             let last = position(&editor, [center[0] + 3., center[1]])?;
-            click(&mut editor, &context, last)?;
+            // O raio livre não deve capturar a grade; o centro continua usando a referência.
+            click_modified(&mut editor, &context, last, egui::Modifiers::ALT)?;
             settle(&mut editor, &context)?;
             let sketch = &editor
                 .current()

@@ -1,6 +1,10 @@
 //! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
 #[derive(Clone, Copy)]
 pub enum Text {
+    GridIntersection,
+    GridMidpoint,
+    GridCenter,
+    GridLine,
     ArrowInvalidValue,
     ArrowValueHint,
     Label,
@@ -758,6 +762,10 @@ pub enum Text {
 }
 pub fn text(key: Text) -> &'static str {
     match key {
+        Text::GridIntersection => "Grade: cruzamento",
+        Text::GridMidpoint => "Grade: ponto médio",
+        Text::GridCenter => "Grade: centro da célula",
+        Text::GridLine => "Grade: linha",
         Text::ArrowInvalidValue => "Informe uma medida válida para esta ferramenta.",
         Text::ArrowValueHint => "Enter fixa a medida · Esc restaura · OK conclui",
         Text::Label => "Rótulo",
