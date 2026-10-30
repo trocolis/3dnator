@@ -1350,14 +1350,24 @@ fn draw(p: &Pen, icon: Icon) {
             p.arrow([13., 15.], [19., 15.], p.accent);
         }
         Icon::SketchFillet => {
-            p.stroke(&[[4., 3.], [4., 14.]], p.ink);
-            p.stroke(&[[10., 20.], [21., 20.]], p.ink);
-            p.arc(10., 14., 6., PI, PI + FRAC_PI_2, p.accent);
+            // Retângulo com o canto superior esquerdo arredondado; o Chanfro
+            // usa a mesma silhueta com uma aresta reta no lugar do arco.
+            let mut outline = vec![[10., 4.], [20., 4.], [20., 20.], [4., 20.], [4., 10.]];
+            outline.extend((0..=12).map(|index| {
+                let angle = PI + FRAC_PI_2 * index as f32 / 12.;
+                [10. + 6. * angle.cos(), 10. + 6. * angle.sin()]
+            }));
+            p.polygon(&outline, p.surface, p.ink, MAIN);
+            p.arc(10., 10., 6., PI, PI + FRAC_PI_2, p.accent);
         }
         Icon::SketchChamfer => {
-            p.stroke(&[[4., 3.], [4., 14.]], p.ink);
-            p.stroke(&[[10., 20.], [21., 20.]], p.ink);
-            p.line(&[[4., 14.], [10., 20.]], p.accent, 2.2);
+            p.polygon(
+                &[[10., 4.], [20., 4.], [20., 20.], [4., 20.], [4., 10.]],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.line(&[[4., 10.], [10., 4.]], p.accent, 2.2);
         }
         Icon::SketchMirror => {
             p.dashed([12., 2.], [12., 22.], p.ink, 1.4);

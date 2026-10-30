@@ -8,6 +8,7 @@
 - Arquivos, modelagem, rascunho, montagem, vista, janela, reprodução da linha do tempo e acessórios passam pelo mesmo sistema visual; o rascunho conserva preto/verde e referências conservam o violeta. O estado desabilitado e a barra escura da janela usam paletas próprias, sem perder contraste.
 - Novo cenário de captura `icons` desenha a folha de contato de todos os ícones, com amostra da barra escura; `--render-ui-scenario` aceita largura e altura opcionais para revisão em alta resolução. Formato `.3dnator` mantido em 37; etapa local sem push/release.
 - Nenhuma dependência ou recurso gráfico externo foi adicionado: os desenhos continuam vetoriais e próprios do 3dnator.
+- Arredondar e Chanfrar do rascunho passam a usar a mesma silhueta de retângulo com o canto superior esquerdo modificado — arco no primeiro, aresta reta no segundo —, legível a 18 pontos e distinta da ferramenta Retângulo.
 
 ## 0.15.0 — 30/10/2026
 

@@ -5,6 +5,7 @@
 - Etapa 0.16.0, formato `.3dnator` mantido em 37. Os desenhos passaram para `icons/draw.rs`, sobre a mesma grade de 24 unidades: traço principal de 2 unidades, pontas e junções arredondadas, formas sólidas com preenchimento tonal, setas preenchidas e uma única cor de ação. Rascunho e restrições seguem em preto/verde; referências, seção, aviso e estado desabilitado têm paletas próprias, incluindo a barra escura da janela.
 - Novo cenário de captura `icons` desenha a folha de contato de todos os ícones e uma amostra da barra escura; `--render-ui-scenario` agora aceita largura e altura opcionais. Capturas inspecionadas em `target/validation/icons-20261030/`: `icones.png` (1920 × 1200), `montagem.png`, `mover.png`, `peca.png` e `rascunho.png`. Os ícones permanecem legíveis de 16 a 46 pontos, inclusive nos botões compactos de 18 pontos.
 - Aprovados 65 testes do protótipo, 266 testes sem OCCT e 366 com OCCT; formatação e Clippy com todos os alvos e avisos negados nas duas configurações. Nenhuma dependência ou imagem externa foi adicionada; os testes de clique, estado desabilitado, nome acessível e teclado continuam passando.
+- Arredondar e Chanfrar do rascunho foram refeitos como retângulo com canto arredondado/chanfrado, sem guias que desapareciam a 18 pontos. Capturas revisadas: `rascunho-arredondar5.png` e `icones-arredondar5.png` no mesmo diretório.
 
 ## Extrusão zero e conclusão de AJUSTES — 30/10/2026
 
