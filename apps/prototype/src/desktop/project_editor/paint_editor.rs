@@ -346,7 +346,14 @@ impl Editor {
             footer,
             command.is_some() && !self.busy() && draft.running.is_none() && draft.queue.is_empty(),
             |ui| {
-                ui.label(text(T::PaintSurfaces));
+                let selection =
+                    panel::selection(ui, text(T::PaintSurfaces), draft.targets.len(), None, true);
+                if selection.clear {
+                    draft.targets.clear();
+                    draft.queue.clear();
+                    draft.running = None;
+                }
+
                 ui.label(
                     egui::RichText::new(text(T::PaintPickHint))
                         .small()

@@ -676,7 +676,6 @@ pub enum Text {
     AlignHint,
     ComponentField,
     MirrorHint,
-    NewInstanceTool,
     CloneTool,
     GroupTool,
     UngroupTool,
@@ -731,9 +730,9 @@ pub enum Text {
     MoveEdgeToEdge,
     MovePointToPoint,
     CopyMenu,
+    CopyType,
     CopyNewInstance,
     CopyIndependent,
-    CopyPattern,
     ReferenceGroup,
     PartsGroup,
     NewPartName,
@@ -1483,7 +1482,6 @@ pub fn text(key: Text) -> &'static str {
         Text::MirrorHint => {
             "Cria uma peça nova e independente, refletida pelo plano em coordenadas do pai."
         }
-        Text::NewInstanceTool => "Nova instância",
         Text::CloneTool => "Clone independente",
         Text::GroupTool => "Agrupar",
         Text::UngroupTool => "Desagrupar",
@@ -1548,9 +1546,9 @@ pub fn text(key: Text) -> &'static str {
         Text::MoveEdgeToEdge => "Aresta a aresta",
         Text::MovePointToPoint => "Vértice a vértice",
         Text::CopyMenu => "Copiar",
+        Text::CopyType => "Tipo de cópia",
         Text::CopyNewInstance => "Nova instância",
         Text::CopyIndependent => "Cópia independente",
-        Text::CopyPattern => "Padrão de repetição",
         Text::ReferenceGroup => "Referência",
         Text::PartsGroup => "Peças",
         Text::NewPartName => "Peça",

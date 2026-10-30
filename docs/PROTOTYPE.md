@@ -1,4 +1,4 @@
-# Protótipo 0.13.1 — CAD paramétrico
+# Protótipo 0.14.0 — CAD paramétrico
 
 A grade do rascunho serve como referência de captura: linhas, cruzamentos, pontos médios e centros de células atraem o cursor. O passo acompanha o zoom e a geometria existente mantém prioridade. Alt libera o cursor. A captura posiciona o ponto sem criar fixações ou vínculos permanentes com a grade.
 
@@ -204,3 +204,5 @@ Resultados locais e limitações estão em [VALIDATION.md](VALIDATION.md). A CI 
 O código próprio usa MIT; as dependências mantêm suas licenças, listadas inicialmente em [THIRD_PARTY.md](../THIRD_PARTY.md). O SDK OCCT não está incorporado ao repositório. Os avisos/textos das dependências ainda precisam integrar o empacotamento de binários.
 
 O lock mantém `clipboard-win` 5.4.1, marcado como yanked no índice do cache offline. Essa cadeia deve ser atualizada e validada antes de distribuir Windows. O terminal continua sem acesso de rede para obter novas versões ou instalar OCCT.
+
+Copiar componentes usa prévia e confirmação: tipo compartilhado/independente e padrões linear/circular por ícones no painel; cópias simples preservam a hierarquia e a cor da ocorrência. Os modos de movimento também usam ícones. Pintar usa o mesmo seletor com contagem e limpeza da Extrusão.

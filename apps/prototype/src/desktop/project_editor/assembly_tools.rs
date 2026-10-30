@@ -44,14 +44,6 @@ enum Movement {
     Point,
 }
 impl Movement {
-    fn label(self) -> T {
-        match self {
-            Self::Free => T::MoveFree,
-            Self::Face => T::MoveFaceToFace,
-            Self::Edge => T::MoveEdgeToEdge,
-            Self::Point => T::MovePointToPoint,
-        }
-    }
     fn kind(self) -> Option<navigation::PickMode> {
         match self {
             Self::Free => None,
@@ -76,26 +68,85 @@ impl Panel {
 }
 fn movement_picker(ui: &mut egui::Ui, movement: &mut Movement) {
     panel::row(ui, text(T::MovementMode), |ui| {
-        egui::ComboBox::from_id_salt("movement_mode")
-            .selected_text(text(movement.label()))
-            .width(168.)
-            .show_ui(ui, |ui| {
-                for mode in [
-                    Movement::Free,
-                    Movement::Face,
-                    Movement::Edge,
-                    Movement::Point,
-                ] {
-                    ui.selectable_value(movement, mode, text(mode.label()))
-                        .on_hover_text(text(match mode {
-                            Movement::Free => T::MoveFreeHint,
-                            Movement::Face => T::MoveFaceHint,
-                            Movement::Edge => T::MoveEdgeHint,
-                            Movement::Point => T::MovePointHint,
-                        }));
-                }
-            });
+        panel::choice(
+            ui,
+            movement,
+            &[
+                (Movement::Free, Icon::Move, T::MoveFree),
+                (Movement::Face, Icon::FaceToFace, T::MoveFaceToFace),
+                (Movement::Edge, Icon::EdgeToEdge, T::MoveEdgeToEdge),
+                (Movement::Point, Icon::PointToPoint, T::MovePointToPoint),
+            ],
+        );
     });
+    if *movement == Movement::Free {
+        ui.label(
+            egui::RichText::new(text(T::MoveFreeHint))
+                .small()
+                .color(theme::MUTED),
+        );
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CopyKind {
+    Shared,
+    Independent,
+    Linear,
+    Circular,
+}
+impl Panel {
+    fn copy_kind(&self) -> Option<CopyKind> {
+        match self {
+            Self::Move(d) if d.mode.copies() => Some(if d.independent {
+                CopyKind::Independent
+            } else {
+                CopyKind::Shared
+            }),
+            Self::Align(d) if d.mode.copies() => Some(if d.independent {
+                CopyKind::Independent
+            } else {
+                CopyKind::Shared
+            }),
+            Self::Pattern(d) => Some(if d.circular {
+                CopyKind::Circular
+            } else {
+                CopyKind::Linear
+            }),
+            _ => None,
+        }
+    }
+}
+fn copy_picker(ui: &mut egui::Ui, kind: &mut CopyKind, bodies: bool) {
+    panel::row(ui, text(T::CopyType), |ui| {
+        if bodies {
+            panel::choice(
+                ui,
+                kind,
+                &[(CopyKind::Independent, Icon::Copy, T::CopyIndependent)],
+            );
+        } else {
+            panel::choice(
+                ui,
+                kind,
+                &[
+                    (CopyKind::Shared, Icon::NewBody, T::CopyNewInstance),
+                    (CopyKind::Independent, Icon::Copy, T::CopyIndependent),
+                    (CopyKind::Linear, Icon::Pattern, T::RectangularPattern),
+                    (CopyKind::Circular, Icon::Revolve, T::CircularPattern),
+                ],
+            );
+        }
+    });
+    ui.label(
+        egui::RichText::new(text(match kind {
+            CopyKind::Shared => T::CopyInstanceHint,
+            CopyKind::Independent => T::CopyIndependentHint,
+            _ => T::CopyPatternHint,
+        }))
+        .small()
+        .color(theme::MUTED),
+    );
 }
 
 impl Panel {
@@ -164,6 +215,7 @@ pub(super) struct MoveDraft {
     rotation_inputs: [panel::NumberInput; 3],
     pivot: Pivot,
     mode: MoveMode,
+    independent: bool,
     drag: Option<GizmoDrag>,
     floating: distance_arrow::Input,
     floating_handle: Option<Handle>,
@@ -184,6 +236,7 @@ pub(super) struct AlignDraft {
     flip: bool,
     targets: Vec<Selection>,
     mode: MoveMode,
+    independent: bool,
 }
 
 /// Destino de um alinhamento: geometria do modelo ou de um rascunho de referência da
@@ -525,7 +578,13 @@ fn moved_local(frame: &Frame, delta: Placement) -> Option<Placement> {
 }
 
 /// Comandos de mover (ou copiar) os elementos pela transformação no mundo.
-fn move_commands(tab: &Tab, frames: &[Frame], delta: Placement, copy: bool) -> Vec<Command> {
+fn move_commands(
+    tab: &Tab,
+    frames: &[Frame],
+    delta: Placement,
+    copy: bool,
+    independent: bool,
+) -> Vec<Command> {
     let document = tab.session.document();
     frames
         .iter()
@@ -535,10 +594,11 @@ fn move_commands(tab: &Tab, frames: &[Frame], delta: Placement, copy: bool) -> V
                 (Selection::Instance(id), false) => Command::MoveInstance { id, placement },
                 (Selection::Instance(id), true) => {
                     let instance = document.instance(id)?;
-                    Command::AddInstance {
-                        part: instance.part,
-                        parent: instance.parent,
+                    Command::CopyInstanceAt {
+                        id,
                         placement,
+                        independent,
+                        name: format!("{} ({})", instance.name, text(T::CopySuffix)),
                     }
                 }
                 (Selection::Body { id, .. }, false) => Command::MoveBody { id, placement },
@@ -606,6 +666,7 @@ impl AlignDraft {
 
 impl MoveDraft {
     pub(super) fn new(tab: u64, targets: Vec<Selection>) -> Self {
+        let independent = targets.iter().any(|s| matches!(s, Selection::Body { .. }));
         Self {
             tab,
             picking: targets.is_empty(),
@@ -616,6 +677,7 @@ impl MoveDraft {
             rotation_inputs: Default::default(),
             pivot: Pivot::Center,
             mode: MoveMode::MoveOrCopy(false),
+            independent,
             drag: None,
             floating: Default::default(),
             floating_handle: None,
@@ -685,9 +747,9 @@ impl Editor {
     }
 
     fn change_movement(&mut self, panel: Panel, movement: Movement) -> Panel {
-        let (tab, targets, mode, source) = match panel {
-            Panel::Move(d) => (d.tab, d.targets, d.mode, None),
-            Panel::Align(d) => (d.tab, d.targets, d.mode, d.from),
+        let (tab, targets, mode, independent, source) = match panel {
+            Panel::Move(d) => (d.tab, d.targets, d.mode, d.independent, None),
+            Panel::Align(d) => (d.tab, d.targets, d.mode, d.independent, d.from),
             other => return other,
         };
         if let Some(kind) = movement.kind() {
@@ -716,10 +778,12 @@ impl Editor {
                 flip: false,
                 targets,
                 mode,
+                independent,
             }))
         } else {
             let mut draft = MoveDraft::new(tab, targets);
             draft.mode = mode;
+            draft.independent = independent;
             Panel::Move(Box::new(draft))
         }
     }
@@ -791,6 +855,7 @@ impl Editor {
         self.open_move();
         if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
             draft.mode = if copy { MoveMode::Copy } else { MoveMode::Move };
+            draft.independent = true;
         }
     }
     /// Translação e rotação do Mover/Copiar aberto, para capturas de ensaio.
@@ -841,6 +906,7 @@ impl Editor {
             flip: false,
             targets,
             mode: MoveMode::MoveOrCopy(false),
+            independent: false,
         })));
     }
     pub(super) fn open_instance_pattern(&mut self, circular: bool) {
@@ -871,40 +937,74 @@ impl Editor {
         }));
     }
 
-    /// Instância nova da mesma definição, ao lado da original.
-    pub(super) fn duplicate_selection(&mut self, context: &egui::Context) {
-        let commands = self
-            .current()
-            .selected
-            .iter()
-            .filter_map(|s| match s {
-                Selection::Instance(id) => Some(Command::DuplicateInstance { id: *id }),
-                _ => None,
-            })
-            .collect();
-        if let Some(command) = batch("Nova instância compartilhada", commands) {
-            self.prepare_command(context, self.current().id, command);
+    /// Copiar abre a prévia; a escolha da definição fica no painel.
+    pub(super) fn duplicate_selection(&mut self, _context: &egui::Context) {
+        self.open_copy(false);
+    }
+    pub(super) fn clone_selection(&mut self, _context: &egui::Context) {
+        self.open_copy(true);
+    }
+    pub(super) fn open_copy(&mut self, independent: bool) {
+        self.open_move();
+        let independent = independent || self.current().active_part.is_some();
+        if let Some(Panel::Move(d)) = &mut self.assembly_panel {
+            d.mode = MoveMode::Copy;
+            d.independent = independent;
         }
     }
-    /// Peça nova e independente para cada instância selecionada.
-    pub(super) fn clone_selection(&mut self, context: &egui::Context) {
-        let document = self.current().session.document();
-        let commands = self
-            .current()
-            .selected
-            .iter()
-            .filter_map(|s| match s {
-                Selection::Instance(id) => document.instance(*id),
-                _ => None,
-            })
-            .map(|i| Command::CloneInstance {
-                id: i.id,
-                name: format!("{} ({})", i.name, text(T::CopySuffix)),
-            })
-            .collect();
-        if let Some(command) = batch("Clonar peça independente", commands) {
-            self.prepare_command(context, self.current().id, command);
+    fn change_copy(&mut self, panel: Panel, kind: CopyKind) -> Panel {
+        if matches!(kind, CopyKind::Shared | CopyKind::Independent) {
+            let mut panel = match panel {
+                Panel::Pattern(d) => Panel::Move(Box::new(MoveDraft::new(
+                    d.tab,
+                    d.target.map(Selection::Instance).into_iter().collect(),
+                ))),
+                other => other,
+            };
+            match &mut panel {
+                Panel::Move(d) => {
+                    d.mode = MoveMode::Copy;
+                    d.independent = kind == CopyKind::Independent;
+                }
+                Panel::Align(d) => {
+                    d.mode = MoveMode::Copy;
+                    d.independent = kind == CopyKind::Independent;
+                }
+                _ => {}
+            }
+            panel
+        } else {
+            match panel {
+                Panel::Pattern(mut d) => {
+                    d.circular = kind == CopyKind::Circular;
+                    Panel::Pattern(d)
+                }
+                Panel::Move(d) => self.copy_pattern(d.tab, d.targets, kind),
+                Panel::Align(d) => self.copy_pattern(d.tab, d.targets, kind),
+                other => other,
+            }
         }
+    }
+    fn copy_pattern(&self, tab: u64, targets: Vec<Selection>, kind: CopyKind) -> Panel {
+        let target = targets.iter().find_map(|s| {
+            if let Selection::Instance(id) = s {
+                Some(*id)
+            } else {
+                None
+            }
+        });
+        Panel::Pattern(PatternDraft {
+            tab,
+            target,
+            picking: target.is_none(),
+            circular: kind == CopyKind::Circular,
+            axis: 0,
+            count: 3,
+            spacing: "100 mm".into(),
+            angle: "360 deg".into(),
+            origin: [0.; 3],
+            origin_inputs: Default::default(),
+        })
     }
     /// Grupo com as instâncias selecionadas do mesmo nível.
     pub(super) fn group_selection(&mut self, context: &egui::Context) {
@@ -1127,12 +1227,14 @@ impl Editor {
             Panel::Move(_) => (Icon::Move, T::MoveMenu),
             Panel::Align(d) if matches!(d.mode, MoveMode::Copy) => (Icon::Copy, T::CopyMenu),
             Panel::Align(_) => (Icon::Move, T::MoveMenu),
-            Panel::Pattern(d) if d.circular => (Icon::Pattern, T::CircularInstancePattern),
-            Panel::Pattern(_) => (Icon::Pattern, T::RectangularInstancePattern),
+            Panel::Pattern(_) => (Icon::Copy, T::CopyMenu),
             Panel::Mirror(_) => (Icon::Mirror, T::MirrorComponent),
         };
         let document = self.current().session.document().clone();
         let picked = self.current().picked.as_ref().map(|p| p.point);
+        let initial_copy = panel.copy_kind();
+        let mut copy_kind = initial_copy;
+        let bodies = self.current().active_part.is_some();
         let initial_movement = panel.movement();
         let mut movement = initial_movement;
         let outcome = panel::show_validated(
@@ -1146,6 +1248,9 @@ impl Editor {
             footer,
             command.is_some() && !self.busy(),
             |ui| {
+                if let Some(kind) = &mut copy_kind {
+                    copy_picker(ui, kind, bodies);
+                }
                 if let Some(movement) = &mut movement {
                     movement_picker(ui, movement);
                 }
@@ -1166,6 +1271,11 @@ impl Editor {
             && let Some(movement) = movement
         {
             panel = self.change_movement(panel, movement);
+        }
+        if copy_kind != initial_copy
+            && let Some(kind) = copy_kind
+        {
+            panel = self.change_copy(panel, kind);
         }
         // Valores digitados neste quadro já estão no rascunho: o comando é refeito com eles.
         let command = self.panel_command(&panel);
@@ -1210,7 +1320,7 @@ impl Editor {
                     } else {
                         "Mover elementos"
                     },
-                    move_commands(tab, &frames, delta, d.mode.copies()),
+                    move_commands(tab, &frames, delta, d.mode.copies(), d.independent),
                 )
             }
             Panel::Align(d) => {
@@ -1229,7 +1339,7 @@ impl Editor {
                 let frames = frames(tab, &targets);
                 batch(
                     "Alinhar elemento",
-                    move_commands(tab, &frames, delta, d.mode.copies()),
+                    move_commands(tab, &frames, delta, d.mode.copies(), d.independent),
                 )
             }
             Panel::Pattern(d) => Some(Command::PatternInstance {
@@ -1858,16 +1968,6 @@ fn instance_selection(
 
 fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
     instance_selection(ui, &mut d.target, &mut d.picking, document);
-    panel::row(ui, text(T::ChamferType), |ui| {
-        panel::choice(
-            ui,
-            &mut d.circular,
-            &[
-                (false, Icon::Pattern, T::RectangularPattern),
-                (true, Icon::Revolve, T::CircularPattern),
-            ],
-        );
-    });
     panel::row(
         ui,
         text(if d.circular {
@@ -2083,6 +2183,7 @@ mod tests {
             flip: false,
             targets: vec![],
             mode: MoveMode::Move,
+            independent: false,
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
         // O ponto de origem vai ao destino e a normal fica oposta à do destino.

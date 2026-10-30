@@ -151,6 +151,13 @@ pub enum Command {
     DuplicateInstance {
         id: InstanceId,
     },
+    /// Cópia no posicionamento escolhido, compartilhada ou com hierarquia independente.
+    CopyInstanceAt {
+        id: InstanceId,
+        placement: Placement,
+        independent: bool,
+        name: String,
+    },
     ReparentInstance {
         id: InstanceId,
         parent: Option<PartId>,
@@ -406,6 +413,7 @@ impl Command {
             Self::MirrorInstance { .. } => "Espelhar instância como nova peça",
             Self::CloneInstance { .. } => "Clonar peça independente",
             Self::DuplicateInstance { .. } => "Nova instância",
+            Self::CopyInstanceAt { .. } => "Copiar componente",
             Self::ReparentInstance { .. } => "Organizar subpeça",
             Self::RemoveInstance { .. } => "Remover instância",
             Self::CreateGroup { .. } => "Criar grupo organizacional",
@@ -730,6 +738,24 @@ impl Command {
                 let copy = doc.add_instance(source.part, source.parent, source.placement)?;
                 doc.instance_mut(copy)?.color = source.color;
                 doc.place_beside(&[copy])?;
+            }
+            Self::CopyInstanceAt {
+                id,
+                placement,
+                independent,
+                name,
+            } => {
+                let source = doc
+                    .instance(id)
+                    .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+                    .clone();
+                let part = if independent {
+                    doc.clone_part(source.part, name)?
+                } else {
+                    source.part
+                };
+                let copy = doc.add_instance(part, source.parent, placement)?;
+                doc.instance_mut(copy)?.color = source.color;
             }
             Self::ReparentInstance { id, parent } => doc.reparent(id, parent)?,
             Self::RemoveInstance { id } => doc.remove_instance(id)?,

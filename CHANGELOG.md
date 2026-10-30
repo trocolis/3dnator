@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.14.0 — 30/10/2026
+
+- Copiar na montagem e na árvore abre o painel com prévia e tipos por ícones: instância compartilhada, cópia independente, padrão linear e circular. A cópia simples aceita os quatro modos de posicionamento, preserva a cor da ocorrência e só cria o componente ao confirmar, em uma transação reversível.
+- Modos de movimento por ícones com dicas, no padrão dos rascunhos; alternar face/aresta/ponto/livre preserva o tipo de cópia. Corpos da peça usam cópia independente.
+- Pintar recebe o campo de seleção padrão da Extrusão, com contagem e limpeza; limpar também cancela consultas de seleção pendentes. Demais seletores de componentes usam o mesmo componente visual compartilhado.
+- Formato mantido em 36; etapa local sem push/release.
+
 ## 0.13.1 — 30/10/2026
 
 - Transição guiada retirada da faixa de ferramentas e da busca de criação. Leitura, recálculo e edição de operações existentes permanecem disponíveis para preservar os projetos. Formato 36; etapa local sem push/release.

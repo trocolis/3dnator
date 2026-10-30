@@ -142,7 +142,7 @@ impl Action {
             Self::CopyBody => T::CopyMenu,
             Self::MoveCopy => T::MoveMenu,
             Self::Align => T::AlignTool,
-            Self::NewInstance => T::NewInstanceTool,
+            Self::NewInstance => T::CopyMenu,
             Self::CloneInstance => T::CloneTool,
             Self::InstancePattern(false) => T::RectangularInstancePattern,
             Self::InstancePattern(true) => T::CircularInstancePattern,
@@ -437,7 +437,13 @@ impl Editor {
                         .selected
                         .iter()
                         .any(|s| matches!(s, Selection::Instance(_)))
-                        || matches!(action, Action::InstancePattern(_) | Action::InstanceMirror))
+                        || matches!(
+                            action,
+                            Action::NewInstance
+                                | Action::CloneInstance
+                                | Action::InstancePattern(_)
+                                | Action::InstanceMirror
+                        ))
             }
             Action::Ungroup => {
                 editable
@@ -1400,27 +1406,7 @@ impl Editor {
                     },
                 );
                 self.ribbon_group(ui, T::PositionGroup, &[Action::MoveCopy]);
-                self.ribbon_menu_group(
-                    ui,
-                    T::CopyMenu,
-                    Menu {
-                        icon: Icon::Copy,
-                        label: T::CopyMenu,
-                        items: &[
-                            (Action::NewInstance, T::CopyNewInstance, T::CopyInstanceHint),
-                            (
-                                Action::CloneInstance,
-                                T::CopyIndependent,
-                                T::CopyIndependentHint,
-                            ),
-                            (
-                                Action::InstancePattern(false),
-                                T::CopyPattern,
-                                T::CopyPatternHint,
-                            ),
-                        ],
-                    },
-                );
+                self.ribbon_group(ui, T::CopyMenu, &[Action::NewInstance]);
                 self.ribbon_group(ui, T::ArrangeGroup, &[Action::Group, Action::Ungroup]);
             }
             RibbonTab::Inspect => {

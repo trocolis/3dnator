@@ -83,6 +83,7 @@ pub(super) fn context(command: &Command, doc: &Document) -> C {
         | Command::CreateGroup { .. }
         | Command::RemoveGroup { .. }
         | Command::DuplicateInstance { .. }
+        | Command::CopyInstanceAt { .. }
         | Command::CloneInstance { .. }
         | Command::AddInstance { .. }
         | Command::RemoveInstance { .. }
@@ -219,7 +220,9 @@ pub(super) fn intent(command: &Command, doc: &Document) -> Option<Intent> {
         Command::MoveInstance { id, .. } => (K::Move, Some(T::Instance(*id))),
         Command::MoveBody { id, .. } => (K::Move, Some(T::Body(*id))),
         Command::CopyBody { .. } => (K::Copy, None),
-        Command::DuplicateInstance { .. } | Command::CloneInstance { .. } => (K::Copy, None),
+        Command::DuplicateInstance { .. }
+        | Command::CloneInstance { .. }
+        | Command::CopyInstanceAt { .. } => (K::Copy, None),
         Command::MoveGroup { id, .. } => (K::Move, Some(T::Group(*id))),
         Command::CreateGroup { .. } => (K::Group, None),
         Command::RemoveGroup { id } => {

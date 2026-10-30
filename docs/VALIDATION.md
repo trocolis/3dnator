@@ -1,5 +1,9 @@
 # Validação local do protótipo
 
+## Cópias e painéis — 30/10/2026
+
+- Etapa 0.14.0: 53 ensaios gráficos aprovados, com formatação e Clippy com OCCT. Nova regressão troca os quatro tipos de cópia e os modos de posicionamento, verifica prévia sem criar componentes, hierarquia, definição compartilhada/independente, posicionamento escolhido, cores e desfazer. Seleção de Pintar segue o campo compartilhado da Extrusão; limpeza descarta consultas pendentes. Logs `copy-*` em `target/codex-validation/adjustments-20261029/`. Compatibilidade da Transição guiada verificada em duas regressões nativas de persistência/recálculo (`remove-sweep-test.log`).
+
 ## Captura pela grade — 30/10/2026
 
 - Etapa 0.13.0: 68 testes de rascunho e 52 ensaios gráficos aprovados, com formatação e Clippy com OCCT. Cobertura de cruzamentos, meios, centros, linhas, prioridade geométrica, guias combinadas e suspensão por Alt. Logs `grid-*` em `target/codex-validation/adjustments-20261029/`. Formato mantido em 36; sem push/release.

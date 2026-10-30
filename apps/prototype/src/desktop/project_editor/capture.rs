@@ -1317,6 +1317,86 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn copy_panel_previews_types_preserves_hierarchy_and_confirms_one_transaction()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut doc = Document::new("Cópias com painel")?;
+        let root = doc.create_part("Conjunto".into())?;
+        let root_id = doc.instances()[0].id;
+        let (_, _) = doc.add_mesh(
+            None,
+            "Filho".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let child = doc.instances().last().ok_or("Filho")?.id;
+        doc.reparent(child, Some(root))?;
+        doc.instance_mut(root_id)?.color = Some(nator_geometry::RgbColor::new([45, 90, 180]));
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = None;
+        editor.shell.tab = shell::RibbonTab::Assembly;
+        settle(&mut editor, &context)?;
+        for independent in [false, true] {
+            editor
+                .current_mut()
+                .select(Some(Selection::Instance(root_id)));
+            editor.duplicate_selection(&context);
+            frame(&mut editor, &context, vec![])?;
+            for kind in [
+                T::RectangularPattern,
+                T::CircularPattern,
+                T::CopyNewInstance,
+            ] {
+                click_choice(&mut editor, &context, kind)?;
+                assert_eq!(editor.current().session.document().instances().len(), 2);
+            }
+            if independent {
+                click_choice(&mut editor, &context, T::CopyIndependent)?;
+            }
+            click_choice(&mut editor, &context, T::MovePointToPoint)?;
+            click_choice(&mut editor, &context, T::MoveFree)?;
+            editor.set_move_for_capture([100., -20., 10.], [0.; 3]);
+            settle(&mut editor, &context)?;
+            let ok = label_position(&mut editor, &context, text(T::Ok))?;
+            click(&mut editor, &context, ok)?;
+            settle(&mut editor, &context)?;
+            let document = editor.current().session.document();
+            let copy = document
+                .instances()
+                .iter()
+                .find(|i| i.parent.is_none() && i.id != root_id)
+                .ok_or("Cópia")?;
+            assert_eq!(copy.placement.translation_mm(), [100., -20., 10.]);
+            assert_eq!(copy.part != root, independent);
+            assert_eq!(
+                copy.color,
+                document.instance(root_id).ok_or("Origem")?.color
+            );
+            assert_eq!(
+                document
+                    .occurrences()?
+                    .iter()
+                    .filter(|o| o.path.first() == Some(&copy.id))
+                    .count(),
+                2
+            );
+            assert_eq!(
+                document.instance(root_id).ok_or("Origem")?.placement,
+                Placement::default()
+            );
+            assert!(editor.current_mut().session.undo());
+            assert_eq!(editor.current().session.document().instances().len(), 2);
+            editor.current_mut().changed();
+            editor.invalidate_scene();
+            settle(&mut editor, &context)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn imported_module_viewport_picks_the_root_and_preserves_other_occurrences()
     -> Result<(), Box<dyn Error>> {
         use nator_kernel::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart};
@@ -1587,18 +1667,13 @@ mod tests {
             let tip = tips[0].ok_or("Eixo X")?;
             drag_between(&mut editor, &context, tip, tip + egui::vec2(18., -6.))?;
             assert_eq!(editor.current().session.revision(), 0);
-            let mut current = T::MoveFree;
             for next in [
                 T::MoveFaceToFace,
                 T::MoveEdgeToEdge,
                 T::MovePointToPoint,
                 T::MoveFree,
             ] {
-                let combo = label_position(&mut editor, &context, text(current))?;
-                click(&mut editor, &context, combo)?;
-                let option = label_position(&mut editor, &context, text(next))?;
-                click(&mut editor, &context, option)?;
-                current = next;
+                click_choice(&mut editor, &context, next)?;
                 assert_eq!(editor.current().session.revision(), 0);
             }
             editor.set_move_for_capture([12., -3., 7.], [0., 0., 25.]);
@@ -1658,10 +1733,7 @@ mod tests {
                 browser::MenuAction::Move(vec![Selection::Instance(root_instance)]),
             );
             frame(&mut editor, &context, vec![])?;
-            let combo = label_position(&mut editor, &context, text(T::MoveFree))?;
-            click(&mut editor, &context, combo)?;
-            let option = label_position(&mut editor, &context, text(T::MovePointToPoint))?;
-            click(&mut editor, &context, option)?;
+            click_choice(&mut editor, &context, T::MovePointToPoint)?;
             let document = editor.current().session.document();
             let occurrence = document
                 .occurrences()?
@@ -4184,10 +4256,7 @@ mod tests {
         ] {
             let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
             click(&mut editor, &context, move_button)?;
-            let free = label_position(&mut editor, &context, text(T::MoveFree))?;
-            click(&mut editor, &context, free)?;
-            let option = label_position(&mut editor, &context, text(label))?;
-            click(&mut editor, &context, option)?;
+            click_choice(&mut editor, &context, label)?;
             assert_eq!(editor.pick_mode, mode);
             let mut from = editor
                 .current()
@@ -4229,10 +4298,7 @@ mod tests {
         // durante a edição da peça ativa, mesmo que chegue ao painel por uma seleção.
         let move_button = label_position(&mut editor, &context, text(T::MoveMenu))?;
         click(&mut editor, &context, move_button)?;
-        let free = label_position(&mut editor, &context, text(T::MoveFree))?;
-        click(&mut editor, &context, free)?;
-        let option = label_position(&mut editor, &context, text(T::MovePointToPoint))?;
-        click(&mut editor, &context, option)?;
+        click_choice(&mut editor, &context, T::MovePointToPoint)?;
         let foreign = editor
             .current()
             .session
@@ -9283,6 +9349,17 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         Ok(())
+    }
+    fn click_choice(
+        editor: &mut Editor,
+        context: &egui::Context,
+        label: T,
+    ) -> Result<(), Box<dyn Error>> {
+        frame(editor, context, vec![])?;
+        let rect = context
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("choice_rect", text(label)))))
+            .ok_or_else(|| format!("Ícone ausente: {}", text(label)))?;
+        click(editor, context, rect.center())
     }
     fn label_position(
         editor: &mut Editor,

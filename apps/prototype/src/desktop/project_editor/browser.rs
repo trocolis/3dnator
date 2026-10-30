@@ -30,6 +30,7 @@ pub(super) enum MenuAction {
     Deactivate,
     Select(Vec<Selection>),
     Move(Vec<Selection>),
+    Copy(Vec<Selection>, bool),
     Command(Box<Command>),
     Pattern(InstanceId, bool),
     Mirror(InstanceId),
@@ -92,16 +93,8 @@ pub(super) fn instance_menu(
     if item(ui, Icon::Move, T::MoveCopyTool) {
         action = Some(MenuAction::Move(vec![target]));
     }
-    if item(ui, Icon::NewBody, T::NewInstanceTool) {
-        action = Some(MenuAction::Command(Box::new(Command::DuplicateInstance {
-            id: instance.id,
-        })));
-    }
-    if item(ui, Icon::Boolean, T::CloneTool) {
-        action = Some(MenuAction::Command(Box::new(Command::CloneInstance {
-            id: instance.id,
-            name: format!("{part_name} ({})", text(T::CopySuffix)),
-        })));
+    if item(ui, Icon::Copy, T::CopyMenu) {
+        action = Some(MenuAction::Copy(vec![target], false));
     }
     if item(ui, Icon::Pattern, T::RectangularInstancePattern) {
         action = Some(MenuAction::Pattern(instance.id, false));
@@ -216,6 +209,9 @@ pub(super) fn body_menu(
     ui.add_enabled_ui(editable, |ui| {
         if item(ui, Icon::Move, T::MoveCopyTool) {
             action = Some(MenuAction::Move(vec![target]));
+        }
+        if item(ui, Icon::Copy, T::CopyMenu) {
+            action = Some(MenuAction::Copy(vec![target], true));
         }
     });
     if item(
@@ -371,6 +367,10 @@ impl Editor {
                 }
                 self.current_mut().select_many(items, false);
                 self.open_move();
+            }
+            MenuAction::Copy(items, independent) => {
+                self.apply_menu_action(context, MenuAction::Move(items));
+                self.open_copy(independent);
             }
             MenuAction::Command(command) => self.prepare_command(context, tab, *command),
             MenuAction::Pattern(id, circular) => {
