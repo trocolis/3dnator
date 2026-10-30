@@ -1,4 +1,4 @@
-# Protótipo 0.13.0 — CAD paramétrico
+# Protótipo 0.13.1 — CAD paramétrico
 
 A grade do rascunho serve como referência de captura: linhas, cruzamentos, pontos médios e centros de células atraem o cursor. O passo acompanha o zoom e a geometria existente mantém prioridade. Alt libera o cursor. A captura posiciona o ponto sem criar fixações ou vínculos permanentes com a grade.
 
@@ -8,7 +8,7 @@ Ao pressionar uma seta de medida, um campo flutuante acompanha o cursor. Digite 
 
 **Rótulo**, em Acabamento, adiciona texto à superfície selecionada, plana ou curva. O painel oferece fontes do sistema, negrito, itálico, sublinhado, tamanho, rotação, cor e posição. Arraste o marcador circular para reposicionar; Esc durante o arraste restaura a posição anterior. Superficial conserva o volume e divide a face para colorir as letras; Relevo acrescenta material; Gravação retira material, com profundidade configurável. A projeção segue a normal local e recorta o texto nos limites da face, incluindo furos; pontos singulares e geometrias incompatíveis são recusados. Os contornos ficam no projeto: reabrir, mover, redimensionar ou recolorir não exige a fonte original; mudar texto/fonte/estilo exige uma fonte disponível. O cartão na linha do tempo edita a operação, com prévia, desfazer/refazer. STEP conserva os contornos geométricos e as cores por face no mesmo sólido; texto não é uma anotação STEP editável. Pintura posterior pode substituir as cores do rótulo.
 
-**Transição guiada** liga duas áreas em planos diferentes. Trajetória Automática cria uma guia cúbica tangente aos planos; Eixo usa uma linha coplanar à entrada e requer centros no mesmo raio/altura, com opção do arco pelo lado oposto; Rascunho permite clicar numa linha/arco e captura a cadeia aberta conectada. A guia deve terminar nos planos das áreas e ser perpendicular a eles nas extremidades. Furos seguem a mesma correspondência da Transição entre perfis. Os rascunhos usados são ocultados ao criar a operação e podem ser mostrados novamente pela árvore.
+**Transição guiada (legado)** foi retirada da criação e da busca de ferramentas. Projetos existentes continuam abrindo, recalculando e permitindo editar essa operação, que liga duas áreas em planos diferentes. Trajetória Automática cria uma guia cúbica tangente aos planos; Eixo usa uma linha coplanar à entrada e requer centros no mesmo raio/altura, com opção do arco pelo lado oposto; Rascunho permite clicar numa linha/arco e captura a cadeia aberta conectada. A guia deve terminar nos planos das áreas e ser perpendicular a eles nas extremidades. Furos seguem a mesma correspondência da Transição entre perfis. Os rascunhos usados são ocultados ao criar a operação e podem ser mostrados novamente pela árvore.
 
 **Transição entre perfis** usa geratrizes retas por padrão para duas seções. Círculos são repartidos em arcos nas direções dos vértices do outro perfil, evitando torção de costura; a opção de geratrizes permanece editável.
 

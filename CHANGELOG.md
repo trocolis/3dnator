@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.13.1 — 30/10/2026
+
+- Transição guiada retirada da faixa de ferramentas e da busca de criação. Leitura, recálculo e edição de operações existentes permanecem disponíveis para preservar os projetos. Formato 36; etapa local sem push/release.
+
 ## 0.13.0 — 30/10/2026
 
 - Grade do rascunho captura cruzamentos, pontos médios de segmentos, centros das células e linhas, com o mesmo passo adaptativo do desenho. A grade cobre os limites visíveis do plano, com limite de linhas para manter a interação responsiva.

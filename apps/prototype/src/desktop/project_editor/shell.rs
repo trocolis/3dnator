@@ -325,7 +325,6 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Extrude),
     Action::Solid(SolidTool::Revolve),
     Action::Solid(SolidTool::Loft),
-    Action::Solid(SolidTool::Sweep),
     Action::Solid(SolidTool::Label),
     Action::Solid(SolidTool::Fillet),
     Action::Solid(SolidTool::Chamfer),
@@ -1357,7 +1356,6 @@ impl Editor {
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
                         Action::Solid(SolidTool::Loft),
-                        Action::Solid(SolidTool::Sweep),
                         Action::Solid(SolidTool::Shell),
                     ],
                 );
