@@ -314,6 +314,109 @@ mod precise {
         Ok(prism)
     }
 
+    fn imprint_faces(solid: &Solid, mask: &Solid, g: Guide) -> Result<Vec<usize>, DocumentError> {
+        let point = std::array::from_fn(|i| g.origin[i] + g.normal[i] * g.from);
+        let mut faces = Vec::new();
+        for index in 0..solid.face_count().map_err(error)? {
+            if let nator_kernel::FaceKind::Plane { normal, offset } =
+                solid.face_measure(index).map_err(error)?.kind
+                && dot(normal, g.normal).abs() > 1. - 1e-8
+                && (dot(normal, point) - offset).abs() < 1e-6
+                && solid.face_mask_area(index, mask).map_err(error)? > 1e-7
+            {
+                faces.push(index);
+            }
+        }
+        Ok(faces)
+    }
+
+    /// Resolve uma única base por contato com o plano e o perfil exatos. A base
+    /// explícita é mantida para que alterações posteriores não migrem de corpo.
+    pub(crate) fn imprint_target(
+        doc: &Document,
+        part: PartId,
+        mut operation: Operation,
+        preferred: Option<BodyId>,
+    ) -> Result<Operation, DocumentError> {
+        if !matches!(operation, Operation::Extrude { .. }) {
+            return Err(error(
+                "Selecione uma área de rascunho para dividir a face com extrusão zero.",
+            ));
+        }
+        let g = guide(doc, part, &operation)?;
+        let mask = tool(
+            doc,
+            part,
+            &operation,
+            "imprint-mask",
+            Some((g.from - 1., g.from + 1.)),
+        )?;
+        let explicit = combination(&operation).map(|c| c.target);
+        let piece = doc.part(part).ok_or_else(|| error("Peça inexistente."))?;
+        let mut candidates = Vec::new();
+        for body in piece
+            .bodies
+            .iter()
+            .filter(|b| b.brep.is_some() && explicit.map_or(b.visible, |id| id == b.id))
+        {
+            let (solid, _) = source(doc, part, body.id)?;
+            if !imprint_faces(&solid, &mask, g)?.is_empty() {
+                candidates.push(body.id);
+            }
+        }
+        let target = if let Some(id) = preferred.filter(|id| candidates.contains(id)) {
+            id
+        } else if candidates.len() == 1 {
+            candidates[0]
+        } else {
+            return Err(error(if candidates.is_empty() {
+                "Extrusão zero exige um perfil sobre uma face plana do corpo."
+            } else {
+                "Mais de um corpo sob o perfil; selecione explicitamente a base da divisão."
+            }));
+        };
+        if let Operation::Extrude { combine, .. } = &mut operation {
+            *combine = Some(Combine {
+                target,
+                mode: BooleanMode::Join,
+            });
+        }
+        Ok(operation)
+    }
+
+    pub(crate) fn imprint(
+        doc: &Document,
+        part: PartId,
+        operation: &Operation,
+        owner: &str,
+    ) -> Result<Solid, DocumentError> {
+        let base = combination(operation)
+            .ok_or_else(|| error("Selecione a base da divisão."))?
+            .target;
+        let g = guide(doc, part, operation)?;
+        let mask = tool(
+            doc,
+            part,
+            operation,
+            "imprint-mask",
+            Some((g.from - 1., g.from + 1.)),
+        )?;
+        let (solid, _) = source(doc, part, base)?;
+        let faces = imprint_faces(&solid, &mask, g)?;
+        if faces.is_empty() {
+            return Err(error("O perfil perdeu o contato com a face da divisão."));
+        }
+        solid
+            .imprint(
+                &faces
+                    .iter()
+                    .map(|index| (*index, &mask))
+                    .collect::<Vec<_>>(),
+                owner,
+            )
+            .map_err(error)
+    }
+
     pub fn automatic(
         doc: &Document,
         part: PartId,
@@ -322,10 +425,8 @@ mod precise {
     ) -> Result<Operation, DocumentError> {
         let g = guide(doc, part, &operation)?;
         let step = (g.to - g.from).abs().clamp(0.00001, 0.001) * (g.to - g.from).signum();
-        if step == 0. {
-            return Err(DocumentError(
-                "Extrusão deve ter comprimento não nulo.".into(),
-            ));
+        if (g.to - g.from).abs() < 1e-7 {
+            return imprint_target(doc, part, operation, preferred);
         }
         let leading = tool(doc, part, &operation, "auto", Some((g.from, g.from + step)))?;
         // Consulta uma lâmina de 0,002 mm ao redor do início. Ela detecta contato
@@ -430,7 +531,7 @@ pub fn combination(operation: &Operation) -> Option<Combine> {
 #[cfg(feature = "occt")]
 pub use precise::{automatic, guide, removed};
 #[cfg(feature = "occt")]
-pub(super) use precise::{limit_plane, tool};
+pub(super) use precise::{imprint, imprint_target, limit_plane, tool};
 #[cfg(not(feature = "occt"))]
 pub fn automatic(
     _doc: &Document,

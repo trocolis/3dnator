@@ -1,4 +1,4 @@
-// Particiona apenas a representação de aparência das faces. O B-rep de origem
+// Particiona faces para aparência, intercâmbio e subdivisão de perfis. O B-rep de origem
 // permanece intacto; dentro/fora dos prismas preservam curvas e furos exatos.
 #pragma once
 #include <BRepBuilderAPI_Sewing.hxx>
@@ -80,6 +80,19 @@ extern "C" bool nator_face_common_area(const Shape* first,std::size_t a,const Sh
         BRepAlgoAPI_Common common(left(static_cast<int>(a)+1),right(static_cast<int>(b)+1));
         if (!common.IsDone()) throw std::runtime_error("Não foi possível transferir a pintura entre superfícies.");
         GProp_GProps properties;BRepGProp::SurfaceProperties(common.Shape(),properties);
+        *output=properties.Mass();
+    });
+}
+
+// Interseção exata da face com um volume delimitador; usada para encontrar o
+// suporte de uma subdivisão sem confundir faces coplanares afastadas.
+extern "C" bool nator_face_mask_area(const Shape* body,std::size_t index,const Shape* mask,double* output) noexcept {
+    return guarded([&] {
+        const auto faces=map_of(body->value,TopAbs_FACE);
+        if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face inexistente.");
+        BRepAlgoAPI_Common common(faces(static_cast<int>(index)+1),mask->value);
+        if (!common.IsDone()) throw std::runtime_error("Não foi possível delimitar a face pelo perfil.");
+        GProp_GProps properties; BRepGProp::SurfaceProperties(common.Shape(),properties);
         *output=properties.Mass();
     });
 }

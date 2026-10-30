@@ -16,6 +16,41 @@ unsafe extern "C" {
     ) -> *mut c_void;
 }
 impl Solid {
+    /// Subdivide faces sem acrescentar material. Nomes derivam da face de origem
+    /// e do lado do contorno; componentes indistinguíveis permanecem ambíguos.
+    pub fn imprint(&self, masks: &[(usize, &Solid)], owner: &str) -> Result<Solid, KernelError> {
+        owner_name(owner)?;
+        let layers = masks
+            .iter()
+            .map(|(face, mask)| (*face, Some(*mask)))
+            .collect::<Vec<_>>();
+        let (mut result, materials, sources) = self.painted_solid_with_sources(&layers)?;
+        let mut counts = vec![0; self.faces.len()];
+        for source in &sources {
+            counts[*source as usize] += 1;
+        }
+        if counts.iter().all(|count| *count <= 1) {
+            return Err(KernelError(
+                "O perfil não cria uma nova divisão na face.".into(),
+            ));
+        }
+        result.faces = sources
+            .iter()
+            .zip(materials)
+            .map(|(source, material)| {
+                let index = *source as usize;
+                let name = &self.faces[index];
+                if name.is_empty() || counts[index] == 1 {
+                    return name.clone();
+                }
+                format!(
+                    "{name}:{owner}:imprint:{}",
+                    if material == 0 { "outside" } else { "inside" }
+                )
+            })
+            .collect();
+        Ok(result)
+    }
     /// Subdivide e costura as faces mantendo volume e cascas fechadas. Materiais
     /// são por face (0 = base, 1..=255 = camada), na ordem de `face_count`.
     pub fn painted_solid(
@@ -136,6 +171,12 @@ impl Solid {
 }
 
 unsafe extern "C" {
+    fn nator_face_mask_area(
+        body: *const c_void,
+        index: usize,
+        mask: *const c_void,
+        output: *mut f64,
+    ) -> bool;
     fn nator_face_common_area(
         first: *const c_void,
         a: usize,
@@ -145,6 +186,21 @@ unsafe extern "C" {
     ) -> bool;
 }
 impl Solid {
+    pub fn face_mask_area(&self, index: usize, mask: &Self) -> Result<f64, KernelError> {
+        let mut area = 0.;
+        // SAFETY: sólidos vivos nesta thread e saída exclusiva; índice validado na ponte.
+        if !unsafe {
+            nator_face_mask_area(
+                self.pointer.as_ptr(),
+                index,
+                mask.pointer.as_ptr(),
+                &mut area,
+            )
+        } {
+            return Err(last_error());
+        }
+        Ok(area)
+    }
     pub fn face_common_area(&self, a: usize, other: &Self, b: usize) -> Result<f64, KernelError> {
         let mut area = 0.;
         // SAFETY: sólidos vivos na mesma thread, saída exclusiva com um double;

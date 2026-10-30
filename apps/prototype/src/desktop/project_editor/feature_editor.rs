@@ -1665,7 +1665,7 @@ impl Editor {
         }
         let complete = d.complete() && nator_kernel::is_available();
         let footer_error;
-        let footer = if !complete || d.zero_extrusion(&part) {
+        let footer = if !complete {
             Footer::None
         } else {
             match self.preview_status(&command) {
@@ -1690,7 +1690,10 @@ impl Editor {
             },
             self.canvas_rect,
             footer,
-            complete && !d.zero_extrusion(&part) && !self.busy(),
+            complete
+                && !self.busy()
+                && (!d.zero_extrusion(&part)
+                    || matches!(self.preview_status(&command), PreviewStatus::Ready)),
             |ui| {
                 if !nator_kernel::is_available() {
                     ui.colored_label(theme::WARNING, text(T::KernelUnavailable));
@@ -1704,7 +1707,16 @@ impl Editor {
                 }
                 match d.tool {
                     Tool::Label => label::panel(ui, &mut d, &self.label_fonts.names),
-                    Tool::Extrude => extrude_panel(ui, &mut d, &part, &regions),
+                    Tool::Extrude => {
+                        extrude_panel(ui, &mut d, &part, &regions);
+                        if d.zero_extrusion(&part) {
+                            ui.label(
+                                egui::RichText::new(text(T::ZeroExtrusionHint))
+                                    .small()
+                                    .color(theme::MUTED),
+                            );
+                        }
+                    }
                     Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
                     Tool::Loft | Tool::Sweep => loft_panel(ui, &mut d, &part, &regions),
                     Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
@@ -1724,7 +1736,7 @@ impl Editor {
             self.close_feature_panel(&d);
             return;
         }
-        if outcome.ok && complete && !d.zero_extrusion(&part) {
+        if outcome.ok && complete {
             let command = match d.output {
                 Some(output) => self.with_pending_fix(tab, output, command),
                 None => command,

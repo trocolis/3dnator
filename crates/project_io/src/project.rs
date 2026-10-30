@@ -52,7 +52,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 34: transição entre perfis e correspondência persistida dos furos.
 /// Versão 35: transições guiadas com trajetórias associativas.
 /// Versão 36: rótulos com contornos persistidos e cores intrínsecas por face.
-pub const FORMAT_VERSION: u32 = 36;
+/// Versão 37: extrusão nula com base explícita subdivide faces, sem alterar volume.
+pub const FORMAT_VERSION: u32 = 37;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

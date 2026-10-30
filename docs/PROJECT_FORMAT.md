@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 36
+# Formato de projeto — versão interna 37
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 36; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 37; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -41,6 +41,9 @@ Desde a versão 29, cada camada de pintura pode guardar `boundaries`, uma lista 
 `base_color_srgb` opcional em `appearances` registra a pintura do corpo inteiro. Essa cor prevalece sobre a cor importada da ocorrência e não exige camada/cache por face; nesse caso, `layers` pode estar vazio e os caminhos de cache são nulos. Novas operações conservam a cor uniforme e transferem pinturas localizadas às faces geometricamente herdadas; extrusões também transferem a pintura do apoio às faces novas. Referências por nome só são usadas quando únicas. Faces sem nome ou com nome repetido usam `FaceRef::Index` com assinatura do B-rep para representar precisamente o clique, sem escolher arbitrariamente outra face.
 
 A cor personalizada da interface não pertence ao projeto nem ao desfazer: fica em `paint-color.json`, junto ao diretório de estado do aplicativo (ao lado da pasta de recuperação). É um array JSON de três bytes RGB, limitado a 64 bytes na leitura. A gravação é serializada e atômica; escolher uma cor predefinida não substitui a preferência personalizada.
+
+Desde a versão 37, `Extrude` com limites iguais e `combine.target` explícito representa a subdivisão das faces coplanares pelo perfil, sem alterar o volume. A combinação persistida é `Join`, usada para registrar a dependência da base; o núcleo realiza partição e costura, sem booleano volumétrico. Sem contato ou sem nova divisão, o comando falha. A base é resolvida uma vez na criação, por contato exato; ambiguidade exige escolha explícita. Várias áreas no mesmo plano e furos são preservados. Nomes das subdivisões derivam da face original, da operação e do lado do contorno; partes indistinguíveis continuam ambíguas e exigem referência com assinatura do B-rep. A versão de formato impede leitores antigos de aceitar uma operação nula que não saberiam recalcular.
+
 
 Desde a versão 28, `until` em `Extrude`/`ExtrudeFace` aceita três referências de limite: `{"body": id, "face": FaceRef}` conserva a representação anterior; `{"sketch": id}` usa o plano de outro rascunho; `{"work_plane": id}` usa um plano de trabalho. Todas pertencem à mesma peça. Editar o plano ou mover o rascunho limite recalcula a extrusão; clonar remapeia os identificadores. Não é permitido excluir um rascunho/plano ainda usado como limite. O prisma é recortado pelo plano inteiro, inclusive quando inclinado; um plano paralelo à direção da extrusão é recusado.
 
@@ -175,6 +178,8 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 - Versões 1 a 6: campos acrescentados ao longo dessas versões (rascunhos, parâmetros, histórico, B-rep, subconjuntos, grupos, folhas) são opcionais e assumem valores vazios quando ausentes.
 - 6 → 7 (`migrate_to_7`): antes da desserialização tipada, a região numérica de extrusões/revoluções vira `{"Index": n}`, e o par `edge`/`face` + `signature` de arredondamento, chanfro e casca vira `{"Index": {"index": n, "signature": s}}`. Um histórico com campos ausentes é rejeitado inteiro, sem migração parcial.
 
+- 36 → 37: sem novos campos; extrusões nulas com base explícita representam subdivisões de face sem volume. Projetos anteriores conservam sua geometria e operações.
+
 ## Integridade e limites
 
 - Até 256 MiB de arquivo, 512 MiB descompactados e 8 MiB de manifesto.
@@ -185,6 +190,7 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 - Versões futuras e campos desconhecidos são rejeitados para evitar descarte silencioso de dados.
 
 O salvamento cria um arquivo temporário no diretório de destino, conclui e sincroniza a gravação, reabre e valida o pacote e só então substitui o arquivo principal. Falhas anteriores à substituição preservam o arquivo anterior. Isso não constitui garantia contra toda falha de hardware ou sistema de arquivos.
+
 
 ## Recuperação
 

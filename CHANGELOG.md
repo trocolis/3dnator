@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.15.0 — 30/10/2026
+
+- Confirmar Extrusão com distância zero subdivide as faces coplanares pelo perfil de rascunho. A partição ocorre no B-rep exato, preserva o volume, os furos e a pintura, e aceita várias áreas no mesmo plano. A base é persistida explicitamente; contatos ambíguos ou perdidos e perfis sem uma divisão nova são recusados atomicamente.
+- A seta continua disponível em zero mesmo quando ainda não existe divisão válida. A confirmação de zero depende da prévia pronta; dividir, cancelar e desfazer usam as mesmas transações das demais operações.
+- Formato interno 37, com leitura de 1–37: a operação usa os campos existentes de Extrude e registra a nova semântica para impedir recálculo por leitores antigos. Regressões de geometria, cores, múltiplas regiões, base ambígua, recálculo, desfazer/refazer, clonagem, persistência, STEP e confirmação pelo mouse.
+- Etapa local sem push/release.
+
 ## 0.14.0 — 30/10/2026
 
 - Copiar na montagem e na árvore abre o painel com prévia e tipos por ícones: instância compartilhada, cópia independente, padrão linear e circular. A cópia simples aceita os quatro modos de posicionamento, preserva a cor da ocorrência e só cria o componente ao confirmar, em uma transação reversível.

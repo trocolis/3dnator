@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Extrusão zero e conclusão de AJUSTES — 30/10/2026
+
+- Etapa 0.15.0, formato 37 (leitura 1–37): partição exata por perfil com base persistida e volume invariável. Duas regressões novas em `extrusion_occt` cobrem furos, pintura herdada, várias áreas com contorno interno, contato ambíguo/explicitado, perda de apoio com falha atômica, alteração real do perfil, clonagem, persistência e STEP; as nove regressões desse módulo passam.
+- Nova regressão gráfica escolhe o perfil na face, confirma zero pela interface e verifica B-rep, volume, sete faces na placa subdividida, desfazer e refazer. A seta continua disponível nos estados sem divisão válida. Ensaio de Copiar também aciona o botão da faixa e o menu da árvore; o cenário legado `menu-copy` mostra o painel atual. Ensaio de centros aguarda a referência assíncrona após trocar a força da junção.
+- Validação final aprovada: **366 testes com OCCT**, **266 sem OCCT**, **54 ensaios gráficos seriais**, formatação e Clippy com todos os alvos e avisos negados nas duas configurações. Logs em `target/codex-validation/adjustments-20261029/`: `final-occt-tests.log`, `final-portable-tests.log`, `imprint-gpu-final.log`, `imprint-clippy.log` e `final-portable-clippy.log`.
+- Oito itens de AJUSTES concluídos em commits locais, sem push, tags ou publicação de releases. Alterações do usuário em AGENTS.md, .gitignore e recursos em icons/ preservadas.
+
 ## Cópias e painéis — 30/10/2026
 
 - Etapa 0.14.0: 53 ensaios gráficos aprovados, com formatação e Clippy com OCCT. Nova regressão troca os quatro tipos de cópia e os modos de posicionamento, verifica prévia sem criar componentes, hierarquia, definição compartilhada/independente, posicionamento escolhido, cores e desfazer. Seleção de Pintar segue o campo compartilhado da Extrusão; limpeza descarta consultas pendentes. Logs `copy-*` em `target/codex-validation/adjustments-20261029/`. Compatibilidade da Transição guiada verificada em duas regressões nativas de persistência/recálculo (`remove-sweep-test.log`).

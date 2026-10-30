@@ -533,6 +533,15 @@ impl Editor {
                 }
             })
             .inner;
+        #[cfg(all(test, feature = "occt"))]
+        if large {
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    egui::Id::new(("ribbon_action_rect", text(action.label()))),
+                    response.rect,
+                );
+            });
+        }
         let hint = if let Some(shortcut) = action.shortcut() {
             format!("{} · {shortcut}", text(action.label()))
         } else {

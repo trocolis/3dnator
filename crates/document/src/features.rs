@@ -212,6 +212,7 @@ pub enum Operation {
         combine: Option<Combine>,
         until: Option<ExtrusionLimit>,
     },
+    /// Com limites iguais e base explícita, subdivide as faces coplanares sem alterar volume.
     Extrude {
         sketch: SketchId,
         region: RegionRef,
@@ -812,6 +813,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 to,
                 region,
                 until,
+                combine,
                 ..
             } => {
                 validate_region(region)?;
@@ -823,7 +825,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                     }
                     None => {
                         let b = part.parameters.evaluate(to, Length)?;
-                        if (a - b).abs() < 1e-7 {
+                        if (a - b).abs() < 1e-7 && combine.is_none() {
                             return Err(DocumentError(
                                 "Extrusão deve ter comprimento não nulo.".into(),
                             ));

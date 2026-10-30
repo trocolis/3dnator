@@ -280,20 +280,6 @@ impl Editor {
                 let guide = extrusion.as_ref().and_then(|(part, operation)| {
                     nator_commands::extrusion::guide(&document, *part, operation).ok()
                 });
-                // Zero é um estado de interação, sem sólido nem comando publicável.
-                // A guia independe da construção e deve chegar para desenhar a seta.
-                if guide.is_some_and(|g| (g.to - g.from).abs() < 1e-7) {
-                    let _ = sender.send(Computed {
-                        tab,
-                        revision,
-                        key,
-                        guide,
-                        choice: None,
-                        result: Ok(None),
-                    });
-                    context.request_repaint();
-                    return;
-                }
                 let original = document.clone();
                 let mut choice = None;
                 let result =
@@ -383,15 +369,17 @@ impl Editor {
         if !current {
             return;
         }
+        // A seta continua disponível mesmo sem uma divisão possível (perfil livre
+        // ou face inteira em zero), para permitir iniciar o arraste da extrusão.
+        if let Some(draft) = self
+            .feature_edit
+            .as_mut()
+            .filter(|d| d.tab() == computed.tab)
+        {
+            draft.receive_extrusion(computed.guide, computed.choice);
+        }
         match computed.result {
             Ok(None) => {
-                if let Some(draft) = self
-                    .feature_edit
-                    .as_mut()
-                    .filter(|d| d.tab() == computed.tab)
-                {
-                    draft.receive_extrusion(computed.guide, None);
-                }
                 self.preview.ready = None;
                 self.preview.failed = None;
                 self.preview.shown = 0;
@@ -399,13 +387,6 @@ impl Editor {
             }
             Ok(Some((prepared, scene))) => {
                 self.preview.empty = None;
-                if let Some(draft) = self
-                    .feature_edit
-                    .as_mut()
-                    .filter(|d| d.tab() == computed.tab)
-                {
-                    draft.receive_extrusion(computed.guide, computed.choice);
-                }
                 self.preview.failed = None;
                 if computed.tab == self.current().id
                     && let Some((mesh, data)) = scene

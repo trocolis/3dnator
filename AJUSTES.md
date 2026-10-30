@@ -7,4 +7,4 @@
 - [x] Padronizar a Ferramenta Copiar e por os tipos de cópia no paine de propriedades.
 - [x] Representar as variações de ferramentas no painel de propriedades por icones, no estilo dos painesn das ferramentas do Rascunho.
 - [x] Padronizar a seleção de componentes nos paineis de propriedades, para ficar igual a o da extrusão.
-- [ ] Ao confirma uma extrusão com valor zero, criar apaena uma divião na face.
+- [x] Ao confirma uma extrusão com valor zero, criar apaena uma divião na face.

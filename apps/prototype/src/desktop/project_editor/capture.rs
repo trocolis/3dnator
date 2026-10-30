@@ -181,11 +181,9 @@ pub(crate) fn render_ui_scenario(
                     _ => vec![egui::Event::PointerMoved(middle + egui::vec2(60., -80.))],
                 };
             }
-            // Menus da faixa: clique no botão (Nova peça, Mover, Copiar) e cursor sobre a
-            // primeira subopção.
+            // Menu Nova peça: clique no botão e cursor sobre a primeira subopção.
             let ribbon_menu = match pointer.as_str() {
                 "menu-new-part" => Some(0),
-                "menu-copy" => Some(1),
                 _ => None,
             };
             if let Some(index) = ribbon_menu
@@ -785,6 +783,8 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 .select(instance.map(Selection::Instance));
             if scenario == "menu-move" {
                 editor.open_move();
+            } else if scenario == "menu-copy" {
+                editor.open_copy(false);
             }
         }
         "part-menu-move" => {
@@ -1342,8 +1342,35 @@ mod tests {
             editor
                 .current_mut()
                 .select(Some(Selection::Instance(root_id)));
-            editor.duplicate_selection(&context);
+            if independent {
+                editor.apply_menu_action(
+                    &context,
+                    browser::MenuAction::Copy(vec![Selection::Instance(root_id)], false),
+                );
+            } else {
+                frame(&mut editor, &context, vec![])?;
+                let rect = context
+                    .data(|d| {
+                        d.get_temp::<egui::Rect>(egui::Id::new((
+                            "ribbon_action_rect",
+                            text(T::CopyMenu),
+                        )))
+                    })
+                    .ok_or("Botão Copiar")?;
+                // A seleção foi alterada fora dos eventos: atualizar a captura do botão
+                // habilitado antes de pressioná-lo, como no movimento real do ponteiro.
+                frame(
+                    &mut editor,
+                    &context,
+                    vec![egui::Event::PointerMoved(rect.center())],
+                )?;
+                click(&mut editor, &context, rect.center())?;
+            }
             frame(&mut editor, &context, vec![])?;
+            assert!(
+                editor.assembly_panel.is_some(),
+                "Copiar deve abrir o painel"
+            );
             for kind in [
                 T::RectangularPattern,
                 T::CircularPattern,
@@ -6020,6 +6047,128 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn zero_extrusion_confirms_a_real_face_partition_and_undo_restores_the_body()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Placa", Plane::xy());
+        sketch.add_rectangle([0., 0.], [20., 20.], false)?;
+        let mut doc = Document::new("Dividir com zero")?;
+        let (part, base_sketch) = doc.add_sketch(None, sketch)?;
+        let mut session = Session::new(doc)?;
+        let Effect::Imported { body: base, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch: base_sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Base".into());
+        };
+        let mut profile = Sketch::new(
+            "Limite da divisão",
+            Plane {
+                origin: [0., 0., 10.],
+                ..Plane::xy()
+            },
+        );
+        profile.add_rectangle([2., 2.], [18., 18.], false)?;
+        session.execute(Command::AddSketch {
+            destination: Some(part),
+            sketch: profile,
+        })?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        settle(&mut editor, &context)?;
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        frame(&mut editor, &context, vec![])?;
+        let point = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [5., 5., 10.],
+        )
+        .ok_or("Perfil")?;
+        click(&mut editor, &context, point)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let guide = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.extrusion_state())
+            .ok_or("Seta em zero")?
+            .0;
+        assert_eq!(guide.from, guide.to);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .bodies
+                .len(),
+            1
+        );
+        assert_eq!(editor.current().session.revision(), 0);
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.feature_edit.is_none());
+        let doc = editor.current().session.document();
+        let result = doc
+            .part(part)
+            .ok_or("Peça")?
+            .bodies
+            .iter()
+            .find(|b| b.visible)
+            .ok_or("Resultado")?;
+        assert_ne!(result.id, base);
+        assert_eq!(result.face_names.len(), 7);
+        assert!(
+            (nator_kernel::Solid::from_brep(
+                result.brep.as_ref().ok_or("B-rep")?,
+                Some(&result.face_names)
+            )?
+            .volume()?
+                - 4000.)
+                .abs()
+                < 1e-6
+        );
+        assert!(editor.current_mut().session.undo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .body(base)
+                .ok_or("Base")?
+                .visible
+        );
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .bodies
+                .len(),
+            1
+        );
+        assert!(editor.current_mut().session.redo());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn offset_plane_follows_the_face_drag_and_typing_and_hides_after_a_sketch()
     -> Result<(), Box<dyn Error>> {
         use sketch_scene::PlanePurpose;
@@ -7945,6 +8094,20 @@ mod tests {
                 strong
             );
             assert_eq!(editor.current().session.revision(), revision + 1);
+        }
+        // As referências de centros são recalculadas em segundo plano após F.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .is_none_or(|w| w.reference_points().centers.is_empty())
+        {
+            if Instant::now() > deadline {
+                return Err("Centro do retângulo não ficou pronto".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
         }
         let center = at(&editor, [10., 5., 0.])?;
         click(&mut editor, &context, center)?;

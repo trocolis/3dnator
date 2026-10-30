@@ -535,3 +535,191 @@ fn zero_is_a_guide_only_and_sketch_and_work_planes_are_associative_limits() -> R
     doc.validate()?;
     Ok(())
 }
+
+#[test]
+fn zero_extrusion_partitions_faces_preserves_holes_colors_and_rebuilds() -> Result<()> {
+    use nator_commands::painting::Target;
+    use nator_geometry::RgbColor;
+    for hole in [false, true] {
+        let (mut session, part, base) = fixture(hole)?;
+        let red = RgbColor::new([180, 35, 60]);
+        let blue = RgbColor::new([25, 80, 220]);
+        session.execute(Command::SetBodyColor {
+            id: base,
+            color: Some(red),
+        })?;
+        session.execute(Command::PaintSurfaces {
+            targets: vec![Target::Face {
+                body: base,
+                face: FaceRef::Named(format!("{}:end", body_owner(base))),
+                boundaries: vec![],
+            }],
+            color: blue,
+        })?;
+        let mut profile = Sketch::new(
+            "Divisão",
+            Plane {
+                origin: [0., 0., 10.],
+                ..Plane::xy()
+            },
+        );
+        profile.add_rectangle([2., 2.], [18., 18.], false)?;
+        let (_, sketch) = add_sketch(&mut session, Some(part), profile.clone())?;
+        let old_volume = volume(&session, base)?;
+        let old_faces = session
+            .document()
+            .body(base)
+            .ok_or("Base")?
+            .face_names
+            .len();
+        let output = created(session.execute(Command::AddSmartExtrusion {
+            part,
+            name: "Dividir face".into(),
+            preferred: None,
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "0 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?)?;
+        assert!((volume(&session, output)? - old_volume).abs() < 1e-6);
+        let body = session.document().body(output).ok_or("Divisão")?;
+        assert!(body.face_names.len() > old_faces);
+        assert_eq!(body.color, Some(red));
+        let appearance = session
+            .document()
+            .body_appearance(output)
+            .ok_or("Pintura herdada")?;
+        assert!(appearance.layers.len() >= 2);
+        assert!(appearance.layers.iter().all(|layer| layer.color == blue));
+        let op = &session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .features
+            .last()
+            .ok_or("Etapa")?
+            .operation;
+        assert!(
+            matches!(op, Operation::Extrude { combine: Some(Combine { target, .. }), region: RegionRef::Boundary(_), .. } if *target == base)
+        );
+        if hole {
+            assert!(
+                session
+                    .document()
+                    .pick(nator_geometry::query::Ray {
+                        origin: [10., 10., 50.],
+                        direction: [0., 0., -1.]
+                    })?
+                    .is_none()
+            );
+        }
+        assert!(session.undo());
+        assert!(session.document().body(base).ok_or("Base")?.visible);
+        assert!(session.document().body(output).is_none());
+        assert!(session.redo());
+        let revision = session.revision();
+        profile.plane.origin[2] = 11.;
+        assert!(
+            session
+                .execute(Command::UpdateSketch {
+                    id: sketch,
+                    sketch: profile.clone()
+                })
+                .is_err()
+        );
+        assert_eq!(session.revision(), revision);
+        profile.plane.origin[2] = 10.;
+        for point in &mut profile.points {
+            point.position[0] += 0.25;
+        }
+        session.execute(Command::UpdateSketch {
+            id: sketch,
+            sketch: profile,
+        })?;
+        assert!((volume(&session, output)? - old_volume).abs() < 1e-6);
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("divisao.3dnator");
+        nator_project_io::write_project(&path, session.document())?;
+        let reopened = Session::new(nator_project_io::read_project(&path)?)?;
+        assert!((volume(&reopened, output)? - old_volume).abs() < 1e-6);
+        let body = reopened.document().body(output).ok_or("Divisão")?;
+        let solid = Solid::from_brep(body.brep.as_ref().ok_or("B-rep")?, Some(&body.face_names))?;
+        let step = directory.path().join("divisao.step");
+        solid.write_step(&step)?;
+        let restored = Solid::read_step(&step)?;
+        assert!((restored.volume()? - old_volume).abs() < 1e-5);
+        assert_eq!(restored.face_count()?, solid.face_count()?);
+        let mut cloned = reopened.document().clone();
+        cloned.clone_part(part, "Cópia da divisão".into())?;
+        cloned.validate()?;
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_extrusion_requires_unique_support_and_keeps_multiple_regions() -> Result<()> {
+    let (mut session, part, base) = fixture(false)?;
+    let mut profile = Sketch::new(
+        "Duas áreas",
+        Plane {
+            origin: [0., 0., 10.],
+            ..Plane::xy()
+        },
+    );
+    profile.add_rectangle([1., 1.], [6., 6.], false)?;
+    profile.add_rectangle([14., 14.], [19., 19.], false)?;
+    let inner = profile.add_circle([3., 3.], 1., false)?;
+    let regions = nator_sketch::profiles::regions(&profile)?
+        .iter()
+        .filter(|r| !r.outer.entities.contains(&inner))
+        .map(|r| RegionRef::Boundary(r.boundary()))
+        .collect();
+    let (_, sketch) = add_sketch(&mut session, Some(part), profile)?;
+    let operation = Operation::Extrude {
+        sketch,
+        region: RegionRef::Multiple(regions),
+        from: "0 mm".into(),
+        to: "0 mm".into(),
+        combine: None,
+        until: None,
+    };
+    let original = session.document().body(base).ok_or("Base")?.clone();
+    session.document().validate()?;
+    let output = created(session.execute(Command::AddFeature {
+        part,
+        name: "Divisão múltipla".into(),
+        operation: operation.clone(),
+    })?)?;
+    let body = session.document().body(output).ok_or("Divisão")?;
+    assert_eq!(body.face_names.len(), original.face_names.len() + 3);
+    assert!((volume(&session, output)? - 4000.).abs() < 1e-6);
+    assert!(session.undo());
+    // Dois corpos coincidentes não podem ser escolhidos por ordem de criação.
+    session.execute(Command::CopyBody {
+        id: base,
+        placement: nator_geometry::Placement::default(),
+    })?;
+    let revision = session.revision();
+    assert!(
+        session
+            .execute(Command::AddSmartExtrusion {
+                part,
+                name: "Ambígua".into(),
+                operation: operation.clone(),
+                preferred: None
+            })
+            .is_err()
+    );
+    assert_eq!(session.revision(), revision);
+    created(session.execute(Command::AddSmartExtrusion {
+        part,
+        name: "Base explícita".into(),
+        operation,
+        preferred: Some(base),
+    })?)?;
+    Ok(())
+}

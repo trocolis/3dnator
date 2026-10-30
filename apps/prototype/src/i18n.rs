@@ -205,6 +205,7 @@ pub enum Text {
     #[allow(dead_code)]
     ViewOrbitDown,
     ViewOrbitReverseHint,
+    ZeroExtrusionHint,
     Extrude,
     Revolve,
     Join,
@@ -1133,6 +1134,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ViewOrbitReverseHint => {
             "Passo de 45° ao redor da normal da face predominante. Shift+clique ou botão direito inverte o sentido."
         }
+        Text::ZeroExtrusionHint => "Zero divide a face pelo perfil, preservando o volume do corpo.",
         Text::Extrude => "Extrusão",
         Text::Revolve => "Revolução",
         Text::Join => "Unir",

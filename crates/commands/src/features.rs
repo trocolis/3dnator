@@ -367,6 +367,16 @@ pub(super) fn normalize(
     part: PartId,
     operation: Operation,
 ) -> Result<Operation, DocumentError> {
+    let operation = if matches!(operation, Operation::Extrude { .. }) {
+        let guide = crate::extrusion::guide(doc, part, &operation)?;
+        if (guide.to - guide.from).abs() < 1e-7 {
+            crate::extrusion::imprint_target(doc, part, operation, None)?
+        } else {
+            operation
+        }
+    } else {
+        operation
+    };
     let stable_one = |sketch, reference: RegionRef| -> Result<RegionRef, DocumentError> {
         Ok(match reference {
             RegionRef::Index(_) => {
@@ -723,14 +733,19 @@ pub(super) fn construct(
     let mut solid = match operation {
         operation @ (Operation::Extrude { combine, .. }
         | Operation::ExtrudeFace { combine, .. }) => {
-            let extrusion = crate::extrusion::tool(doc, part, operation, &owner, None)?;
-            match combine {
-                // O corpo existente é a base: o corte remove a extrusão dele.
-                Some(combine) => source(doc, part, combine.target)?
-                    .0
-                    .boolean(&extrusion, boolean_mode(combine.mode), &owner)
-                    .map_err(error)?,
-                None => extrusion,
+            let guide = crate::extrusion::guide(doc, part, operation)?;
+            if (guide.to - guide.from).abs() < 1e-7 {
+                crate::extrusion::imprint(doc, part, operation, &owner)?
+            } else {
+                let extrusion = crate::extrusion::tool(doc, part, operation, &owner, None)?;
+                match combine {
+                    // O corpo existente é a base: o corte remove a extrusão dele.
+                    Some(combine) => source(doc, part, combine.target)?
+                        .0
+                        .boolean(&extrusion, boolean_mode(combine.mode), &owner)
+                        .map_err(error)?,
+                    None => extrusion,
+                }
             }
         }
         Operation::Label { base, face, spec } => {
