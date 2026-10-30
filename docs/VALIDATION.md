@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Abas fixas e faixa sem nomes de seção — 30/10/2026
+
+- Etapa 0.17.0, formato `.3dnator` mantido em 37. A faixa passa a ter quatro abas fixas na ordem Montagem, Construção, Rascunho e Inspecionar; a antiga aba Peça foi renomeada para Construção. Sem edição ativa, Rascunho oferece **Novo rascunho** e continua selecionável.
+- O rodapé de 18 pontos com o nome das seções foi removido; os grupos permanecem separados por linhas e a faixa ficou mais baixa. As ferramentas secundárias do Criar e do Modificar passam para um botão compacto de menu (chevron) à direita do grupo, com nomes e dicas; Concluir e Cancelar continuam como botões diretos.
+- Capturas inspecionadas em `target/validation/tabs-20261030/`: `montagem.png`, `construcao.png`, `rascunho.png` (edição ativa) e `rascunho-vazio.png` (aba fixa sem edição). O novo cenário `rascunho-tab` produz o último estado.
+- Aprovados 266 testes sem OCCT e 366 com OCCT; formatação e Clippy com todos os alvos e avisos negados nas duas configurações. O ensaio gráfico optativo `ribbon_shows_four_fixed_tabs_without_group_captions` confere as quatro abas e a ausência de rótulos como Seleção, Criar, Acabamento, Modificar, Organizar e Posicionar; `sketch_group_chevron_keeps_secondary_tools_reachable` confere o menu compacto do Modificar com Estender e Excluir.
+
 ## Ícones vetoriais redesenhados — 30/10/2026
 
 - Etapa 0.16.0, formato `.3dnator` mantido em 37. Os desenhos passaram para `icons/draw.rs`, sobre a mesma grade de 24 unidades: traço principal de 2 unidades, pontas e junções arredondadas, formas sólidas com preenchimento tonal, setas preenchidas e uma única cor de ação. Rascunho e restrições seguem em preto/verde; referências, seção, aviso e estado desabilitado têm paletas próprias, incluindo a barra escura da janela.

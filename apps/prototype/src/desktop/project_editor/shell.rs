@@ -8,11 +8,10 @@ use super::{
 use feature_editor::Tool as SolidTool;
 use nator_sketch::edit::Action as SketchEdit;
 
-/// Todas as abas compartilham a mesma faixa: corpo dos botões, pequeno
-/// intervalo e rodapé reservado tanto para rótulos quanto para menus.
-const GROUP_CAPTION_HEIGHT: f32 = 18.;
-const GROUP_VERTICAL_GAP: f32 = 2.;
+/// Todas as abas compartilham a mesma faixa, sem rodapé com o nome do grupo.
 const GROUP_HORIZONTAL_GAP: f32 = 3.;
+/// Coluna compacta do menu de ferramentas secundárias do grupo.
+const GROUP_MENU_WIDTH: f32 = 22.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(super) enum RibbonTab {
@@ -780,9 +779,7 @@ impl Editor {
             .map(|w| (self.current().id, w.id));
         if sketch != self.shell.sketch_context {
             if sketch.is_some() {
-                if self.shell.tab != RibbonTab::Sketch {
-                    self.shell.before_sketch = Some(self.shell.tab);
-                }
+                self.shell.before_sketch = Some(self.shell.tab);
                 self.shell.tab = RibbonTab::Sketch;
             } else {
                 // Volta à aba de origem (Montagem para rascunhos de referência).
@@ -915,12 +912,9 @@ impl Editor {
                     for tab in [
                         RibbonTab::Assembly,
                         RibbonTab::Model,
-                        RibbonTab::Inspect,
                         RibbonTab::Sketch,
+                        RibbonTab::Inspect,
                     ] {
-                        if tab == RibbonTab::Sketch && sketch.is_none() {
-                            continue;
-                        }
                         let selected = self.shell.tab == tab;
                         // A aba ativa já tem seu próprio contorno. O divisor aparece
                         // apenas entre duas abas inativas, sem duplicar essa borda.
@@ -1044,91 +1038,78 @@ impl Editor {
             });
     }
 
-    /// O menu do rótulo reúne as ferramentas secundárias do grupo, como na referência
-    /// visual; só aparecem intenções que o rascunho sabe executar.
-    fn sketch_section_menu(&mut self, ui: &mut egui::Ui, label: T, actions: &[Action]) {
+    /// Botão compacto no fim do grupo reúne as ferramentas secundárias do rascunho.
+    /// Sem o antigo rodapé, o menu continua acessível sem exibir o nome do grupo.
+    fn sketch_group_menu(&mut self, ui: &mut egui::Ui, actions: &[Action]) {
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(GROUP_MENU_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
+            egui::Sense::click(),
+        );
+        self.shell.menu_rects.push(rect);
+        let label = text(T::MoreTools);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+        });
+        if response.hovered() && ui.is_enabled() {
+            ui.painter().rect_filled(rect, 5, theme::BLUE_FILL);
+        }
+        let color = if ui.is_enabled() {
+            theme::MUTED
+        } else {
+            egui::Color32::from_gray(165)
+        };
+        let center = rect.center();
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                center + egui::vec2(-4., -2.),
+                center + egui::vec2(4., -2.),
+                center + egui::vec2(0., 3.),
+            ],
+            color,
+            egui::Stroke::NONE,
+        ));
         let mut chosen = None;
-        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            let label_width = ui
-                .painter()
-                .layout_no_wrap(
-                    text(label).to_owned(),
-                    egui::FontId::proportional(10.),
-                    theme::MUTED,
-                )
-                .size()
-                .x;
-            let button = egui::Button::new(
-                egui::RichText::new(text(label))
-                    .size(10.)
-                    .color(theme::MUTED),
-            )
-            .frame(false)
-            .min_size(egui::vec2(label_width + 26., GROUP_CAPTION_HEIGHT));
-            let (response, _) =
-                egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                    for action in actions {
-                        let enabled = self.action_enabled(*action);
-                        ui.horizontal(|ui| {
-                            let (rect, _) = ui
-                                .allocate_exact_size(egui::Vec2::splat(20.), egui::Sense::hover());
-                            icons::paint(ui.painter(), rect, action.icon(), enabled);
-                            if ui
-                                .add_enabled(
-                                    enabled,
-                                    egui::Button::new(text(action.label())).frame(false),
-                                )
-                                .clicked()
-                            {
-                                chosen = Some(*action);
-                                ui.close();
-                            }
-                        });
+        egui::Popup::menu(&response).show(|ui| {
+            for action in actions {
+                let enabled = self.action_enabled(*action);
+                ui.horizontal(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(20.), egui::Sense::hover());
+                    icons::paint(ui.painter(), rect, action.icon(), enabled);
+                    if ui
+                        .add_enabled(
+                            enabled,
+                            egui::Button::new(text(action.label())).frame(false),
+                        )
+                        .clicked()
+                    {
+                        chosen = Some(*action);
+                        ui.close();
                     }
                 });
-            let at = egui::pos2(response.rect.right() - 8., response.rect.center().y);
-            ui.painter().add(egui::Shape::convex_polygon(
-                vec![
-                    at + egui::vec2(-3., -2.),
-                    at + egui::vec2(3., -2.),
-                    at + egui::vec2(0., 2.),
-                ],
-                theme::MUTED,
-                egui::Stroke::NONE,
-            ));
+            }
         });
+        response.on_hover_text(label);
         if let Some(action) = chosen {
             self.activate_action(ui.ctx(), action);
         }
     }
 
-    fn sketch_section(
-        &mut self,
-        ui: &mut egui::Ui,
-        label: T,
-        promoted: &[Action],
-        menu: &[Action],
-    ) {
-        self.ribbon_group_layout(
-            ui,
-            group_width(promoted.len()),
-            |editor, ui| {
-                for action in promoted {
-                    editor.action_button(ui, *action, true);
-                }
-            },
-            |editor, ui| {
-                if menu.is_empty() {
-                    ui.label(
-                        egui::RichText::new(text(label))
-                            .size(10.)
-                            .color(theme::MUTED),
-                    );
-                } else {
-                    editor.sketch_section_menu(ui, label, menu);
-                }
-            },
-        );
+    fn sketch_section(&mut self, ui: &mut egui::Ui, promoted: &[Action], menu: &[Action]) {
+        let width = group_width(promoted.len())
+            + if menu.is_empty() {
+                0.
+            } else {
+                GROUP_HORIZONTAL_GAP + GROUP_MENU_WIDTH
+            };
+        self.ribbon_group_layout(ui, width, |editor, ui| {
+            for action in promoted {
+                editor.action_button(ui, *action, true);
+            }
+            if !menu.is_empty() {
+                editor.sketch_group_menu(ui, menu);
+            }
+        });
     }
 
     // Galeria preservada para futura reativação; oculta conforme AJUSTE.md.
@@ -1189,61 +1170,24 @@ impl Editor {
                         }
                     });
             },
-            |editor, ui| {
-                editor.sketch_section_menu(
-                    ui,
-                    T::ConstrainGroup,
-                    &[
-                        Action::SketchTool(sketch_editor::Tool::Dimension),
-                        Action::SketchEdit(SketchEdit::HorizontalVertical),
-                        Action::SketchEdit(SketchEdit::Coincident),
-                        Action::SketchEdit(SketchEdit::Tangent),
-                        Action::SketchEdit(SketchEdit::Equal),
-                        Action::SketchEdit(SketchEdit::Parallel),
-                        Action::SketchEdit(SketchEdit::Perpendicular),
-                        Action::SketchEdit(SketchEdit::Construction),
-                        Action::SketchEdit(SketchEdit::FixPoint),
-                    ],
-                );
-            },
         );
     }
-    fn ribbon_group(&mut self, ui: &mut egui::Ui, label: T, actions: &[Action]) {
-        self.ribbon_group_with(ui, label, actions.len(), |editor, ui| {
+    fn ribbon_group(&mut self, ui: &mut egui::Ui, actions: &[Action]) {
+        self.ribbon_group_layout(ui, group_width(actions.len()), |editor, ui| {
             for action in actions {
                 editor.action_button(ui, *action, true);
             }
         });
     }
-    /// Um grupo pode combinar botões diretos e menus, mantendo o mesmo rótulo e separador.
-    fn ribbon_group_with(
-        &mut self,
-        ui: &mut egui::Ui,
-        label: T,
-        count: usize,
-        body: impl FnOnce(&mut Self, &mut egui::Ui),
-    ) {
-        self.ribbon_group_layout(ui, group_width(count), body, |_, ui| {
-            ui.label(
-                egui::RichText::new(text(label))
-                    .size(10.)
-                    .color(theme::MUTED),
-            );
-        });
-    }
-
-    /// Rótulos simples e botões de menu ocupam a mesma altura. Reservar corpo e
-    /// rodapé evita que o mínimo de interação do egui aumente só algumas abas.
+    /// Corpo do grupo: somente os botões, sem o antigo rodapé com o nome da seção.
     fn ribbon_group_layout(
         &mut self,
         ui: &mut egui::Ui,
         width: f32,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
-        caption: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
         ui.vertical(|ui| {
             ui.set_width(width);
-            ui.spacing_mut().item_spacing.y = GROUP_VERTICAL_GAP;
             ui.allocate_ui_with_layout(
                 egui::vec2(width, icons::RIBBON_BUTTON_SIZE.y),
                 egui::Layout::left_to_right(egui::Align::Min),
@@ -1252,23 +1196,13 @@ impl Editor {
                     body(self, ui);
                 },
             );
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, GROUP_CAPTION_HEIGHT),
-                egui::Layout::top_down(egui::Align::Center),
-                |ui| {
-                    ui.set_min_height(GROUP_CAPTION_HEIGHT);
-                    ui.spacing_mut().interact_size.y = GROUP_CAPTION_HEIGHT;
-                    ui.spacing_mut().button_padding = egui::vec2(4., 1.);
-                    caption(self, ui);
-                },
-            );
         });
         ui.separator();
     }
     /// Grupo com um botão de menu: o clique abre as subopções, cada uma com ícone, nome e
     /// uma linha de explicação, habilitadas conforme o contexto.
-    fn ribbon_menu_group(&mut self, ui: &mut egui::Ui, label: T, menu: Menu<'_>) {
-        self.ribbon_group_with(ui, label, 1, |editor, ui| {
+    fn ribbon_menu_group(&mut self, ui: &mut egui::Ui, menu: Menu<'_>) {
+        self.ribbon_group_layout(ui, group_width(1), |editor, ui| {
             editor.ribbon_menu_button(ui, menu);
         });
     }
@@ -1359,14 +1293,13 @@ impl Editor {
             self.shell.tab,
             RibbonTab::Assembly | RibbonTab::Model | RibbonTab::Sketch
         ) {
-            self.ribbon_group(ui, T::SelectionGroup, &[Action::Select]);
+            self.ribbon_group(ui, &[Action::Select]);
         }
         match self.shell.tab {
             RibbonTab::Model => {
-                self.ribbon_group(ui, T::Sketch, &[Action::NewSketch]);
+                self.ribbon_group(ui, &[Action::NewSketch]);
                 self.ribbon_group(
                     ui,
-                    T::CreateGroupLabel,
                     &[
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
@@ -1376,7 +1309,6 @@ impl Editor {
                 );
                 self.ribbon_group(
                     ui,
-                    T::FinishingGroup,
                     &[
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
@@ -1384,26 +1316,23 @@ impl Editor {
                         Action::Solid(SolidTool::Label),
                     ],
                 );
-                self.ribbon_group_with(ui, T::ModifyGroup, 4, |editor, ui| {
-                    editor.action_button(ui, Action::MoveBody, true);
-                    for action in [
+                self.ribbon_group(
+                    ui,
+                    &[
+                        Action::MoveBody,
                         Action::CopyBody,
                         Action::Solid(SolidTool::Join),
                         Action::Solid(SolidTool::Split),
-                    ] {
-                        editor.action_button(ui, action, true);
-                    }
-                });
-                // Geometria de construção fecha a aba.
-                self.ribbon_group(ui, T::ConstructionGroup, &[Action::OffsetPlane]);
+                    ],
+                );
+                self.ribbon_group(ui, &[Action::OffsetPlane]);
             }
             // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
             // posicionamento, cópias e organização.
             RibbonTab::Assembly => {
-                self.ribbon_group(ui, T::ReferenceGroup, &[Action::ReferenceSketch]);
+                self.ribbon_group(ui, &[Action::ReferenceSketch]);
                 self.ribbon_menu_group(
                     ui,
-                    T::PartsGroup,
                     Menu {
                         icon: Icon::NewBody,
                         label: T::NewPartMenu,
@@ -1414,61 +1343,64 @@ impl Editor {
                         ],
                     },
                 );
-                self.ribbon_group(ui, T::PositionGroup, &[Action::MoveCopy]);
-                self.ribbon_group(ui, T::CopyMenu, &[Action::NewInstance]);
-                self.ribbon_group(ui, T::ArrangeGroup, &[Action::Group, Action::Ungroup]);
+                self.ribbon_group(ui, &[Action::MoveCopy]);
+                self.ribbon_group(ui, &[Action::NewInstance]);
+                self.ribbon_group(ui, &[Action::Group, Action::Ungroup]);
             }
             RibbonTab::Inspect => {
-                self.ribbon_group(ui, T::AnalysesGroup, &[Action::Measure, Action::Section]);
-                self.ribbon_group(ui, T::DocumentGroup, &[Action::Drawing, Action::Parameters]);
-                self.ribbon_group(ui, T::ExportGroup, &[Action::ExportStl, Action::ExportStep]);
+                self.ribbon_group(ui, &[Action::Measure, Action::Section]);
+                self.ribbon_group(ui, &[Action::Drawing, Action::Parameters]);
+                self.ribbon_group(ui, &[Action::ExportStl, Action::ExportStep]);
             }
             RibbonTab::Sketch => {
-                self.sketch_section(
-                    ui,
-                    T::CreateGroupLabel,
-                    &[
-                        Action::SketchTool(sketch_editor::Tool::Line),
-                        Action::SketchTool(sketch_editor::Tool::Rectangle),
-                        Action::SketchTool(sketch_editor::Tool::Circle),
-                        Action::SketchTool(sketch_editor::Tool::Arc),
-                        Action::SketchTool(sketch_editor::Tool::Project),
-                        Action::SketchImage,
-                    ],
-                    &[
-                        Action::SketchTool(sketch_editor::Tool::Select),
-                        Action::SketchTool(sketch_editor::Tool::Line),
-                        Action::SketchTool(sketch_editor::Tool::Rectangle),
-                        Action::SketchTool(sketch_editor::Tool::Circle),
-                        Action::SketchTool(sketch_editor::Tool::Arc),
-                        Action::SketchTool(sketch_editor::Tool::Project),
-                        Action::SketchImage,
-                    ],
-                );
-                self.sketch_section(
-                    ui,
-                    T::ModifyGroup,
-                    &[
-                        Action::SketchTool(sketch_editor::Tool::Trim),
-                        Action::SketchEdit(SketchEdit::Offset),
-                        Action::SketchEdit(SketchEdit::Fillet),
-                        Action::SketchEdit(SketchEdit::Chamfer),
-                        Action::SketchEdit(SketchEdit::Mirror),
-                        Action::SketchTool(sketch_editor::Tool::Dimension),
-                    ],
-                    &[
-                        Action::SketchTool(sketch_editor::Tool::Trim),
-                        Action::SketchEdit(SketchEdit::Offset),
-                        Action::SketchEdit(SketchEdit::Fillet),
-                        Action::SketchEdit(SketchEdit::Chamfer),
-                        Action::SketchEdit(SketchEdit::Extend),
-                        Action::SketchEdit(SketchEdit::Mirror),
-                        Action::SketchTool(sketch_editor::Tool::Dimension),
-                        Action::SketchEdit(SketchEdit::Delete),
-                    ],
-                );
-                let exit = [Action::FinishSketch, Action::CancelSketch];
-                self.sketch_section(ui, T::SketchExitGroup, &exit, &exit);
+                if self.current().sketch_edit.is_none() {
+                    // A aba Rascunho é fixa; sem edição ativa ela inicia um novo rascunho.
+                    self.ribbon_group(ui, &[Action::NewSketch]);
+                } else {
+                    self.sketch_section(
+                        ui,
+                        &[
+                            Action::SketchTool(sketch_editor::Tool::Line),
+                            Action::SketchTool(sketch_editor::Tool::Rectangle),
+                            Action::SketchTool(sketch_editor::Tool::Circle),
+                            Action::SketchTool(sketch_editor::Tool::Arc),
+                            Action::SketchTool(sketch_editor::Tool::Project),
+                            Action::SketchImage,
+                        ],
+                        &[
+                            Action::SketchTool(sketch_editor::Tool::Select),
+                            Action::SketchTool(sketch_editor::Tool::Line),
+                            Action::SketchTool(sketch_editor::Tool::Rectangle),
+                            Action::SketchTool(sketch_editor::Tool::Circle),
+                            Action::SketchTool(sketch_editor::Tool::Arc),
+                            Action::SketchTool(sketch_editor::Tool::Project),
+                            Action::SketchImage,
+                        ],
+                    );
+                    self.sketch_section(
+                        ui,
+                        &[
+                            Action::SketchTool(sketch_editor::Tool::Trim),
+                            Action::SketchEdit(SketchEdit::Offset),
+                            Action::SketchEdit(SketchEdit::Fillet),
+                            Action::SketchEdit(SketchEdit::Chamfer),
+                            Action::SketchEdit(SketchEdit::Mirror),
+                            Action::SketchTool(sketch_editor::Tool::Dimension),
+                        ],
+                        &[
+                            Action::SketchTool(sketch_editor::Tool::Trim),
+                            Action::SketchEdit(SketchEdit::Offset),
+                            Action::SketchEdit(SketchEdit::Fillet),
+                            Action::SketchEdit(SketchEdit::Chamfer),
+                            Action::SketchEdit(SketchEdit::Extend),
+                            Action::SketchEdit(SketchEdit::Mirror),
+                            Action::SketchTool(sketch_editor::Tool::Dimension),
+                            Action::SketchEdit(SketchEdit::Delete),
+                        ],
+                    );
+                    let exit = [Action::FinishSketch, Action::CancelSketch];
+                    self.sketch_section(ui, &exit, &[]);
+                }
             }
         }
     }

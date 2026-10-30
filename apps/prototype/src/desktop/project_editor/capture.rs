@@ -86,11 +86,12 @@ pub(crate) fn render_ui_scenario(
         | "extrude-face"
         | "status-dialog"
         | "icons"
+        | "rascunho-tab"
         | "extrude-cut" => {}
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog, icons."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, status-dialog, icons, rascunho-tab."
                     .into(),
             );
         }
@@ -368,6 +369,11 @@ fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
     // A folha de contato substitui o editor inteiro; não depende do projeto.
     if scenario == "icons" {
+        return Ok(());
+    }
+    // A aba Rascunho é fixa; sem edição ativa ela oferece o início de um rascunho.
+    if scenario == "rascunho-tab" {
+        editor.shell.tab = shell::RibbonTab::Sketch;
         return Ok(());
     }
     if matches!(scenario, "paint" | "paint-hover") {
@@ -3546,6 +3552,120 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_group_chevron_keeps_secondary_tools_reachable() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Menu do grupo")?;
+        let mut sketch = Sketch::new("Perfil", Plane::xy());
+        sketch.add_rectangle([-20., -10.], [20., 10.], false)?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, document)
+            .map_err(|error| error.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        settle(&mut editor, &context)?;
+        editor.shell.tab = shell::RibbonTab::Sketch;
+        frame(&mut editor, &context, vec![])?;
+        let chevrons = editor.shell.menu_rects.clone();
+        assert_eq!(chevrons.len(), 2, "menus do Criar e do Modificar ausentes");
+        click(&mut editor, &context, chevrons[1].center())?;
+        let mut labels = Vec::new();
+        for _ in 0..3 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440., 900.),
+                    )),
+                    time: Some(context.input(|i| i.time) + 1. / 60.),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            labels = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+        }
+        assert!(
+            labels.iter().any(|label| label.contains("Estender")),
+            "menu do Modificar sem Estender: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label.contains("Excluir")),
+            "menu do Modificar sem Excluir: {labels:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn ribbon_shows_four_fixed_tabs_without_group_captions() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let document = Document::new("Abas fixas")?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        let mut labels = Vec::new();
+        for _ in 0..2 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 820.),
+                    )),
+                    time: Some(context.input(|i| i.time) + 1. / 60.),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            labels = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                    _ => None,
+                })
+                .collect();
+            output.textures_delta.clear();
+        }
+        for tab in [
+            text(T::Assembly),
+            text(T::ModelTab),
+            text(T::Sketch),
+            text(T::InspectTab),
+        ] {
+            assert!(
+                labels.iter().any(|label| label == tab),
+                "aba ausente: {tab}"
+            );
+        }
+        for caption in [
+            "Seleção",
+            "Criar",
+            "Acabamento",
+            "Modificar",
+            "Organizar",
+            "Posicionar",
+        ] {
+            assert!(
+                !labels.iter().any(|label| label == caption),
+                "nome de seção visível: {caption}"
+            );
+        }
+        Ok(())
+    }
+
     /// Ensaio optativo porque precisa de adaptador wgpu. Usa eventos reais egui
     /// sobre o canvas completo; não exige compositor nem janela nativa.
     #[test]
@@ -4168,7 +4288,7 @@ mod tests {
             .select(Some(Selection::Body { part, id: original }));
         editor.shell.tab = shell::RibbonTab::Model;
         settle(&mut editor, &context)?;
-        assert_eq!(text(T::ModelTab), "Peça");
+        assert_eq!(text(T::ModelTab), "Construção");
 
         let copy = label_position(&mut editor, &context, text(T::CopyMenu))?;
         click(&mut editor, &context, copy)?;

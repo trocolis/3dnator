@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.17.0 — 30/10/2026
+
+- A faixa passa a ter quatro abas fixas, na ordem **Montagem**, **Construção**, **Rascunho** e **Inspecionar**. A antiga aba Peça foi renomeada para Construção; Rascunho continua disponível sem edição ativa e, nesse estado, oferece **Novo rascunho**.
+- Os nomes das seções deixaram de aparecer no rodapé dos grupos. A faixa ficou mais compacta e os grupos continuam separados; as ferramentas secundárias (Selecionar do Criar, Estender e Excluir do Modificar) ficam num botão compacto de menu (chevron) à direita do grupo.
+- Novo cenário de captura `rascunho-tab` mostra a aba sem edição ativa. Teste gráfico opcional confere as quatro abas e a ausência dos nomes de seção; a altura uniforme da faixa entre abas continua coberta.
+- Formato `.3dnator` mantido em 37; etapa local sem push/release.
+
 ## 0.16.0 — 30/10/2026
 
 - Ícones da interface redesenhados sobre a mesma grade de 24 unidades: traço uniforme de 2 unidades, pontas e junções arredondadas, preenchimentos tonais e uma única cor de ação por contexto. A geometria foi simplificada para continuar legível de 16 a 46 pontos, da árvore à faixa e aos painéis.

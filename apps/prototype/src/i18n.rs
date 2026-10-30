@@ -44,7 +44,6 @@ pub enum Text {
     AppName,
     ChooseOffsetBase,
     OffsetPlane,
-    ConstructionGroup,
     WorkPlanesFolder,
     WorkPlaneName,
     FlipOffset,
@@ -114,6 +113,7 @@ pub enum Text {
     ArcShort,
     Visibility,
     ModelTab,
+    MoreTools,
     /// Identificador reservado da aba removida, preservado para futuras traduções.
     #[allow(dead_code)]
     InsertTab,
@@ -149,10 +149,6 @@ pub enum Text {
     SearchHint,
     NoMatchingTools,
     ChooseActivePart,
-    CreateGroupLabel,
-    ModifyGroup,
-    FinishingGroup,
-    ArrangeGroup,
     /// Reservado para traduções da seção antiga, retirada da aba Peça.
     #[allow(dead_code)]
     ManageGroup,
@@ -160,7 +156,6 @@ pub enum Text {
     /// Rótulos reservados dos grupos das antigas abas Inserir e Vista.
     #[allow(dead_code)]
     ImportGroup,
-    ExportGroup,
     #[allow(dead_code)]
     SketchPlanes,
     #[allow(dead_code)]
@@ -499,8 +494,6 @@ pub enum Text {
     SketchRelativeAngleHint,
     SketchAngleValue,
     SketchHorizontalAngleHint,
-    ConstrainGroup,
-    SketchExitGroup,
     SketchDimension,
     HorizontalVertical,
     SketchExtendShort,
@@ -549,7 +542,6 @@ pub enum Text {
     #[allow(dead_code)]
     SketchTools,
     Select,
-    SelectionGroup,
     Line,
     Rectangle,
     Circle,
@@ -680,7 +672,6 @@ pub enum Text {
     CloneTool,
     GroupTool,
     UngroupTool,
-    PositionGroup,
     Selectable,
     Hide,
     Show,
@@ -734,8 +725,6 @@ pub enum Text {
     CopyType,
     CopyNewInstance,
     CopyIndependent,
-    ReferenceGroup,
-    PartsGroup,
     NewPartName,
     EmptyPartHint,
     StepPartHint,
@@ -817,7 +806,6 @@ pub fn text(key: Text) -> &'static str {
             "Selecione o plano a deslocar: plano da origem, plano de trabalho ou face plana"
         }
         Text::OffsetPlane => "Plano deslocado",
-        Text::ConstructionGroup => "Construção",
         Text::WorkPlanesFolder => "Planos",
         Text::WorkPlaneName => "Plano",
         Text::FlipOffset => "Inverter sentido",
@@ -870,7 +858,8 @@ pub fn text(key: Text) -> &'static str {
         Text::MirrorShort => "Espelhar",
         Text::ArcShort => "Arco",
         Text::Visibility => "Mostrar / ocultar",
-        Text::ModelTab => "Peça",
+        Text::ModelTab => "Construção",
+        Text::MoreTools => "Mais ferramentas",
         Text::InsertTab => "Inserir",
         Text::InspectTab => "Inspecionar",
         Text::ViewTab => "Vista",
@@ -911,14 +900,9 @@ pub fn text(key: Text) -> &'static str {
         Text::SearchHint => "Digite uma ferramenta…",
         Text::NoMatchingTools => "Nenhuma ferramenta encontrada.",
         Text::ChooseActivePart => "Selecione uma peça e use Construir nesta peça.",
-        Text::CreateGroupLabel => "Criar",
-        Text::ModifyGroup => "Modificar",
-        Text::FinishingGroup => "Acabamento",
-        Text::ArrangeGroup => "Organizar",
         Text::ManageGroup => "Gerenciar",
         Text::DocumentGroup => "Documentar",
         Text::ImportGroup => "Importar",
-        Text::ExportGroup => "Exportar",
         Text::SketchPlanes => "Planos de rascunho",
         Text::CameraGroup => "Câmera",
         Text::PanelsGroup => "Painéis",
@@ -1024,8 +1008,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchHorizontalAngleHint => {
             "Ângulo em relação ao eixo horizontal do rascunho; positivo no sentido anti-horário."
         }
-        Text::ConstrainGroup => "Restringir",
-        Text::SketchExitGroup => "Sair",
         Text::SketchProject => "Projetar",
         Text::JunctionStrong => "Junção forte",
         Text::JunctionWeak => "Junção fraca",
@@ -1094,7 +1076,6 @@ pub fn text(key: Text) -> &'static str {
         Text::Redundant => "Há restrições redundantes",
         Text::SketchTools => "Ferramentas do rascunho",
         Text::Select => "Selecionar",
-        Text::SelectionGroup => "Seleção",
         Text::Line => "Linha",
         Text::Rectangle => "Retângulo",
         Text::Circle => "Círculo",
@@ -1487,7 +1468,6 @@ pub fn text(key: Text) -> &'static str {
         Text::CloneTool => "Clone independente",
         Text::GroupTool => "Agrupar",
         Text::UngroupTool => "Desagrupar",
-        Text::PositionGroup => "Posicionar",
         Text::Selectable => "Selecionável",
         Text::Hide => "Ocultar",
         Text::Show => "Mostrar",
@@ -1551,8 +1531,6 @@ pub fn text(key: Text) -> &'static str {
         Text::CopyType => "Tipo de cópia",
         Text::CopyNewInstance => "Nova instância",
         Text::CopyIndependent => "Cópia independente",
-        Text::ReferenceGroup => "Referência",
-        Text::PartsGroup => "Peças",
         Text::NewPartName => "Peça",
         Text::EmptyPartHint => "Peça vazia ao lado das existentes, já ativa para construção.",
         Text::StepPartHint => {
