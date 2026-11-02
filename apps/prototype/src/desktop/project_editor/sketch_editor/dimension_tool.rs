@@ -801,11 +801,7 @@ fn paint(
         let galley =
             painter.layout_no_wrap(caption.to_owned(), egui::FontId::proportional(13.), color);
         let rect = egui::Rect::from_center_size(at, galley.size()).expand2(egui::vec2(4., 1.));
-        painter.rect_filled(
-            rect,
-            3,
-            egui::Color32::from_rgba_unmultiplied(233, 238, 245, 225),
-        );
+        painter.rect_filled(rect, 3, theme::label_fill());
         painter.galley(rect.min + egui::vec2(4., 1.), galley, color);
     }
 }

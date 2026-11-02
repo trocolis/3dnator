@@ -50,6 +50,12 @@ palette! {
     border = rgb(218, 225, 234), rgb(58, 68, 84);
     panel = rgb(250, 252, 255), rgb(31, 36, 45);
     canvas = rgb(233, 238, 245), rgb(23, 27, 34);
+    /// Fundo translúcido dos textos das cotas sobre o desenho, na cor da área de edição.
+    label_fill = egui::Color32::from_rgba_unmultiplied_const(233, 238, 245, 225),
+        egui::Color32::from_rgba_unmultiplied_const(23, 27, 34, 225);
+    /// Véu sobre as etapas do histórico posteriores ao marcador.
+    veil = egui::Color32::from_rgba_unmultiplied_const(233, 238, 245, 150),
+        egui::Color32::from_rgba_unmultiplied_const(23, 27, 34, 150);
     header = rgb(40, 49, 64), rgb(15, 19, 26);
     /// Fundo de cartões, campos e janelas: branco no claro.
     surface = egui::Color32::WHITE, rgb(39, 45, 56);

@@ -140,13 +140,9 @@ fn paint_tile(ui: &egui::Ui, response: &egui::Response, operation: &Operation, l
                 egui::Stroke::new(1.5, theme::danger()),
             );
         }
-        // Posterior ao marcador: véu claro sobre a operação.
+        // Posterior ao marcador: véu da cor do fundo sobre a operação.
         FeatureState::RolledBack => {
-            painter.rect_filled(
-                rect,
-                4,
-                egui::Color32::from_rgba_unmultiplied(233, 238, 245, 150),
-            );
+            painter.rect_filled(rect, 4, theme::veil());
         }
         FeatureState::Dependent | FeatureState::Active => {}
     }
