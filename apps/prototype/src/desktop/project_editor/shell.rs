@@ -103,11 +103,7 @@ enum Action {
     InsertPart,
     ReferenceSketch,
     NewEmptyPart,
-    NewPartStep,
-    NewPartStl,
-    ReferenceStep,
-    ReferenceStl,
-    Reference3mf,
+    ImportReference,
     MoveFace,
     MoveEdge,
     MovePoint,
@@ -174,11 +170,7 @@ impl Action {
             Self::InsertPart => T::InsertFromProject,
             Self::ReferenceSketch => T::ReferenceSketch,
             Self::NewEmptyPart => T::NewPartMenu,
-            Self::NewPartStep => T::NewPartFromStep,
-            Self::NewPartStl => T::NewPartFromStl,
-            Self::ReferenceStep => T::ReferenceFromStep,
-            Self::ReferenceStl => T::ReferenceFromStl,
-            Self::Reference3mf => T::ReferenceFrom3mf,
+            Self::ImportReference => T::ImportReference,
             Self::MoveFace => T::MoveFaceToFace,
             Self::MoveEdge => T::MoveEdgeToEdge,
             Self::MovePoint => T::MovePointToPoint,
@@ -229,6 +221,7 @@ impl Action {
             Self::InstanceMirror => T::MirrorShort,
             Self::ExportStep => T::StepShort,
             Self::SketchFace => T::SketchFaceShort,
+            Self::ImportReference => T::ImportMenu,
             _ => self.label(),
         }
     }
@@ -286,9 +279,7 @@ impl Action {
             Self::InsertPart => Icon::Import,
             Self::ReferenceSketch => Icon::ReferenceSketch,
             Self::NewEmptyPart => Icon::NewBody,
-            Self::NewPartStep | Self::ReferenceStep => Icon::StepFile,
-            Self::NewPartStl => Icon::StlFile,
-            Self::ReferenceStl | Self::Reference3mf => Icon::StlFile,
+            Self::ImportReference => Icon::Import,
             Self::MoveFace => Icon::FaceToFace,
             Self::MoveEdge => Icon::EdgeToEdge,
             Self::MovePoint => Icon::PointToPoint,
@@ -347,14 +338,6 @@ impl Action {
     }
 }
 
-/// Botão de menu da faixa: ícone e nome principais e as subopções (ação, nome no menu e
-/// explicação).
-struct Menu<'a> {
-    icon: Icon,
-    label: T,
-    items: &'a [(Action, T, T)],
-}
-
 /// Também alimenta a busca: nenhuma entrada anuncia uma ferramenta sem implementação.
 const SEARCH_ACTIONS: &[Action] = &[
     Action::Select,
@@ -411,11 +394,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::InsertPart,
     Action::ReferenceSketch,
     Action::NewEmptyPart,
-    Action::NewPartStep,
-    Action::NewPartStl,
-    Action::ReferenceStep,
-    Action::ReferenceStl,
-    Action::Reference3mf,
+    Action::ImportReference,
     Action::MoveFace,
     Action::MoveEdge,
     Action::MovePoint,
@@ -549,15 +528,10 @@ impl Editor {
             }
             Action::ReferenceSketch
             | Action::NewEmptyPart
-            | Action::NewPartStl
-            | Action::ReferenceStl
-            | Action::Reference3mf
+            | Action::ImportReference
             | Action::MoveFace
             | Action::MoveEdge
             | Action::MovePoint => editable && self.current().sketch_edit.is_none(),
-            Action::NewPartStep | Action::ReferenceStep => {
-                editable && self.current().sketch_edit.is_none() && nator_kernel::is_available()
-            }
             Action::NewSketch | Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
                 editable && self.current().sketch_edit.is_none()
             }
@@ -780,11 +754,8 @@ impl Editor {
                     name: format!("{} {count}", text(T::NewPartName)),
                 });
             }
-            Action::NewPartStep => self.import(context, ImportSource::Step, None, false),
-            Action::NewPartStl => self.import(context, ImportSource::Stl, None, false),
-            Action::ReferenceStep => self.import(context, ImportSource::Step, None, true),
-            Action::ReferenceStl => self.import(context, ImportSource::Stl, None, true),
-            Action::Reference3mf => self.import(context, ImportSource::ThreeMf, None, true),
+            // Abre direto o seletor com STEP, STL e 3MF; o modelo entra só como referência.
+            Action::ImportReference => self.import(context, ImportSource::Any, None, true),
             Action::MoveFace => self.open_align(navigation::PickMode::Face),
             Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
             Action::MovePoint => self.open_align(navigation::PickMode::Vertex),
@@ -1473,102 +1444,6 @@ impl Editor {
         });
         ui.separator();
     }
-    /// Grupo com um botão de menu: o clique abre as subopções, cada uma com ícone, nome e
-    /// uma linha de explicação, habilitadas conforme o contexto.
-    fn ribbon_menu_group(&mut self, ui: &mut egui::Ui, menu: Menu<'_>) {
-        self.ribbon_group_layout(ui, group_width(1), |editor, ui| {
-            editor.ribbon_menu_button(ui, menu);
-        });
-    }
-    fn ribbon_menu_button(&mut self, ui: &mut egui::Ui, menu: Menu<'_>) {
-        let enabled = ui.is_enabled() && menu.items.iter().any(|(a, _, _)| self.action_enabled(*a));
-        let response = ui
-            .add_enabled_ui(enabled, |ui| {
-                icons::ribbon_button(ui, menu.icon, text(menu.label), false)
-            })
-            .inner;
-        self.shell.menu_rects.push(response.rect);
-        // Seta de menu centrada sob o rótulo, sem cobrir rótulos longos.
-        let corner = response.rect.center_bottom() + egui::vec2(0., -6.);
-        ui.painter().add(egui::Shape::convex_polygon(
-            vec![
-                corner + egui::vec2(-4., -2.),
-                corner + egui::vec2(4., -2.),
-                corner + egui::vec2(0., 3.),
-            ],
-            if enabled {
-                theme::ink()
-            } else {
-                theme::muted()
-            },
-            egui::Stroke::NONE,
-        ));
-        let mut chosen = None;
-        egui::Popup::menu(&response).show(|ui| {
-            // Largura fixa: a descrição quebra em até duas linhas em vez de alargar o menu.
-            ui.set_width(300.);
-            for (action, name, hint) in menu.items {
-                let enabled = self.action_enabled(*action);
-                // Item indisponível por falta do núcleo: o motivo substitui a descrição.
-                let (hint, hint_color) = if !enabled
-                    && matches!(*action, Action::NewPartStep | Action::ReferenceStep)
-                    && !nator_kernel::is_available()
-                {
-                    (T::StepNeedsKernel, theme::warning())
-                } else {
-                    (*hint, theme::muted())
-                };
-                let row = ui
-                    .add_enabled_ui(enabled, |ui| {
-                        let (rect, row) =
-                            ui.allocate_exact_size(egui::vec2(300., 54.), egui::Sense::click());
-                        if row.hovered() && enabled {
-                            ui.painter().rect_filled(rect, 4, theme::blue_fill());
-                        }
-                        let icon = egui::Rect::from_center_size(
-                            egui::pos2(rect.left() + 20., rect.center().y),
-                            egui::Vec2::splat(24.),
-                        );
-                        icons::paint(ui.painter(), icon, action.icon(), enabled);
-                        let ink = if enabled {
-                            theme::ink()
-                        } else {
-                            theme::muted()
-                        };
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 42., rect.top() + 7.),
-                            egui::Align2::LEFT_TOP,
-                            text(*name),
-                            egui::FontId::proportional(13.),
-                            ink,
-                        );
-                        let mut job = egui::text::LayoutJob::simple(
-                            text(hint).to_owned(),
-                            egui::FontId::proportional(10.5),
-                            hint_color,
-                            rect.width() - 48.,
-                        );
-                        job.wrap.max_rows = 2;
-                        let galley = ui.painter().layout_job(job);
-                        ui.painter().galley(
-                            egui::pos2(rect.left() + 42., rect.top() + 24.),
-                            galley,
-                            hint_color,
-                        );
-                        row.on_hover_text(text(hint))
-                            .on_disabled_hover_text(text(hint))
-                    })
-                    .inner;
-                if row.clicked() && enabled {
-                    chosen = Some(*action);
-                    ui.close();
-                }
-            }
-        });
-        if let Some(action) = chosen {
-            self.activate_action(ui.ctx(), action);
-        }
-    }
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
         self.shell.menu_rects.clear();
         match self.shell.tab {
@@ -1614,32 +1489,7 @@ impl Editor {
             RibbonTab::Assembly => {
                 self.ribbon_group(ui, &[Action::ReferenceSketch]);
                 self.ribbon_group(ui, &[Action::NewEmptyPart]);
-                self.ribbon_menu_group(
-                    ui,
-                    Menu {
-                        icon: Icon::Import,
-                        label: T::ImportMenu,
-                        items: &[
-                            (
-                                Action::ReferenceStep,
-                                T::ReferenceFromStep,
-                                T::ReferenceImportHint,
-                            ),
-                            (
-                                Action::ReferenceStl,
-                                T::ReferenceFromStl,
-                                T::ReferenceImportHint,
-                            ),
-                            (
-                                Action::Reference3mf,
-                                T::ReferenceFrom3mf,
-                                T::ReferenceImportHint,
-                            ),
-                            (Action::NewPartStep, T::NewPartFromStep, T::StepPartHint),
-                            (Action::NewPartStl, T::NewPartFromStl, T::StlPartHint),
-                        ],
-                    },
-                );
+                self.ribbon_group(ui, &[Action::ImportReference]);
                 self.ribbon_group(ui, &[Action::MoveCopy]);
                 self.ribbon_group(ui, &[Action::NewInstance]);
                 self.ribbon_group(ui, &[Action::Group, Action::Ungroup]);

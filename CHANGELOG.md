@@ -2,6 +2,9 @@
 
 ## Não lançado
 
+## 0.30.0 — 02/11/2026
+
+- **Importar**, na Montagem, deixou de ser um menu: o botão abre direto o seletor de arquivos com STEP, STL e 3MF, e o modelo entra como referência. A ferramenta não cria mais peças; para isso, use **Criar peça** no menu da referência, na árvore. Saíram os itens Referência STEP/STL/3MF e Criar a partir de STEP/STL.
 ## 0.29.1 — 02/11/2026
 
 - Linha contínua: o traço encerra quando a reta é infinita ou quando a ponta termina sobre outro elemento (vértice, linha, curva, centro, interseção, tangente ou projeção). A sequência só continua numa ponta solta, alinhada ou num passo da precisão.

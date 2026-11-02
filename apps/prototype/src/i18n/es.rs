@@ -970,16 +970,9 @@ pub fn text(key: Text) -> &'static str {
         Text::ReferenceNotEditable => {
             "Las referencias no se pueden editar. Use Crear pieza en su menú, en el árbol."
         }
-        Text::ReferenceFromStep => "Referencia STEP",
-        Text::ReferenceFromStl => "Referencia STL",
-        Text::ReferenceFrom3mf => "Referencia 3MF",
-        Text::ReferenceImportHint => {
-            "Modelo solo para posicionar las piezas: queda en Referencias y no se puede editar."
-        }
         Text::MergeCoplanarAreas => "Unir áreas coplanares",
         Text::ImportMenu => "Importar",
-        Text::NewPartFromStep => "Crear a partir de STEP",
-        Text::NewPartFromStl => "Crear a partir de STL",
+        Text::ImportReference => "Importar STEP, STL o 3MF como referencia",
         Text::MovementMode => "Modo de movimiento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Libre",
@@ -991,12 +984,6 @@ pub fn text(key: Text) -> &'static str {
         Text::CopyNewInstance => "Nueva instancia",
         Text::CopyIndependent => "Copia independiente",
         Text::NewPartName => "Pieza",
-        Text::StepPartHint => {
-            "Cada definición del archivo se convierte en una pieza independiente, con colores y jerarquía."
-        }
-        Text::StlPartHint => {
-            "La malla entra como pieza nueva; la unidad se confirma antes de insertar."
-        }
         Text::MoveFreeHint => "Manipulador 3D y valores de traslación y rotación.",
         Text::MoveFaceHint => {
             "Caras opuestas y coplanares; acepta el plano de un boceto de referencia como destino."
@@ -1024,9 +1011,6 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::ReferenceSketchHint => {
             "Boceto del ensamblaje para posicionar piezas; no genera cuerpos."
-        }
-        Text::StepNeedsKernel => {
-            "No disponible: este ejecutable se compiló sin el núcleo OCCT (--features occt)."
         }
         Text::LeavePart => "Volver al ensamblaje",
         Text::ProjectNode => "Proyecto",

@@ -942,16 +942,9 @@ pub fn text(key: Text) -> &'static str {
         Text::ReferenceNotEditable => {
             "References cannot be edited. Use Create part in its menu, in the tree."
         }
-        Text::ReferenceFromStep => "STEP reference",
-        Text::ReferenceFromStl => "STL reference",
-        Text::ReferenceFrom3mf => "3MF reference",
-        Text::ReferenceImportHint => {
-            "Model only for positioning parts: it goes in References and cannot be edited."
-        }
         Text::MergeCoplanarAreas => "Merge coplanar areas",
         Text::ImportMenu => "Import",
-        Text::NewPartFromStep => "Create from STEP",
-        Text::NewPartFromStl => "Create from STL",
+        Text::ImportReference => "Import STEP, STL or 3MF as a reference",
         Text::MovementMode => "Movement mode",
         Text::MoveMenu => "Move",
         Text::MoveFree => "Free",
@@ -963,12 +956,6 @@ pub fn text(key: Text) -> &'static str {
         Text::CopyNewInstance => "New instance",
         Text::CopyIndependent => "Independent copy",
         Text::NewPartName => "Part",
-        Text::StepPartHint => {
-            "Each definition in the file becomes an independent part, with colors and hierarchy."
-        }
-        Text::StlPartHint => {
-            "The mesh goes in as a new part; the unit is confirmed before inserting."
-        }
         Text::MoveFreeHint => "3D manipulator and translation and rotation values.",
         Text::MoveFaceHint => {
             "Opposite and coplanar faces; accepts the plane of a reference sketch as target."
@@ -992,9 +979,6 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::ReferenceSketchHint => {
             "Assembly sketch for positioning parts; it does not create bodies."
-        }
-        Text::StepNeedsKernel => {
-            "Unavailable: this executable was built without the OCCT kernel (--features occt)."
         }
         Text::LeavePart => "Back to the assembly",
         Text::ProjectNode => "Project",

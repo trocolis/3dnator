@@ -7153,16 +7153,12 @@ mod tests {
         click(&mut editor, &context, button)?;
         settle(&mut editor, &context)?;
         assert_eq!(editor.current().session.document().parts().len(), parts + 1);
-        // A peça nova entra em edição; o Importar fica na faixa da Montagem.
+        // A peça nova entra em edição; o Importar fica na faixa da Montagem, como um botão
+        // que abre direto o seletor de arquivos, sem menu de opções.
         editor.current_mut().active_part = None;
         editor.shell.tab = shell::RibbonTab::Assembly;
         frame(&mut editor, &context, vec![])?;
-        let import = label_position(&mut editor, &context, text(T::ImportMenu))?;
-        click(&mut editor, &context, import)?;
-        frame(&mut editor, &context, vec![])?;
-        for item in [T::NewPartFromStep, T::NewPartFromStl] {
-            label_position(&mut editor, &context, text(item))?;
-        }
+        label_position(&mut editor, &context, text(T::ImportMenu))?;
         Ok(())
     }
 

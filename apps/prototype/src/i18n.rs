@@ -882,14 +882,9 @@ pub enum Text {
     ReferenceModelHint,
     CreatePartFromReference,
     ReferenceNotEditable,
-    ReferenceFromStep,
-    ReferenceFromStl,
-    ReferenceFrom3mf,
-    ReferenceImportHint,
     MergeCoplanarAreas,
     ImportMenu,
-    NewPartFromStep,
-    NewPartFromStl,
+    ImportReference,
     MovementMode,
     MoveMenu,
     MoveFree,
@@ -901,8 +896,6 @@ pub enum Text {
     CopyNewInstance,
     CopyIndependent,
     NewPartName,
-    StepPartHint,
-    StlPartHint,
     MoveFreeHint,
     MoveFaceHint,
     MoveEdgeHint,
@@ -917,7 +910,6 @@ pub enum Text {
     CopyIndependentHint,
     CopyPatternHint,
     ReferenceSketchHint,
-    StepNeedsKernel,
     LeavePart,
     ProjectNode,
     CollapseTree,
@@ -1890,16 +1882,9 @@ fn pt(key: Text) -> &'static str {
         Text::ReferenceNotEditable => {
             "Referências não podem ser editadas. Use Criar peça no menu dela, na árvore."
         }
-        Text::ReferenceFromStep => "Referência STEP",
-        Text::ReferenceFromStl => "Referência STL",
-        Text::ReferenceFrom3mf => "Referência 3MF",
-        Text::ReferenceImportHint => {
-            "Modelo só para posicionar as peças: fica em Referências e não pode ser editado."
-        }
         Text::MergeCoplanarAreas => "Juntar áreas coplanares",
         Text::ImportMenu => "Importar",
-        Text::NewPartFromStep => "Criar a partir de STEP",
-        Text::NewPartFromStl => "Criar a partir de STL",
+        Text::ImportReference => "Importar STEP, STL ou 3MF como referência",
         Text::MovementMode => "Modo de movimento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Livre",
@@ -1911,12 +1896,6 @@ fn pt(key: Text) -> &'static str {
         Text::CopyNewInstance => "Nova instância",
         Text::CopyIndependent => "Cópia independente",
         Text::NewPartName => "Peça",
-        Text::StepPartHint => {
-            "Cada definição do arquivo vira uma peça independente, com cores e hierarquia."
-        }
-        Text::StlPartHint => {
-            "A malha entra como peça nova; a unidade é confirmada antes de inserir."
-        }
         Text::MoveFreeHint => "Manipulador 3D e valores de translação e rotação.",
         Text::MoveFaceHint => {
             "Faces opostas e coplanares; aceita o plano de um rascunho de referência como destino."
@@ -1941,9 +1920,6 @@ fn pt(key: Text) -> &'static str {
             "Instâncias repetidas em padrão retangular ou circular, reunidas num grupo."
         }
         Text::ReferenceSketchHint => "Rascunho da montagem para posicionar peças; não gera corpos.",
-        Text::StepNeedsKernel => {
-            "Indisponível: este executável foi compilado sem o núcleo OCCT (--features occt)."
-        }
         Text::LeavePart => "Voltar à montagem",
         Text::ProjectNode => "Projeto",
         Text::CollapseTree => "Recolher a árvore",

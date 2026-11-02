@@ -601,9 +601,6 @@ pub struct Editor {
 pub(super) enum ImportSource {
     Reference,
     Any,
-    Step,
-    Stl,
-    ThreeMf,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -1600,16 +1597,10 @@ impl Editor {
             } else {
                 // Os filtros dos diálogos no Linux distinguem maiúsculas: "PECA.STEP" também
                 // precisa aparecer.
-                let (label, extensions): (_, &[&str]) = match source {
-                    ImportSource::Step => (text(T::StepFilter), &["step", "stp", "STEP", "STP"]),
-                    ImportSource::Stl => (text(T::StlFilter), &["stl", "STL"]),
-                    ImportSource::ThreeMf => (text(T::ThreeMfFilter), &["3mf", "3MF"]),
-                    _ => (
-                        text(T::ModelFilter),
-                        &["stl", "step", "stp", "3mf", "STL", "STEP", "STP", "3MF"],
-                    ),
-                };
-                let mut dialog = rfd::FileDialog::new().add_filter(label, extensions);
+                let mut dialog = rfd::FileDialog::new().add_filter(
+                    text(T::ModelFilter),
+                    &["stl", "step", "stp", "3mf", "STL", "STEP", "STP", "3MF"],
+                );
                 if let Some(directory) = &directory {
                     dialog = dialog.set_directory(directory);
                 }
