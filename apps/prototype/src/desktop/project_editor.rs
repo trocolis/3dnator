@@ -1943,8 +1943,7 @@ impl Editor {
         self.canvas(ui);
         // Depois do canvas: Selecionar e o balão podem encerrar a edição do rascunho.
         self.collapsed_tree(ui.ctx());
-        self.edit_balloon(ui.ctx());
-        self.freedom_balloon(ui.ctx());
+        self.edit_balloons(ui.ctx());
         self.navigation_bar(ui.ctx());
         self.sketch_tools_window(ui.ctx());
         self.sketch_action_panel(ui.ctx());

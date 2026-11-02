@@ -7054,6 +7054,12 @@ mod tests {
         let balloon = format!("{}: {degrees}", text(T::DegreesOfFreedom));
         let at = label_position(&mut editor, &context, &balloon)?;
         assert!(at.y < editor.canvas_rect.top() + 40.);
+        // Rascunho com Concluir e graus de liberdade na mesma fila, sem quebrar linha.
+        let sketch_balloon = area_rect(&context, "sketch_balloon")?;
+        let freedom = area_rect(&context, "freedom_balloon")?;
+        assert!((sketch_balloon.top() - freedom.top()).abs() < 1.);
+        assert!((sketch_balloon.height() - freedom.height()).abs() < 2.);
+        assert!(freedom.left() > sketch_balloon.right() && freedom.height() < 60.);
         // O Diagnóstico fica logo à direita de Dimensionar e abre o painel.
         let dimension = label_position(&mut editor, &context, text(T::SketchDimension))?;
         let button = dimension + egui::vec2(icons::RIBBON_BUTTON_SIZE.x / 2. + 16., -8.);
@@ -7066,6 +7072,14 @@ mod tests {
                 .as_ref()
                 .is_some_and(|w| w.diagnostics_open())
         );
+        // Concluir, no balão do rascunho, encerra a edição.
+        click(
+            &mut editor,
+            &context,
+            egui::pos2(sketch_balloon.right() - 27., sketch_balloon.center().y),
+        )?;
+        settle(&mut editor, &context)?;
+        assert!(editor.current().sketch_edit.is_none());
         Ok(())
     }
 
@@ -11822,8 +11836,9 @@ mod tests {
         let context = egui::Context::default();
         let (mut editor, _) = navigation_editor(&context)?;
         let docked = editor.canvas_rect;
+        // O balão da peça fica no canto, junto da árvore.
         let balloon = area_rect(&context, "edit_balloon")?;
-        assert!((balloon.center().x - docked.center().x).abs() < 1.);
+        assert!((balloon.left() - docked.left() - 8.).abs() < 1.);
         assert!((balloon.top() - docked.top() - 8.).abs() < 1.);
         let collapse = egui::pos2(docked.left() - 8. - 27., docked.top() + 13.);
         click(&mut editor, &context, collapse)?;
@@ -11833,6 +11848,10 @@ mod tests {
         let bar = area_rect(&context, "collapsed_tree")?;
         assert!(bar.height() < 60.);
         assert_eq!(bar.top(), editor.canvas_rect.top() + 8.);
+        // Com a árvore recolhida, o balão vem logo depois da barra, na mesma altura.
+        let balloon = area_rect(&context, "edit_balloon")?;
+        assert!(balloon.left() > bar.right() && balloon.left() < bar.right() + 16.);
+        assert!((balloon.height() - bar.height()).abs() < 2.);
         click(
             &mut editor,
             &context,

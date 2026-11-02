@@ -2,9 +2,13 @@
 
 ## Não lançado
 
+## 0.31.0 — 02/11/2026
+
+- Balões de edição numa fila no canto, junto da árvore (ou da barra dela, recolhida): o da peça em edição, com Salvar; o do rascunho em edição, com o nome e o botão **Concluir**; e o dos graus de liberdade. Todos têm o estilo da árvore recolhida, a mesma altura e não quebram linha; nomes longos ficam abreviados, com o nome inteiro na dica.
 ## 0.30.1 — 02/11/2026
 
 - Corrigido: no tema escuro, o texto das cotas do rascunho ficava ilegível, claro sobre um fundo fixo cinza-claro. O fundo da etiqueta e o véu das etapas posteriores ao marcador do histórico agora seguem o tema.
+
 ## 0.30.0 — 02/11/2026
 
 - **Importar**, na Montagem, deixou de ser um menu: o botão abre direto o seletor de arquivos com STEP, STL e 3MF, e o modelo entra como referência. A ferramenta não cria mais peças; para isso, use **Criar peça** no menu da referência, na árvore. Saíram os itens Referência STEP/STL/3MF e Criar a partir de STEP/STL.

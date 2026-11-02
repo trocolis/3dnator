@@ -3,8 +3,80 @@ use super::*;
 
 /// Largura da barra de título da árvore recolhida.
 const COLLAPSED_TREE_WIDTH: f32 = 200.;
-/// Ícone, botão e espaçamentos que dividem o balão com o nome da peça.
-const BALLOON_CONTROLS_WIDTH: f32 = 90.;
+/// Ícone, botão e espaçamentos que dividem o balão com o nome da peça ou do rascunho.
+const BALLOON_CONTROLS_WIDTH: f32 = 96.;
+/// Largura reservada ao balão dos graus de liberdade.
+const FREEDOM_BALLOON_WIDTH: f32 = 190.;
+
+/// Balão flutuante no topo da área de edição, com o estilo da barra da árvore recolhida.
+/// Devolve o retângulo ocupado e o valor do conteúdo.
+fn balloon<R>(
+    context: &egui::Context,
+    id: &str,
+    at: egui::Pos2,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> (egui::Rect, R) {
+    let shown = egui::Area::new(egui::Id::new(id))
+        .order(egui::Order::Middle)
+        .fade_in(false)
+        .constrain(false)
+        .fixed_pos(at)
+        .show(context, |ui| {
+            theme::floating_frame()
+                .show(ui, |ui| {
+                    egui::Frame::new()
+                        .fill(theme::subtle())
+                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .corner_radius(8)
+                        .show(ui, |ui| {
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                            ui.horizontal(|ui| {
+                                // Altura do botão compacto: balões com e sem botão ficam iguais.
+                                ui.set_min_height(30.);
+                                content(ui)
+                            })
+                            .inner
+                        })
+                        .inner
+                })
+                .inner
+        });
+    (shown.response.rect, shown.inner)
+}
+
+/// Ícone, nome abreviado se preciso e um botão de ação; devolve o clique no botão.
+fn named_balloon(
+    ui: &mut egui::Ui,
+    icon: icons::Icon,
+    name: &str,
+    name_width: f32,
+    action: icons::Icon,
+    hint: &str,
+    enabled: bool,
+) -> bool {
+    ui.spacing_mut().item_spacing.x = 6.;
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(22.), egui::Sense::hover());
+    icons::paint(ui.painter(), rect, icon, true);
+    ui.allocate_ui_with_layout(
+        egui::vec2(name_width, 22.),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(name)
+                        .strong()
+                        .size(13.)
+                        .color(theme::accent()),
+                )
+                .truncate(),
+            )
+            .on_hover_text(name);
+        },
+    );
+    ui.add_enabled_ui(enabled, |ui| icons::button(ui, action, hint, false, false))
+        .inner
+        .clicked()
+}
 
 /// Barra de título da árvore: mostra o nome do projeto na dica e devolve o clique no botão
 /// de recolher ou mostrar.
@@ -263,15 +335,82 @@ impl Editor {
             self.shell.browser_visible = true;
         }
     }
-    /// Balão da peça em edição, centrado no topo da área de edição. Salvar conclui a edição
-    /// e volta à montagem: o que foi feito já está no documento.
-    /// Situação do rascunho em edição num balão no canto, junto da árvore.
-    pub(super) fn freedom_balloon(&self, context: &egui::Context) {
-        let Some(work) = self.current().sketch_edit.as_ref() else {
+    /// Balões de edição numa fila no canto, junto da árvore: a peça em edição (Salvar
+    /// conclui e volta à montagem), o rascunho em edição com Concluir e os graus de
+    /// liberdade dele. Todos têm o estilo da árvore recolhida e não quebram linha.
+    pub(super) fn edit_balloons(&mut self, context: &egui::Context) {
+        let tab = self.current();
+        let part = tab
+            .active_part
+            .and_then(|part| tab.session.document().part(part))
+            .map(|part| part.name.clone());
+        let sketch = tab.sketch_edit.as_ref().map(|work| {
+            let name = tab
+                .session
+                .document()
+                .sketch(work.id)
+                .map(|record| record.sketch.name.clone())
+                .unwrap_or_default();
+            (name, work.pending.is_none(), work.freedom())
+        });
+        let canvas = self.canvas_rect;
+        let busy = self.busy() || self.pending_close.is_some();
+        // Com a árvore recolhida, a barra dela ocupa o canto: a fila vem logo depois.
+        let mut left = canvas.left()
+            + if self.shell.browser_visible {
+                8.
+            } else {
+                COLLAPSED_TREE_WIDTH + 18.
+            };
+        // Os nomes dividem o espaço até o cubo; nomes longos ficam abreviados.
+        let room = canvas.right() - view_cube::rect(canvas).width() - 16. - left;
+        let names = usize::from(part.is_some()) + usize::from(sketch.is_some());
+        let name_width = if names == 0 {
+            0.
+        } else {
+            ((room - FREEDOM_BALLOON_WIDTH - names as f32 * BALLOON_CONTROLS_WIDTH) / names as f32)
+                .clamp(60., 240.)
+        };
+        let top = canvas.top() + 8.;
+        if let Some(name) = part {
+            let (rect, save) = balloon(context, "edit_balloon", egui::pos2(left, top), |ui| {
+                named_balloon(
+                    ui,
+                    icons::Icon::Edit,
+                    &name,
+                    name_width,
+                    icons::Icon::Save,
+                    text(T::StopEditPart),
+                    !busy,
+                )
+            });
+            left = rect.right() + 8.;
+            if save {
+                self.apply_menu_action(context, browser::MenuAction::Deactivate);
+                context.request_repaint();
+            }
+        }
+        let Some((name, settled, freedom)) = sketch else {
             return;
         };
+        let (rect, finish) = balloon(context, "sketch_balloon", egui::pos2(left, top), |ui| {
+            named_balloon(
+                ui,
+                icons::Icon::Sketch,
+                &name,
+                name_width,
+                icons::Icon::Check,
+                text(T::FinishSketch),
+                !busy && settled,
+            )
+        });
+        left = rect.right() + 8.;
+        if finish {
+            self.finish_sketch();
+            context.request_repaint();
+        }
         // O cálculo do trabalhador vale para o rascunho como está, inclusive ao abrir.
-        let Some(status) = work.freedom() else {
+        let Some(status) = freedom else {
             return;
         };
         let (label, color) = match status {
@@ -286,90 +425,9 @@ impl Editor {
                 theme::accent(),
             ),
         };
-        // Com a árvore recolhida, a barra dela ocupa o canto: o balão vem logo depois.
-        let left = if self.shell.browser_visible {
-            8.
-        } else {
-            COLLAPSED_TREE_WIDTH + 16.
-        };
-        egui::Area::new(egui::Id::new("freedom_balloon"))
-            .order(egui::Order::Middle)
-            .fade_in(false)
-            .constrain(false)
-            .interactable(false)
-            .fixed_pos(self.canvas_rect.left_top() + egui::vec2(left, 8.))
-            .show(context, |ui| {
-                theme::floating_frame()
-                    .inner_margin(egui::Margin::symmetric(10, 6))
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(label).strong().color(color));
-                    });
-            });
-    }
-    pub(super) fn edit_balloon(&mut self, context: &egui::Context) {
-        let tab = self.current();
-        let Some(name) = tab
-            .active_part
-            .and_then(|part| tab.session.document().part(part))
-            .map(|part| part.name.clone())
-        else {
-            return;
-        };
-        let canvas = self.canvas_rect;
-        let busy = self.busy();
-        // O cubo e a árvore recolhida ocupam os cantos: nomes longos ficam abreviados.
-        let side = view_cube::rect(canvas).width().max(COLLAPSED_TREE_WIDTH) + 16.;
-        let name_width = (canvas.width() - 2. * side - BALLOON_CONTROLS_WIDTH).max(80.);
-        let save = egui::Area::new(egui::Id::new("edit_balloon"))
-            .order(egui::Order::Middle)
-            .fade_in(false)
-            .constrain(false)
-            .pivot(egui::Align2::CENTER_TOP)
-            .fixed_pos(canvas.center_top() + egui::vec2(0., 8.))
-            .show(context, |ui| {
-                theme::floating_frame()
-                    .inner_margin(egui::Margin::symmetric(12, 3))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.;
-                            let (rect, _) = ui
-                                .allocate_exact_size(egui::Vec2::splat(18.), egui::Sense::hover());
-                            icons::paint(ui.painter(), rect, icons::Icon::Edit, true);
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(name_width, 30.),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(&name)
-                                                .strong()
-                                                .color(theme::accent()),
-                                        )
-                                        .truncate(),
-                                    );
-                                },
-                            );
-                            ui.add_enabled_ui(!busy, |ui| {
-                                icons::button(
-                                    ui,
-                                    icons::Icon::Save,
-                                    text(T::StopEditPart),
-                                    false,
-                                    false,
-                                )
-                            })
-                            .inner
-                            .clicked()
-                        })
-                        .inner
-                    })
-                    .inner
-            })
-            .inner;
-        if save {
-            self.apply_menu_action(context, browser::MenuAction::Deactivate);
-            context.request_repaint();
-        }
+        balloon(context, "freedom_balloon", egui::pos2(left, top), |ui| {
+            ui.label(egui::RichText::new(label).strong().size(13.).color(color));
+        });
     }
     fn apply_tree_intent(&mut self, ui: &egui::Ui, intent: project_tree::Intent) {
         use project_tree::Intent;
