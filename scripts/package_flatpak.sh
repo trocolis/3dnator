@@ -12,11 +12,16 @@ LICENSE_DIR="$(realpath -e -- "$4")"
 [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] || { echo 'Versão inválida.' >&2; exit 1; }
 [[ ! -e "$OUTPUT_PATH" && ! -e "$OUTPUT_PATH.work" ]] || { echo 'Destino já existe.' >&2; exit 1; }
 APP_ID=io.github.trocolis.ThreeDnator
-RUNTIME_VERSION=25.08
+# A release usa 25.08. Um executável compilado numa distribuição mais nova (glibc maior)
+# só roda num runtime à altura: FLATPAK_RUNTIME=26.08 para instalações locais.
+RUNTIME_VERSION="${FLATPAK_RUNTIME:-25.08}"
+# Sem compilar dentro do sandbox, o Platform também serve de Sdk se o Sdk não estiver instalado.
+SDK_ID=org.freedesktop.Sdk
+flatpak info "$SDK_ID//$RUNTIME_VERSION" >/dev/null 2>&1 || SDK_ID=org.freedesktop.Platform
 RUNTIME_DIR="$(flatpak info --show-location "org.freedesktop.Platform//$RUNTIME_VERSION")"
 BUILD_DIR="$OUTPUT_PATH.work/build"
 mkdir -p -- "$(dirname "$OUTPUT_PATH")"
-flatpak build-init "$BUILD_DIR" "$APP_ID" org.freedesktop.Sdk org.freedesktop.Platform "$RUNTIME_VERSION"
+flatpak build-init "$BUILD_DIR" "$APP_ID" "$SDK_ID" org.freedesktop.Platform "$RUNTIME_VERSION"
 mkdir -p "$BUILD_DIR/files/bin" "$BUILD_DIR/files/libexec" "$BUILD_DIR/files/lib" "$BUILD_DIR/files/share/3dnator"
 install -m755 "$BIN_PATH" "$BUILD_DIR/files/libexec/3dnator"
 cat > "$BUILD_DIR/files/bin/3dnator" <<'LAUNCHER'
@@ -27,13 +32,14 @@ LAUNCHER
 chmod 755 "$BUILD_DIR/files/bin/3dnator"
 # Inclui OCCT e somente as dependências ausentes do runtime. Não copia glibc,
 # carregador ELF nem drivers gráficos do hospedeiro para o sandbox.
-python3 - "$BIN_PATH" "$RUNTIME_DIR/files" "$BUILD_DIR/files" <<'PY'
+python3 - "$BIN_PATH" "$RUNTIME_DIR/files" "$BUILD_DIR/files" "$RUNTIME_VERSION" <<'PY'
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-binary, runtime, app = map(Path, sys.argv[1:])
+binary, runtime, app = map(Path, sys.argv[1:4])
+version = sys.argv[4]
 text = subprocess.check_output(["ldd", str(binary)], text=True)
 if "not found" in text:
     raise SystemExit("O executável contém bibliotecas não encontradas.")
@@ -49,7 +55,7 @@ for line in text.splitlines():
         if name.startswith(("libc.so", "libstdc++", "libgcc_s", "ld-linux")):
             raise SystemExit(f"Runtime incompatível: {name} ausente.")
         shutil.copyfile(Path(source).resolve(), app / "lib" / name)
-    manifest.append(f'{name}: {"incluída" if bundled else "runtime Freedesktop 25.08"}')
+    manifest.append(f'{name}: {"incluída" if bundled else "runtime Freedesktop " + version}')
 if not any(p.name.startswith("libTKernel") for p in (app / "lib").iterdir()):
     raise SystemExit("A pré-release Flatpak exige OCCT dinâmico.")
 (app / "share/3dnator/NATIVE_DEPENDENCIES.txt").write_text("\n".join(manifest)+"\n", encoding="utf-8")

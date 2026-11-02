@@ -2,6 +2,8 @@
 
 ## Não lançado
 
+- `scripts/package_flatpak.sh` aceita `FLATPAK_RUNTIME` (padrão 25.08) e usa o Platform como Sdk quando o Sdk não está instalado. Um executável compilado numa distribuição recente, com glibc mais nova, roda no runtime 26.08 para instalação local.
+
 ## 0.29.0 — 02/11/2026
 
 - **Medir** foi refeito, sem painel. Cada clique escolhe um vértice, uma aresta ou uma face, e a medida aparece desenhada na cena. Um alvo mostra a própria medida: coordenadas, comprimento (com raio e diâmetro se for circular) ou área. Dois alvos mostram a menor distância, ou o ângulo se forem arestas ou faces não paralelas. Duplo clique no segundo alvo decompõe a distância em ΔX, ΔY e ΔZ. Esc apaga a medição e, sem medição, sai do Medir. Saíram o relatório, o alinhamento e a rotação que ficavam no painel antigo.
