@@ -381,11 +381,6 @@ impl Workspace {
     fn continue_line(&mut self, sketch: &Sketch, context: &egui::Context, end: Point2) {
         let closed =
             self.line_type != LineType::Infinite && drafting::closes_chain(&self.chain_points, end);
-        if closed {
-            self.reset_drawing(context);
-            return;
-        }
-        self.chain_points.push(end);
         let last = sketch.entities.iter().rev().find(|entity| {
             matches!(entity.curve, Curve::Line { .. })
                 && entity.point_ids().into_iter().any(|id| {
@@ -394,6 +389,27 @@ impl Workspace {
                         .is_ok_and(|p| nator_sketch::distance(p, end) < 1e-7)
                 })
         });
+        // A sequência só continua numa ponta solta: reta infinita, ponta capturada num
+        // elemento ou num vértice de outra entidade encerram o traço.
+        let touches = self
+            .anchor_kinds
+            .last()
+            .copied()
+            .flatten()
+            .is_some_and(ends_on_element)
+            || sketch.entities.iter().any(|entity| {
+                Some(entity.id) != last.map(|l| l.id)
+                    && entity.point_ids().into_iter().any(|id| {
+                        sketch
+                            .point(id)
+                            .is_ok_and(|p| nator_sketch::distance(p, end) < 1e-7)
+                    })
+            });
+        if closed || touches || self.line_type == LineType::Infinite {
+            self.reset_drawing(context);
+            return;
+        }
+        self.chain_points.push(end);
         let endpoint = last.and_then(|entity| {
             entity.point_ids().into_iter().find(|id| {
                 sketch
@@ -467,6 +483,12 @@ impl Workspace {
         }
     }
 }
+/// Captura que prende a ponta a uma geometria existente. Alinhamentos, passos da precisão e
+/// centros de área só posicionam e deixam a ponta solta.
+fn ends_on_element(kind: Kind) -> bool {
+    !matches!(kind, Kind::Alignment | Kind::Step | Kind::RegionCenter)
+}
+
 fn sketch_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }

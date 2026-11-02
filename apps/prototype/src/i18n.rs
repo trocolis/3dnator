@@ -1325,7 +1325,7 @@ fn pt(key: Text) -> &'static str {
         Text::SketchCircleDiameter => "Dois pontos (diâmetro)",
         Text::SketchCircleTangent => "Tangente",
         Text::SketchContinuousLineHint => {
-            "Clique nos próximos vértices. Esc encerra a sequência; fechar uma área também encerra."
+            "Clique nos próximos vértices. Esc encerra a sequência; fechar uma área ou terminar sobre outro elemento também encerra."
         }
         Text::SketchSymmetricLineHint => {
             "O primeiro ponto é o centro: cada segmento cria outro de mesmo tamanho no lado oposto."

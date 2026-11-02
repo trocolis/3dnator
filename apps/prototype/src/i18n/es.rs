@@ -654,7 +654,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchCircleDiameter => "Dos puntos (diámetro)",
         Text::SketchCircleTangent => "Tangente",
         Text::SketchContinuousLineHint => {
-            "Haga clic en los siguientes vértices. Esc termina la secuencia; cerrar un área también la termina."
+            "Haga clic en los siguientes vértices. Esc termina la secuencia; cerrar un área o terminar sobre otro elemento también la termina."
         }
         Text::SketchSymmetricLineHint => {
             "El primer punto es el centro: cada segmento crea otro del mismo tamaño en el lado opuesto."

@@ -84,6 +84,45 @@ fn continuous_lines_keep_the_endpoint_and_stop_only_on_area_or_escape() -> Resul
 }
 
 #[test]
+fn continuous_lines_stop_on_infinite_lines_and_existing_elements() -> Result<(), String> {
+    let context = egui::Context::default();
+    let parameters = Parameters::default();
+    // Reta infinita não encadeia.
+    let mut sketch = Sketch::new("Infinita", nator_sketch::Plane::xy());
+    let mut work = workspace(Tool::Line, &[[0., 0.], [20., 0.]]);
+    work.line_type = LineType::Infinite;
+    work.chain_points = vec![[0., 0.]];
+    draw_entity(&mut sketch, &work, &parameters)?;
+    work.continue_line(&sketch, &context, [20., 0.]);
+    assert!(!work.is_drawing());
+    // Ponta sobre o vértice de outra linha encerra.
+    let mut sketch = Sketch::new("Vértice", nator_sketch::Plane::xy());
+    let mut work = workspace(Tool::Line, &[[0., 10.], [10., 10.]]);
+    work.chain_points = vec![[0., 10.]];
+    draw_entity(&mut sketch, &work, &parameters)?;
+    work.reset_drawing(&context);
+    work.anchors = vec![[10., 0.], [10., 10.]];
+    work.anchor_kinds = vec![None, None];
+    work.chain_points = vec![[10., 0.]];
+    draw_entity(&mut sketch, &work, &parameters)?;
+    work.continue_line(&sketch, &context, [10., 10.]);
+    assert!(!work.is_drawing());
+    // Ponta capturada sobre uma curva encerra; ponta só alinhada continua.
+    let line = sketch.entities[0].id;
+    for (kind, drawing) in [(Kind::OnCurve(line), false), (Kind::Alignment, true)] {
+        work.anchors = vec![[5., -10.], [5., 10.]];
+        work.anchor_kinds = vec![None, Some(kind)];
+        work.chain_points = vec![[5., -10.]];
+        let mut candidate = sketch.clone();
+        draw_entity(&mut candidate, &work, &parameters)?;
+        work.continue_line(&candidate, &context, [5., 10.]);
+        assert_eq!(work.is_drawing(), drawing, "{kind:?}");
+        work.reset_drawing(&context);
+    }
+    Ok(())
+}
+
+#[test]
 fn rectangle_modes_use_the_preview_corners_and_respect_stroke() -> Result<(), String> {
     for (mode, anchors, expected_area) in [
         (RectangleMode::Normal, vec![[0., 0.], [20., 10.]], 200.),

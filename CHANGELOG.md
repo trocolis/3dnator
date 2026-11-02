@@ -2,6 +2,9 @@
 
 ## Não lançado
 
+## 0.29.1 — 02/11/2026
+
+- Linha contínua: o traço encerra quando a reta é infinita ou quando a ponta termina sobre outro elemento (vértice, linha, curva, centro, interseção, tangente ou projeção). A sequência só continua numa ponta solta, alinhada ou num passo da precisão.
 - `scripts/package_flatpak.sh` aceita `FLATPAK_RUNTIME` (padrão 25.08) e usa o Platform como Sdk quando o Sdk não está instalado. Um executável compilado numa distribuição recente, com glibc mais nova, roda no runtime 26.08 para instalação local.
 
 ## 0.29.0 — 02/11/2026
