@@ -50,10 +50,13 @@ impl Overlay {
 pub(super) enum Look {
     Hover,
     Selected,
+    /// Esqueleto do objeto na posição original, durante a movimentação.
+    Ghost,
 }
 impl Look {
     fn color(self, alpha: u8) -> egui::Color32 {
         match self {
+            Self::Ghost => egui::Color32::from_rgba_unmultiplied(70, 80, 96, alpha),
             Self::Hover => egui::Color32::from_rgba_unmultiplied(64, 156, 236, alpha),
             Self::Selected => egui::Color32::from_rgba_unmultiplied(28, 104, 196, alpha),
         }
@@ -222,10 +225,14 @@ pub(super) fn reference(
         feature_editor::Kept::Face(FaceRef::Named(name)) => face_index(body, name)
             .map(|f| face(body, pose, f))
             .unwrap_or_default(),
-        feature_editor::Kept::PlanarFace(face, _) => {
+        // Vira arestas individuais ao chegar no painel; não fica guardado na seleção.
+        feature_editor::Kept::Edges(_) => Overlay::default(),
+        feature_editor::Kept::PlanarFace(face, ..) => {
             reference(cache, body, pose, &feature_editor::Kept::Face(face.clone()))
         }
-        feature_editor::Kept::Body(_) => body_outline(cache, body, pose),
+        feature_editor::Kept::Body(_) | feature_editor::Kept::Component(..) => {
+            body_outline(cache, body, pose)
+        }
     }
 }
 
@@ -244,6 +251,7 @@ pub(super) fn draw(
     let fill = look.color(match look {
         Look::Hover => 70,
         Look::Selected => 95,
+        Look::Ghost => 0,
     });
     for triangle in &overlay.triangles {
         let normal = cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0]));
@@ -270,6 +278,7 @@ pub(super) fn draw(
         match look {
             Look::Hover => 2.5,
             Look::Selected => 3.,
+            Look::Ghost => 1.2,
         },
         look.color(255),
     );
@@ -359,11 +368,17 @@ impl Editor {
         {
             live_preview::roll_back(&mut document, draft.part(), output, true);
         }
+        self.apply_carried_move(&mut document);
         document
     }
 
     /// Recalcula a pré-seleção quando o cursor se move sobre a área 3D.
     pub(super) fn update_hover(&mut self, ui: &egui::Ui, response: &egui::Response) {
+        // Nos modos de câmera o botão esquerdo não escolhe nada: não há o que antecipar.
+        if self.shell.camera_mode.is_some() {
+            self.hover = None;
+            return;
+        }
         if self.current().plane_pick.is_some() {
             self.update_plane_hover(ui, response);
             return;
@@ -554,7 +569,7 @@ impl Editor {
                     ),
                     None => Default::default(),
                 },
-                feature_editor::Awaiting::Body => {
+                feature_editor::Awaiting::Body | feature_editor::Awaiting::Component => {
                     (body_outline(cache, body, pose), body.name.clone())
                 }
             };
@@ -659,6 +674,42 @@ impl Editor {
                 for kept in draft.references() {
                     selected.extend(reference(&mut self.highlight_cache, &base, pose, kept));
                 }
+                selected
+                    .points
+                    .extend(draft.sliver_points().map(|p| placement.apply(p)));
+                // Contatos ficam em cantos internos: o ponto os mantém visíveis de longe.
+                for line in draft.contact_lines() {
+                    let line = line.iter().map(|p| placement.apply(*p)).collect::<Vec<_>>();
+                    selected.points.extend(line.first());
+                    selected
+                        .segments
+                        .extend(line.windows(2).map(|s| ([s[0], s[1]], None)));
+                }
+            }
+        }
+        // Área de face escolhida como perfil: a célula vem do trabalhador da prévia.
+        if let Some(draft) = self
+            .feature_edit
+            .as_ref()
+            .filter(|d| d.tab() == self.current().id)
+            && let Some(area) = draft.face_area()
+        {
+            if area.boundaries.is_empty() {
+                let document = self.picking_document();
+                if let (Some(body), Ok(placement)) = (
+                    document.body(area.body),
+                    sketch_scene::part_placement(self.current(), draft.part()),
+                ) {
+                    let pose = placement.compose(body.placement).unwrap_or(placement);
+                    selected.extend(reference(
+                        &mut self.highlight_cache,
+                        body,
+                        pose,
+                        &feature_editor::Kept::Face(area.face.clone()),
+                    ));
+                }
+            } else if let Some(cell) = draft.area_overlay() {
+                selected.extend(cell.clone());
             }
         }
         if let Some(draft) = self
@@ -689,6 +740,12 @@ impl Editor {
                 }
             }
         }
+        if let Some(point) = self.print_check_focus().or(self.fit_check_focus()) {
+            selected.points.push(point);
+        }
+        selected
+            .segments
+            .extend(self.excerpt_edges().into_iter().map(|edge| (edge, None)));
         // Face ou aresta escolhida com o modo de seleção, na peça em construção.
         if self.feature_edit.is_none()
             && self.paint_edit.is_none()
@@ -719,6 +776,9 @@ impl Editor {
                 });
             }
         }
+        if let Some(ghost) = self.move_ghost() {
+            draw(&painter, &camera, bounds, rect, &ghost, Look::Ghost);
+        }
         if !selected.is_empty() {
             draw(&painter, &camera, bounds, rect, &selected, Look::Selected);
         }
@@ -731,7 +791,7 @@ impl Editor {
             if let Some(point) = hover.captured
                 && let Some(p) = sketch_scene::project(&camera, bounds, rect, point)
             {
-                let stroke = egui::Stroke::new(1.5, theme::ACCENT);
+                let stroke = egui::Stroke::new(1.5, theme::accent());
                 for axis in [egui::vec2(11., 0.), egui::vec2(0., 11.)] {
                     painter.line_segment(
                         [p - axis, p + axis],

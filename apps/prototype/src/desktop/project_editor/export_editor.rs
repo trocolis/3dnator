@@ -1,7 +1,15 @@
-//! Exportação STL para impressão 3D: escopo, qualidade e resumo antes de gravar.
+//! Exportação para impressão 3D: formato, escopo, qualidade e resumo antes de gravar.
 //! O planejamento e a gravação ocorrem na thread de trabalho; nada é sobrescrito.
 use super::*;
 use nator_commands::export::{self, Quality, Scope};
+use nator_project_io::{PrintExportPreferences, ThreeMfObject};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Format {
+    ThreeMf,
+    Stl,
+}
 
 /// Escopos na ordem exibida.
 const SCOPES: [T; 5] = [
@@ -28,6 +36,12 @@ pub(super) struct Draft {
     angular_deg: f64,
     /// Resumo calculado para a revisão indicada.
     summary: Option<(u64, String)>,
+    format: Format,
+    /// Aplica a face na mesa e distribui os objetos; desligado, mantém as coordenadas.
+    prepare: bool,
+    /// Caixa do trecho, em coordenadas da peça; só para corpo ou peça.
+    excerpt: Option<export::Excerpt>,
+    preferences: PrintExportPreferences,
 }
 impl Draft {
     fn scope(&self) -> Option<Scope> {
@@ -58,7 +72,7 @@ impl Draft {
 }
 
 /// Texto do resumo: arquivos, triângulos, tamanho, dimensões e ocorrências.
-fn describe(files: &[export::File]) -> String {
+fn describe(files: &[export::File], settings: nator_document::Settings) -> String {
     use nator_drawing::format_mm as mm;
     let summary = export::summarize(files);
     let size = if summary.bytes >= 1 << 20 {
@@ -75,7 +89,13 @@ fn describe(files: &[export::File]) -> String {
     )];
     if let Some(b) = summary.bounds {
         let s = b.size();
-        lines.push(format!("{} × {} × {} mm", mm(s[0]), mm(s[1]), mm(s[2])));
+        lines.push(format!(
+            "{} × {} × {} {}",
+            settings.format_compact_length(s[0]),
+            settings.format_compact_length(s[1]),
+            settings.format_compact_length(s[2]),
+            settings.unit.suffix()
+        ));
     }
     for file in files.iter().filter(|f| f.occurrences > 1) {
         lines.push(format!(
@@ -86,6 +106,141 @@ fn describe(files: &[export::File]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+/// Linhas de tamanho no resumo; projetos importados chegam a centenas de corpos.
+const SIZE_LINES: usize = 8;
+
+/// Tamanhos na mesa e o que não coube. Excessos não impedem a exportação.
+fn describe_bed(plan: &export::PrintPlan, settings: nator_document::Settings) -> String {
+    let layout = &plan.layout;
+    let size = |name: &str, size: [f64; 3]| {
+        let [x, y, z] = size.map(|v| settings.format_compact_length(v));
+        format!("{name}: {x} × {y} × {z} {}", settings.unit.suffix())
+    };
+    let mut lines = match &plan.group {
+        Some((name, group)) => vec![size(name, *group)],
+        None => layout
+            .files
+            .iter()
+            .take(SIZE_LINES)
+            .map(|file| size(&file.name, file.size))
+            .collect(),
+    };
+    if plan.group.is_none() && layout.files.len() > SIZE_LINES {
+        lines.push(format!("… +{}", layout.files.len() - SIZE_LINES));
+    }
+    if !plan.skipped.is_empty() {
+        lines.push(skipped_note(&plan.skipped));
+    }
+    if !layout.oversized.is_empty() {
+        lines.push(format!(
+            "{}: {}",
+            text(T::ExportOversized),
+            layout.oversized.join(", ")
+        ));
+    }
+    if layout.overflow {
+        lines.push(text(T::ExportOverflow).to_owned());
+    }
+    lines.join("\n")
+}
+
+fn skipped_note(skipped: &[String]) -> String {
+    format!("{}: {}", text(T::ExportSkipped), skipped.join(", "))
+}
+
+fn preferences_path() -> Option<PathBuf> {
+    nator_project_io::recovery_directory()
+        .parent()
+        .map(|p| p.join("print-export.json"))
+}
+
+/// Nome do arquivo único: o do objeto, ou o geral quando há vários.
+fn single_name(layout: &[export::Placed], general: &str) -> String {
+    match layout {
+        [file] => file.name.clone(),
+        _ => general.to_owned(),
+    }
+}
+
+/// Abre os arquivos no fatiador, se o usuário pediu nas preferências de exportação.
+pub(super) fn open_slicer_if_asked(paths: &[PathBuf]) -> Result<(), String> {
+    let preferences = preferences_path()
+        .map(|path| nator_project_io::read_print_export(&path))
+        .unwrap_or_default();
+    if preferences.open_slicer {
+        slicer::open(&preferences.slicer_command, paths)
+            .map_err(|e| format!("{}: {e}", text(T::ExportNotOpened)))?;
+    }
+    Ok(())
+}
+
+fn save_dialog(name: &str, filter: T, extension: &str) -> Option<PathBuf> {
+    let mut path = rfd::FileDialog::new()
+        .add_filter(text(filter), &[extension])
+        .set_file_name(format!("{name}.{extension}"))
+        .save_file()?;
+    if !path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(extension))
+    {
+        path.set_extension(extension);
+    }
+    Some(path)
+}
+
+/// Grava o 3MF com um objeto por arquivo planejado. `None` significa cancelado.
+pub(super) fn write_three_mf(
+    layout: &[export::Placed],
+    general: &str,
+) -> Result<Option<Vec<PathBuf>>, String> {
+    let Some(path) = save_dialog(&single_name(layout, general), T::ThreeMfFilter, "3mf") else {
+        return Ok(None);
+    };
+    let objects = layout
+        .iter()
+        .map(|file| ThreeMfObject {
+            name: &file.name,
+            mesh: &file.mesh,
+            items: &file.items,
+        })
+        .collect::<Vec<_>>();
+    nator_project_io::write_3mf(&path, &objects).map_err(|e| e.to_string())?;
+    Ok(Some(vec![path]))
+}
+
+/// Grava STL: um arquivo escolhido, ou uma pasta quando há vários. O conjunto da montagem
+/// vai para um único arquivo, com um sólido por corpo. `None` significa cancelado.
+fn write_stl(
+    meshes: &[(String, nator_geometry::Mesh)],
+    group: Option<&str>,
+) -> Result<Option<Vec<PathBuf>>, String> {
+    if let Some(name) = group {
+        let Some(path) = save_dialog(name, T::StlFilter, "stl") else {
+            return Ok(None);
+        };
+        let list = meshes.iter().map(|(_, mesh)| mesh).collect::<Vec<_>>();
+        nator_project_io::write_stl_group(&path, &list).map_err(|e| e.to_string())?;
+        return Ok(Some(vec![path]));
+    }
+    if let [(name, mesh)] = meshes {
+        let Some(path) = save_dialog(name, T::StlFilter, "stl") else {
+            return Ok(None);
+        };
+        nator_project_io::write_stl(&path, mesh).map_err(|e| e.to_string())?;
+        return Ok(Some(vec![path]));
+    }
+    let Some(folder) = rfd::FileDialog::new().pick_folder() else {
+        return Ok(None);
+    };
+    let list = meshes
+        .iter()
+        .map(|(name, mesh)| (name.clone(), mesh))
+        .collect::<Vec<_>>();
+    nator_project_io::write_stl_files(&folder, &list)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 impl Editor {
@@ -128,14 +283,58 @@ impl Editor {
         };
         self.export_edit = Some(Draft {
             tab: self.current().id,
-            scope: if body.is_some() { 0 } else { 3 },
+            // Sem corpo escolhido, a peça em edição é o alvo natural de uma impressão.
+            scope: if body.is_some() {
+                0
+            } else if part.is_some() {
+                1
+            } else {
+                3
+            },
             body,
             part,
             quality: 1,
             linear_mm: 0.02,
             angular_deg: 15.,
             summary: None,
+            format: Format::ThreeMf,
+            prepare: true,
+            excerpt: None,
+            preferences: preferences_path()
+                .map(|path| nator_project_io::read_print_export(&path))
+                .unwrap_or_default(),
         });
+    }
+
+    /// Arestas do trecho na montagem, para ver a caixa enquanto ela é ajustada.
+    pub(super) fn excerpt_edges(&self) -> Vec<[Point3; 2]> {
+        let Some(draft) = self
+            .export_edit
+            .as_ref()
+            .filter(|d| d.tab == self.current().id)
+        else {
+            return Vec::new();
+        };
+        let (Some(excerpt), Some(part)) = (draft.excerpt, draft.part) else {
+            return Vec::new();
+        };
+        let Ok(placement) = sketch_scene::part_placement(self.current(), part) else {
+            return Vec::new();
+        };
+        let corner = |bits: u8| {
+            placement.apply(std::array::from_fn(|axis| {
+                if bits >> axis & 1 == 0 {
+                    excerpt.min[axis]
+                } else {
+                    excerpt.max[axis]
+                }
+            }))
+        };
+        (0..8_u8)
+            .flat_map(|a| [1_u8, 2, 4].map(|bit| (a, a | bit)))
+            .filter(|(a, b)| a != b)
+            .map(|(a, b)| [corner(a), corner(b)])
+            .collect()
     }
 
     pub(super) fn export_dialog(&mut self, ctx: &egui::Context) {
@@ -152,7 +351,7 @@ impl Editor {
             .and_then(|b| document.body(b))
             .is_some_and(|b| b.brep.is_some());
         let mut action = None;
-        let title = text(T::ExportStl);
+        let title = text(T::ExportForPrint);
         let outcome = command_panel::options(
             ctx,
             command_panel::Header {
@@ -163,18 +362,84 @@ impl Editor {
             self.canvas_rect,
             command_panel::WIDTH,
             |ui| {
-                ui.label(text(T::ExportScope));
-                for (i, label) in SCOPES.iter().enumerate() {
-                    let available = match i {
-                        0 => draft.body.is_some(),
-                        1 => draft.part.is_some(),
-                        _ => true,
-                    };
-                    ui.add_enabled_ui(available, |ui| {
-                        if ui.radio_value(&mut draft.scope, i, text(*label)).changed() {
-                            draft.summary = None;
+                ui.horizontal(|ui| {
+                    ui.label(text(T::ExportFormat));
+                    ui.radio_value(&mut draft.format, Format::ThreeMf, "3MF");
+                    ui.radio_value(&mut draft.format, Format::Stl, "STL");
+                });
+                if ui
+                    .checkbox(&mut draft.prepare, text(T::ExportPrepareBed))
+                    .changed()
+                {
+                    draft.summary = None;
+                }
+                ui.checkbox(
+                    &mut draft.preferences.open_slicer,
+                    text(T::ExportOpenSlicer),
+                );
+                if draft.preferences.open_slicer {
+                    ui.horizontal(|ui| {
+                        ui.label(text(T::ExportSlicerCommand));
+                        ui.text_edit_singleline(&mut draft.preferences.slicer_command);
+                    });
+                    ui.small(text(T::ExportSlicerHint));
+                }
+                egui::ComboBox::from_label(text(T::ExportScope))
+                    .selected_text(text(SCOPES[draft.scope]))
+                    .show_ui(ui, |ui| {
+                        for (i, label) in SCOPES.iter().enumerate() {
+                            let available = match i {
+                                0 => draft.body.is_some(),
+                                1 => draft.part.is_some(),
+                                _ => true,
+                            };
+                            ui.add_enabled_ui(available, |ui| {
+                                if ui
+                                    .selectable_value(&mut draft.scope, i, text(*label))
+                                    .changed()
+                                {
+                                    draft.summary = None;
+                                }
+                            });
                         }
                     });
+                let boxable = draft.scope < 2;
+                if !boxable {
+                    draft.excerpt = None;
+                }
+                ui.add_enabled_ui(boxable, |ui| {
+                    let mut chosen = draft.excerpt.is_some();
+                    if ui.checkbox(&mut chosen, text(T::ExcerptToggle)).changed() {
+                        draft.excerpt = chosen
+                            .then(|| {
+                                draft
+                                    .scope()
+                                    .and_then(|s| export::scope_bounds(&document, s))
+                            })
+                            .flatten();
+                        draft.summary = None;
+                    }
+                });
+                if let Some(excerpt) = &mut draft.excerpt {
+                    let before = *excerpt;
+                    for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
+                        command_panel::row(ui, label, |ui| {
+                            ui.add(command_panel::localized(
+                                egui::DragValue::new(&mut excerpt.min[axis])
+                                    .speed(0.5)
+                                    .max_decimals(2),
+                            ));
+                            ui.add(command_panel::localized(
+                                egui::DragValue::new(&mut excerpt.max[axis])
+                                    .speed(0.5)
+                                    .max_decimals(2),
+                            ));
+                        });
+                    }
+                    if *excerpt != before {
+                        draft.summary = None;
+                    }
+                    command_panel::hint(ui, text(T::ExcerptHint));
                 }
                 egui::ComboBox::from_label(text(T::ExportQuality))
                     .selected_text(text(QUALITIES[draft.quality]))
@@ -217,7 +482,7 @@ impl Editor {
                     if !solid_body {
                         ui.small(text(T::MeshIsNotSolid));
                     }
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button(text(T::ComputeSummary)).clicked() {
                             action = Some(false);
                         }
@@ -248,42 +513,64 @@ impl Editor {
         if let (Some(write), Some(scope)) = (action, draft.scope()) {
             let quality = draft.quality();
             let tab = draft.tab;
+            let (format, prepare, excerpt) = (draft.format, draft.prepare, draft.excerpt);
+            let preferences = draft.preferences.clone();
             draft.summary = None;
             self.start(ctx, None, move || {
-                let files = export::plan(&document, scope, quality).map_err(|e| e.to_string())?;
+                let bed = document.print_profile().bed_mm;
+                let plan = export::print_plan_of(&document, scope, quality, prepare, bed, excerpt)
+                    .map_err(|e| e.to_string())?;
                 if !write {
+                    let mut files = describe(&plan.files, document.settings());
+                    if prepare || !plan.skipped.is_empty() {
+                        files = format!("{files}\n{}", describe_bed(&plan, document.settings()));
+                    }
                     return Ok(Outcome::ExportSummary {
                         tab,
                         revision,
-                        text: describe(&files),
+                        text: files,
                     });
                 }
-                if let [file] = files.as_slice() {
-                    let Some(mut path) = rfd::FileDialog::new()
-                        .add_filter(text(T::StlFilter), &["stl"])
-                        .set_file_name(format!("{}.stl", file.name))
-                        .save_file()
-                    else {
-                        return Ok(Outcome::Cancelled);
-                    };
-                    if !path
-                        .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("stl"))
-                    {
-                        path.set_extension("stl");
-                    }
-                    nator_project_io::write_stl(&path, &file.mesh).map_err(|e| e.to_string())?;
-                } else {
-                    let Some(folder) = rfd::FileDialog::new().pick_folder() else {
-                        return Ok(Outcome::Cancelled);
-                    };
-                    let list = files
-                        .iter()
-                        .map(|f| (f.name.clone(), &f.mesh))
-                        .collect::<Vec<_>>();
-                    nator_project_io::write_stl_files(&folder, &list).map_err(|e| e.to_string())?;
+                // Antes de abrir o seletor e nas coordenadas da modelagem: o erro cita o corpo
+                // e a posição que o usuário encontra na área 3D.
+                for file in &plan.files {
+                    nator_project_io::require_printable(&file.name, &file.mesh)
+                        .map_err(|e| e.to_string())?;
                 }
-                Ok(Outcome::Exported)
+                let written = match format {
+                    Format::ThreeMf => write_three_mf(&plan.layout.files, document.name())?,
+                    Format::Stl => {
+                        let meshes = plan
+                            .layout
+                            .files
+                            .iter()
+                            .map(|file| Ok((file.name.clone(), file.positioned()?)))
+                            .collect::<Result<Vec<_>, nator_document::DocumentError>>()
+                            .map_err(|e| e.to_string())?;
+                        write_stl(&meshes, plan.group.as_ref().map(|(name, _)| name.as_str()))?
+                    }
+                };
+                let Some(paths) = written else {
+                    return Ok(Outcome::Cancelled);
+                };
+                // A escolha vale a partir de uma exportação concluída; falhar ao guardá-la
+                // não invalida o arquivo já gravado.
+                if let Some(path) = preferences_path() {
+                    let _ = nator_project_io::write_print_export(&path, &preferences);
+                }
+                if preferences.open_slicer {
+                    slicer::open(&preferences.slicer_command, &paths)
+                        .map_err(|e| format!("{}: {e}", text(T::ExportNotOpened)))?;
+                }
+                Ok(if plan.skipped.is_empty() {
+                    Outcome::Exported
+                } else {
+                    Outcome::ExportedWith(format!(
+                        "{}. {}",
+                        text(T::Exported),
+                        skipped_note(&plan.skipped)
+                    ))
+                })
             });
         }
         if open {

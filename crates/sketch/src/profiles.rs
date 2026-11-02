@@ -181,6 +181,8 @@ pub fn line_intersection(a: Point2, b: Point2, c: Point2, d: Point2) -> Option<(
 
 pub fn analyze(sketch: &Sketch) -> Result<(Vec<Wire>, Diagnostics)> {
     sketch.validate()?;
+    // Pontas a menos da própria precisão são o mesmo vértice (`fusion`).
+    let sketch = &*crate::fusion::fused(sketch);
     let mut diagnostics = Diagnostics::default();
     let mut nodes: Vec<Point2> = Vec::new();
     // Cada aresta do grafo guarda também a entidade de origem.

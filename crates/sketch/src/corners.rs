@@ -64,10 +64,36 @@ pub fn selected(sketch: &Sketch, entities: &[u64]) -> Result<Vec<Corner>> {
     Ok(result)
 }
 
+/// Cantos da seleção; com `only`, somente os desses vértices. É isso que permite
+/// arredondar três cantos de um retângulo cujas quatro linhas estão selecionadas.
+pub fn chosen(sketch: &Sketch, entities: &[u64], only: &[Point2]) -> Result<Vec<Corner>> {
+    let mut corners = selected(sketch, entities)?;
+    if !only.is_empty() {
+        corners.retain(|c| only.iter().any(|p| distance(*p, c.point) < 1e-7));
+        if corners.is_empty() {
+            return Err(SketchError(
+                "Os vértices escolhidos não formam um canto.".into(),
+            ));
+        }
+    }
+    Ok(corners)
+}
+
 /// Aplica todos os cantos na mesma candidata. Se a soma dos cortes consumir um
 /// segmento, a edição inteira falha e o documento original permanece intacto.
-pub fn refine(sketch: &mut Sketch, entities: &[u64], size: f64, rounded: bool) -> Result<Vec<u64>> {
-    let corners = selected(sketch, entities)?;
+pub fn refine(
+    sketch: &mut Sketch,
+    entities: &[u64],
+    only: &[Point2],
+    size: f64,
+    rounded: bool,
+) -> Result<Vec<u64>> {
+    let corners = chosen(sketch, entities, only)?;
+    let touched = corners
+        .iter()
+        .flat_map(|c| [c.first, c.second])
+        .collect::<Vec<_>>();
+    sketch.refuse_locked(&touched)?;
     let mut next = sketch.clone();
     let mut created = Vec::new();
     for corner in corners {
@@ -93,7 +119,7 @@ mod tests {
             let mut sketch = Sketch::new("Cantos", Plane::xy());
             let lines = sketch.add_rectangle([0., 0.], [20., 10.], false)?;
             let original = sketch.clone();
-            let created = refine(&mut sketch, &lines, 2., rounded)?;
+            let created = refine(&mut sketch, &lines, &[], 2., rounded)?;
             assert_eq!(created.len(), 4);
             assert_eq!(profiles::regions(&sketch)?.len(), 1);
             assert!(solver::max_error(&sketch)? < 1e-6);
@@ -104,7 +130,7 @@ mod tests {
             };
             assert!((profiles::regions(&sketch)?[0].outer.area().abs() - expected).abs() < 1e-6);
             let mut invalid = original.clone();
-            assert!(refine(&mut invalid, &lines, 6., rounded).is_err());
+            assert!(refine(&mut invalid, &lines, &[], 6., rounded).is_err());
             assert_eq!(invalid.next_id, original.next_id);
             assert_eq!(invalid.entities.len(), original.entities.len());
             assert_eq!(invalid.line(lines[0])?, original.line(lines[0])?);
@@ -121,7 +147,28 @@ mod tests {
         }
         lines.push(sketch.add_line([-5., 5.], [40., 5.], false)?);
         assert_eq!(selected(&sketch, &lines)?.len(), 2);
-        assert_eq!(refine(&mut sketch, &lines, 1., false)?.len(), 2);
+        assert_eq!(refine(&mut sketch, &lines, &[], 1., false)?.len(), 2);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod chosen_corners {
+    use super::*;
+
+    #[test]
+    fn three_corners_of_a_rectangle_can_be_rounded_without_the_fourth() -> Result<()> {
+        let mut sketch = Sketch::new("Três cantos", Plane::xy());
+        let lines = sketch.add_rectangle([0., 0.], [20., 10.], false)?;
+        let only = [[0., 0.], [20., 0.], [20., 10.]];
+        let created = refine(&mut sketch, &lines, &only, 2., true)?;
+        assert_eq!(created.len(), 3);
+        assert!(junctions::at(&sketch, [0., 10.])?.is_some());
+        assert!(junctions::at(&sketch, [0., 0.])?.is_none());
+        let mut other = Sketch::new("Sem canto", Plane::xy());
+        let lines = other.add_rectangle([0., 0.], [20., 10.], false)?;
+        assert!(refine(&mut other, &lines, &[[5., 5.]], 2., true).is_err());
+        assert_eq!(other.entities.len(), 4);
         Ok(())
     }
 }

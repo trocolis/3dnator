@@ -20,13 +20,16 @@ pub struct Guide {
 #[cfg(feature = "occt")]
 mod precise {
     use super::*;
-    use crate::features::{face_index, region, source};
+    use crate::features::{face_index, mask_area, region, source};
     use nator_document::{
+        PaintBoundary,
         features::{BooleanMode, ExtrusionLimit},
         parameters::Dimension,
     };
     use nator_geometry::{dot, norm, sub};
     use nator_kernel::Solid;
+    /// Nunca trocar por outra geometria: a área sumiu e o usuário precisa escolher de novo.
+    const AREA_LOST: &str = "A área escolhida não existe mais na face.";
     fn error(e: impl std::fmt::Display) -> DocumentError {
         DocumentError(e.to_string())
     }
@@ -168,6 +171,56 @@ mod precise {
         Ok(dot(n, sub(point, origin)) / denominator)
     }
 
+    /// Reduz o prisma da face à célula escolhida. Cada condição é o prisma das regiões
+    /// do rascunho entre os limites da extrusão: comum para dentro, corte para fora.
+    fn limit_to_area(
+        piece: &nator_document::Part,
+        mut prism: Solid,
+        g: Guide,
+        span: (f64, f64),
+        boundaries: &[PaintBoundary],
+        support: (&Solid, usize),
+        owner: &str,
+    ) -> Result<Solid, DocumentError> {
+        for boundary in boundaries {
+            let record = piece
+                .sketches
+                .iter()
+                .find(|s| s.id == boundary.mask.sketch)
+                .ok_or_else(|| error("Rascunho que delimita a área inexistente."))?;
+            let sketch = &record.sketch;
+            let facing = dot(sketch.plane.normal(), g.normal);
+            if facing.abs() < 1. - 1e-7 {
+                return Err(error(
+                    "O rascunho que delimita a área não é mais paralelo à face.",
+                ));
+            }
+            let start = dot(sub(g.origin, sketch.plane.origin), sketch.plane.normal());
+            let (a, b) = (start + facing * span.0, start + facing * span.1);
+            let mut mask: Option<Solid> = None;
+            for reference in boundary.mask.region.selections() {
+                let (outline, area) = mask_area(sketch, reference, support.0, support.1)?;
+                // A folga evita tampas coincidentes com as do prisma da face.
+                let mut part = Solid::extrude(&outline, &area, a.min(b) - 1., a.max(b) + 1., owner)
+                    .map_err(error)?;
+                // Dois rascunhos podem ter entidades de mesmo número.
+                part.map_face_names(|name| format!("{name}:s{}", record.id.0));
+                mask = Some(match mask {
+                    Some(previous) => previous.boolean(&part, 0, owner).map_err(error)?,
+                    None => part,
+                });
+            }
+            let mask = mask.ok_or_else(|| error("Delimitação de área vazia."))?;
+            prism = prism
+                .boolean(&mask, if boundary.inside { 2 } else { 1 }, owner)
+                .map_err(|e| error(format!("{AREA_LOST} ({e})")))?;
+            if prism.volume().map_err(error)? <= 1e-9 {
+                return Err(error(AREA_LOST));
+            }
+        }
+        Ok(prism)
+    }
+
     /// Prisma isolado: usado na construção, na classificação e na prévia de remoção.
     pub(crate) fn tool(
         doc: &Document,
@@ -273,11 +326,18 @@ mod precise {
                 }
                 result.ok_or_else(|| error("Selecione pelo menos uma área."))?
             }
-            Operation::ExtrudeFace { base, face, .. } => {
+            Operation::ExtrudeFace {
+                base,
+                face,
+                boundaries,
+                ..
+            } => {
                 let (solid, bytes) = source(doc, part, *base)?;
-                solid
+                let prism = solid
                     .extrude_face(face_index(&solid, &bytes, face)?, from, to, owner)
-                    .map_err(error)?
+                    .map_err(error)?;
+                let support = (&solid, face_index(&solid, &bytes, face)?);
+                limit_to_area(piece, prism, g, (from, to), boundaries, support, owner)?
             }
             _ => return Err(DocumentError("Perfil de extrusão inválido.".into())),
         };
@@ -338,7 +398,8 @@ mod precise {
         mut operation: Operation,
         preferred: Option<BodyId>,
     ) -> Result<Operation, DocumentError> {
-        if !matches!(operation, Operation::Extrude { .. }) {
+        let cell = matches!(&operation, Operation::ExtrudeFace { boundaries, .. } if !boundaries.is_empty());
+        if !matches!(operation, Operation::Extrude { .. }) && !cell {
             return Err(error(
                 "Selecione uma área de rascunho para dividir a face com extrusão zero.",
             ));
@@ -375,10 +436,14 @@ mod precise {
                 "Mais de um corpo sob o perfil; selecione explicitamente a base da divisão."
             }));
         };
-        if let Operation::Extrude { combine, .. } = &mut operation {
+        if let Operation::Extrude { combine, .. } | Operation::ExtrudeFace { combine, .. } =
+            &mut operation
+        {
+            // A extrusão zero existe para dividir a face: nada a juntar.
             *combine = Some(Combine {
                 target,
                 mode: BooleanMode::Join,
+                merge_coplanar: false,
             });
         }
         Ok(operation)
@@ -494,6 +559,7 @@ mod precise {
         let choice = candidates.first().map(|c| Combine {
             target: c.3,
             mode: c.4,
+            merge_coplanar: c.4 == BooleanMode::Join,
         });
         match &mut operation {
             Operation::Extrude { combine, .. } | Operation::ExtrudeFace { combine, .. } => {
@@ -521,6 +587,28 @@ mod precise {
         let mut common = base.boolean(&prism, 2, "removal").map_err(error)?;
         Ok(Some(common.tessellate(0.05, 0.25).map_err(error)?))
     }
+
+    /// Material novo de uma união: a prévia destaca isto, não o corpo resultante inteiro.
+    pub fn added(
+        doc: &Document,
+        part: PartId,
+        operation: &Operation,
+    ) -> Result<Option<nator_geometry::Mesh>, DocumentError> {
+        let Some(combine) = combination(operation).filter(|c| c.mode == BooleanMode::Join) else {
+            return Ok(None);
+        };
+        let g = guide(doc, part, operation)?;
+        if (g.to - g.from).abs() < 1e-7 {
+            return Ok(None);
+        }
+        let (base, _) = source(doc, part, combine.target)?;
+        let prism = tool(doc, part, operation, "addition", None)?;
+        if prism.volume().map_err(error)? - base.common_volume(&prism).map_err(error)? <= 1e-9 {
+            return Ok(None);
+        }
+        let mut outside = prism.boolean(&base, 1, "addition").map_err(error)?;
+        Ok(Some(outside.tessellate(0.05, 0.25).map_err(error)?))
+    }
 }
 pub fn combination(operation: &Operation) -> Option<Combine> {
     match operation {
@@ -529,7 +617,7 @@ pub fn combination(operation: &Operation) -> Option<Combine> {
     }
 }
 #[cfg(feature = "occt")]
-pub use precise::{automatic, guide, removed};
+pub use precise::{added, automatic, guide, removed};
 #[cfg(feature = "occt")]
 pub(super) use precise::{imprint, imprint_target, limit_plane, tool};
 #[cfg(not(feature = "occt"))]
@@ -551,6 +639,14 @@ pub fn guide(
 }
 #[cfg(not(feature = "occt"))]
 pub fn removed(
+    _doc: &Document,
+    _part: PartId,
+    _operation: &Operation,
+) -> Result<Option<nator_geometry::Mesh>, DocumentError> {
+    Ok(None)
+}
+#[cfg(not(feature = "occt"))]
+pub fn added(
     _doc: &Document,
     _part: PartId,
     _operation: &Operation,

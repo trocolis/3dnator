@@ -88,6 +88,25 @@ pub(super) fn import_step(
                 .id;
             doc.remove_instance(automatic)?;
             for body in &mut part.bodies {
+                if body.surface {
+                    // Superfície aberta não é um sólido: vira corpo de malha, que aparece e
+                    // sai em STL, mas fica fora das operações CAD e da exportação STEP.
+                    let (mesh, _) = body
+                        .solid
+                        .tessellate_with_faces(0.05, 0.25)
+                        .map_err(|e| DocumentError(e.to_string()))?;
+                    triangles += mesh.triangles().len();
+                    if triangles > nator_document::MAX_SCENE_TRIANGLES {
+                        return Err(DocumentError(
+                            "STEP excede dois milhões de triângulos.".into(),
+                        ));
+                    }
+                    let (_, b) =
+                        doc.add_mesh(Some(id), body.name.clone(), Arc::new(MeshAsset::new(mesh)))?;
+                    doc.body_mut(b)?.color = body.color;
+                    first_body.get_or_insert((id, b));
+                    continue;
+                }
                 let faces = body
                     .solid
                     .face_count()

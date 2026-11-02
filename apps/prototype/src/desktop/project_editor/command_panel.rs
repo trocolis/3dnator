@@ -6,6 +6,7 @@ use super::{
     icons::{self, Icon},
     *,
 };
+use nator_document::{LengthUnit, Settings};
 
 /// Largura do painel, em pontos.
 pub(super) const WIDTH: f32 = 330.;
@@ -28,7 +29,7 @@ pub(super) struct Outcome {
     pub cancel: bool,
 }
 
-/// A posição usa o controle inteiro, incluindo Home/Enquadrar e setas. O painel
+/// A posição usa o controle inteiro, incluindo Home e setas. O painel
 /// fica alinhado à direita do canvas; memória de janelas antigas não muda a âncora.
 fn position(canvas: egui::Rect, width: f32) -> egui::Pos2 {
     let cube = view_cube::rect(canvas);
@@ -56,12 +57,28 @@ pub(super) struct Header<'a> {
     pub title: &'a str,
 }
 
+fn offset_id(key: &str) -> egui::Id {
+    egui::Id::new(("command_panel_offset", key))
+}
+
 fn window(
     context: &egui::Context,
     header: Header<'_>,
     canvas: egui::Rect,
     width: f32,
 ) -> egui::Window<'static> {
+    // O painel reabre na âncora original; um deslocamento arrastado pela barra
+    // de título dura enquanto ele permanece aberto e é esquecido ao fechar.
+    let seen = egui::Id::new(("command_panel_seen", header.id));
+    let frame = context.cumulative_frame_nr();
+    let previous = context.data_mut(|data| data.get_temp::<u64>(seen));
+    if previous.is_none_or(|previous| frame > previous + 1) {
+        context.data_mut(|data| data.insert_temp(offset_id(header.id), egui::Vec2::ZERO));
+    }
+    context.data_mut(|data| data.insert_temp(seen, frame));
+    let offset = context
+        .data_mut(|data| data.get_temp::<egui::Vec2>(offset_id(header.id)))
+        .unwrap_or_default();
     egui::Window::new(header.title)
         .id(id(header.id))
         .title_bar(false)
@@ -69,7 +86,7 @@ fn window(
         .resizable(false)
         .movable(false)
         .constrain(false)
-        .fixed_pos(position(canvas, width))
+        .fixed_pos(position(canvas, width) + offset)
         .min_width(width)
         .max_width(width)
         .frame(
@@ -88,8 +105,30 @@ fn window(
 /// Mesmo cabeçalho do Mover: ícone, nome em maiúsculas e fechar à direita.
 fn heading(ui: &mut egui::Ui, header: Header<'_>) -> bool {
     let mut close = false;
+    // Arraste pela barra de título. Criado antes dos botões para que o fechar,
+    // desenhado depois, continue recebendo o clique.
+    let drag_rect =
+        egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), 38.));
+    let drag = ui.interact(
+        drag_rect,
+        egui::Id::new(("command_panel_title_drag", header.id)),
+        egui::Sense::drag(),
+    );
+    if drag.dragged() {
+        let delta = drag.drag_delta();
+        ui.ctx().data_mut(|data| {
+            let mut offset = data
+                .get_temp::<egui::Vec2>(offset_id(header.id))
+                .unwrap_or_default();
+            offset += delta;
+            data.insert_temp(offset_id(header.id), offset);
+        });
+    }
+    if drag.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(244, 247, 251))
+        .fill(theme::subtle())
         .inner_margin(egui::Margin::symmetric(12, 8))
         .corner_radius(egui::CornerRadius {
             nw: 8,
@@ -102,11 +141,15 @@ fn heading(ui: &mut egui::Ui, header: Header<'_>) -> bool {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::Vec2::splat(22.), egui::Sense::hover());
                 icons::paint(ui.painter(), rect, header.icon, true);
-                ui.label(
-                    egui::RichText::new(header.title.to_uppercase())
-                        .strong()
-                        .size(13.)
-                        .color(theme::INK),
+                // Texto selecionável capturaria o arraste que move o painel.
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(header.title.to_uppercase())
+                            .strong()
+                            .size(13.)
+                            .color(theme::ink()),
+                    )
+                    .selectable(false),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     close = icons::button(ui, Icon::Close, text(T::Cancel), false, false).clicked();
@@ -217,7 +260,7 @@ pub(super) fn show_validated(
                             ui.label(
                                 egui::RichText::new(text(T::PreviewComputing))
                                     .small()
-                                    .color(theme::MUTED),
+                                    .color(theme::muted()),
                             );
                         }
                         Footer::Ready => {
@@ -227,7 +270,7 @@ pub(super) fn show_validated(
                             ui.label(
                                 egui::RichText::new(text(T::PreviewReady))
                                     .small()
-                                    .color(theme::MUTED),
+                                    .color(theme::muted()),
                             );
                         }
                         Footer::Failed(_) => {
@@ -237,7 +280,7 @@ pub(super) fn show_validated(
                             ui.label(
                                 egui::RichText::new(text(T::PreviewFailed))
                                     .small()
-                                    .color(theme::DANGER),
+                                    .color(theme::danger()),
                             );
                         }
                     }
@@ -250,7 +293,7 @@ pub(super) fn show_validated(
                                 .strong()
                                 .color(egui::Color32::WHITE),
                         )
-                        .fill(theme::ACCENT)
+                        .fill(theme::accent())
                         .min_size(egui::vec2(64., 26.));
                         if ui.add_enabled(ok_enabled && fields_valid, ok).clicked() {
                             outcome.ok = true;
@@ -258,7 +301,7 @@ pub(super) fn show_validated(
                     });
                 });
                 if let Footer::Failed(message) = footer {
-                    ui.label(egui::RichText::new(message).small().color(theme::DANGER));
+                    ui.label(egui::RichText::new(message).small().color(theme::danger()));
                 }
             });
     });
@@ -283,13 +326,13 @@ pub(super) fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui:
         let galley = ui.painter().layout(
             label.to_owned(),
             egui::FontId::proportional(12.5),
-            theme::MUTED,
+            theme::muted(),
             LABEL_WIDTH - 4.,
         );
         ui.painter().galley(
             egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.),
             galley,
-            theme::MUTED,
+            theme::muted(),
         );
         add(ui)
     })
@@ -323,14 +366,11 @@ pub(super) fn selection(
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::new(("selection_rect", label)), rect));
         let (fill, stroke) = if active {
-            (theme::BLUE_FILL, egui::Stroke::new(1.5, theme::ACCENT))
+            (theme::blue_fill(), egui::Stroke::new(1.5, theme::accent()))
         } else if chosen > 0 {
-            (egui::Color32::WHITE, egui::Stroke::new(1., theme::ACCENT))
+            (theme::surface(), egui::Stroke::new(1., theme::accent()))
         } else {
-            (
-                egui::Color32::WHITE,
-                egui::Stroke::new(1., egui::Color32::from_rgb(196, 207, 220)),
-            )
+            (theme::surface(), egui::Stroke::new(1., theme::border()))
         };
         ui.painter()
             .rect(rect, 4, fill, stroke, egui::StrokeKind::Inside);
@@ -352,9 +392,9 @@ pub(super) fn selection(
             caption,
             egui::FontId::proportional(12.5),
             if chosen > 0 || active {
-                theme::ACCENT
+                theme::accent()
             } else {
-                theme::MUTED
+                theme::muted()
             },
             (rect.width() - 30.).max(1.),
         );
@@ -363,7 +403,7 @@ pub(super) fn selection(
         ui.painter().galley(
             egui::pos2(rect.left() + 25., rect.center().y - galley.size().y / 2.),
             galley,
-            theme::ACCENT,
+            theme::accent(),
         );
         if response.clicked() {
             result.activate = true;
@@ -432,7 +472,7 @@ pub(super) fn hint(ui: &mut egui::Ui, message: &str) {
     let width = ui.available_width().min(WIDTH - 24.);
     ui.scope(|ui| {
         ui.set_max_width(width);
-        ui.add(egui::Label::new(egui::RichText::new(message).small().color(theme::MUTED)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(message).small().color(theme::muted())).wrap());
     });
 }
 
@@ -446,20 +486,110 @@ pub(super) fn expression(ui: &mut egui::Ui, value: &mut String) -> egui::Respons
     .on_hover_text(text(T::ExpressionHint))
 }
 
+/// Campo de expressão de comprimento. O texto fica como foi digitado, mas o rascunho recebe
+/// sua forma com unidade explícita: prévia e comando leem sempre a medida certa, mesmo com
+/// Enter antes de o campo perder o foco. Mudar o rascunho por fora (setas) substitui o texto.
+pub(super) fn length_expression(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
+    let unit = settings(ui.ctx()).unit;
+    let id = ui.next_auto_id().with("typed_length");
+    let mut typed = ui
+        .data(|data| data.get_temp::<String>(id))
+        .filter(|typed| unit.normalize_expression(typed) == *value)
+        .unwrap_or_else(|| value.clone());
+    let response = expression(ui, &mut typed);
+    if response.changed() {
+        *value = unit.normalize_expression(&typed);
+    }
+    ui.data_mut(|data| data.insert_temp(id, typed));
+    response
+}
+
+/// Configurações do documento ativo, publicadas a cada quadro para os campos e manipuladores
+/// que não recebem o documento. Sem publicação valem as padrão.
+pub(super) fn publish_settings(context: &egui::Context, settings: Settings) {
+    context.data_mut(|data| data.insert_temp(settings_id(), settings));
+}
+pub(super) fn settings(context: &egui::Context) -> Settings {
+    context
+        .data(|data| data.get_temp(settings_id()))
+        .unwrap_or_default()
+}
+fn settings_id() -> egui::Id {
+    egui::Id::new("document_settings")
+}
+
+/// Caixa numérica com vírgula decimal, aceitando ponto ou vírgula ao digitar.
+pub(super) fn localized(value: egui::DragValue<'_>) -> egui::DragValue<'_> {
+    value
+        .custom_parser(|input| input.trim().replace(',', ".").parse().ok())
+        .custom_formatter(|value, decimals| nator_drawing::format_trimmed(value, *decimals.end()))
+}
+
+/// Caixa numérica de uma medida guardada em mm, exibida na unidade do documento e movida
+/// em passos da precisão do mouse. `range` está em mm.
+pub(super) fn length_value<'a>(
+    context: &egui::Context,
+    value: &'a mut f64,
+    range: std::ops::RangeInclusive<f64>,
+) -> egui::DragValue<'a> {
+    let settings = settings(context);
+    let unit = settings.unit;
+    localized(
+        egui::DragValue::from_get_set(move |next| {
+            if let Some(next) = next {
+                *value = unit.to_mm(next);
+            }
+            unit.from_mm(*value)
+        })
+        .speed(unit.from_mm(settings.mouse_step_mm))
+        .range(unit.from_mm(*range.start())..=unit.from_mm(*range.end()))
+        .suffix(format!(" {}", unit.suffix()))
+        .max_decimals(settings.length_decimals()),
+    )
+}
+
 /// Grandeza de um campo numérico digitável.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Quantity {
-    /// Milímetros.
+    /// Guardada em milímetros e exibida na unidade do documento.
     Length,
     /// Graus.
     Angle,
 }
 impl Quantity {
     /// Unidade mostrada no rótulo da linha; o campo exibe só o número.
-    pub(super) fn unit(self) -> &'static str {
+    pub(super) fn unit(self, settings: Settings) -> &'static str {
         match self {
-            Self::Length => "mm",
+            Self::Length => settings.unit.suffix(),
             Self::Angle => "°",
+        }
+    }
+    /// Número com a unidade do documento quando o campo for de comprimento.
+    pub(super) fn normalize(self, input: &str, unit: LengthUnit) -> String {
+        match self {
+            Self::Length => unit.normalize_expression(input),
+            Self::Angle => input.to_owned(),
+        }
+    }
+    /// Texto de campo com casas fixas, sem esconder a precisão do mouse.
+    fn fixed(self, value: f64, decimals: usize, settings: Settings) -> String {
+        match self {
+            Self::Length => nator_drawing::format_fixed(
+                settings.unit.from_mm(value),
+                decimals.max(settings.length_decimals()),
+            ),
+            Self::Angle => {
+                nator_drawing::format_fixed(value, decimals.max(settings.angle_step_decimals()))
+            }
+        }
+    }
+    /// Texto compacto do campo flutuante dos manipuladores.
+    pub(super) fn compact(self, value: f64, settings: Settings) -> String {
+        match self {
+            Self::Length => settings.format_compact_length(value),
+            Self::Angle => {
+                nator_drawing::format_trimmed(value, 3.max(settings.angle_step_decimals()))
+            }
         }
     }
 }
@@ -491,17 +621,20 @@ const NUMBER_LIMIT: f64 = 1e7;
 pub(super) struct NumberInput {
     buffer: Option<String>,
     last_value: Option<f64>,
+    /// Unidade do último quadro: a validação do painel roda fora do campo.
+    unit: LengthUnit,
 }
 
 impl NumberInput {
     pub fn is_valid(&self, quantity: Quantity) -> bool {
         self.buffer
             .as_ref()
-            .is_none_or(|s| Self::parse(s, quantity).is_some())
+            .is_none_or(|s| self.parse(s, quantity).is_some())
     }
 
-    fn parse(buffer: &str, quantity: Quantity) -> Option<f64> {
-        parse_number(buffer, quantity).filter(|v| v.abs() <= NUMBER_LIMIT)
+    fn parse(&self, buffer: &str, quantity: Quantity) -> Option<f64> {
+        parse_number(&quantity.normalize(buffer, self.unit), quantity)
+            .filter(|v| v.abs() <= NUMBER_LIMIT)
     }
 
     /// Campo digitável: cada expressão válida atualiza a prévia. Texto inválido continua
@@ -516,6 +649,8 @@ impl NumberInput {
         decimals: usize,
         width: f32,
     ) -> egui::Response {
+        let settings = settings(ui.ctx());
+        self.unit = settings.unit;
         if self.last_value != Some(*value) {
             self.buffer = None;
         }
@@ -523,14 +658,14 @@ impl NumberInput {
         let mut buffer = self
             .buffer
             .take()
-            .unwrap_or_else(|| nator_drawing::format_fixed(*value, decimals));
+            .unwrap_or_else(|| quantity.fixed(*value, decimals, settings));
         let response = ui.add(
             egui::TextEdit::singleline(&mut buffer)
                 .id(id)
                 .desired_width(width)
                 .horizontal_align(egui::Align::RIGHT),
         );
-        let parsed = Self::parse(&buffer, quantity);
+        let parsed = self.parse(&buffer, quantity);
         if response.changed()
             && let Some(parsed) = parsed
         {
@@ -560,7 +695,7 @@ impl NumberInput {
             ui.painter().rect_stroke(
                 response.rect.expand(1.),
                 3,
-                egui::Stroke::new(1.5, theme::DANGER),
+                egui::Stroke::new(1.5, theme::danger()),
                 egui::StrokeKind::Outside,
             );
         }
@@ -738,6 +873,127 @@ mod tests {
         ]
     }
 
+    fn in_unit(context: &egui::Context, unit: LengthUnit) {
+        publish_settings(
+            context,
+            Settings {
+                unit,
+                ..Settings::default()
+            },
+        );
+    }
+
+    #[test]
+    fn number_fields_show_and_read_the_document_unit_keeping_millimeters() -> TestResult<()> {
+        let context = egui::Context::default();
+        let mut input = NumberInput::default();
+        let mut value = 125.;
+        // A publicação vale a partir do quadro seguinte, como no editor.
+        number_frame(&context, &mut input, &mut value, vec![], true)?;
+        in_unit(&context, LengthUnit::Inch);
+        number_frame(&context, &mut input, &mut value, vec![], false)?;
+        // A precisão métrica padrão (0,4 mm) pede casas a mais em polegada.
+        assert_eq!(
+            Quantity::Length.fixed(value, 2, settings(&context)),
+            "4,92126"
+        );
+        number_frame(&context, &mut input, &mut value, replace("3"), false)?;
+        assert!((value - 76.2).abs() < 1e-9, "{value}");
+        number_frame(&context, &mut input, &mut value, replace("3 mm"), false)?;
+        assert_eq!(value, 3.);
+        assert!(input.is_valid(Quantity::Length));
+        // Limite de 10⁷ mm: entre 393 700 e 393 701 polegadas.
+        assert_eq!(
+            input.parse("393700", Quantity::Length),
+            Some(393_700. * 25.4)
+        );
+        assert_eq!(input.parse("393701", Quantity::Length), None);
+        assert_eq!(input.parse("45", Quantity::Angle), Some(45.));
+        Ok(())
+    }
+
+    #[test]
+    fn length_expressions_keep_the_typed_text_and_store_the_explicit_unit() -> TestResult<()> {
+        let context = egui::Context::default();
+        in_unit(&context, LengthUnit::Inch);
+        let id = egui::Id::new("length_field");
+        let mut value = String::from("10 mm");
+        let run = |events: Vec<egui::Event>, value: &mut String| {
+            let mut field = None;
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800., 600.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.push_id(id, |ui| {
+                        let response = length_expression(ui, value);
+                        response.request_focus();
+                        field = Some(response.id);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            field
+        };
+        run(vec![], &mut value);
+        assert_eq!(value, "10 mm");
+        run(vec![], &mut value);
+        run(replace("1,5"), &mut value);
+        assert_eq!(value, "1,5 in");
+        // O campo continua editável sobre o que foi digitado, sem repetir a unidade.
+        run(vec![egui::Event::Text("5".into())], &mut value);
+        assert_eq!(value, "1,55 in");
+        // Uma seta ou outro campo pode substituir o rascunho por fora.
+        value = "2 cm".into();
+        run(vec![], &mut value);
+        run(vec![egui::Event::Text("0".into())], &mut value);
+        assert_eq!(value, "2 cm0");
+        Ok(())
+    }
+
+    #[test]
+    fn precision_box_accepts_a_decimal_comma_only_when_the_typing_is_confirmed() {
+        let context = egui::Context::default();
+        in_unit(&context, LengthUnit::Inch);
+        let mut step = 1.;
+        let run = |events: Vec<egui::Event>, step: &mut f64, focus: bool| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800., 600.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let context = ui.ctx().clone();
+                    let response = ui.add(
+                        length_value(&context, step, 0.001..=1000.)
+                            .speed(0.)
+                            .max_decimals(6)
+                            .update_while_editing(false),
+                    );
+                    if focus {
+                        response.request_focus();
+                    }
+                },
+            );
+            output.textures_delta.clear();
+        };
+        run(vec![], &mut step, true);
+        run(vec![], &mut step, false);
+        run(replace("0,01"), &mut step, false);
+        assert_eq!(step, 1., "Cada confirmação vira uma ação do documento");
+        run(vec![key(egui::Key::Enter)], &mut step, false);
+        assert!((step - 0.254).abs() < 1e-12, "{step}");
+    }
+
     #[test]
     fn invalid_numbers_survive_blur_and_block_panel_confirmation() -> TestResult<()> {
         let context = egui::Context::default();
@@ -824,8 +1080,8 @@ mod tests {
         number_frame(&context, &mut input, &mut value, replace("10000001"), false)?;
         assert_eq!(value, 5.);
         assert!(!input.is_valid(Quantity::Length));
-        assert_eq!(NumberInput::parse("-10000001", Quantity::Length), None);
-        assert_eq!(NumberInput::parse("10000000", Quantity::Length), Some(1e7));
+        assert_eq!(input.parse("-10000001", Quantity::Length), None);
+        assert_eq!(input.parse("10000000", Quantity::Length), Some(1e7));
         Ok(())
     }
 

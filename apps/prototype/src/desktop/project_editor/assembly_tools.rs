@@ -32,7 +32,8 @@ pub(super) enum Panel {
     Move(Box<MoveDraft>),
     /// Guarda duas seleções completas; em caixa, para não inflar as demais variantes.
     Align(Box<AlignDraft>),
-    Pattern(PatternDraft),
+    /// Campos numéricos com estado próprio; em caixa pelo mesmo motivo.
+    Pattern(Box<PatternDraft>),
     Mirror(MirrorDraft),
 }
 
@@ -83,7 +84,7 @@ fn movement_picker(ui: &mut egui::Ui, movement: &mut Movement) {
         ui.label(
             egui::RichText::new(text(T::MoveFreeHint))
                 .small()
-                .color(theme::MUTED),
+                .color(theme::muted()),
         );
     }
 }
@@ -145,7 +146,7 @@ fn copy_picker(ui: &mut egui::Ui, kind: &mut CopyKind, bodies: bool) {
             _ => T::CopyPatternHint,
         }))
         .small()
-        .color(theme::MUTED),
+        .color(theme::muted()),
     );
 }
 
@@ -237,6 +238,8 @@ pub(super) struct AlignDraft {
     targets: Vec<Selection>,
     mode: MoveMode,
     independent: bool,
+    /// Movimento feito antes de escolher este tipo: o alinhamento continua dali.
+    carried: Placement,
 }
 
 /// Destino de um alinhamento: geometria do modelo ou de um rascunho de referência da
@@ -662,6 +665,12 @@ impl AlignDraft {
         };
         rotation.translated(sub(to.point, from.point)).ok()
     }
+    /// Movimento acumulado no mundo, com o alinhamento se ele já estiver completo.
+    fn total(&self) -> Placement {
+        self.delta()
+            .and_then(|delta| delta.compose(self.carried).ok())
+            .unwrap_or(self.carried)
+    }
 }
 
 impl MoveDraft {
@@ -747,45 +756,162 @@ impl Editor {
     }
 
     fn change_movement(&mut self, panel: Panel, movement: Movement) -> Panel {
-        let (tab, targets, mode, independent, source) = match panel {
-            Panel::Move(d) => (d.tab, d.targets, d.mode, d.independent, None),
-            Panel::Align(d) => (d.tab, d.targets, d.mode, d.independent, d.from),
+        // Trocar o tipo não desfaz o que já foi movido: o acumulado segue para o novo tipo.
+        let total = match &panel {
+            Panel::Move(d) => {
+                let frames = frames(self.current(), &d.targets);
+                pivot_point(self.current(), &frames, d.pivot)
+                    .and_then(|pivot| world_delta(pivot, d.translation, d.rotation))
+                    .unwrap_or_default()
+            }
+            Panel::Align(d) => d.total(),
+            _ => Placement::default(),
+        };
+        let carried = match &panel {
+            Panel::Align(d) if movement.kind().is_some() => d.carried,
+            _ => total,
+        };
+        let (tab, targets, mode, independent, source, destination, field, flip) = match panel {
+            Panel::Move(d) => (
+                d.tab,
+                d.targets,
+                d.mode,
+                d.independent,
+                None,
+                None,
+                None,
+                false,
+            ),
+            Panel::Align(d) => (
+                d.tab,
+                d.targets,
+                d.mode,
+                d.independent,
+                d.from,
+                d.to,
+                d.field,
+                d.flip,
+            ),
             other => return other,
         };
         if let Some(kind) = movement.kind() {
             self.pick_mode = kind;
-            let mut from = source
-                .or_else(|| self.current().picked.clone())
-                .filter(|p| {
-                    targets
-                        .iter()
-                        .any(|t| selection_contains_pick(self.current().session.document(), *t, p))
-                });
+            // O último clique foi feito na posição antiga: não vale depois de mover.
+            let picked = self
+                .current()
+                .picked
+                .clone()
+                .filter(|_| carried == Placement::default());
+            let mut from = source.or(picked).filter(|p| {
+                targets
+                    .iter()
+                    .any(|t| selection_contains_pick(self.current().session.document(), *t, p))
+            });
             if let Some(pick) = &mut from {
                 navigation::snap_pick(pick, kind);
             }
-            let field = Some(if from.is_some() {
-                AlignField::To
+            // Trocar face/aresta/ponto mantém as duas escolhas e o campo em edição,
+            // para a movimentação continuar de onde parou em vez de reiniciar.
+            let field = if from.is_some() {
+                field.or(Some(AlignField::To))
             } else {
-                AlignField::From
-            });
+                Some(AlignField::From)
+            };
             Panel::Align(Box::new(AlignDraft {
                 tab,
                 kind,
                 from,
-                to: None,
+                to: destination,
                 field,
-                flip: false,
+                flip,
                 targets,
                 mode,
                 independent,
+                carried,
             }))
         } else {
             let mut draft = MoveDraft::new(tab, targets);
             draft.mode = mode;
             draft.independent = independent;
+            // O acumulado vira os valores do painel, medidos do centro dos alvos.
+            let frames = frames(self.current(), &draft.targets);
+            if let Some(pivot) = pivot_point(self.current(), &frames, draft.pivot) {
+                draft.translation = sub(total.apply(pivot), pivot);
+                draft.rotation = total.rotation_rad().map(f64::to_degrees);
+            }
             Panel::Move(Box::new(draft))
         }
+    }
+
+    /// Com um alinhamento que continua um movimento, os cliques valem para a posição
+    /// exibida na prévia, não para a posição ainda gravada no documento.
+    pub(super) fn apply_carried_move(&self, document: &mut Document) {
+        let Some(Panel::Align(d)) = &self.assembly_panel else {
+            return;
+        };
+        if d.carried == Placement::default() {
+            return;
+        }
+        for frame in frames(self.current(), &d.targets) {
+            let Some(placement) = moved_local(&frame, d.carried) else {
+                continue;
+            };
+            let _ = match frame.item {
+                Selection::Instance(id) => document
+                    .instance_mut(id)
+                    .map(|instance| instance.placement = placement),
+                Selection::Body { id, .. } => {
+                    document.body_mut(id).map(|body| body.placement = placement)
+                }
+            };
+        }
+    }
+
+    /// Linhas dos alvos na posição original, enquanto a prévia os mostra movidos.
+    /// Copiar mantém o original na cena, então não há esqueleto a desenhar.
+    pub(super) fn move_ghost(&mut self) -> Option<highlight::Overlay> {
+        let (targets, mode) = match self.assembly_panel.as_ref()? {
+            Panel::Move(d) => (&d.targets, d.mode),
+            Panel::Align(d) => (&d.targets, d.mode),
+            _ => return None,
+        };
+        if self.preview.shown == 0 || mode.copies() {
+            return None;
+        }
+        let document = self.current().session.document().clone();
+        let occurrences = document.occurrences().ok()?;
+        let mut poses = Vec::new();
+        for frame in frames(self.current(), targets) {
+            match frame.item {
+                Selection::Body { id, .. } => poses.push((id, frame.world)),
+                Selection::Instance(id) => {
+                    for occurrence in occurrences.iter().filter(|o| o.path.contains(&id)) {
+                        let Some(part) = document
+                            .instance(occurrence.instance)
+                            .and_then(|i| document.part(i.part))
+                        else {
+                            continue;
+                        };
+                        for body in part.shown_bodies() {
+                            if let Ok(pose) = occurrence.placement.compose(body.placement) {
+                                poses.push((body.id, pose));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut overlay = highlight::Overlay::default();
+        for (id, pose) in poses {
+            if let Some(body) = document.body(id) {
+                overlay.extend(highlight::body_outline(
+                    &mut self.highlight_cache,
+                    body,
+                    pose,
+                ));
+            }
+        }
+        Some(overlay)
     }
 
     /// Elementos posicionáveis da seleção atual: instâncias na montagem, corpos da peça ativa
@@ -802,7 +928,7 @@ impl Editor {
             })
             .collect()
     }
-    fn selected_instance(&self) -> Option<InstanceId> {
+    pub(super) fn selected_instance(&self) -> Option<InstanceId> {
         self.current().selected.iter().rev().find_map(|s| match s {
             Selection::Instance(id) => Some(*id),
             _ => None,
@@ -859,6 +985,13 @@ impl Editor {
         }
     }
     /// Translação e rotação do Mover/Copiar aberto, para capturas de ensaio.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn move_values_for_test(&self) -> Option<(Point3, Point3)> {
+        match &self.assembly_panel {
+            Some(Panel::Move(d)) => Some((d.translation, d.rotation)),
+            _ => None,
+        }
+    }
     pub(super) fn set_move_for_capture(&mut self, translation: Point3, rotation: Point3) {
         if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
             draft.translation = translation;
@@ -907,12 +1040,13 @@ impl Editor {
             targets,
             mode: MoveMode::MoveOrCopy(false),
             independent: false,
+            carried: Placement::default(),
         })));
     }
     pub(super) fn open_instance_pattern(&mut self, circular: bool) {
         let target = self.selected_instance();
         self.feature_edit = None;
-        self.assembly_panel = Some(Panel::Pattern(PatternDraft {
+        self.assembly_panel = Some(Panel::Pattern(Box::new(PatternDraft {
             tab: self.current().id,
             target,
             picking: target.is_none(),
@@ -923,7 +1057,7 @@ impl Editor {
             angle: "360 deg".into(),
             origin: [0.; 3],
             origin_inputs: Default::default(),
-        }));
+        })));
     }
     pub(super) fn open_instance_mirror(&mut self) {
         let target = self.selected_instance();
@@ -993,7 +1127,7 @@ impl Editor {
                 None
             }
         });
-        Panel::Pattern(PatternDraft {
+        Panel::Pattern(Box::new(PatternDraft {
             tab,
             target,
             picking: target.is_none(),
@@ -1004,7 +1138,7 @@ impl Editor {
             angle: "360 deg".into(),
             origin: [0.; 3],
             origin_inputs: Default::default(),
-        })
+        }))
     }
     /// Grupo com as instâncias selecionadas do mesmo nível.
     pub(super) fn group_selection(&mut self, context: &egui::Context) {
@@ -1083,14 +1217,12 @@ impl Editor {
             f64::from(rect.aspect_ratio()),
         );
         let view = self.current().view.clone();
+        let document = self.picking_document();
         let model = if self.alignment_pick_mode() == Some(navigation::PickMode::Vertex) {
-            let document = self.current().session.document().clone();
             self.point_target(&document, rect, position, &response.ctx)
                 .map(|target| target.pick)
         } else {
-            self.current()
-                .session
-                .document()
+            document
                 .pick_all_with(ray, |o| view.pickable(o))
                 .ok()
                 .and_then(|picks| section::first_visible(picks, self.current().section))
@@ -1324,22 +1456,25 @@ impl Editor {
                 )
             }
             Panel::Align(d) => {
-                let from = d.from.as_ref()?;
-                if tab.active_part.is_some_and(|p| p != from.part) {
+                if let Some(from) = &d.from
+                    && tab.active_part.is_some_and(|p| p != from.part)
+                {
                     return None;
                 }
-                d.to.as_ref()?;
-                let delta = d.delta()?;
-                let item = tab.selection_for_pick(from)?;
+                // Sem as duas escolhas, ainda vale o que veio do tipo anterior.
+                let moved = d.carried != Placement::default();
+                if d.delta().is_none() && !moved {
+                    return None;
+                }
                 let targets = if d.targets.is_empty() {
-                    vec![item]
+                    vec![tab.selection_for_pick(d.from.as_ref()?)?]
                 } else {
                     d.targets.clone()
                 };
                 let frames = frames(tab, &targets);
                 batch(
                     "Alinhar elemento",
-                    move_commands(tab, &frames, delta, d.mode.copies(), d.independent),
+                    move_commands(tab, &frames, d.total(), d.mode.copies(), d.independent),
                 )
             }
             Panel::Pattern(d) => Some(Command::PatternInstance {
@@ -1385,6 +1520,7 @@ impl Editor {
         if draft.tab != self.current().id || draft.targets.is_empty() {
             return false;
         }
+        let settings = self.current().session.document().settings();
         let Some(bounds) = self.current().scene_bounds else {
             return false;
         };
@@ -1509,7 +1645,7 @@ impl Editor {
             center,
             if active == Some(Handle::Free) { 8. } else { 6. },
             egui::Color32::WHITE,
-            egui::Stroke::new(2., theme::ACCENT),
+            egui::Stroke::new(2., theme::accent()),
         );
         let down = ui.input(|i| i.pointer.primary_down());
         let pressed = ui.input(|i| i.pointer.primary_pressed());
@@ -1543,7 +1679,7 @@ impl Editor {
                             let delta =
                                 f64::from((position - drag.start).dot(per_mm) / per_mm.length_sq());
                             let mut t = drag.translation;
-                            t[k] = ((drag.translation[k] + delta) * 100.).round() / 100.;
+                            t[k] = settings.snap_length(drag.translation[k] + delta);
                             draft.translation = t;
                         }
                     }
@@ -1556,11 +1692,15 @@ impl Editor {
                     delta = (delta + 540.).rem_euclid(360.) - 180.;
                     let sign = if dot(AXES[k], view) >= 0. { 1. } else { -1. };
                     let mut r = drag.rotation;
-                    r[k] = snap_rotation(drag.rotation[k] + sign * delta);
+                    let step = settings.mouse_angle_step_deg;
+                    r[k] = snap_rotation(drag.rotation[k] + sign * delta, step);
                     draft.rotation = r;
                     // Ângulo junto ao cursor, destacado quando fixado num múltiplo de 45°.
                     let snapped = r[k].rem_euclid(ROTATION_SNAP.0) == 0.;
-                    let label = format!("{}°", nator_drawing::format_fixed(r[k], 0));
+                    let label = format!(
+                        "{}°",
+                        nator_drawing::format_fixed(r[k], settings.angle_step_decimals())
+                    );
                     let at = position + egui::vec2(16., -18.);
                     let galley = painter.layout_no_wrap(
                         label,
@@ -1568,7 +1708,7 @@ impl Editor {
                         if snapped {
                             egui::Color32::WHITE
                         } else {
-                            theme::INK
+                            theme::ink()
                         },
                     );
                     let frame = egui::Rect::from_min_size(at, galley.size()).expand(4.);
@@ -1581,7 +1721,7 @@ impl Editor {
                             egui::Color32::from_white_alpha(230)
                         },
                     );
-                    painter.galley(at, galley, theme::INK);
+                    painter.galley(at, galley, theme::ink());
                 }
                 Handle::Free => {
                     let aspect = f64::from(rect.aspect_ratio());
@@ -1594,7 +1734,7 @@ impl Editor {
                     let a = camera.world_on_target_plane(cursor(drag.start), bounds, aspect);
                     let b = camera.world_on_target_plane(cursor(position), bounds, aspect);
                     draft.translation = std::array::from_fn(|i| {
-                        ((drag.translation[i] + b[i] - a[i]) * 100.).round() / 100.
+                        settings.snap_length(drag.translation[i] + b[i] - a[i])
                     });
                 }
             }
@@ -1615,11 +1755,12 @@ impl Editor {
                 Handle::Ring(k) => (draft.rotation[k], panel::Quantity::Angle, T::RotationField),
                 Handle::Free => (0., panel::Quantity::Length, T::DistanceField),
             };
-            let edit = draft
-                .floating
-                .show(ui, "move", rect, value, dragging, label, |s| {
-                    panel::parse_number(s, quantity).filter(|v| v.abs() <= 1e7)
-                });
+            let edit =
+                draft
+                    .floating
+                    .show(ui, "move", rect, value, dragging, label, quantity, |s| {
+                        panel::parse_number(s, quantity).filter(|v| v.abs() <= 1e7)
+                    });
             if let Some(value) = edit.value {
                 match handle {
                     Handle::Axis(k) => draft.translation[k] = value,
@@ -1723,7 +1864,7 @@ impl Editor {
             mark(
                 from.point,
                 edge.then_some([from.vertices[0], from.vertices[1]]),
-                theme::ACCENT,
+                theme::accent(),
             );
         }
         if let Some(to) = &d.to {
@@ -1731,7 +1872,7 @@ impl Editor {
                 to.point,
                 edge.then_some(to.edge),
                 if to.reference {
-                    theme::REFERENCE
+                    theme::reference()
                 } else {
                     egui::Color32::from_rgb(232, 128, 22)
                 },
@@ -1754,17 +1895,18 @@ fn item_name(document: &Document, item: Selection) -> String {
     }
 }
 
-/// Fixação da rotação pelo manipulador: múltiplos de 45° capturam o anel a menos de 4°;
-/// fora disso, o ângulo anda em passos de 1°.
+/// Múltiplos de 45° capturam o anel a menos de 4°, salvo com precisão abaixo de 1° ou que
+/// não passe por 45°: nesses casos a captura impediria alcançar os valores configurados.
 const ROTATION_SNAP: (f64, f64) = (45., 4.);
 
-fn snap_rotation(degrees: f64) -> f64 {
-    let nearest = (degrees / ROTATION_SNAP.0).round() * ROTATION_SNAP.0;
-    if (degrees - nearest).abs() <= ROTATION_SNAP.1 {
-        nearest
-    } else {
-        degrees.round()
+fn snap_rotation(degrees: f64, step: f64) -> f64 {
+    if step >= 1. && (ROTATION_SNAP.0 / step).fract() == 0. {
+        let nearest = (degrees / ROTATION_SNAP.0).round() * ROTATION_SNAP.0;
+        if (degrees - nearest).abs() <= ROTATION_SNAP.1 {
+            return nearest;
+        }
     }
+    nator_sketch::drafting::snap_to_step(degrees, step)
 }
 
 /// Três campos digitáveis (X, Y, Z) com a precisão de exibição do documento.
@@ -1777,15 +1919,19 @@ fn number_row(
     document: &Document,
 ) {
     let decimals = usize::from(document.settings().display_decimals);
-    panel::row(ui, &format!("{label} ({})", quantity.unit()), |ui| {
-        ui.spacing_mut().item_spacing.x = 3.;
-        let width = ((ui.available_width() - 6.) / 3. - 8.).clamp(44., 90.);
-        for (axis, (value, input)) in values.iter_mut().zip(inputs).enumerate() {
-            input
-                .show(ui, (label, axis), value, quantity, decimals, width)
-                .on_hover_text(AXIS_NAMES[axis]);
-        }
-    });
+    panel::row(
+        ui,
+        &format!("{label} ({})", quantity.unit(document.settings())),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 3.;
+            let width = ((ui.available_width() - 6.) / 3. - 8.).clamp(44., 90.);
+            for (axis, (value, input)) in values.iter_mut().zip(inputs).enumerate() {
+                input
+                    .show(ui, (label, axis), value, quantity, decimals, width)
+                    .on_hover_text(AXIS_NAMES[axis]);
+            }
+        },
+    );
 }
 
 fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked: Option<Point3>) {
@@ -1865,13 +2011,13 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         ui.label(
             egui::RichText::new(text(T::InvalidTransformNumber))
                 .small()
-                .color(theme::DANGER),
+                .color(theme::danger()),
         );
     }
     ui.label(
         egui::RichText::new(text(T::MoveHint))
             .small()
-            .color(theme::MUTED),
+            .color(theme::muted()),
     );
 }
 
@@ -1925,7 +2071,7 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
             navigation::PickMode::Vertex => T::MovePointHint,
         }))
         .small()
-        .color(theme::MUTED),
+        .color(theme::muted()),
     );
     if let MoveMode::MoveOrCopy(copy) = &mut d.mode
         && d.targets
@@ -1937,7 +2083,7 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
     ui.label(
         egui::RichText::new(text(T::AlignHint))
             .small()
-            .color(theme::MUTED),
+            .color(theme::muted()),
     );
 }
 
@@ -2004,7 +2150,7 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
             ui.label(
                 egui::RichText::new(text(T::InvalidTransformNumber))
                     .small()
-                    .color(theme::DANGER),
+                    .color(theme::danger()),
             );
         }
         panel::row(ui, text(T::TotalAngle), |ui| {
@@ -2012,7 +2158,7 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
         });
     } else {
         panel::row(ui, text(T::SpacingField), |ui| {
-            panel::expression(ui, &mut d.spacing)
+            panel::length_expression(ui, &mut d.spacing)
         });
     }
 }
@@ -2028,17 +2174,13 @@ fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
         }
     });
     panel::row(ui, text(T::OffsetField), |ui| {
-        ui.add(
-            egui::DragValue::new(&mut d.offset)
-                .speed(0.5)
-                .suffix(" mm")
-                .max_decimals(4),
-        )
+        let context = ui.ctx().clone();
+        ui.add(panel::length_value(&context, &mut d.offset, -1e7..=1e7))
     });
     ui.label(
         egui::RichText::new(text(T::MirrorHint))
             .small()
-            .color(theme::MUTED),
+            .color(theme::muted()),
     );
 }
 
@@ -2129,7 +2271,7 @@ mod tests {
             (30.4, 30.),
             (61.6, 62.),
         ] {
-            assert_eq!(snap_rotation(raw), snapped, "{raw}");
+            assert_eq!(snap_rotation(raw, 1.), snapped, "{raw}");
         }
     }
 
@@ -2184,6 +2326,7 @@ mod tests {
             targets: vec![],
             mode: MoveMode::Move,
             independent: false,
+            carried: Placement::default(),
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
         // O ponto de origem vai ao destino e a normal fica oposta à do destino.

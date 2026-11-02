@@ -52,7 +52,8 @@ fn text_rect(
     gap: f64,
 ) -> Option<egui::Rect> {
     let constraint = sketch.constraints.iter().find(|c| c.id == id)?;
-    let text = caption(&constraint.kind, constraint.reference)?;
+    let settings = command_panel::settings(painter.ctx());
+    let text = caption(&constraint.kind, constraint.reference, settings)?;
     let layout = layout(
         sketch,
         &constraint.kind,
@@ -60,7 +61,7 @@ fn text_rect(
         gap,
     )?;
     let at = frame.screen(layout.text)?;
-    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.), theme::INK);
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.), theme::ink());
     Some(egui::Rect::from_center_size(at, galley.size()).expand(5.))
 }
 
@@ -126,7 +127,9 @@ pub(crate) fn interact_existing(
             && let Some(at) = frame.screen(layout.text)
             && value_box(ui, draft, at, &constraint.kind, parameters, false)
         {
-            match typed_value(&constraint.kind, &draft.text, parameters) {
+            let settings = command_panel::settings(ui.ctx());
+            let expression = typed_expression(&constraint.kind, &draft.text, settings);
+            match typed_value(&constraint.kind, &expression, parameters) {
                 Ok(value) => {
                     let id = *id;
                     if let Some(constraint) = sketch.constraints.iter_mut().find(|c| c.id == id)
@@ -136,7 +139,7 @@ pub(crate) fn interact_existing(
                     }
                     sketch
                         .dimension_expressions
-                        .insert(id, draft.text.trim().into());
+                        .insert(id, expression.trim().into());
                     output.changed = Some(id);
                     state.edit = None;
                 }
@@ -201,7 +204,13 @@ pub(crate) fn interact_existing(
                             .dimension_expressions
                             .get(&id)
                             .cloned()
-                            .unwrap_or_else(|| measured_text(&constraint.kind, value)),
+                            .unwrap_or_else(|| {
+                                measured_text(
+                                    &constraint.kind,
+                                    value,
+                                    command_panel::settings(ui.ctx()),
+                                )
+                            }),
                         editing: true,
                         focus: true,
                         ..Default::default()
@@ -223,8 +232,13 @@ pub(crate) fn interact_existing(
             frame,
             painter,
             &layout,
-            caption(&constraint.kind, constraint.reference).as_deref(),
-            theme::ACCENT,
+            caption(
+                &constraint.kind,
+                constraint.reference,
+                command_panel::settings(painter.ctx()),
+            )
+            .as_deref(),
+            theme::accent(),
         );
     }
     output

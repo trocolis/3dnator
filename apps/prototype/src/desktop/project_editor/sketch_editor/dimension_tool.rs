@@ -12,7 +12,10 @@
 //! Também desenha todas as cotas do rascunho como cotas: linhas de extensão, linha de cota
 //! com setas e o valor; raios e diâmetros com R/Ø; ângulos como arco entre as linhas.
 use super::*;
-use nator_document::parameters::{Dimension, Parameters};
+use nator_document::{
+    Settings,
+    parameters::{Dimension, Parameters},
+};
 use nator_sketch::{add, cross, distance, dot, scale, sub};
 mod existing;
 pub(super) use existing::{Existing, interact_existing};
@@ -392,11 +395,20 @@ pub(super) fn build(
 }
 
 /// Texto da caixa com a medida atual, na formatação da interface.
-fn measured_text(kind: &ConstraintKind, measured: f64) -> String {
+fn measured_text(kind: &ConstraintKind, measured: f64, settings: Settings) -> String {
     if kind.is_angular() {
         format!("{} deg", nator_drawing::format_mm(measured.to_degrees()))
     } else {
-        format!("{} mm", nator_drawing::format_mm(measured))
+        settings.length_label(measured)
+    }
+}
+
+/// Texto da caixa com a unidade explícita, para que a cota não mude com a unidade exibida.
+fn typed_expression(kind: &ConstraintKind, input: &str, settings: Settings) -> String {
+    if kind.is_angular() {
+        input.to_owned()
+    } else {
+        settings.unit.normalize_expression(input)
     }
 }
 
@@ -438,6 +450,7 @@ pub(super) fn commit(
     typed: Option<&str>,
     label: Option<Point2>,
     parameters: &Parameters,
+    settings: Settings,
 ) -> Result<(Sketch, u64), String> {
     let mut kind = built.kind.clone();
     let (value, expression) = match typed {
@@ -450,7 +463,7 @@ pub(super) fn commit(
             if kind.is_angular() {
                 format!("{} deg", built.measured.to_degrees())
             } else {
-                format!("{} mm", built.measured)
+                settings.unit.expression(built.measured)
             },
         ),
     };
@@ -739,15 +752,15 @@ fn layout(
 
 /// Valor exibido: R/Ø nos raios e diâmetros, graus nos ângulos e parênteses nas cotas de
 /// referência, como no SolidCraft.
-fn caption(kind: &ConstraintKind, reference: bool) -> Option<String> {
+fn caption(kind: &ConstraintKind, reference: bool, settings: Settings) -> Option<String> {
     let value = kind.dimension_value()?;
     let text = match kind {
-        ConstraintKind::Radius { .. } => format!("R {}", nator_drawing::format_mm(value)),
-        ConstraintKind::Diameter { .. } => format!("Ø {}", nator_drawing::format_mm(value)),
+        ConstraintKind::Radius { .. } => format!("R {}", settings.format_compact_length(value)),
+        ConstraintKind::Diameter { .. } => format!("Ø {}", settings.format_compact_length(value)),
         _ if kind.is_angular() => {
             format!("{}°", nator_drawing::format_mm(value.to_degrees().abs()))
         }
-        _ => nator_drawing::format_mm(value.abs()),
+        _ => settings.format_compact_length(value.abs()),
     };
     Some(if reference { format!("({text})") } else { text })
 }
@@ -805,16 +818,17 @@ pub(super) fn paint_all(
     selected: Option<u64>,
 ) {
     let gap = f64::from(DEFAULT_GAP) / frame.pixels_per_mm([0., 0.]);
+    let settings = command_panel::settings(painter.ctx());
     for constraint in &sketch.constraints {
         let offset = sketch.dimension_labels.get(&constraint.id).copied();
         if let Some(layout) = layout(sketch, &constraint.kind, offset, gap) {
-            let caption = caption(&constraint.kind, constraint.reference);
+            let caption = caption(&constraint.kind, constraint.reference, settings);
             let color = if selected == Some(constraint.id) {
-                theme::ACCENT
+                theme::accent()
             } else if constraint.reference {
-                theme::MUTED
+                theme::muted()
             } else {
-                theme::INK
+                theme::ink()
             };
             paint(frame, painter, &layout, caption.as_deref(), color);
         }
@@ -866,15 +880,16 @@ pub(super) fn update(
     parameters: &Parameters,
 ) -> Update {
     let mut update = Update::default();
+    let settings = command_panel::settings(ui.ctx());
     let pixels_per_mm = frame.pixels_per_mm(hover.unwrap_or([0., 0.]));
     let tolerance = f64::from(PICK_RADIUS) / pixels_per_mm;
     let gap = f64::from(DEFAULT_GAP) / pixels_per_mm;
     let candidate = hover.and_then(|cursor| pick(sketch, cursor, tolerance));
     for chosen in &draft.picks {
-        highlight(frame, painter, sketch, *chosen, theme::ACCENT);
+        highlight(frame, painter, sketch, *chosen, theme::accent());
     }
     if let Some(candidate) = candidate.filter(|c| !draft.picks.contains(c)) {
-        highlight(frame, painter, sketch, candidate, theme::WARNING);
+        highlight(frame, painter, sketch, candidate, theme::warning());
     }
     // O texto acompanha o ponteiro mesmo sobre a caixa de valor, que fica ao lado dele.
     let pointer = ui
@@ -903,11 +918,18 @@ pub(super) fn update(
     let mut commit = false;
     if let Some(built) = &built {
         if !draft.typed {
-            draft.text = measured_text(&built.kind, built.measured);
+            draft.text = measured_text(&built.kind, built.measured, settings);
         }
         let preview_kind = match draft
             .typed
-            .then(|| typed_value(&built.kind, &draft.text, parameters).ok())
+            .then(|| {
+                typed_value(
+                    &built.kind,
+                    &typed_expression(&built.kind, &draft.text, settings),
+                    parameters,
+                )
+                .ok()
+            })
             .flatten()
         {
             Some(value) => {
@@ -923,9 +945,9 @@ pub(super) fn update(
         if let Some(layout) = layout(sketch, &built.kind, offset, gap) {
             // Com a caixa aberta, o valor aparece nela; a prévia mostra as linhas.
             let caption = (!draft.editing)
-                .then(|| caption(&preview_kind, false))
+                .then(|| caption(&preview_kind, false, settings))
                 .flatten();
-            paint(frame, painter, &layout, caption.as_deref(), theme::ACCENT);
+            paint(frame, painter, &layout, caption.as_deref(), theme::accent());
             if draft.editing
                 && let Some(at) = frame.screen(layout.text)
             {
@@ -941,8 +963,10 @@ pub(super) fn update(
         }
     }
     if commit && let Some(built) = &built {
-        let typed = draft.typed.then_some(draft.text.as_str());
-        match self::commit(sketch, built, typed, label, parameters) {
+        let typed = draft
+            .typed
+            .then(|| typed_expression(&built.kind, &draft.text, settings));
+        match self::commit(sketch, built, typed.as_deref(), label, parameters, settings) {
             Ok((mut sketch, id)) => {
                 // A ordem dos cliques é preservada separadamente do tipo da cota:
                 // ponto–linha e linha–círculo normalizam seus campos ao combinar.
@@ -1042,7 +1066,13 @@ fn value_box(
     } else {
         (egui::Align2::CENTER_CENTER, at)
     };
-    let valid = typed_value(kind, &draft.text, parameters).is_ok();
+    let settings = command_panel::settings(ui.ctx());
+    let valid = typed_value(
+        kind,
+        &typed_expression(kind, &draft.text, settings),
+        parameters,
+    )
+    .is_ok();
     let mut confirm = false;
     egui::Area::new(id.with("area"))
         .order(egui::Order::Foreground)
@@ -1053,7 +1083,11 @@ fn value_box(
                 .fill(egui::Color32::WHITE)
                 .stroke(egui::Stroke::new(
                     1.5,
-                    if valid { theme::ACCENT } else { theme::DANGER },
+                    if valid {
+                        theme::accent()
+                    } else {
+                        theme::danger()
+                    },
                 ))
                 .corner_radius(4)
                 .inner_margin(egui::Margin::symmetric(4, 2))
@@ -1095,7 +1129,7 @@ fn value_box(
                             )
                         });
                         if enter {
-                            if typed_value(kind, &draft.text, parameters).is_ok() {
+                            if valid {
                                 confirm = true;
                             } else {
                                 draft.focus = true;
@@ -1256,7 +1290,14 @@ mod tests {
         // O valor guardado é o do setor, positivo, e a solução o mantém.
         let built = build(&sketch, measure, Some([-6., 3.]))?;
         let parameters = Parameters::default();
-        let (next, id) = commit(&sketch, &built, Some("120"), Some([-6., 3.]), &parameters)?;
+        let (next, id) = commit(
+            &sketch,
+            &built,
+            Some("120"),
+            Some([-6., 3.]),
+            &parameters,
+            Settings::default(),
+        )?;
         let stored = next
             .constraints
             .iter()
@@ -1280,7 +1321,14 @@ mod tests {
         let parameters = Parameters::default();
         let built = build(&sketch, Measure::Points(a, b), None)?;
         // Sem digitar, a medida exata entra na expressão, sem o arredondamento da caixa.
-        let (mut next, id) = commit(&sketch, &built, None, None, &parameters)?;
+        let (mut next, id) = commit(
+            &sketch,
+            &built,
+            None,
+            None,
+            &parameters,
+            Settings::default(),
+        )?;
         settle_driven(&mut next, id, &parameters)?;
         let constraint = next.constraints.iter().find(|c| c.id == id).ok_or("Cota")?;
         assert!(!constraint.reference);
@@ -1295,7 +1343,14 @@ mod tests {
             sketch.add_constraint(ConstraintKind::Fixed { point, position }, false)?;
         }
         let built = build(&sketch, Measure::Points(a, b), None)?;
-        let (mut fixed, id) = commit(&sketch, &built, Some("30"), None, &parameters)?;
+        let (mut fixed, id) = commit(
+            &sketch,
+            &built,
+            Some("30"),
+            None,
+            &parameters,
+            Settings::default(),
+        )?;
         settle_driven(&mut fixed, id, &parameters)?;
         let constraint = fixed
             .constraints
@@ -1304,10 +1359,33 @@ mod tests {
             .ok_or("Cota")?;
         assert!(constraint.reference);
         assert!(!fixed.dimension_expressions.contains_key(&id));
-        assert_eq!(caption(&constraint.kind, true).as_deref(), Some("(12,346)"));
+        assert_eq!(
+            caption(&constraint.kind, true, Settings::default()).as_deref(),
+            Some("(12,346)")
+        );
         // Valores fora do domínio são recusados antes de chegar ao rascunho.
-        assert!(commit(&sketch, &built, Some("-3"), None, &parameters).is_err());
-        assert!(commit(&sketch, &built, Some("3 deg"), None, &parameters).is_err());
+        assert!(
+            commit(
+                &sketch,
+                &built,
+                Some("-3"),
+                None,
+                &parameters,
+                Settings::default()
+            )
+            .is_err()
+        );
+        assert!(
+            commit(
+                &sketch,
+                &built,
+                Some("3 deg"),
+                None,
+                &parameters,
+                Settings::default()
+            )
+            .is_err()
+        );
         Ok(())
     }
 }

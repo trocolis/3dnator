@@ -80,7 +80,7 @@ pub(super) fn panel(ui: &mut egui::Ui, d: &mut Draft, fonts: &[String]) {
         ui.checkbox(&mut d.label.underline, text(T::LabelUnderline));
     });
     panel::row(ui, text(T::LabelSize), |ui| {
-        panel::expression(ui, &mut d.label.size)
+        panel::length_expression(ui, &mut d.label.size)
     });
     panel::row(ui, text(T::LabelMode), |ui| {
         panel::choice(
@@ -95,7 +95,7 @@ pub(super) fn panel(ui: &mut egui::Ui, d: &mut Draft, fonts: &[String]) {
     });
     if d.label.mode != LabelMode::Surface {
         panel::row(ui, text(T::HoleDepth), |ui| {
-            panel::expression(ui, &mut d.label.depth)
+            panel::length_expression(ui, &mut d.label.depth)
         });
     }
     panel::row(ui, text(T::RotationField), |ui| {
@@ -118,7 +118,7 @@ pub(super) fn panel(ui: &mut egui::Ui, d: &mut Draft, fonts: &[String]) {
     ui.label(
         egui::RichText::new(text(T::LabelHint))
             .small()
-            .color(theme::MUTED),
+            .color(theme::muted()),
     );
 }
 impl Editor {
@@ -158,8 +158,8 @@ impl Editor {
         let hovered =
             pointer.is_some_and(|p| response.rect.contains(p) && p.distance(center) < 12.);
         let painter = ui.painter().with_clip_rect(response.rect);
-        painter.circle_filled(center, 5., theme::ACCENT);
-        painter.circle_stroke(center, 8., egui::Stroke::new(1.5, theme::INK));
+        painter.circle_filled(center, 5., theme::accent());
+        painter.circle_stroke(center, 8., egui::Stroke::new(1.5, theme::ink()));
         if hovered || d.label_drag.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
@@ -183,7 +183,9 @@ impl Editor {
         }
         if let Some(drag) = &d.label_drag {
             if let Some(cursor) = pointer.and_then(|p| drag.frame.cursor(p)) {
-                let delta = [cursor[0] - drag.cursor[0], cursor[1] - drag.cursor[1]];
+                let step = panel::settings(ui.ctx()).mouse_step_mm;
+                let delta = [cursor[0] - drag.cursor[0], cursor[1] - drag.cursor[1]]
+                    .map(|v| nator_sketch::drafting::snap_to_step(v, step));
                 d.label.position = drag.frame.plane.world(delta);
                 d.label.uv = None;
             }

@@ -340,6 +340,16 @@ impl Editor {
         let tab = self.current().id;
         match action {
             // Entrar na edição de uma peça leva da faixa Montagem à Peça; sair, de volta.
+            MenuAction::Activate(part)
+                if self
+                    .current()
+                    .session
+                    .document()
+                    .part(part)
+                    .is_some_and(|p| p.reference) =>
+            {
+                self.status.warning(text(T::ReferenceNotEditable));
+            }
             MenuAction::Activate(part) => {
                 self.current_mut().active_part = Some(part);
                 self.finish_sketch();

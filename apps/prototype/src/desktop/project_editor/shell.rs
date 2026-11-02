@@ -7,11 +7,17 @@ use super::{
 };
 use feature_editor::Tool as SolidTool;
 use nator_sketch::edit::Action as SketchEdit;
+use view_modes::{CameraMode, PrimaryRoute};
 
 /// Todas as abas compartilham a mesma faixa, sem rodapé com o nome do grupo.
 const GROUP_HORIZONTAL_GAP: f32 = 3.;
 /// Coluna compacta do menu de ferramentas secundárias do grupo.
 const GROUP_MENU_WIDTH: f32 = 22.;
+/// Três botões de 20 pontos da seção Restringir, com o rótulo sob as duas fileiras.
+const RESTRICT_COLUMN_WIDTH: f32 = 64.;
+/// Coluna estreita do Diagnóstico, entre Dimensionar e as restrições.
+const DIAGNOSTICS_WIDTH: f32 = 26.;
+const RESTRICT_CAPTION_HEIGHT: f32 = 12.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(super) enum RibbonTab {
@@ -19,16 +25,16 @@ pub(super) enum RibbonTab {
     #[default]
     Assembly,
     Model,
-    Inspect,
     Sketch,
+    Print,
 }
 impl RibbonTab {
     fn label(self) -> T {
         match self {
             Self::Model => T::ModelTab,
             Self::Assembly => T::Assembly,
-            Self::Inspect => T::InspectTab,
             Self::Sketch => T::Sketch,
+            Self::Print => T::PrintTab,
         }
     }
 }
@@ -38,6 +44,10 @@ pub(super) struct ShellState {
     pub tab: RibbonTab,
     pub browser_visible: bool,
     pub measure_open: bool,
+    /// Modo em que o botão esquerdo move a câmera; `None` deixa-o com a ferramenta atual.
+    pub camera_mode: Option<CameraMode>,
+    /// Botão esquerdo pressionado no canvas e repassado à câmera.
+    pub camera_press: PrimaryRoute,
     pub search_open: bool,
     query: String,
     pub search_focus: bool,
@@ -71,6 +81,7 @@ enum Action {
     Reference,
     NewSketch,
     SketchImage,
+    SketchText,
     Paint,
     SketchXY,
     SketchXZ,
@@ -94,15 +105,25 @@ enum Action {
     NewEmptyPart,
     NewPartStep,
     NewPartStl,
+    ReferenceStep,
+    ReferenceStl,
+    Reference3mf,
     MoveFace,
     MoveEdge,
     MovePoint,
     Parameters,
+    PrintProfile,
+    Calibrate,
+    PrintCheck,
+    FitCheck,
     Measure,
     Drawing,
-    ExportStl,
+    ExportPrint,
     ExportStep,
+    Home,
     Fit,
+    PanCamera,
+    OrbitCamera,
     Iso,
     Front,
     Top,
@@ -130,6 +151,7 @@ impl Action {
             Self::Reference => T::Reference,
             Self::NewSketch => T::NewSketch,
             Self::SketchImage => T::SketchImage,
+            Self::SketchText => T::SketchTextTool,
             Self::Paint => T::Paint,
             Self::SketchXY => T::SketchXY,
             Self::SketchXZ => T::SketchXZ,
@@ -151,18 +173,28 @@ impl Action {
             Self::Section => T::SectionAnalysis,
             Self::InsertPart => T::InsertFromProject,
             Self::ReferenceSketch => T::ReferenceSketch,
-            Self::NewEmptyPart => T::NewEmptyPart,
+            Self::NewEmptyPart => T::NewPartMenu,
             Self::NewPartStep => T::NewPartFromStep,
             Self::NewPartStl => T::NewPartFromStl,
+            Self::ReferenceStep => T::ReferenceFromStep,
+            Self::ReferenceStl => T::ReferenceFromStl,
+            Self::Reference3mf => T::ReferenceFrom3mf,
             Self::MoveFace => T::MoveFaceToFace,
             Self::MoveEdge => T::MoveEdgeToEdge,
             Self::MovePoint => T::MovePointToPoint,
+            Self::PrintProfile => T::PrintProfile,
+            Self::Calibrate => T::Calibrate,
+            Self::PrintCheck => T::PrintCheck,
+            Self::FitCheck => T::FitCheck,
             Self::Parameters => T::Parameters,
-            Self::Measure => T::MeasureSelection,
+            Self::Measure => T::MeasureTool,
             Self::Drawing => T::Drawing,
-            Self::ExportStl => T::ExportStl,
+            Self::ExportPrint => T::ExportForPrint,
             Self::ExportStep => T::ExportAssemblyStep,
+            Self::Home => T::ViewHome,
             Self::Fit => T::Fit,
+            Self::PanCamera => T::PanCamera,
+            Self::OrbitCamera => T::OrbitCamera,
             Self::Iso => T::Iso,
             Self::Front => T::Front,
             Self::Top => T::Top,
@@ -184,9 +216,14 @@ impl Action {
             Self::Solid(SolidTool::Fillet) => T::FilletShort,
             Self::Solid(SolidTool::Mirror) => T::MirrorShort,
             Self::Solid(SolidTool::Split) => T::SplitShort,
+            Self::Solid(SolidTool::CheckSolid) => T::CheckSolidShort,
+            Self::Solid(SolidTool::BedFace) => T::BedFaceShort,
+            Self::Solid(SolidTool::ComponentCut) => T::ComponentCutShort,
+            Self::Solid(SolidTool::ScrewBoss) => T::ScrewBossShort,
+            Self::ExportPrint => T::ExportForPrintShort,
+            Self::PrintCheck => T::PrintCheckShort,
+            Self::FitCheck => T::FitCheckShort,
             Self::SketchTool(sketch_editor::Tool::Arc) => T::ArcShort,
-            Self::SketchEdit(SketchEdit::CircularPattern) => T::SketchCircularShort,
-            Self::SketchEdit(SketchEdit::RectangularPattern) => T::SketchRectangularShort,
             Self::InstancePattern(false) => T::RectangularPattern,
             Self::InstancePattern(true) => T::CircularPattern,
             Self::InstanceMirror => T::MirrorShort,
@@ -213,6 +250,7 @@ impl Action {
             | Self::SketchFace => Icon::Sketch,
             Self::OffsetPlane => Icon::OffsetPlane,
             Self::SketchImage => Icon::Image,
+            Self::SketchText => Icon::Label,
             Self::Paint => Icon::Paint,
             Self::Solid(tool) => match tool {
                 SolidTool::Extrude => Icon::Extrude,
@@ -224,10 +262,17 @@ impl Action {
                 SolidTool::Fillet => Icon::Fillet,
                 SolidTool::Chamfer => Icon::Chamfer,
                 SolidTool::Shell => Icon::Shell,
+                SolidTool::MergeFaces => Icon::Join,
                 SolidTool::Mirror => Icon::Mirror,
                 SolidTool::LinearPattern | SolidTool::CircularPattern => Icon::Pattern,
                 SolidTool::Split => Icon::Split,
                 SolidTool::Join | SolidTool::Cut | SolidTool::Intersect => Icon::Boolean,
+                SolidTool::CheckSolid => Icon::CheckSolid,
+                SolidTool::BedFace => Icon::BedFace,
+                SolidTool::ComponentCut => Icon::ComponentCut,
+                SolidTool::Lip => Icon::Lip,
+                SolidTool::ScrewBoss => Icon::ScrewBoss,
+                SolidTool::SnapFit => Icon::SnapFit,
             },
             Self::MoveCopy | Self::MoveBody => Icon::Move,
             Self::CopyBody => Icon::Copy,
@@ -241,16 +286,24 @@ impl Action {
             Self::InsertPart => Icon::Import,
             Self::ReferenceSketch => Icon::ReferenceSketch,
             Self::NewEmptyPart => Icon::NewBody,
-            Self::NewPartStep => Icon::StepFile,
+            Self::NewPartStep | Self::ReferenceStep => Icon::StepFile,
             Self::NewPartStl => Icon::StlFile,
+            Self::ReferenceStl | Self::Reference3mf => Icon::StlFile,
             Self::MoveFace => Icon::FaceToFace,
             Self::MoveEdge => Icon::EdgeToEdge,
             Self::MovePoint => Icon::PointToPoint,
+            Self::PrintProfile => Icon::PrintProfile,
+            Self::Calibrate => Icon::Calibrate,
+            Self::PrintCheck => Icon::PrintCheck,
+            Self::FitCheck => Icon::FitCheck,
             Self::Parameters => Icon::Parameters,
             Self::Measure => Icon::Measure,
             Self::Drawing => Icon::Drawing,
-            Self::ExportStl | Self::ExportStep => Icon::Export,
+            Self::ExportPrint | Self::ExportStep => Icon::Export,
+            Self::Home => Icon::Home,
             Self::Fit => Icon::Fit,
+            Self::PanCamera => Icon::PanCamera,
+            Self::OrbitCamera => Icon::OrbitCamera,
             Self::Iso => Icon::Cube,
             Self::Front => Icon::Front,
             Self::Top => Icon::Top,
@@ -315,6 +368,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Reference,
     Action::NewSketch,
     Action::SketchImage,
+    Action::SketchText,
     Action::SketchXY,
     Action::SketchXZ,
     Action::SketchYZ,
@@ -328,6 +382,8 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Fillet),
     Action::Solid(SolidTool::Chamfer),
     Action::Solid(SolidTool::Shell),
+    Action::Solid(SolidTool::MergeFaces),
+    Action::Solid(SolidTool::Hole),
     Action::Solid(SolidTool::Join),
     Action::Solid(SolidTool::Cut),
     Action::Solid(SolidTool::Intersect),
@@ -335,6 +391,12 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::CircularPattern),
     Action::Solid(SolidTool::Mirror),
     Action::Solid(SolidTool::Split),
+    Action::Solid(SolidTool::CheckSolid),
+    Action::Solid(SolidTool::BedFace),
+    Action::Solid(SolidTool::ComponentCut),
+    Action::Solid(SolidTool::Lip),
+    Action::Solid(SolidTool::ScrewBoss),
+    Action::Solid(SolidTool::SnapFit),
     Action::MoveCopy,
     Action::CopyBody,
     Action::Align,
@@ -351,15 +413,25 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::NewEmptyPart,
     Action::NewPartStep,
     Action::NewPartStl,
+    Action::ReferenceStep,
+    Action::ReferenceStl,
+    Action::Reference3mf,
     Action::MoveFace,
     Action::MoveEdge,
     Action::MovePoint,
     Action::Parameters,
+    Action::PrintProfile,
+    Action::Calibrate,
+    Action::PrintCheck,
+    Action::FitCheck,
     Action::Drawing,
     Action::Measure,
-    Action::ExportStl,
+    Action::ExportPrint,
     Action::ExportStep,
+    Action::Home,
     Action::Fit,
+    Action::PanCamera,
+    Action::OrbitCamera,
     Action::Iso,
     Action::Front,
     Action::Top,
@@ -386,6 +458,13 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::CancelSketch,
 ];
 
+/// Barra de navegação, na ordem de exibição: modos do clique, enquadramentos e câmera.
+const NAVIGATION_GROUPS: [&[Action]; 3] = [
+    &[Action::Select, Action::Measure],
+    &[Action::Home, Action::Fit],
+    &[Action::PanCamera, Action::OrbitCamera],
+];
+
 fn group_width(count: usize) -> f32 {
     count as f32 * icons::RIBBON_BUTTON_SIZE.x
         + count.saturating_sub(1) as f32 * GROUP_HORIZONTAL_GAP
@@ -396,7 +475,10 @@ impl Editor {
         let editable = !self.busy() && self.pending_close.is_none();
         match action {
             Action::SketchImage => editable && self.current().sketch_edit.is_some(),
-            Action::Fit => true,
+            Action::SketchText => {
+                editable && self.current().sketch_edit.is_some() && nator_kernel::is_available()
+            }
+            Action::Home | Action::Fit | Action::PanCamera | Action::OrbitCamera => true,
             Action::Iso
             | Action::Front
             | Action::Top
@@ -468,10 +550,12 @@ impl Editor {
             Action::ReferenceSketch
             | Action::NewEmptyPart
             | Action::NewPartStl
+            | Action::ReferenceStl
+            | Action::Reference3mf
             | Action::MoveFace
             | Action::MoveEdge
             | Action::MovePoint => editable && self.current().sketch_edit.is_none(),
-            Action::NewPartStep => {
+            Action::NewPartStep | Action::ReferenceStep => {
                 editable && self.current().sketch_edit.is_none() && nator_kernel::is_available()
             }
             Action::NewSketch | Action::SketchXY | Action::SketchXZ | Action::SketchYZ => {
@@ -480,7 +564,9 @@ impl Editor {
             Action::SketchFace => {
                 editable && self.current().picked.is_some() && self.current().sketch_edit.is_none()
             }
-            Action::Measure => editable && self.current().picked.is_some(),
+            // Medir usa cliques na área 3D, que o rascunho em edição reserva às ferramentas.
+            Action::Measure => editable && self.current().sketch_edit.is_none(),
+            Action::PrintCheck => editable && self.current().active_part.is_some(),
             Action::SketchTool(_) | Action::SketchEdit(_) => {
                 editable && self.current().sketch_edit.is_some()
             }
@@ -500,8 +586,16 @@ impl Editor {
     fn action_selected(&self, action: Action) -> bool {
         match action {
             Action::SketchImage => self.image_edit.is_some(),
+            Action::SketchText => self.sketch_text.is_some(),
             Action::Paint => self.paint_edit.is_some(),
-            Action::Select => self.selection_active() && self.image_edit.is_none(),
+            Action::Select => {
+                self.selection_active()
+                    && self.image_edit.is_none()
+                    && self.shell.camera_mode.is_none()
+            }
+            Action::Measure => self.shell.measure_open && self.shell.camera_mode.is_none(),
+            Action::PanCamera => self.shell.camera_mode == Some(CameraMode::Pan),
+            Action::OrbitCamera => self.shell.camera_mode == Some(CameraMode::Orbit),
             Action::Perspective => {
                 self.viewport.camera.projection == nator_renderer::Projection::Perspective
             }
@@ -509,8 +603,11 @@ impl Editor {
             Action::Triangles => self.viewport.show_triangles,
             Action::Browser => self.shell.browser_visible,
             Action::Section => self.current().section.is_some_and(|s| s.visible),
+            // Selecionar no rascunho é o estado neutro: o botão acende só com o diagnóstico aberto.
             Action::SketchTool(tool) => self.current().sketch_edit.as_ref().is_some_and(|w| {
-                w.tool() == tool && (tool != sketch_editor::Tool::Select || w.is_selecting())
+                w.tool() == tool
+                    && (tool != sketch_editor::Tool::Select
+                        || (w.is_selecting() && w.diagnostics_open()))
             }),
             Action::SketchEdit(action) => self
                 .current()
@@ -533,14 +630,12 @@ impl Editor {
             })
             .inner;
         #[cfg(all(test, feature = "occt"))]
-        if large {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(
-                    egui::Id::new(("ribbon_action_rect", text(action.label()))),
-                    response.rect,
-                );
-            });
-        }
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new(("ribbon_action_rect", text(action.label()))),
+                response.rect,
+            );
+        });
         let hint = if let Some(shortcut) = action.shortcut() {
             format!("{} · {shortcut}", text(action.label()))
         } else {
@@ -566,6 +661,28 @@ impl Editor {
     }
     pub(super) fn fit_view(&mut self, context: &egui::Context) {
         self.activate_action(context, Action::Fit);
+    }
+    /// Ação de um atalho de teclado (`shortcuts`).
+    pub(super) fn run_shortcut(&mut self, context: &egui::Context, target: shortcuts::Target) {
+        use shortcuts::Target;
+        match target {
+            Target::Save => self.save(context, self.current().id, false, false),
+            Target::Undo => self.step_history(context, false),
+            Target::Redo => self.step_history(context, true),
+            Target::Search => {
+                self.shell.search_open = true;
+                self.shell.search_focus = true;
+            }
+            Target::Tool(tool) => self.select_sketch_tool(tool),
+            Target::Edit(action) => self.open_sketch_action(context, action),
+            Target::Delete => self.delete_sketch_selection(context),
+            Target::Stroke => self.toggle_sketch_stroke(context),
+            Target::Extrude => self.activate_action(context, Action::Solid(SolidTool::Extrude)),
+            Target::Revolve => self.activate_action(context, Action::Solid(SolidTool::Revolve)),
+            Target::Fillet => self.activate_action(context, Action::Solid(SolidTool::Fillet)),
+            Target::Chamfer => self.activate_action(context, Action::Solid(SolidTool::Chamfer)),
+            Target::Move => self.activate_action(context, Action::MoveCopy),
+        }
     }
     fn activate_action(&mut self, context: &egui::Context, action: Action) {
         if !self.action_enabled(action) {
@@ -593,9 +710,13 @@ impl Editor {
                 | Action::Section
                 | Action::InsertPart
                 | Action::Parameters
+                | Action::PrintProfile
+                | Action::Calibrate
+                | Action::PrintCheck
+                | Action::FitCheck
                 | Action::Measure
                 | Action::Drawing
-                | Action::ExportStl
+                | Action::ExportPrint
                 | Action::SketchTool(_)
                 | Action::SketchEdit(_)
         ) {
@@ -603,7 +724,8 @@ impl Editor {
         }
         if matches!(
             action,
-            Action::Fit
+            Action::Home
+                | Action::Fit
                 | Action::Iso
                 | Action::Front
                 | Action::Top
@@ -627,10 +749,18 @@ impl Editor {
                 self.save(context, self.current().id, action == Action::SaveAs, false)
             }
             Action::Undo | Action::Redo => self.step_history(context, action == Action::Redo),
-            Action::Import => self.import(context, ImportSource::Any, self.current().active_part),
-            Action::Reference => {
-                self.import(context, ImportSource::Reference, self.current().active_part)
-            }
+            Action::Import => self.import(
+                context,
+                ImportSource::Any,
+                self.current().active_part,
+                false,
+            ),
+            Action::Reference => self.import(
+                context,
+                ImportSource::Reference,
+                self.current().active_part,
+                false,
+            ),
             Action::ReferenceSketch => {
                 let pick = (self.pick_mode == navigation::PickMode::Face)
                     .then(|| self.selected_pick().cloned())
@@ -650,12 +780,16 @@ impl Editor {
                     name: format!("{} {count}", text(T::NewPartName)),
                 });
             }
-            Action::NewPartStep => self.import(context, ImportSource::Step, None),
-            Action::NewPartStl => self.import(context, ImportSource::Stl, None),
+            Action::NewPartStep => self.import(context, ImportSource::Step, None, false),
+            Action::NewPartStl => self.import(context, ImportSource::Stl, None, false),
+            Action::ReferenceStep => self.import(context, ImportSource::Step, None, true),
+            Action::ReferenceStl => self.import(context, ImportSource::Stl, None, true),
+            Action::Reference3mf => self.import(context, ImportSource::ThreeMf, None, true),
             Action::MoveFace => self.open_align(navigation::PickMode::Face),
             Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
             Action::MovePoint => self.open_align(navigation::PickMode::Vertex),
             Action::SketchImage => self.load_reference_image(context),
+            Action::SketchText => self.open_sketch_text(context),
             Action::NewSketch => {
                 let pick = (self.pick_mode == navigation::PickMode::Face)
                     .then(|| self.selected_pick().cloned())
@@ -709,18 +843,29 @@ impl Editor {
             Action::InsertPart => self.open_insert_part(),
             Action::Ungroup => self.ungroup_selection(context),
             Action::Parameters => self.open_parameters(),
+            Action::PrintProfile => self.open_print_profile(),
+            Action::Calibrate => self.open_calibration(),
+            Action::PrintCheck => self.open_print_check(),
+            Action::FitCheck => self.open_fit_check(),
             Action::Measure => {
                 self.shell.measure_open = true;
-                self.measure_report.clear();
-                self.measure_current_selection(context);
+                self.measure_tool.clear();
             }
             Action::Drawing => self.open_drawing(None),
-            Action::ExportStl => self.open_export(),
+            Action::ExportPrint => self.open_export(),
             Action::ExportStep => self.export_step(
                 context,
                 self.current().id,
                 nator_commands::export::StepScope::Assembly,
             ),
+            Action::Home => {
+                // Mesmo efeito do Home do cubo: a projeção escolhida não muda.
+                self.viewport
+                    .camera
+                    .set_direction(Camera::default().direction());
+                let [w, h] = self.viewport.size();
+                self.viewport.camera.fit(f64::from(w) / f64::from(h));
+            }
             Action::Fit => {
                 if let Some(work) = &mut self.current_mut().sketch_edit {
                     work.fit_requested = true;
@@ -729,6 +874,8 @@ impl Editor {
                 let [w, h] = self.viewport.size();
                 self.viewport.camera.fit(f64::from(w) / f64::from(h));
             }
+            Action::PanCamera => self.toggle_camera_mode(CameraMode::Pan),
+            Action::OrbitCamera => self.toggle_camera_mode(CameraMode::Orbit),
             Action::Iso => self
                 .viewport
                 .camera
@@ -761,6 +908,38 @@ impl Editor {
             Action::CancelSketch => self.cancel_sketch(context),
         }
     }
+    /// Arrastar e Rotacionar suspendem a ferramenta em uso sem cancelá-la: um novo clique
+    /// devolve o botão esquerdo a ela.
+    fn toggle_camera_mode(&mut self, mode: CameraMode) {
+        let active = self.shell.camera_mode == Some(mode);
+        self.shell.camera_mode = (!active).then_some(mode);
+    }
+    /// Painel dos modos de navegação, centrado na base da área de edição.
+    pub(super) fn navigation_bar(&mut self, context: &egui::Context) {
+        egui::Area::new(egui::Id::new("navigation_bar"))
+            .order(egui::Order::Middle)
+            .fade_in(false)
+            .constrain(false)
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .fixed_pos(self.canvas_rect.center_bottom() - egui::vec2(0., 10.))
+            .show(context, |ui| {
+                theme::floating_frame()
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.;
+                            for (index, group) in NAVIGATION_GROUPS.iter().enumerate() {
+                                if index > 0 {
+                                    ui.separator();
+                                }
+                                for action in *group {
+                                    self.action_button(ui, *action, false);
+                                }
+                            }
+                        });
+                    });
+            });
+    }
     fn sketch_on_selected_face(&mut self, context: &egui::Context) {
         let Some(pick) = self.current().picked.clone() else {
             return;
@@ -782,15 +961,22 @@ impl Editor {
                 self.shell.before_sketch = Some(self.shell.tab);
                 self.shell.tab = RibbonTab::Sketch;
             } else {
-                // Volta à aba de origem (Montagem para rascunhos de referência).
-                self.shell.tab = self.shell.before_sketch.take().unwrap_or_default();
+                // Confirmar ou cancelar volta ao contexto de edição da peça, que é
+                // a aba Construção, mesmo que o rascunho tenha sido aberto da Montagem.
+                // Rascunhos de referência não têm peça: pertencem à Montagem.
+                self.shell.before_sketch = None;
+                self.shell.tab = if self.current().active_part.is_some() {
+                    RibbonTab::Model
+                } else {
+                    RibbonTab::Assembly
+                };
             }
             self.shell.sketch_context = sketch;
         }
         egui::Panel::top("application_bar")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::HEADER)
+                    .fill(theme::header())
                     .inner_margin(egui::Margin::symmetric(12, 6)),
             )
             .show(ui, |ui| {
@@ -811,68 +997,94 @@ impl Editor {
                     ui.label(egui::RichText::new(text(T::AppName)).strong().size(18.));
                     ui.separator();
                     self.action_button(ui, Action::New, false);
-                    self.action_button(ui, Action::Open, false);
-                    let save = icons::button(ui, Icon::Save, text(T::Save), false, false);
-                    if save.clicked() && self.action_enabled(Action::Save) {
-                        self.activate_action(ui.ctx(), Action::Save);
-                    }
-                    save.context_menu(|ui| {
-                        for action in [
-                            Action::SaveAs,
-                            Action::Import,
-                            Action::ExportStl,
-                            Action::ExportStep,
-                        ] {
-                            if ui
-                                .add_enabled(
-                                    self.action_enabled(action),
-                                    egui::Button::new(text(action.label())),
-                                )
-                                .clicked()
-                            {
-                                self.activate_action(ui.ctx(), action);
-                                ui.close();
-                            }
-                        }
-                    });
-                    let settings =
-                        icons::button(ui, Icon::Settings, text(T::SettingsMenu), false, false);
-                    egui::Popup::menu(&settings).show(|ui| {
-                        ui.separator();
+                    let open = ui
+                        .add_enabled_ui(self.action_enabled(Action::Open), |ui| {
+                            icons::button(ui, Icon::Open, text(T::OpenProject), false, false)
+                        })
+                        .inner;
+                    let mut open_dialog = false;
+                    let mut open_recent = None;
+                    let recent = self.recent.clone();
+                    egui::Popup::menu(&open).show(|ui| {
                         if ui
                             .add_enabled(
-                                !self.recoveries.is_empty(),
-                                egui::Button::new(text(T::Recovery)),
+                                self.action_enabled(Action::Open),
+                                egui::Button::new(text(T::OpenProject)),
                             )
                             .clicked()
                         {
-                            self.show_recovery = true;
+                            open_dialog = true;
                             ui.close();
                         }
-                        ui.menu_button(text(T::DisplayDecimals), |ui| {
-                            let mut decimals = self
-                                .current()
-                                .session
-                                .document()
-                                .settings()
-                                .display_decimals;
-                            if ui
-                                .add_enabled(
-                                    !self.busy(),
-                                    egui::DragValue::new(&mut decimals)
-                                        .range(0..=nator_document::MAX_DISPLAY_DECIMALS),
-                                )
-                                .changed()
-                            {
-                                self.execute(Command::SetSettings {
-                                    settings: nator_document::Settings {
-                                        display_decimals: decimals,
-                                    },
-                                });
+                        if !recent.is_empty() {
+                            ui.separator();
+                            ui.label(
+                                egui::RichText::new(text(T::RecentProjects))
+                                    .small()
+                                    .color(theme::muted()),
+                            );
+                            for path in recent {
+                                let name = path
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| path.display().to_string());
+                                if ui
+                                    .add(egui::Button::new(name).frame(false))
+                                    .on_hover_text(path.display().to_string())
+                                    .clicked()
+                                {
+                                    open_recent = Some(path);
+                                    ui.close();
+                                }
                             }
-                            ui.label(text(T::DisplayDecimalsHint));
-                        });
+                        }
                     });
+                    if open_dialog {
+                        self.activate_action(ui.ctx(), Action::Open);
+                    }
+                    if let Some(path) = open_recent {
+                        self.open_recent(ui.ctx(), path);
+                    }
+                    let save = ui
+                        .add_enabled_ui(self.action_enabled(Action::Save), |ui| {
+                            icons::button(ui, Icon::Save, text(T::Save), false, false)
+                        })
+                        .inner;
+                    let mut save_now = false;
+                    let mut save_as = false;
+                    egui::Popup::menu(&save).show(|ui| {
+                        if ui
+                            .add_enabled(
+                                self.action_enabled(Action::Save),
+                                egui::Button::new(text(T::Save)),
+                            )
+                            .clicked()
+                        {
+                            save_now = true;
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                self.action_enabled(Action::SaveAs),
+                                egui::Button::new(text(T::SaveAs)),
+                            )
+                            .clicked()
+                        {
+                            save_as = true;
+                            ui.close();
+                        }
+                    });
+                    if save_now {
+                        self.activate_action(ui.ctx(), Action::Save);
+                    }
+                    if save_as {
+                        self.activate_action(ui.ctx(), Action::SaveAs);
+                    }
+                    let settings =
+                        icons::button(ui, Icon::Settings, text(T::SettingsMenu), false, false);
+                    if settings.clicked() {
+                        self.settings_panel.open();
+                    }
                     // As ações secundárias continuam acessíveis pelo menu de Salvar e pela busca.
                     ui.separator();
                     let width =
@@ -900,9 +1112,9 @@ impl Editor {
         egui::Panel::top("ribbon")
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::WHITE)
+                    .fill(theme::surface())
                     .inner_margin(egui::Margin::symmetric(12, 3))
-                    .stroke(egui::Stroke::new(1., theme::BORDER)),
+                    .stroke(egui::Stroke::new(1., theme::border())),
             )
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.;
@@ -913,22 +1125,22 @@ impl Editor {
                         RibbonTab::Assembly,
                         RibbonTab::Model,
                         RibbonTab::Sketch,
-                        RibbonTab::Inspect,
+                        RibbonTab::Print,
                     ] {
                         let selected = self.shell.tab == tab;
                         // A aba ativa já tem seu próprio contorno. O divisor aparece
                         // apenas entre duas abas inativas, sem duplicar essa borda.
                         if previous_selected == Some(false) && !selected {
-                            ui.label(egui::RichText::new("|").color(theme::MUTED));
+                            ui.label(egui::RichText::new("|").color(theme::muted()));
                         }
                         previous_selected = Some(selected);
                         let response = ui.add(
                             egui::Button::new(
                                 egui::RichText::new(text(tab.label())).strong().color(
                                     if selected {
-                                        theme::ACCENT
+                                        theme::accent()
                                     } else {
-                                        theme::MUTED
+                                        theme::muted()
                                     },
                                 ),
                             )
@@ -972,7 +1184,7 @@ impl Editor {
                     for (index, tab) in self.tabs.iter().enumerate() {
                         let active = index == self.active;
                         if index > 0 && !active && index - 1 != self.active {
-                            ui.label(egui::RichText::new("|").color(theme::MUTED));
+                            ui.label(egui::RichText::new("|").color(theme::muted()));
                         }
                         let name = tab
                             .path
@@ -985,7 +1197,7 @@ impl Editor {
                             .fill(if active {
                                 egui::Color32::from_rgb(69, 82, 101)
                             } else {
-                                theme::HEADER
+                                theme::header()
                             })
                             .corner_radius(5)
                             .inner_margin(egui::Margin::symmetric(12, 1))
@@ -1038,7 +1250,7 @@ impl Editor {
             });
     }
 
-    /// Botão compacto no fim do grupo reúne as ferramentas secundárias do rascunho.
+    /// Botão compacto no fim do grupo reúne as ferramentas secundárias.
     /// Sem o antigo rodapé, o menu continua acessível sem exibir o nome do grupo.
     fn sketch_group_menu(&mut self, ui: &mut egui::Ui, actions: &[Action]) {
         let (rect, response) = ui.allocate_exact_size(
@@ -1051,10 +1263,10 @@ impl Editor {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
         });
         if response.hovered() && ui.is_enabled() {
-            ui.painter().rect_filled(rect, 5, theme::BLUE_FILL);
+            ui.painter().rect_filled(rect, 5, theme::blue_fill());
         }
         let color = if ui.is_enabled() {
-            theme::MUTED
+            theme::muted()
         } else {
             egui::Color32::from_gray(165)
         };
@@ -1112,65 +1324,127 @@ impl Editor {
         });
     }
 
-    // Galeria preservada para futura reativação; oculta conforme AJUSTE.md.
-    #[allow(dead_code)]
-    fn sketch_constraints(&mut self, ui: &mut egui::Ui) {
-        const GALLERY: [SketchEdit; 6] = [
-            SketchEdit::HorizontalVertical,
-            SketchEdit::Coincident,
-            SketchEdit::Tangent,
-            SketchEdit::Equal,
-            SketchEdit::Parallel,
-            SketchEdit::Perpendicular,
-        ];
-        self.ribbon_group_layout(
-            ui,
-            group_width(1) + GROUP_HORIZONTAL_GAP + 80.,
-            |editor, ui| {
-                editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Dimension), true);
-                // A grade precisa de layout vertical próprio: herdar o alinhamento
-                // central da linha deslocaria a primeira fileira e cortaria o rodapé.
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(80., icons::RIBBON_BUTTON_SIZE.y),
-                    egui::Sense::hover(),
-                );
-                let mut gallery = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(rect.shrink2(egui::vec2(0., 1.)))
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                gallery.spacing_mut().interact_size.y = 24.;
-                egui::Grid::new("constraint_gallery")
-                    .num_columns(3)
-                    .min_col_width(24.)
-                    .min_row_height(24.)
-                    .spacing([2., 4.])
-                    .show(&mut gallery, |ui| {
-                        ui.spacing_mut().button_padding = egui::vec2(2., 2.);
-                        for (index, kind) in GALLERY.into_iter().enumerate() {
-                            let action = Action::SketchEdit(kind);
-                            let enabled = editor.action_enabled(action);
-                            let selected = editor.action_selected(action);
-                            let response = ui
-                                .add_enabled_ui(enabled, |ui| {
-                                    icons::tree_button(
-                                        ui,
-                                        action.icon(),
-                                        text(action.label()),
-                                        selected,
-                                    )
-                                })
-                                .inner;
-                            if response.clicked() {
-                                editor.activate_action(ui.ctx(), action);
-                            }
-                            if index % 3 == 2 {
-                                ui.end_row();
-                            }
+    /// Seção Restringir: Dimencionar em destaque, as seis restrições mais usadas e, sob elas,
+    /// o rótulo que abre a lista completa.
+    fn restrict_group(&mut self, ui: &mut egui::Ui) {
+        let enabled =
+            !self.busy() && self.pending_close.is_none() && self.current().sketch_edit.is_some();
+        let width = icons::RIBBON_BUTTON_SIZE.x
+            + DIAGNOSTICS_WIDTH
+            + 2. * GROUP_HORIZONTAL_GAP
+            + RESTRICT_COLUMN_WIDTH;
+        self.ribbon_group_layout(ui, width, |editor, ui| {
+            editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Dimension), true);
+            // Diagnóstico ao lado de Dimensionar, só com o ícone: um botão inteiro faria a
+            // faixa do rascunho passar da largura de uma tela de 1280 pontos.
+            let diagnostics = Action::SketchTool(sketch_editor::Tool::Select);
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(DIAGNOSTICS_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
+                egui::Sense::hover(),
+            );
+            let mut slot = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+                egui::Layout::centered_and_justified(egui::Direction::TopDown),
+            ));
+            let clicked = slot
+                .add_enabled_ui(enabled, |ui| {
+                    icons::tree_button(
+                        ui,
+                        diagnostics.icon(),
+                        text(T::SketchDiagnostics),
+                        editor.action_selected(diagnostics),
+                    )
+                })
+                .inner
+                .clicked();
+            if clicked {
+                editor.activate_action(ui.ctx(), diagnostics);
+            }
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(RESTRICT_COLUMN_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
+                egui::Sense::hover(),
+            );
+            let mut column = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            column.spacing_mut().item_spacing = egui::vec2(2., 1.);
+            column.spacing_mut().button_padding = egui::vec2(1., 1.);
+            column.spacing_mut().interact_size.y = 20.;
+            let mut chosen = None;
+            for row in sketch_editor::GALLERY.chunks(3) {
+                column.horizontal(|ui| {
+                    for restriction in row {
+                        let (icon, label) = sketch_editor::presentation(*restriction);
+                        let armed = editor.restriction_is_armed(*restriction);
+                        let button = ui
+                            .add_enabled_ui(enabled, |ui| {
+                                icons::tree_button(ui, icon, text(label), armed)
+                            })
+                            .inner;
+                        #[cfg(all(test, feature = "occt"))]
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(
+                                egui::Id::new(("gallery_rect", text(label))),
+                                button.rect,
+                            );
+                        });
+                        if button.clicked() {
+                            chosen = Some(sketch_editor::Choice::Apply(*restriction));
                         }
-                    });
-            },
-        );
+                    }
+                });
+            }
+            let response = column
+                .add_enabled_ui(enabled, |ui| {
+                    ui.allocate_exact_size(
+                        egui::vec2(RESTRICT_COLUMN_WIDTH, RESTRICT_CAPTION_HEIGHT),
+                        egui::Sense::click(),
+                    )
+                })
+                .inner
+                .1;
+            editor.shell.menu_rects.push(response.rect);
+            let label = text(T::Restrict);
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label)
+            });
+            if response.hovered() && enabled {
+                column
+                    .painter()
+                    .rect_filled(response.rect, 3, theme::blue_fill());
+            }
+            let ink = if enabled {
+                theme::ink()
+            } else {
+                theme::muted()
+            };
+            column.painter().text(
+                response.rect.left_center() + egui::vec2(2., 0.),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                ink,
+            );
+            let arrow = response.rect.right_center() - egui::vec2(7., 0.);
+            column.painter().add(egui::Shape::convex_polygon(
+                vec![
+                    arrow + egui::vec2(-3.5, -1.5),
+                    arrow + egui::vec2(3.5, -1.5),
+                    arrow + egui::vec2(0., 2.5),
+                ],
+                ink,
+                egui::Stroke::NONE,
+            ));
+            egui::Popup::menu(&response).show(|ui| {
+                if let Some(choice) = editor.restriction_menu(ui) {
+                    chosen = Some(choice);
+                }
+            });
+            if let Some(choice) = chosen {
+                editor.apply_restriction(ui.ctx(), choice);
+            }
+        });
     }
     fn ribbon_group(&mut self, ui: &mut egui::Ui, actions: &[Action]) {
         self.ribbon_group_layout(ui, group_width(actions.len()), |editor, ui| {
@@ -1222,7 +1496,11 @@ impl Editor {
                 corner + egui::vec2(4., -2.),
                 corner + egui::vec2(0., 3.),
             ],
-            if enabled { theme::INK } else { theme::MUTED },
+            if enabled {
+                theme::ink()
+            } else {
+                theme::muted()
+            },
             egui::Stroke::NONE,
         ));
         let mut chosen = None;
@@ -1233,26 +1511,30 @@ impl Editor {
                 let enabled = self.action_enabled(*action);
                 // Item indisponível por falta do núcleo: o motivo substitui a descrição.
                 let (hint, hint_color) = if !enabled
-                    && *action == Action::NewPartStep
+                    && matches!(*action, Action::NewPartStep | Action::ReferenceStep)
                     && !nator_kernel::is_available()
                 {
-                    (T::StepNeedsKernel, theme::WARNING)
+                    (T::StepNeedsKernel, theme::warning())
                 } else {
-                    (*hint, theme::MUTED)
+                    (*hint, theme::muted())
                 };
                 let row = ui
                     .add_enabled_ui(enabled, |ui| {
                         let (rect, row) =
                             ui.allocate_exact_size(egui::vec2(300., 54.), egui::Sense::click());
                         if row.hovered() && enabled {
-                            ui.painter().rect_filled(rect, 4, theme::BLUE_FILL);
+                            ui.painter().rect_filled(rect, 4, theme::blue_fill());
                         }
                         let icon = egui::Rect::from_center_size(
                             egui::pos2(rect.left() + 20., rect.center().y),
                             egui::Vec2::splat(24.),
                         );
                         icons::paint(ui.painter(), icon, action.icon(), enabled);
-                        let ink = if enabled { theme::INK } else { theme::MUTED };
+                        let ink = if enabled {
+                            theme::ink()
+                        } else {
+                            theme::muted()
+                        };
                         ui.painter().text(
                             egui::pos2(rect.left() + 42., rect.top() + 7.),
                             egui::Align2::LEFT_TOP,
@@ -1289,12 +1571,6 @@ impl Editor {
     }
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
         self.shell.menu_rects.clear();
-        if matches!(
-            self.shell.tab,
-            RibbonTab::Assembly | RibbonTab::Model | RibbonTab::Sketch
-        ) {
-            self.ribbon_group(ui, &[Action::Select]);
-        }
         match self.shell.tab {
             RibbonTab::Model => {
                 self.ribbon_group(ui, &[Action::NewSketch]);
@@ -1310,6 +1586,7 @@ impl Editor {
                 self.ribbon_group(
                     ui,
                     &[
+                        Action::Solid(SolidTool::Hole),
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
                         Action::Paint,
@@ -1323,21 +1600,41 @@ impl Editor {
                         Action::CopyBody,
                         Action::Solid(SolidTool::Join),
                         Action::Solid(SolidTool::Split),
+                        Action::Solid(SolidTool::MergeFaces),
                     ],
                 );
-                self.ribbon_group(ui, &[Action::OffsetPlane]);
+                self.sketch_section(
+                    ui,
+                    &[Action::Solid(SolidTool::CheckSolid), Action::OffsetPlane],
+                    &[Action::Parameters, Action::Section],
+                );
             }
             // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
             // posicionamento, cópias e organização.
             RibbonTab::Assembly => {
                 self.ribbon_group(ui, &[Action::ReferenceSketch]);
+                self.ribbon_group(ui, &[Action::NewEmptyPart]);
                 self.ribbon_menu_group(
                     ui,
                     Menu {
-                        icon: Icon::NewBody,
-                        label: T::NewPartMenu,
+                        icon: Icon::Import,
+                        label: T::ImportMenu,
                         items: &[
-                            (Action::NewEmptyPart, T::NewEmptyPart, T::EmptyPartHint),
+                            (
+                                Action::ReferenceStep,
+                                T::ReferenceFromStep,
+                                T::ReferenceImportHint,
+                            ),
+                            (
+                                Action::ReferenceStl,
+                                T::ReferenceFromStl,
+                                T::ReferenceImportHint,
+                            ),
+                            (
+                                Action::Reference3mf,
+                                T::ReferenceFrom3mf,
+                                T::ReferenceImportHint,
+                            ),
                             (Action::NewPartStep, T::NewPartFromStep, T::StepPartHint),
                             (Action::NewPartStl, T::NewPartFromStl, T::StlPartHint),
                         ],
@@ -1346,16 +1643,31 @@ impl Editor {
                 self.ribbon_group(ui, &[Action::MoveCopy]);
                 self.ribbon_group(ui, &[Action::NewInstance]);
                 self.ribbon_group(ui, &[Action::Group, Action::Ungroup]);
+                self.ribbon_group(ui, &[Action::Drawing, Action::Section, Action::ExportStep]);
             }
-            RibbonTab::Inspect => {
-                self.ribbon_group(ui, &[Action::Measure, Action::Section]);
-                self.ribbon_group(ui, &[Action::Drawing, Action::Parameters]);
-                self.ribbon_group(ui, &[Action::ExportStl, Action::ExportStep]);
+            RibbonTab::Print => {
+                self.ribbon_group(ui, &[Action::PrintProfile, Action::Calibrate]);
+                self.ribbon_group(ui, &[Action::Solid(SolidTool::BedFace), Action::PrintCheck]);
+                self.ribbon_group(
+                    ui,
+                    &[Action::Solid(SolidTool::ComponentCut), Action::FitCheck],
+                );
+                self.ribbon_group(
+                    ui,
+                    &[
+                        Action::Solid(SolidTool::Lip),
+                        Action::Solid(SolidTool::ScrewBoss),
+                        Action::Solid(SolidTool::SnapFit),
+                    ],
+                );
+                self.ribbon_group(ui, &[Action::ExportPrint]);
             }
             RibbonTab::Sketch => {
                 // A aba Rascunho mantém o ferramental completo visível fora da edição;
                 // os botões ficam desativados até existir um rascunho em edição.
                 self.ribbon_group(ui, &[Action::NewSketch]);
+                // Imagem fica no menu ▾ da seção, depois de Projetar e Texto: a faixa
+                // inteira precisa caber numa tela de 1280 pontos.
                 self.sketch_section(
                     ui,
                     &[
@@ -1364,15 +1676,15 @@ impl Editor {
                         Action::SketchTool(sketch_editor::Tool::Circle),
                         Action::SketchTool(sketch_editor::Tool::Arc),
                         Action::SketchTool(sketch_editor::Tool::Project),
-                        Action::SketchImage,
+                        Action::SketchText,
                     ],
                     &[
-                        Action::SketchTool(sketch_editor::Tool::Select),
                         Action::SketchTool(sketch_editor::Tool::Line),
                         Action::SketchTool(sketch_editor::Tool::Rectangle),
                         Action::SketchTool(sketch_editor::Tool::Circle),
                         Action::SketchTool(sketch_editor::Tool::Arc),
                         Action::SketchTool(sketch_editor::Tool::Project),
+                        Action::SketchText,
                         Action::SketchImage,
                     ],
                 );
@@ -1384,7 +1696,6 @@ impl Editor {
                         Action::SketchEdit(SketchEdit::Fillet),
                         Action::SketchEdit(SketchEdit::Chamfer),
                         Action::SketchEdit(SketchEdit::Mirror),
-                        Action::SketchTool(sketch_editor::Tool::Dimension),
                     ],
                     &[
                         Action::SketchTool(sketch_editor::Tool::Trim),
@@ -1393,10 +1704,10 @@ impl Editor {
                         Action::SketchEdit(SketchEdit::Chamfer),
                         Action::SketchEdit(SketchEdit::Extend),
                         Action::SketchEdit(SketchEdit::Mirror),
-                        Action::SketchTool(sketch_editor::Tool::Dimension),
                         Action::SketchEdit(SketchEdit::Delete),
                     ],
                 );
+                self.restrict_group(ui);
                 let exit = [Action::FinishSketch, Action::CancelSketch];
                 self.sketch_section(ui, &exit, &[]);
             }
@@ -1406,9 +1717,9 @@ impl Editor {
         egui::Panel::bottom("timeline")
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::WHITE)
+                    .fill(theme::surface())
                     .inner_margin(egui::Margin::symmetric(10, 3))
-                    .stroke(egui::Stroke::new(1., theme::BORDER)),
+                    .stroke(egui::Stroke::new(1., theme::border())),
             )
             .show(ui, |ui| {
                 let (row, _) = ui.allocate_exact_size(
@@ -1417,7 +1728,7 @@ impl Editor {
                 );
                 let busy = self.busy();
                 let (label, color) = if !busy && self.pending_failure.is_some() {
-                    (text(T::Failed), theme::DANGER)
+                    (text(T::Failed), theme::danger())
                 } else {
                     self.status.indicator(busy)
                 };
@@ -1427,7 +1738,7 @@ impl Editor {
                     .layout_no_wrap(
                         label.clone(),
                         egui::TextStyle::Small.resolve(ui.style()),
-                        theme::MUTED,
+                        theme::muted(),
                     )
                     .size()
                     .x;
@@ -1464,7 +1775,7 @@ impl Editor {
                         egui::pos2(left.right(), row.top() + 4.),
                         egui::pos2(left.right(), row.bottom() - 4.),
                     ],
-                    egui::Stroke::new(1., theme::BORDER),
+                    egui::Stroke::new(1., theme::border()),
                 );
                 if middle.is_positive() {
                     let mut strip = ui.new_child(
@@ -1489,7 +1800,7 @@ impl Editor {
                 );
                 state
                     .add(
-                        egui::Label::new(egui::RichText::new(&label).small().color(theme::MUTED))
+                        egui::Label::new(egui::RichText::new(&label).small().color(theme::muted()))
                             .truncate(),
                     )
                     .on_hover_text(&label);

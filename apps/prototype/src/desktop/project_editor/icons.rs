@@ -30,6 +30,16 @@ pub(super) enum Icon {
     Shell,
     Boolean,
     Split,
+    CheckSolid,
+    PrintProfile,
+    BedFace,
+    PrintCheck,
+    FitCheck,
+    ComponentCut,
+    Lip,
+    ScrewBoss,
+    SnapFit,
+    Calibrate,
     Move,
     Mirror,
     Pattern,
@@ -52,7 +62,6 @@ pub(super) enum Icon {
     RotateCounterclockwise,
     Search,
     Check,
-    LockClosed,
     LockOpen,
     Select,
     Line,
@@ -113,9 +122,17 @@ pub(super) enum Icon {
     Origin,
     OffsetPlane,
     WorkPlane,
-    #[allow(dead_code)]
-    Project,
     Home,
+    PanCamera,
+    OrbitCamera,
+    CollapseUp,
+    ExpandDown,
+    ConstraintFix,
+    ConstraintConcentric,
+    ConstraintCollinear,
+    ConstraintSymmetry,
+    ConstraintPolygon,
+    ConstraintManager,
 }
 mod draw;
 
@@ -145,6 +162,16 @@ const ALL: &[Icon] = &[
     Icon::Shell,
     Icon::Boolean,
     Icon::Split,
+    Icon::CheckSolid,
+    Icon::PrintProfile,
+    Icon::BedFace,
+    Icon::PrintCheck,
+    Icon::FitCheck,
+    Icon::ComponentCut,
+    Icon::Lip,
+    Icon::ScrewBoss,
+    Icon::SnapFit,
+    Icon::Calibrate,
     Icon::Move,
     Icon::Mirror,
     Icon::Pattern,
@@ -167,7 +194,6 @@ const ALL: &[Icon] = &[
     Icon::RotateCounterclockwise,
     Icon::Search,
     Icon::Check,
-    Icon::LockClosed,
     Icon::LockOpen,
     Icon::Select,
     Icon::Line,
@@ -228,12 +254,21 @@ const ALL: &[Icon] = &[
     Icon::Origin,
     Icon::OffsetPlane,
     Icon::WorkPlane,
-    Icon::Project,
     Icon::Home,
+    Icon::PanCamera,
+    Icon::OrbitCamera,
+    Icon::CollapseUp,
+    Icon::ExpandDown,
+    Icon::ConstraintFix,
+    Icon::ConstraintConcentric,
+    Icon::ConstraintCollinear,
+    Icon::ConstraintSymmetry,
+    Icon::ConstraintPolygon,
+    Icon::ConstraintManager,
 ];
 
 pub(super) fn paint(painter: &egui::Painter, rect: egui::Rect, icon: Icon, enabled: bool) {
-    draw::paint(painter, rect, icon, enabled, theme::INK, false);
+    draw::paint(painter, rect, icon, enabled, theme::ink(), false);
 }
 pub(super) fn paint_with_ink(
     painter: &egui::Painter,
@@ -263,7 +298,7 @@ pub(super) fn preview_sheet(ui: &mut egui::Ui) {
 }
 /// A faixa usa medidas próprias; os botões maiores dos painéis de opções
 /// conservam sua dimensão para não alterar as ferramentas de desenho.
-pub(super) const RIBBON_BUTTON_SIZE: egui::Vec2 = egui::vec2(72., 54.);
+pub(super) const RIBBON_BUTTON_SIZE: egui::Vec2 = egui::vec2(67., 54.);
 
 enum ButtonLayout {
     Compact,
@@ -330,7 +365,7 @@ fn draw_button(
             let hover = if dark {
                 egui::Color32::from_rgb(69, 82, 101)
             } else {
-                theme::BLUE_FILL
+                theme::blue_fill()
             };
             ui.painter().rect_filled(response.rect, 5, hover);
         }
@@ -343,7 +378,7 @@ fn draw_button(
             if dark {
                 egui::Color32::from_rgb(238, 243, 250)
             } else {
-                theme::INK
+                theme::ink()
             },
             dark,
         );
@@ -354,9 +389,9 @@ fn draw_button(
                 label.to_owned(),
                 egui::FontId::proportional(font_size),
                 if ui.is_enabled() {
-                    theme::INK
+                    theme::ink()
                 } else {
-                    theme::MUTED
+                    theme::muted()
                 },
                 size.x - 4.,
             );
@@ -368,7 +403,7 @@ fn draw_button(
                     response.rect.top() + top,
                 ),
                 galley,
-                theme::INK,
+                theme::ink(),
             );
         }
     }
@@ -377,7 +412,7 @@ fn draw_button(
         ui.painter().rect_stroke(
             response.rect,
             5,
-            egui::Stroke::new(1.5, theme::ACCENT),
+            egui::Stroke::new(1.5, theme::accent()),
             egui::StrokeKind::Inside,
         );
     }
@@ -402,7 +437,8 @@ pub(super) fn tree_button(
     });
     if ui.is_rect_visible(response.rect) {
         if response.hovered() && ui.is_enabled() {
-            ui.painter().rect_filled(response.rect, 4, theme::BLUE_FILL);
+            ui.painter()
+                .rect_filled(response.rect, 4, theme::blue_fill());
         }
         paint(
             ui.painter(),
@@ -415,7 +451,7 @@ pub(super) fn tree_button(
         ui.painter().rect_stroke(
             response.rect,
             4,
-            egui::Stroke::new(1.5, theme::ACCENT),
+            egui::Stroke::new(1.5, theme::accent()),
             egui::StrokeKind::Inside,
         );
     }
@@ -436,7 +472,7 @@ pub(super) fn entry_styled(
     selected: bool,
     dimmed: bool,
 ) -> egui::Response {
-    let ink = if dimmed { theme::MUTED } else { theme::INK };
+    let ink = if dimmed { theme::muted() } else { theme::ink() };
     let response = ui.add(
         egui::Button::new("")
             .min_size(egui::vec2(ui.available_width().max(40.), 22.))
@@ -447,7 +483,8 @@ pub(super) fn entry_styled(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if response.hovered() && ui.is_enabled() {
-        ui.painter().rect_filled(response.rect, 4, theme::BLUE_FILL);
+        ui.painter()
+            .rect_filled(response.rect, 4, theme::blue_fill());
     }
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(response.rect.left() + 13., response.rect.center().y),
@@ -474,7 +511,7 @@ pub(super) fn entry_styled(
         ui.painter().rect_stroke(
             response.rect,
             5,
-            egui::Stroke::new(1.5, theme::ACCENT),
+            egui::Stroke::new(1.5, theme::accent()),
             egui::StrokeKind::Inside,
         );
     }
@@ -530,7 +567,7 @@ mod tests {
     fn icon_button_preserves_clicks_disabled_state_and_accessible_label() -> TestResult<()> {
         for enabled in [true, false] {
             let context = egui::Context::default();
-            theme::apply(&context);
+            theme::apply(&context, theme::Choice::Light);
             let (response, _) = frame(&context, vec![], enabled)?;
             let center = response.rect.center();
             frame(&context, pointer(center, true), enabled)?;

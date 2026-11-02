@@ -132,7 +132,7 @@ impl Editor {
                 .with_clip_rect(response.rect)
                 .add(egui::Shape::line(
                     hit.points,
-                    egui::Stroke::new(3., theme::ACCENT),
+                    egui::Stroke::new(3., theme::accent()),
                 ));
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             if response.clicked()

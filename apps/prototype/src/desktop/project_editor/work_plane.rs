@@ -300,7 +300,11 @@ impl Editor {
                 }
                 pick = field.activate || field.clear;
                 let quantity = panel::Quantity::Length;
-                let label = format!("{} ({})", text(T::DistanceField), quantity.unit());
+                let label = format!(
+                    "{} ({})",
+                    text(T::DistanceField),
+                    quantity.unit(panel::settings(ui.ctx()))
+                );
                 panel::row(ui, &label, |ui| {
                     ui.spacing_mut().item_spacing.x = 3.;
                     draft.input.show(
@@ -384,6 +388,7 @@ impl Editor {
             return false;
         }
         let tab = self.current().id;
+        let settings = self.current().session.document().settings();
         let bounds = self.display_bounds();
         let camera = self.viewport.camera.clone();
         let Some(draft) = self.work_plane_edit.as_mut().filter(|d| d.tab == tab) else {
@@ -410,7 +415,7 @@ impl Editor {
         if let Some(mut points) = patch(world) {
             points.push(points[0]);
             for shape in
-                egui::Shape::dashed_line(&points, egui::Stroke::new(1.2, theme::MUTED), 6., 4.)
+                egui::Shape::dashed_line(&points, egui::Stroke::new(1.2, theme::muted()), 6., 4.)
             {
                 painter.add(shape);
             }
@@ -451,22 +456,22 @@ impl Editor {
         let pointer = ui.input(|i| i.pointer.interact_pos());
         let hovered = !dragging && pointer.is_some_and(|p| p.distance(handle) < 14.);
         if let Some(points) = patch(target) {
-            sketch_scene::paint_patch(&painter, &points, theme::WORK_PLANE, hovered || dragging);
+            sketch_scene::paint_patch(&painter, &points, theme::work_plane(), hovered || dragging);
         }
-        painter.line_segment([start, handle], egui::Stroke::new(2., theme::ACCENT));
+        painter.line_segment([start, handle], egui::Stroke::new(2., theme::accent()));
         painter.circle(
             start,
             4.,
             egui::Color32::WHITE,
-            egui::Stroke::new(1.5, theme::ACCENT),
+            egui::Stroke::new(1.5, theme::accent()),
         );
         painter.circle_filled(
             handle,
             7.,
             if hovered || dragging {
-                theme::GREEN
+                theme::green()
             } else {
-                theme::ACCENT
+                theme::accent()
             },
         );
         let direction = if draft.offset < 0. { -axis } else { axis };
@@ -477,15 +482,15 @@ impl Editor {
                 handle + direction * 5. + side,
                 handle + direction * 5. - side,
             ],
-            theme::ACCENT,
+            theme::accent(),
             egui::Stroke::NONE,
         ));
         painter.text(
             handle + egui::vec2(16., -12.),
             egui::Align2::LEFT_BOTTOM,
-            format!("{} mm", nator_drawing::format_mm(draft.offset)),
+            settings.length_label(draft.offset),
             egui::FontId::proportional(13.),
-            theme::INK,
+            theme::ink(),
         );
         if hovered {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -508,7 +513,7 @@ impl Editor {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             let value = drag.initial
                 + f64::from((pointer - drag.pointer).dot(drag.axis) / drag.pixels_per_mm);
-            let value = (value * 100.).round() / 100.;
+            let value = settings.snap_length(value);
             if value.is_finite() && value.abs() <= MAX_OFFSET {
                 draft.offset = value;
             }
@@ -526,6 +531,7 @@ impl Editor {
             draft.offset,
             dragging_now,
             T::DistanceField,
+            panel::Quantity::Length,
             |s| panel::parse_number(s, panel::Quantity::Length).filter(|v| v.abs() <= MAX_OFFSET),
         );
         if let Some(value) = edit.value {

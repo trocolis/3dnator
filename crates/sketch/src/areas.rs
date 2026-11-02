@@ -33,6 +33,8 @@ fn oriented(edges: &[Edge], half: usize) -> Segment {
 
 pub fn regions(sketch: &Sketch) -> Result<Vec<Region>> {
     sketch.validate()?;
+    // Pontas a menos da própria precisão são o mesmo vértice (`fusion`).
+    let sketch = &*crate::fusion::fused(sketch);
     let mut curves = sketch
         .entities
         .iter()

@@ -40,7 +40,9 @@
 #include <ElSLib.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <Poly_PolygonOnTriangulation.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
@@ -69,7 +71,10 @@
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 
 #include <algorithm>
@@ -118,6 +123,14 @@ struct Shape {
     // Face de origem de cada triângulo de `mesh`, para seleção gráfica.
     std::vector<std::int32_t> mesh_faces;
     std::string brep;
+    // Mapas de índices e adjacência, montados na primeira consulta. `value` só muda durante
+    // a construção, antes de qualquer consulta; o objeto não atravessa threads. Remontá-los
+    // a cada chamada tornava quadráticas as consultas por aresta: uma placa de circuito
+    // importada, com milhares de arestas, levava dezenas de segundos para projetar.
+    mutable std::unique_ptr<TopTools_IndexedMapOfShape> edge_map;
+    mutable std::unique_ptr<TopTools_IndexedMapOfShape> face_map;
+    mutable std::vector<std::int32_t> edge_faces;
+    mutable std::unique_ptr<TopTools_IndexedDataMapOfShapeListOfShape> ancestor_map;
 };
 
 // Todas as exceções ficam do lado C++; nenhuma atravessa o ABI C/Rust.
@@ -162,8 +175,32 @@ TopTools_IndexedMapOfShape map_of(const TopoDS_Shape& shape, TopAbs_ShapeEnum ki
     return map;
 }
 
+const TopTools_IndexedMapOfShape& edges_of(const Shape* shape) {
+    if (!shape->edge_map) {
+        shape->edge_map = std::make_unique<TopTools_IndexedMapOfShape>(map_of(shape->value, TopAbs_EDGE));
+    }
+    return *shape->edge_map;
+}
+
+// Faces vizinhas de cada aresta, pela mesma regra de montagem única.
+const TopTools_IndexedDataMapOfShapeListOfShape& ancestors_of(const Shape* shape) {
+    if (!shape->ancestor_map) {
+        auto map = std::make_unique<TopTools_IndexedDataMapOfShapeListOfShape>();
+        TopExp::MapShapesAndAncestors(shape->value, TopAbs_EDGE, TopAbs_FACE, *map);
+        shape->ancestor_map = std::move(map);
+    }
+    return *shape->ancestor_map;
+}
+
+const TopTools_IndexedMapOfShape& faces_of(const Shape* shape) {
+    if (!shape->face_map) {
+        shape->face_map = std::make_unique<TopTools_IndexedMapOfShape>(map_of(shape->value, TopAbs_FACE));
+    }
+    return *shape->face_map;
+}
+
 TopoDS_Edge edge_at(const Shape* shape, std::size_t index) {
-    const auto edges = map_of(shape->value, TopAbs_EDGE);
+    const auto& edges = edges_of(shape);
     if (index >= static_cast<std::size_t>(edges.Extent())) {
         throw std::runtime_error("Aresta inexistente no resultado atual.");
     }
@@ -471,7 +508,7 @@ Shape* nator_chamfer(const Shape* body, const std::size_t* edges, std::size_t co
             if (faces == nullptr || faces->IsEmpty()) {
                 throw std::runtime_error("Aresta sem face para medir o chanfro.");
             }
-            const auto faces_in_order = map_of(body->value, TopAbs_FACE);
+            const auto& faces_in_order = faces_of(body);
             TopoDS_Face reference;
             int best = 0;
             for (const auto& face : *faces) {
@@ -492,18 +529,65 @@ Shape* nator_chamfer(const Shape* body, const std::size_t* edges, std::size_t co
     });
 }
 
+static bool developable_shell(Shape& output, const TopoDS_Shape& body,
+                              const TopTools_ListOfShape& removed, double thickness,
+                              bool outward);
+
+// Une faces coplanares vizinhas: só as arestas entre duas faces escolhidas desaparecem.
+Shape* nator_merge_faces(const Shape* body, const std::size_t* faces, std::size_t count) noexcept {
+    return build([&](Shape& shape) {
+        const auto& all = faces_of(body);
+        TopTools_MapOfShape chosen;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (faces[i] >= static_cast<std::size_t>(all.Extent())) {
+                throw std::runtime_error("Face inexistente na união de áreas.");
+            }
+            chosen.Add(all(static_cast<int>(faces[i]) + 1));
+        }
+        TopTools_IndexedDataMapOfShapeListOfShape ancestors;
+        TopExp::MapShapesAndAncestors(body->value, TopAbs_EDGE, TopAbs_FACE, ancestors);
+        ShapeUpgrade_UnifySameDomain unifier(body->value, Standard_False, Standard_True,
+                                             Standard_False);
+        for (int i = 1; i <= ancestors.Extent(); ++i) {
+            bool inside = true;
+            for (const auto& face : ancestors(i)) {
+                inside = inside && chosen.Contains(face);
+            }
+            if (!inside) {
+                unifier.KeepShape(ancestors.FindKey(i));
+            }
+        }
+        unifier.Build();
+        shape.value = unifier.Shape();
+        OriginTable table(shape.value);
+        const auto history = unifier.History();
+        for (int i = 1; i <= all.Extent(); ++i) {
+            table.mark(all(i), Same, 0, i - 1);
+        }
+        for (int i = 1; i <= all.Extent(); ++i) {
+            for (const auto& modified : history->Modified(all(i))) {
+                table.mark_all(modified, Modified, 0, i - 1);
+            }
+        }
+        shape.origins = table.take();
+    });
+}
+
 // Casca com as faces indicadas removidas. Paredes para dentro (espessura negativa no OCCT)
 // ou para fora do sólido original.
 Shape* nator_shell(const Shape* body, const std::size_t* faces, std::size_t count,
                    double thickness, bool outward) noexcept {
     return build([&](Shape& shape) {
-        const auto all = map_of(body->value, TopAbs_FACE);
+        const auto& all = faces_of(body);
         TopTools_ListOfShape removed;
         for (std::size_t i = 0; i < count; ++i) {
             if (faces[i] >= static_cast<std::size_t>(all.Extent())) {
                 throw std::runtime_error("Face inexistente.");
             }
             removed.Append(all(static_cast<int>(faces[i]) + 1));
+        }
+        if (developable_shell(shape, body->value, removed, thickness, outward)) {
+            return;
         }
         // Junção por interseção mantém cantos vivos; a junção padrão (arco) arredondaria os
         // cantos externos de uma casca para fora.
@@ -594,7 +678,7 @@ bool nator_properties(const Shape* body, double* output) noexcept {
 // normal e um ponto do plano.
 bool nator_face_measure(const Shape* body, std::size_t index, double* output) noexcept {
     return guarded([&] {
-        const auto faces = map_of(body->value, TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (index >= static_cast<std::size_t>(faces.Extent())) {
             throw std::runtime_error("Face inexistente.");
         }
@@ -665,6 +749,46 @@ bool nator_edge_measure(const Shape* body, std::size_t index, double* output) no
     });
 }
 
+// Geometria exata de uma aresta (15 doubles): tipo (0 reta, 1 círculo, 2 outra curva),
+// início, fim e meio do parâmetro, centro e raio, e 1 se a aresta fecha sobre si.
+bool nator_edge_geometry(const Shape* body, std::size_t index, double* output) noexcept {
+    return guarded([&] {
+        const TopoDS_Edge edge = edge_at(body, index);
+        BRepAdaptor_Curve curve(edge);
+        const auto type = curve.GetType();
+        output[0] = type == GeomAbs_Line ? 0 : type == GeomAbs_Circle ? 1 : 2;
+        const double first = curve.FirstParameter();
+        const double last = curve.LastParameter();
+        const auto store = [&](std::size_t at, const gp_Pnt& p) {
+            output[at] = p.X();
+            output[at + 1] = p.Y();
+            output[at + 2] = p.Z();
+        };
+        store(1, curve.Value(first));
+        store(4, curve.Value(last));
+        store(7, curve.Value((first + last) / 2));
+        if (type == GeomAbs_Circle) {
+            store(10, curve.Circle().Location());
+            output[13] = curve.Circle().Radius();
+        } else {
+            output[10] = output[11] = output[12] = output[13] = 0;
+        }
+        output[14] = curve.IsClosed() ? 1 : 0;
+    });
+}
+
+// Ponto de uma aresta em t entre 0 e 1 do parâmetro, para amostrar curvas livres.
+bool nator_edge_point(const Shape* body, std::size_t index, double t, double* output) noexcept {
+    return guarded([&] {
+        BRepAdaptor_Curve curve(edge_at(body, index));
+        const gp_Pnt p =
+            curve.Value(curve.FirstParameter() + t * (curve.LastParameter() - curve.FirstParameter()));
+        output[0] = p.X();
+        output[1] = p.Y();
+        output[2] = p.Z();
+    });
+}
+
 // Menor distância entre dois sólidos e os pontos mais próximos (7 doubles).
 bool nator_distance(const Shape* a, const Shape* b, double* output) noexcept {
     return guarded([&] {
@@ -712,6 +836,103 @@ bool nator_write_step(const Shape* body, const char* path) noexcept {
     });
 }
 
+// Cones oblíquos das transições são retos do ápice ao arco, mas o gerador de malha espalha
+// nós internos que viram ruído no sombreamento. Estas faces saem como leque regular sobre os
+// nós do arco, os mesmos da tampa vizinha; as geratrizes só têm os extremos, então a malha
+// continua fechada. Devolve falso para as demais faces, que seguem a triangulação comum.
+static bool append_apex_fan(const TopoDS_Face& face, const Handle(Poly_Triangulation)& mesh,
+                            const TopLoc_Location& location, std::vector<gp_Pnt>& fan) {
+    const auto surface = Handle(Geom_BSplineSurface)::DownCast(BRep_Tool::Surface(face));
+    if (surface.IsNull() || surface->VDegree() != 1 || surface->NbVPoles() != 2) {
+        return false;
+    }
+    for (int i = 2; i <= surface->NbUPoles(); ++i) {
+        if (surface->Pole(i, 2).Distance(surface->Pole(1, 2)) > 1e-9) {
+            return false;
+        }
+    }
+    const gp_Pnt apex = surface->Pole(1, 2);
+    // Geratrizes tocam o ápice e só têm os extremos. O resto é o arco, que a costura do
+    // círculo pode ter dividido em pedaços.
+    std::vector<std::vector<gp_Pnt>> pieces;
+    for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next()) {
+        const auto edge = TopoDS::Edge(it.Current());
+        if (BRep_Tool::Degenerated(edge)) {
+            continue;
+        }
+        const auto polygon = BRep_Tool::PolygonOnTriangulation(edge, mesh, location);
+        if (polygon.IsNull()) {
+            return false;
+        }
+        const auto& nodes = polygon->Nodes();
+        std::vector<gp_Pnt> points;
+        for (int i = nodes.Lower(); i <= nodes.Upper(); ++i) {
+            points.push_back(mesh->Node(nodes(i)).Transformed(location.Transformation()));
+        }
+        if (points.front().Distance(apex) < 1e-6 || points.back().Distance(apex) < 1e-6) {
+            if (points.size() != 2) {
+                return false;
+            }
+        } else {
+            pieces.push_back(std::move(points));
+        }
+    }
+    if (pieces.empty()) {
+        return false;
+    }
+    std::vector<gp_Pnt> arc = std::move(pieces.back());
+    pieces.pop_back();
+    while (!pieces.empty()) {
+        bool joined = false;
+        for (std::size_t i = 0; i < pieces.size() && !joined; ++i) {
+            auto& piece = pieces[i];
+            if (piece.back().Distance(arc.back()) < 1e-6) {
+                std::reverse(piece.begin(), piece.end());
+            }
+            if (piece.front().Distance(arc.back()) < 1e-6) {
+                arc.insert(arc.end(), piece.begin() + 1, piece.end());
+                pieces.erase(pieces.begin() + static_cast<std::ptrdiff_t>(i));
+                joined = true;
+            }
+        }
+        if (!joined) {
+            std::reverse(arc.begin(), arc.end());
+            for (std::size_t i = 0; i < pieces.size() && !joined; ++i) {
+                joined = pieces[i].front().Distance(arc.back()) < 1e-6 ||
+                         pieces[i].back().Distance(arc.back()) < 1e-6;
+            }
+            if (!joined) {
+                return false;
+            }
+        }
+    }
+    if (arc.size() < 2) {
+        return false;
+    }
+    // O sentido vem da triangulação do OCCT, que já respeita a orientação da face.
+    gp_XYZ expected(0., 0., 0.);
+    for (int i = 1; i <= mesh->NbTriangles(); ++i) {
+        int a, b, c;
+        mesh->Triangle(i).Get(a, b, c);
+        if (face.Orientation() == TopAbs_REVERSED) {
+            std::swap(b, c);
+        }
+        const gp_XYZ first = mesh->Node(a).XYZ();
+        expected += (mesh->Node(b).XYZ() - first) ^ (mesh->Node(c).XYZ() - first);
+    }
+    gp_XYZ actual(0., 0., 0.);
+    for (std::size_t i = 0; i + 1 < arc.size(); ++i) {
+        actual += (arc[i].XYZ() - apex.XYZ()) ^ (arc[i + 1].XYZ() - apex.XYZ());
+    }
+    if (expected * actual < 0.) {
+        std::reverse(arc.begin(), arc.end());
+    }
+    for (std::size_t i = 0; i + 1 < arc.size(); ++i) {
+        fan.insert(fan.end(), {apex, arc[i], arc[i + 1]});
+    }
+    return true;
+}
+
 bool nator_tessellate(Shape* body, double linear, double angular) noexcept {
     return guarded([&] {
         BRepMesh_IncrementalMesh mesher(body->value, linear, false, angular, false);
@@ -721,13 +942,21 @@ bool nator_tessellate(Shape* body, double linear, double angular) noexcept {
         // Construir em memória temporária preserva a malha anterior em caso de falha.
         std::vector<double> positions;
         std::vector<std::int32_t> faces_of_triangles;
-        const auto faces = map_of(body->value, TopAbs_FACE);
+        const auto& faces = faces_of(body);
         for (int index = 1; index <= faces.Extent(); ++index) {
             const auto face = TopoDS::Face(faces(index));
             TopLoc_Location location;
             const auto mesh = BRep_Tool::Triangulation(face, location);
             if (mesh.IsNull()) {
                 throw std::runtime_error("Uma face não possui triangulação.");
+            }
+            std::vector<gp_Pnt> fan;
+            if (append_apex_fan(face, mesh, location, fan)) {
+                for (const auto& point : fan) {
+                    positions.insert(positions.end(), {point.X(), point.Y(), point.Z()});
+                }
+                faces_of_triangles.insert(faces_of_triangles.end(), fan.size() / 3, index - 1);
+                continue;
             }
             for (int i = 1; i <= mesh->NbTriangles(); ++i) {
                 if (positions.size() / 9 >= max_triangles) {
@@ -846,7 +1075,7 @@ Shape* nator_extrude(const Shape* face, const double* direction) noexcept {
 // altera o sólido de origem e continua pertencendo exclusivamente a esta chamada.
 Shape* nator_extrude_face(const Shape* body, std::size_t index, double from, double to) noexcept {
     return build([&](Shape& shape) {
-        const auto faces = map_of(body->value, TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (index >= static_cast<std::size_t>(faces.Extent()) || !std::isfinite(from) ||
             !std::isfinite(to) || std::abs(to - from) < 1e-7) {
             throw std::runtime_error("Face ou limites de extrusão inválidos.");
@@ -864,7 +1093,7 @@ Shape* nator_extrude_face(const Shape* body, std::size_t index, double from, dou
         Shape profile;
         profile.value = moved.Shape();
         const auto edges = map_of(face, TopAbs_EDGE);
-        const auto source_edges = map_of(body->value, TopAbs_EDGE);
+        const auto& source_edges = edges_of(body);
         std::vector<int> source_indices;
         for (int i = 1; i <= edges.Extent(); ++i) {
             profile.profile_edges.push_back(TopoDS::Edge(moved.ModifiedShape(edges(i))));
@@ -911,13 +1140,13 @@ Shape* nator_revolve(const Shape* face, const double* origin, const double* dire
 
 std::size_t nator_face_count(const Shape* body) noexcept {
     std::size_t count = 0;
-    guarded([&] { count = static_cast<std::size_t>(map_of(body->value, TopAbs_FACE).Extent()); });
+    guarded([&] { count = static_cast<std::size_t>(faces_of(body).Extent()); });
     return count;
 }
 
 std::size_t nator_edge_count(const Shape* body) noexcept {
     std::size_t count = 0;
-    guarded([&] { count = static_cast<std::size_t>(map_of(body->value, TopAbs_EDGE).Extent()); });
+    guarded([&] { count = static_cast<std::size_t>(edges_of(body).Extent()); });
     return count;
 }
 
@@ -925,10 +1154,14 @@ std::size_t nator_edge_count(const Shape* body) noexcept {
 // superfície fechada repete a mesma face; aresta livre usa -1 no segundo índice.
 bool nator_edge_faces(const Shape* body, std::int32_t* output, std::size_t length) noexcept {
     return guarded([&] {
-        const auto edges = map_of(body->value, TopAbs_EDGE);
-        const auto faces = map_of(body->value, TopAbs_FACE);
+        const auto& edges = edges_of(body);
+        const auto& faces = faces_of(body);
         if (length != static_cast<std::size_t>(edges.Extent()) * 2) {
             throw std::runtime_error("Destino da adjacência de arestas inválido.");
+        }
+        if (body->edge_faces.size() == length) {
+            std::copy(body->edge_faces.begin(), body->edge_faces.end(), output);
+            return;
         }
         TopTools_IndexedDataMapOfShapeListOfShape ancestors;
         TopExp::MapShapesAndAncestors(body->value, TopAbs_EDGE, TopAbs_FACE, ancestors);
@@ -962,6 +1195,7 @@ bool nator_edge_faces(const Shape* body, std::int32_t* output, std::size_t lengt
             output[slot] = first;
             output[slot + 1] = second;
         }
+        body->edge_faces.assign(output, output + length);
     });
 }
 
@@ -1025,6 +1259,8 @@ Shape* nator_brep_read(const char* data, std::size_t size) noexcept {
 #include "support_holes.hpp"
 
 #include "opposite_face.hpp"
+#include "contacts.hpp"
+#include "rim.hpp"
 
 #include "transitions.hpp"
 

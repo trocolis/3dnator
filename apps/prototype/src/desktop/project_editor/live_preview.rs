@@ -6,7 +6,7 @@ use super::*;
 use nator_commands::CommandError;
 
 /// Cor do resultado em pré-visualização.
-const PREVIEW_COLOR: [u8; 3] = [86, 156, 224];
+pub(super) const PREVIEW_COLOR: [u8; 3] = [86, 156, 224];
 /// Pausa após a última alteração antes de calcular, para não reconstruir a cada tecla.
 const DEBOUNCE: Duration = Duration::from_millis(220);
 
@@ -30,6 +30,8 @@ struct Computed {
     key: String,
     guide: Option<nator_commands::extrusion::Guide>,
     choice: Option<nator_document::features::Combine>,
+    /// Malha local da célula de face escolhida como perfil, com a pose do corpo.
+    area: Option<(Mesh, BodyId)>,
     result: Result<Option<(PreparedCommand, Scene)>, CommandError>,
 }
 
@@ -280,6 +282,21 @@ impl Editor {
                 let guide = extrusion.as_ref().and_then(|(part, operation)| {
                     nator_commands::extrusion::guide(&document, *part, operation).ok()
                 });
+                let area = extrusion
+                    .as_ref()
+                    .and_then(|(_, operation)| match operation {
+                        nator_document::features::Operation::ExtrudeFace {
+                            base,
+                            face,
+                            boundaries,
+                            ..
+                        } if !boundaries.is_empty() => {
+                            nator_commands::painting::cell_mesh(&document, *base, face, boundaries)
+                                .ok()
+                                .map(|mesh| (mesh, *base))
+                        }
+                        _ => None,
+                    });
                 let original = document.clone();
                 let mut choice = None;
                 let result =
@@ -289,7 +306,12 @@ impl Editor {
                             Effect::Imported { body, .. } => Some(body),
                             _ => None,
                         });
-                        let removal = if let Some((part, _)) = &extrusion {
+                        let failure = |e: nator_document::DocumentError| CommandError {
+                            message: e.to_string(),
+                            failure: None,
+                        };
+                        let mut volume = None;
+                        if let Some((part, _)) = &extrusion {
                             let operation = highlight.and_then(|id| {
                                 display
                                     .part(*part)?
@@ -299,24 +321,38 @@ impl Editor {
                                     .map(|f| &f.operation)
                             });
                             choice = operation.and_then(nator_commands::extrusion::combination);
-                            operation
-                                .map(|operation| {
+                            if let Some(operation) = operation {
+                                volume =
                                     nator_commands::extrusion::removed(&original, *part, operation)
-                                })
-                                .transpose()
-                                .map_err(|e| CommandError {
-                                    message: e.to_string(),
-                                    failure: None,
-                                })?
-                                .flatten()
-                                .map(|mesh| (*part, mesh))
-                        } else {
-                            None
-                        };
+                                        .map_err(failure)?
+                                        .map(|mesh| (PreviewVolume::Removed, *part, mesh));
+                                if volume.is_none() {
+                                    // O destaque é só apresentação: sem ele, a prévia ainda vale.
+                                    volume = nator_commands::extrusion::added(
+                                        &original, *part, operation,
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|mesh| (PreviewVolume::Added, *part, mesh));
+                                }
+                            }
+                        }
                         if let Some((part, output)) = rollback {
                             roll_back_after(&mut display, part, output);
                         }
-                        if let Some(id) = highlight.filter(|_| removal.is_none()) {
+                        // O material novo aparece sobre o corpo original, sem disputar
+                        // a mesma superfície com o resultado da união.
+                        if let (Some((PreviewVolume::Added, part, _)), Some(id)) =
+                            (&volume, highlight)
+                        {
+                            roll_back(&mut display, *part, id, true);
+                        }
+                        // Pintar o resultado de uma união ou corte realçaria o corpo
+                        // inteiro, não o efeito da extrusão.
+                        let combined = choice.is_some_and(|c| {
+                            c.mode != nator_document::features::BooleanMode::Intersect
+                        });
+                        if let Some(id) = highlight.filter(|_| volume.is_none() && !combined) {
                             // A cor de ocorrência prevalece sobre a do corpo: retirá-la na cópia
                             // exibida deixa a tinta da prévia visível também em componentes
                             // importados com cor própria.
@@ -340,7 +376,7 @@ impl Editor {
                                 body.color = Some(nator_geometry::RgbColor::new(PREVIEW_COLOR));
                             }
                         }
-                        let scene = prepare_scene_with_removal(&display, &view, active, removal)
+                        let scene = prepare_scene_with_removal(&display, &view, active, volume)
                             .map_err(|message| CommandError {
                                 message,
                                 failure: None,
@@ -353,6 +389,7 @@ impl Editor {
                     key,
                     guide,
                     choice,
+                    area,
                     result,
                 });
                 context.request_repaint();
@@ -376,7 +413,16 @@ impl Editor {
             .as_mut()
             .filter(|d| d.tab() == computed.tab)
         {
-            draft.receive_extrusion(computed.guide, computed.choice);
+            let tab = self.tabs.iter().find(|t| t.id == computed.tab);
+            let area = tab
+                .zip(computed.area.as_ref())
+                .and_then(|(tab, (mesh, body))| {
+                    let placement = sketch_scene::part_placement(tab, draft.part()).ok()?;
+                    let body = tab.session.document().body(*body)?;
+                    let pose = placement.compose(body.placement).unwrap_or(placement);
+                    cell_hover::area_overlay(mesh, pose)
+                });
+            draft.receive_extrusion(computed.guide, computed.choice, area);
         }
         match computed.result {
             Ok(None) => {

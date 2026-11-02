@@ -141,8 +141,17 @@ pub fn format_fixed(value: f64, decimals: usize) -> String {
     text.replace('.', ",")
 }
 pub fn format_mm(value: f64) -> String {
-    let text = format!("{:.3}", (value * 1000.).round() / 1000.);
-    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format_trimmed(value, 3)
+}
+/// Número com vírgula e até `decimals` casas, sem zeros à direita.
+pub fn format_trimmed(value: f64, decimals: usize) -> String {
+    let scale = 10_f64.powi(decimals as i32);
+    let text = format!("{:.decimals$}", (value * scale).round() / scale);
+    let text = if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        &text
+    };
     let text = if text == "-0" { "0" } else { text };
     text.replace('.', ",")
 }
@@ -1137,6 +1146,8 @@ mod tests {
         assert_eq!(format_mm(12.5), "12,5");
         assert_eq!(format_mm(0.1234), "0,123");
         assert_eq!(format_mm(-0.0001), "0");
+        assert_eq!(format_trimmed(100., 0), "100");
+        assert_eq!(format_trimmed(0.0015, 6), "0,0015");
     }
 
     #[test]

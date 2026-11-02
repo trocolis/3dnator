@@ -293,3 +293,73 @@ fn a_child_kernel_failure_rolls_back_the_entire_mirror() -> Result<()> {
     );
     Ok(())
 }
+
+/// Modelo importado só como referência: fica marcado, recusa qualquer edição por dentro,
+/// mas se move como componente; "Criar peça" tira a marca e libera a edição.
+#[test]
+fn reference_imports_move_but_cannot_be_edited_until_they_become_parts() -> Result<()> {
+    use nator_commands::Effect;
+    let mut session = Session::new(Document::new("Referências")?)?;
+    let Effect::Imported { part, body } =
+        session.execute(Command::ImportAsReference(Box::new(Command::ImportMesh {
+            destination: None,
+            name: "Gabinete".into(),
+            geometry: Arc::new(MeshAsset::new(reference_bracket()?)),
+        })))?
+    else {
+        return Err("Importação sem efeito".into());
+    };
+    let doc = session.document();
+    assert!(doc.part(part).ok_or("Peça")?.reference);
+    let instance = doc
+        .instances()
+        .iter()
+        .find(|i| i.part == part)
+        .ok_or("Ocorrência")?
+        .id;
+    assert!(doc.shows_instance(doc.instance(instance).ok_or("Ocorrência")?));
+    // Por dentro, nada muda: corpo, rascunho ou cor.
+    let refused = [
+        Command::RenameBody {
+            id: body,
+            name: "Outro".into(),
+        },
+        Command::AddSketch {
+            destination: Some(part),
+            sketch: nator_sketch::Sketch::new("Novo", nator_sketch::Plane::xy()),
+        },
+    ];
+    for command in refused {
+        assert!(session.execute(command).is_err());
+    }
+    // Como componente, move e renomeia.
+    session.execute(Command::MoveInstance {
+        id: instance,
+        placement: Placement::new([30., 0., 0.], [0.; 3])?,
+    })?;
+    session.execute(Command::RenamePart {
+        id: part,
+        name: "Gabinete de referência".into(),
+    })?;
+    // A pasta Referências tem visibilidade própria, separada da pasta Peças.
+    session.execute(Command::SetFolderVisibility {
+        folder: nator_document::Folder::Parts,
+        visible: false,
+    })?;
+    let doc = session.document();
+    assert!(doc.shows_instance(doc.instance(instance).ok_or("Ocorrência")?));
+    session.execute(Command::SetPartReference {
+        part,
+        reference: false,
+    })?;
+    session.execute(Command::RenameBody {
+        id: body,
+        name: "Agora editável".into(),
+    })?;
+    assert!(!session.document().part(part).ok_or("Peça")?.reference);
+    // Desfazer devolve a marca.
+    assert!(session.undo());
+    assert!(session.undo());
+    assert!(session.document().part(part).ok_or("Peça")?.reference);
+    Ok(())
+}

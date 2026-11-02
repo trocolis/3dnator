@@ -96,19 +96,22 @@ impl Editor {
             && self.insert_part.is_none()
             && self.mesh_import.is_none()
             && self.parameters_edit.is_none()
+            && self.print_profile_edit.is_none()
+            && self.print_check.is_none()
+            && self.calibration.is_none()
             && self.drawing_edit.is_none()
             && self.export_edit.is_none()
             && !self.shell.measure_open
-            && !self.move_freely
             && self
                 .current()
                 .sketch_edit
                 .as_ref()
-                .is_none_or(|work| work.is_selecting())
+                .is_none_or(|work| work.is_selecting() && work.armed().is_none())
     }
 
     pub(super) fn activate_selection(&mut self, context: &egui::Context) {
         self.image_edit = None;
+        self.sketch_text = None;
         self.cancel_plane_pick();
         self.close_offset_plane();
         self.cancel_feature_tool();
@@ -118,12 +121,15 @@ impl Editor {
         self.insert_part = None;
         self.mesh_import = None;
         self.parameters_edit = None;
+        self.print_profile_edit = None;
+        self.close_print_check();
+        self.calibration = None;
         self.drawing_edit = None;
         self.export_edit = None;
         self.shell.measure_open = false;
+        self.measure_tool.clear();
+        self.shell.camera_mode = None;
         self.paint_edit = None;
-        self.move_freely = false;
-        self.alignment = None;
         self.gestures = SelectionGestures::default();
         if let Some(work) = self.current_mut().sketch_edit.as_mut() {
             work.activate_selection(context);
@@ -134,6 +140,23 @@ impl Editor {
         context.request_repaint();
     }
 
+    /// Esc anda um nível por vez: primeiro desativa a ferramenta, conservando o modo de
+    /// navegação; sem ferramenta ativa, Medir, Arrastar e Rotacionar voltam a Selecionar.
+    pub(super) fn escape_to_selection(&mut self, context: &egui::Context) {
+        // No Medir, Esc primeiro apaga a medição; sem alvos, sai da ferramenta.
+        if self.shell.measure_open && !self.measure_tool.is_empty() {
+            self.measure_tool.clear();
+            context.request_repaint();
+            return;
+        }
+        let camera = self.shell.camera_mode;
+        let tool_active = !self.selection_active() && !self.shell.measure_open;
+        self.activate_selection(context);
+        if tool_active {
+            self.shell.camera_mode = camera;
+        }
+    }
+
     /// Gestos disponíveis fora de rascunhos, seletores de plano, campos de painel e do
     /// arraste livre de posicionamento.
     fn gestures_enabled(&self) -> bool {
@@ -142,7 +165,6 @@ impl Editor {
         }
         self.current().sketch_edit.is_none()
             && self.current().plane_pick.is_none()
-            && !self.move_freely
             && self
                 .feature_edit
                 .as_ref()
@@ -167,6 +189,7 @@ impl Editor {
         // Pressão longa sem movimento: lista de sobrepostos.
         let (down, pointer) = ui.input(|i| (i.pointer.primary_down(), i.pointer.interact_pos()));
         if ui.input(|i| i.pointer.primary_pressed())
+            && response.contains_pointer()
             && let Some(origin) = pointer.filter(|p| response.rect.contains(*p) && !on_cube(*p))
         {
             self.gestures.press = Some(Press {
@@ -233,7 +256,7 @@ impl Editor {
                     rect,
                     0,
                     egui::Color32::from_rgba_unmultiplied(35, 112, 180, 28),
-                    egui::Stroke::new(1.2, theme::ACCENT),
+                    egui::Stroke::new(1.2, theme::accent()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -413,7 +436,7 @@ impl Editor {
                         egui::RichText::new(text(T::SelectOtherTitle))
                             .small()
                             .strong()
-                            .color(theme::MUTED),
+                            .color(theme::muted()),
                     );
                     for (index, entry) in entries.iter().enumerate() {
                         let response = ui.selectable_label(false, entry);

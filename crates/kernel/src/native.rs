@@ -11,7 +11,7 @@ use crate::{
     naming::{self, Inheritance, Origin},
 };
 use nator_geometry::{Mesh, Placement, Point3};
-use nator_sketch::{Sketch, profiles::Region};
+use nator_sketch::{Point2, Sketch, distance, profiles::Region};
 use std::{
     ffi::{CStr, CString, c_char, c_void},
     marker::PhantomData,
@@ -20,6 +20,8 @@ use std::{
     rc::Rc,
 };
 mod annotation;
+mod contacts;
+pub mod fastening;
 mod labels;
 mod projection;
 mod section;
@@ -29,6 +31,10 @@ mod surface_appearance;
 mod transitions;
 pub use projection::projected_edges;
 pub use step::{StepAssembly, StepBody, StepOccurrence, StepPart};
+
+/// Folga máxima emendada num contorno: cada ponta pode distar 1e-6 mm do nó fundido nas
+/// áreas do rascunho, logo duas pontas do mesmo nó distam até o dobro.
+const PROFILE_JOINT: f64 = 2e-6;
 
 // O intercâmbio STEP usa configurações globais do OCCT (Interface_Static e XCAF).
 // Serializar leitores/escritores evita que transferências de projetos em threads
@@ -60,6 +66,7 @@ unsafe extern "C" {
     fn nator_boolean(a: *const c_void, b: *const c_void, mode: i32) -> *mut c_void;
     fn nator_transform(body: *const c_void, matrix: *const f64) -> *mut c_void;
     fn nator_opposite_face(body: *const c_void, index: usize, output: *mut usize) -> bool;
+    fn nator_merge_faces(body: *const c_void, faces: *const usize, count: usize) -> *mut c_void;
     fn nator_shell(
         body: *const c_void,
         faces: *const usize,
@@ -112,6 +119,8 @@ unsafe extern "C" {
         distance: *mut f64,
     ) -> bool;
     fn nator_edge_measure(body: *const c_void, index: usize, output: *mut f64) -> bool;
+    fn nator_edge_geometry(body: *const c_void, index: usize, output: *mut f64) -> bool;
+    fn nator_edge_point(body: *const c_void, index: usize, t: f64, output: *mut f64) -> bool;
     fn nator_distance(a: *const c_void, b: *const c_void, output: *mut f64) -> bool;
     fn nator_half_space(body: *const c_void, origin: *const f64, normal: *const f64)
     -> *mut c_void;
@@ -464,33 +473,188 @@ impl Solid {
             v: axis,
         };
         let points = hole::profile(geometry)?;
-        let mut sketch = Sketch::new("Furo", plane);
-        let ids = points
-            .iter()
-            .map(|(p, _)| sketch.add_point(*p))
+        // Sem componente lateral a gota não muda nada: em furo vertical não há balanço.
+        let up = geometry.teardrop.and_then(|up| {
+            let up = unit(up, "A direção da gota").ok()?;
+            let along = nator_geometry::dot(up, axis);
+            unit(
+                std::array::from_fn(|i| up[i] - axis[i] * along),
+                "A direção da gota",
+            )
+            .ok()
+        });
+        let mut tool = match up {
+            Some(up) => Self::teardrop_tool(center, axis, up, geometry, owner, index)?,
+            None => {
+                let mut sketch = Sketch::new("Furo", plane);
+                let ids = points
+                    .iter()
+                    .map(|(p, _)| sketch.add_point(*p))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sketch_error)?;
+                let mut roles = std::collections::HashMap::new();
+                for i in 0..ids.len() {
+                    let line = sketch
+                        .add_curve(
+                            Curve::Line {
+                                start: ids[i],
+                                end: ids[(i + 1) % ids.len()],
+                            },
+                            false,
+                        )
+                        .map_err(sketch_error)?;
+                    roles.insert(format!("{owner}:e{line}"), points[i].1);
+                }
+                let region = nator_sketch::profiles::regions(&sketch)
+                    .map_err(sketch_error)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| KernelError("Perfil de furo sem região.".into()))?;
+                let mut tool =
+                    Self::revolve(&sketch, &region, center, axis, std::f64::consts::TAU, owner)?;
+                tool.map_face_names(|name| match roles.get(name) {
+                    Some(role) => format!("{owner}:hole{index}:{role}"),
+                    None => name.to_owned(),
+                });
+                tool
+            }
+        };
+        if let hole::HoleHead::Nut {
+            across_flats,
+            depth,
+        } = geometry.head
+        {
+            let pocket = Self::nut_pocket(center, axis, radial, across_flats, depth, owner, index)?;
+            tool = tool.boolean(&pocket, 0, owner)?;
+        }
+        Ok(tool)
+    }
+
+    /// Prisma sextavado do alojamento da porca, a partir da mesma folga do furo.
+    fn nut_pocket(
+        center: Point3,
+        axis: Point3,
+        radial: Point3,
+        across_flats: f64,
+        depth: f64,
+        owner: &str,
+        index: usize,
+    ) -> Result<Self, KernelError> {
+        use nator_sketch::{Curve, Plane};
+        let v = nator_geometry::cross(radial, axis);
+        let plane = Plane {
+            origin: center,
+            u: radial,
+            v,
+        };
+        let circumradius = across_flats / 3_f64.sqrt();
+        let mut sketch = Sketch::new("Porca", plane);
+        let ids = (0..6)
+            .map(|i| {
+                let angle = std::f64::consts::FRAC_PI_3 * f64::from(i);
+                sketch.add_point([circumradius * angle.cos(), circumradius * angle.sin()])
+            })
             .collect::<Result<Vec<_>, _>>()
             .map_err(sketch_error)?;
-        let mut roles = std::collections::HashMap::new();
-        for i in 0..ids.len() {
-            let line = sketch
+        for i in 0..6 {
+            sketch
                 .add_curve(
                     Curve::Line {
                         start: ids[i],
-                        end: ids[(i + 1) % ids.len()],
+                        end: ids[(i + 1) % 6],
                     },
                     false,
                 )
                 .map_err(sketch_error)?;
-            roles.insert(format!("{owner}:e{line}"), points[i].1);
         }
         let region = nator_sketch::profiles::regions(&sketch)
             .map_err(sketch_error)?
             .into_iter()
             .next()
-            .ok_or_else(|| KernelError("Perfil de furo sem região.".into()))?;
-        let mut tool = Self::revolve(&sketch, &region, center, axis, std::f64::consts::TAU, owner)?;
-        tool.map_face_names(|name| match roles.get(name) {
-            Some(role) => format!("{owner}:hole{index}:{role}"),
+            .ok_or_else(|| KernelError("Alojamento da porca sem região.".into()))?;
+        // A normal do plano é o eixo com sinal definido pela base U, V escolhida acima.
+        let sign = nator_geometry::dot(plane.normal(), axis).signum();
+        let (from, to) = (sign * -hole::CLEARANCE_MM, sign * depth);
+        let mut pocket = Self::extrude(&sketch, &region, from.min(to), from.max(to), owner)?;
+        pocket.map_face_names(|name| match name.rsplit_once(':') {
+            Some((_, role)) => format!("{owner}:hole{index}:nut_{role}"),
+            None => name.to_owned(),
+        });
+        Ok(pocket)
+    }
+
+    /// Seção em gota: arco de 270° e duas retas a 45° até a ponta, feita de uma vez. Unir um
+    /// triângulo ao cilindro deixaria faces tangentes, instáveis nas operações booleanas.
+    fn teardrop_tool(
+        center: Point3,
+        axis: Point3,
+        up: Point3,
+        geometry: &HoleGeometry,
+        owner: &str,
+        index: usize,
+    ) -> Result<Self, KernelError> {
+        use nator_sketch::{Curve, Plane};
+        if geometry.tip_angle.is_some() {
+            return Err(KernelError("O furo em gota exige fundo plano.".into()));
+        }
+        let radius = geometry.diameter / 2.;
+        let side = radius * std::f64::consts::FRAC_1_SQRT_2;
+        let plane = Plane {
+            origin: center,
+            u: nator_geometry::cross(up, axis),
+            v: up,
+        };
+        let mut sketch = Sketch::new("Gota", plane);
+        let hub = sketch.add_point([0., 0.]).map_err(sketch_error)?;
+        let left = sketch.add_point([-side, side]).map_err(sketch_error)?;
+        let right = sketch.add_point([side, side]).map_err(sketch_error)?;
+        let peak = sketch
+            .add_point([0., radius * std::f64::consts::SQRT_2])
+            .map_err(sketch_error)?;
+        let bottom = sketch
+            .add_curve(
+                Curve::Arc {
+                    center: hub,
+                    start: left,
+                    end: right,
+                    clockwise: false,
+                },
+                false,
+            )
+            .map_err(sketch_error)?;
+        let rising = sketch
+            .add_curve(
+                Curve::Line {
+                    start: right,
+                    end: peak,
+                },
+                false,
+            )
+            .map_err(sketch_error)?;
+        let falling = sketch
+            .add_curve(
+                Curve::Line {
+                    start: peak,
+                    end: left,
+                },
+                false,
+            )
+            .map_err(sketch_error)?;
+        let region = nator_sketch::profiles::regions(&sketch)
+            .map_err(sketch_error)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| KernelError("Seção em gota sem região.".into()))?;
+        let mut tool = Self::extrude(&sketch, &region, -hole::CLEARANCE_MM, geometry.depth, owner)?;
+        let roles = [
+            (format!("{owner}:e{bottom}"), "wall"),
+            (format!("{owner}:e{rising}"), "tear_right"),
+            (format!("{owner}:e{falling}"), "tear_left"),
+            (format!("{owner}:start"), "top"),
+            (format!("{owner}:end"), "bottom"),
+        ];
+        tool.map_face_names(|name| match roles.iter().find(|(n, _)| n == name) {
+            Some((_, role)) => format!("{owner}:hole{index}:{role}"),
             None => name.to_owned(),
         });
         Ok(tool)
@@ -532,6 +696,34 @@ impl Solid {
 
     /// Casca com faces removidas e paredes de `thickness` mm, para dentro ou
     /// para fora. Faces deslocadas recebem o sufixo `:inner` ou `:outer`.
+    /// Une faces coplanares vizinhas numa só, retirando a linha entre elas. Volume e
+    /// demais faces não mudam; sem aresta comum entre as escolhidas, nada há para unir.
+    pub fn merge_faces(&self, faces: &[usize], owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        if faces.len() < 2 || faces.len() > 1000 {
+            return Err(KernelError("Escolha pelo menos duas faces.".into()));
+        }
+        let count = self.face_count()?;
+        // SAFETY: lista de índices viva durante a chamada; a ponte valida cada índice.
+        let merged = Self::from_pointer(unsafe {
+            nator_merge_faces(self.pointer.as_ptr(), faces.as_ptr(), faces.len())
+        })?
+        .with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner,
+                generated: "merged",
+                modified_suffix: None,
+            },
+        )?;
+        if merged.face_count()? >= count {
+            return Err(KernelError(
+                "As faces escolhidas não têm uma linha em comum no mesmo plano.".into(),
+            ));
+        }
+        Ok(merged)
+    }
+
     pub fn shell(
         &self,
         faces: &[usize],
@@ -643,6 +835,29 @@ impl Solid {
         solid.faces = naming::sweep_names(owner, &solid.origins()?, &profile.entities);
         solid.volume()?;
         Ok(solid)
+    }
+
+    /// Prisma de um contorno de retas no plano, entre `from` e `to` mm ao longo da normal. As
+    /// faces laterais usam as entidades `first_entity..`, para vários contornos não repetirem nomes.
+    pub fn contour_prism(
+        plane: nator_sketch::Plane,
+        contour: &[Point2],
+        first_entity: u64,
+        from: f64,
+        to: f64,
+        owner: &str,
+    ) -> Result<Self, KernelError> {
+        use nator_sketch::profiles::{Region, Segment, Wire};
+        let sides = contour.iter().zip(contour.iter().cycle().skip(1));
+        let segments = sides
+            .map(|(a, b)| Segment::Line { a: *a, b: *b })
+            .collect::<Vec<_>>();
+        let entities = (first_entity..).take(segments.len()).collect();
+        let region = Region {
+            outer: Wire { segments, entities },
+            holes: Vec::new(),
+        };
+        Self::extrude(&Sketch::new("Contorno", plane), &region, from, to, owner)
     }
 
     /// Volume comum, incluindo zero para sólidos disjuntos. Não modifica as entradas.
@@ -772,16 +987,31 @@ impl Solid {
                     *segment = segment.reversed();
                 }
             }
-            for (segment, entity) in segments {
+            // As áreas fundem nós a 1e-6 mm, mas o OCCT só conecta arestas a 1e-7 mm. Cada
+            // segmento termina no início do seguinte, para que a folga residual do solver
+            // entre pontos sem ligação não impeça o contorno; folga real falha na ponte.
+            let starts = segments
+                .iter()
+                .map(|(segment, _)| segment.sample(4)[0])
+                .collect::<Vec<_>>();
+            for (index, (segment, entity)) in segments.into_iter().enumerate() {
+                let next = starts[(index + 1) % starts.len()];
+                let joined = |end: Point2| {
+                    if distance(end, next) < PROFILE_JOINT {
+                        next
+                    } else {
+                        end
+                    }
+                };
                 let (kind, a, b, c, r) = match segment {
-                    Segment::Line { a, b } => (0., world(a), world(b), [0.; 3], 0.),
+                    Segment::Line { a, b } => (0., world(a), world(joined(b)), [0.; 3], 0.),
                     Segment::Arc { .. } => {
                         let points = segment.sample(4);
                         (
                             1.,
                             world(points[0]),
                             world(points[points.len() / 2]),
-                            world(points[points.len() - 1]),
+                            world(joined(points[points.len() - 1])),
                             0.,
                         )
                     }
@@ -938,6 +1168,47 @@ impl Solid {
             length: out[0],
             straight: out[1] == 0.,
             radius: (out[1] == 1.).then_some(out[2]),
+        })
+    }
+
+    /// Geometria exata da aresta, em mm. Curvas livres chegam como polilinha fina.
+    pub fn edge_geometry(&self, index: usize) -> Result<crate::EdgeGeometry, KernelError> {
+        let mut out = [0.; 15];
+        // SAFETY: destino de quinze doubles; a ponte valida o índice.
+        if !unsafe { nator_edge_geometry(self.pointer.as_ptr(), index, out.as_mut_ptr()) } {
+            return Err(last_error());
+        }
+        let point = |at: usize| [out[at], out[at + 1], out[at + 2]];
+        Ok(if out[0] == 0. {
+            crate::EdgeGeometry::Line(point(1), point(4))
+        } else if out[0] == 1. {
+            crate::EdgeGeometry::Circle {
+                center: point(10),
+                radius: out[13],
+                start: point(1),
+                middle: point(7),
+                end: point(4),
+                closed: out[14] != 0.,
+            }
+        } else {
+            const STEPS: usize = 256;
+            let mut points = Vec::with_capacity(STEPS + 1);
+            for step in 0..=STEPS {
+                let mut p = [0.; 3];
+                // SAFETY: destino de três doubles; a ponte valida o índice.
+                if !unsafe {
+                    nator_edge_point(
+                        self.pointer.as_ptr(),
+                        index,
+                        step as f64 / STEPS as f64,
+                        p.as_mut_ptr(),
+                    )
+                } {
+                    return Err(last_error());
+                }
+                points.push(p);
+            }
+            crate::EdgeGeometry::Curve(points)
         })
     }
 

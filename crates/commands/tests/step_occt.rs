@@ -32,7 +32,7 @@ fn external_step_preserves_all_solids_after_import_save_and_reopen() -> Result<(
         .parts
         .iter()
         .flat_map(|p| &p.bodies)
-        .map(|b| b.solid.volume())
+        .map(|b| (!b.surface).then(|| b.solid.volume()).transpose())
         .collect::<std::result::Result<Vec<_>, _>>()?;
     drop(raw);
     let mut session = import(&path)?;
@@ -46,6 +46,11 @@ fn external_step_preserves_all_solids_after_import_save_and_reopen() -> Result<(
         .collect::<Vec<_>>();
     assert_eq!(bodies.len(), expected_bodies);
     for (body, expected_volume) in bodies.iter().zip(expected_volumes) {
+        // Superfícies abertas entram como malha, sem volume nem faces de origem.
+        let Some(expected_volume) = expected_volume else {
+            assert!(body.brep.is_none());
+            continue;
+        };
         assert!(body.brep.is_some());
         let measured = measure::body_properties(document, body.id)?;
         assert!(measured.exact);
@@ -119,6 +124,7 @@ fn fixture() -> Result<StepAssembly> {
                     solid: Solid::cuboid([0.; 3], [10., 20., 30.])?,
                     color: Some(BLUE),
                     face_colors: Vec::new(),
+                    surface: false,
                 }],
             },
         ],
@@ -298,6 +304,171 @@ fn step_import_is_atomic_and_can_insert_an_independent_subassembly() -> Result<(
     assert!(session.redo());
     Ok(())
 }
+/// Quadrado plano de 10 mm como superfície aberta, na estrutura exportada pelo KiCad.
+/// Devolve as entidades e o identificador do modelo, a partir de `first`.
+fn open_surface(first: usize) -> (String, usize) {
+    let mut lines = vec![];
+    let mut next = first;
+    let mut add = |text: String| {
+        lines.push((next, text));
+        next += 1;
+        next - 1
+    };
+    let corners = [[0., 0.], [10., 0.], [10., 10.], [0., 10.]];
+    let vertices = corners.map(|[x, y]| {
+        let point = add(format!("CARTESIAN_POINT('',({x:.1},{y:.1},0.))"));
+        (add(format!("VERTEX_POINT('',#{point})")), point)
+    });
+    let mut oriented = vec![];
+    for side in 0..4 {
+        let (start, point) = vertices[side];
+        let end = vertices[(side + 1) % 4].0;
+        let [a, b] = [corners[side], corners[(side + 1) % 4]];
+        let direction = add(format!(
+            "DIRECTION('',({:.1},{:.1},0.))",
+            (b[0] - a[0]) / 10.,
+            (b[1] - a[1]) / 10.
+        ));
+        let vector = add(format!("VECTOR('',#{direction},1.)"));
+        let line = add(format!("LINE('',#{point},#{vector})"));
+        let edge = add(format!("EDGE_CURVE('',#{start},#{end},#{line},.T.)"));
+        oriented.push(format!(
+            "#{}",
+            add(format!("ORIENTED_EDGE('',*,*,#{edge},.T.)"))
+        ));
+    }
+    let list = oriented.join(",");
+    let edge_loop = add(format!("EDGE_LOOP('',({list}))"));
+    let bound = add(format!("FACE_BOUND('',#{edge_loop},.T.)"));
+    let origin = add("CARTESIAN_POINT('',(0.,0.,0.))".into());
+    let z = add("DIRECTION('',(0.,0.,1.))".into());
+    let x = add("DIRECTION('',(1.,0.,0.))".into());
+    let axis = add(format!("AXIS2_PLACEMENT_3D('',#{origin},#{z},#{x})"));
+    let plane = add(format!("PLANE('',#{axis})"));
+    let face = add(format!("ADVANCED_FACE('',(#{bound}),#{plane},.T.)"));
+    let shell = add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    let text = lines
+        .into_iter()
+        .map(|(id, line)| format!("#{id} = {line};\n"))
+        .collect();
+    (text, model)
+}
+
+/// Grava duas peças sólidas e troca a representação da primeira por superfícies, sem
+/// sólido, e acrescenta superfícies à segunda: os dois formatos que o KiCad gera.
+fn surface_step(path: &Path) -> Result<()> {
+    let part = |name: &str, solid| StepPart {
+        name: name.into(),
+        bodies: vec![StepBody {
+            name: name.into(),
+            solid,
+            color: None,
+            face_colors: Vec::new(),
+            surface: false,
+        }],
+    };
+    let root = |index, name: &str| -> Result<StepOccurrence> {
+        Ok(StepOccurrence {
+            part: index,
+            parent: None,
+            name: name.into(),
+            placement: Placement::default(),
+            color: None,
+        })
+    };
+    StepAssembly {
+        parts: vec![
+            part("Serigrafia", Solid::cuboid([0.; 3], [1., 1., 1.])?),
+            part("Placa", Solid::cuboid([0.; 3], [20., 20., 2.])?),
+        ],
+        instances: vec![root(0, "Serigrafia")?, root(1, "Placa")?],
+    }
+    .write(path)?;
+    let mut text = std::fs::read_to_string(path)?;
+    let mut items = vec![];
+    let mut from = 0;
+    const LIST: &str = "ADVANCED_BREP_SHAPE_REPRESENTATION('',(";
+    while let Some(found) = text[from..].find(LIST) {
+        items.push(from + found + LIST.len());
+        from += found + LIST.len();
+    }
+    assert_eq!(items.len(), 2, "Representações sólidas da montagem");
+    let (first, model) = open_surface(900_000);
+    let (second, mixed) = open_surface(900_100);
+    // De trás para frente: a primeira inserção não desloca a posição da outra.
+    text.insert_str(items[1], &format!("#{mixed},"));
+    let list = items[0]..text[items[0]..].find(')').ok_or("Lista")? + items[0];
+    let kept = text[list.clone()]
+        .split(',')
+        .next()
+        .ok_or("Item")?
+        .to_owned();
+    text.replace_range(list, &format!("{kept},#{model}"));
+    let end = text.rfind("ENDSEC;").ok_or("Fim dos dados")?;
+    text.insert_str(end, &format!("{first}{second}"));
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
+#[test]
+fn open_surfaces_enter_as_meshes_without_blocking_the_solids() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("kicad.step");
+    surface_step(&path)?;
+    let mut session = import(&path)?;
+    let bodies = |doc: &Document| -> Vec<(String, bool, f64)> {
+        doc.parts()
+            .iter()
+            .flat_map(|part| part.bodies.iter())
+            .map(|body| {
+                let size = body.geometry.mesh().bounds().size();
+                (body.name.clone(), body.brep.is_some(), size[0])
+            })
+            .collect()
+    };
+    let found = bodies(session.document());
+    // Peça só de superfícies, sólido da placa e superfície da peça mista.
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert_eq!(found.iter().filter(|(_, solid, _)| *solid).count(), 1);
+    assert!(found.iter().any(|(name, solid, size)| {
+        name == "Serigrafia" && !solid && (size - 10.).abs() < 1e-6
+    }));
+    assert!(
+        found
+            .iter()
+            .any(|(name, solid, size)| { name == "Placa" && !solid && (size - 10.).abs() < 1e-6 })
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(name, solid, size)| { name == "Placa" && *solid && (size - 20.).abs() < 1e-6 })
+    );
+
+    // O arquivo de origem não é mais necessário depois de salvar.
+    let project = temp.path().join("modulo.3dnator");
+    nator_project_io::write_project(&project, session.document())?;
+    std::fs::remove_file(&path)?;
+    let reopened = nator_project_io::read_project(&project)?;
+    assert_eq!(bodies(&reopened), found);
+
+    // A exportação STEP explica a malha visível e aceita o conjunto com ela oculta.
+    assert!(step_scene(session.document(), StepScope::Assembly).is_err());
+    let meshes = session
+        .document()
+        .parts()
+        .iter()
+        .flat_map(|part| part.bodies.iter())
+        .filter(|body| body.brep.is_none())
+        .map(|body| body.id)
+        .collect::<Vec<_>>();
+    for id in meshes {
+        session.execute(Command::SetBodyVisibility { id, visible: false })?;
+    }
+    assert!(step_scene(session.document(), StepScope::Assembly).is_ok());
+    Ok(())
+}
+
 #[test]
 fn step_export_rejects_visible_meshes_and_cycles_before_writing() -> Result<()> {
     let mut doc = Document::new("Malha")?;

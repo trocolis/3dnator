@@ -23,7 +23,6 @@ impl Input {
     pub fn begin(&mut self, value: f64, position: egui::Pos2) {
         *self = Self {
             active: true,
-            text: nator_drawing::format_mm(value),
             initial: value,
             position: Some(position),
             focus: true,
@@ -48,8 +47,12 @@ impl Input {
         value: f64,
         dragging: bool,
         label: T,
+        quantity: command_panel::Quantity,
         parse: impl Fn(&str) -> Option<f64>,
     ) -> Edit {
+        let settings = command_panel::settings(ui.ctx());
+        // Número sem unidade vale a unidade do documento; a medida segue em mm.
+        let parse = |input: &str| parse(&quantity.normalize(input, settings.unit));
         let down = ui.input(|i| i.pointer.primary_down());
         if !down {
             self.held = false;
@@ -63,14 +66,30 @@ impl Input {
         }
         if dragging && !self.typing {
             self.position = ui.input(|i| i.pointer.interact_pos()).or(self.position);
-            self.text = nator_drawing::format_mm(value);
+        }
+        if !self.typing {
+            self.text = quantity.compact(value, settings);
         }
         let at = self.position.unwrap_or(canvas.center()) + egui::vec2(18., 18.);
         let at = egui::pos2(
-            at.x.clamp(canvas.left(), (canvas.right() - 230.).max(canvas.left())),
-            at.y.clamp(canvas.top(), (canvas.bottom() - 64.).max(canvas.top())),
+            at.x.clamp(canvas.left(), (canvas.right() - 92.).max(canvas.left())),
+            at.y.clamp(canvas.top(), (canvas.bottom() - 34.).max(canvas.top())),
         );
         if dragging && !down {
+            self.focus = true;
+        }
+        // Campo sem foco: a primeira tecla o devolve e já entra no valor. O pedido vem
+        // antes do campo para este quadro entregar a ele o mesmo evento de texto.
+        let field = egui::Id::new(("arrow_value", id));
+        if ui.ctx().memory(|memory| memory.focused().is_none())
+            && ui.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::Text(text) if !text.is_empty()))
+            })
+        {
+            ui.ctx().memory_mut(|memory| memory.request_focus(field));
             self.focus = true;
         }
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -81,24 +100,23 @@ impl Input {
             .fixed_pos(at)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .stroke(egui::Stroke::new(
                         1.,
                         if self.invalid {
-                            theme::DANGER
+                            theme::danger()
                         } else {
-                            theme::ACCENT
+                            theme::accent()
                         },
                     ))
                     .corner_radius(4)
-                    .inner_margin(5)
+                    .inner_margin(3)
                     .show(ui, |ui| {
+                        // Só a caixa do valor: o que ela mede está na seta, e um valor
+                        // inválido aparece na borda vermelha e no aviso ao passar o mouse.
                         ui.horizontal(|ui| {
-                            ui.label(text(label));
-                            let field_id = egui::Id::new(("arrow_value", id));
                             if !self.typing
-                                && let Some(mut state) =
-                                    egui::TextEdit::load_state(ui.ctx(), field_id)
+                                && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field)
                             {
                                 state
                                     .cursor
@@ -106,14 +124,19 @@ impl Input {
                                         egui::text::CCursor::new(0),
                                         egui::text::CCursor::new(self.text.chars().count()),
                                     )));
-                                state.store(ui.ctx(), field_id);
+                                state.store(ui.ctx(), field);
                             }
                             let response = ui.add(
                                 egui::TextEdit::singleline(&mut self.text)
-                                    .id(egui::Id::new(("arrow_value", id)))
-                                    .desired_width(108.)
+                                    .id(field)
+                                    .desired_width(72.)
                                     .font(egui::TextStyle::Monospace),
                             );
+                            response.clone().on_hover_text(if self.invalid {
+                                text(T::ArrowInvalidValue)
+                            } else {
+                                text(label)
+                            });
                             rect = response.rect;
                             if response.changed() {
                                 self.typing = true;
@@ -134,15 +157,6 @@ impl Input {
                             }
                         });
                         self.invalid = parse(&self.text).is_none();
-                        if self.invalid {
-                            ui.colored_label(theme::DANGER, text(T::ArrowInvalidValue));
-                        } else {
-                            ui.label(
-                                egui::RichText::new(text(T::ArrowValueHint))
-                                    .small()
-                                    .color(theme::MUTED),
-                            );
-                        }
                     });
             });
         #[cfg(all(test, feature = "occt"))]

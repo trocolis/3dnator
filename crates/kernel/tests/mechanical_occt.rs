@@ -33,6 +33,7 @@ fn blind_hole_with_drill_point_removes_the_analytical_volume() -> Result<()> {
         depth: 10.,
         head: HoleHead::Simple,
         tip_angle: Some(118_f64.to_radians()),
+        teardrop: None,
     };
     let drilled = drill(&block()?, &geometry, [10., 10.])?;
     assert!((BLOCK - drilled.volume()? - removed_volume(&geometry)).abs() < 1e-4);
@@ -55,6 +56,7 @@ fn through_holes_with_counterbore_and_countersink() -> Result<()> {
             depth: 6.,
         },
         tip_angle: None,
+        teardrop: None,
     };
     // Faces planas da revolução (topo, piso do rebaixo, fundo) também recebem nome.
     let tool = Solid::hole_tool([10., 15., 20.], [0., 0., -1.], &counterbore, "b2", 0)?;
@@ -90,6 +92,7 @@ fn linear_pattern_of_hole_tools_keeps_each_copy_referenceable() -> Result<()> {
         depth: 30.,
         head: HoleHead::Simple,
         tip_angle: None,
+        teardrop: None,
     };
     let tool = Solid::hole_tool([8., 15., 20.], [0., 0., -1.], &geometry, "b2", 0)?;
     let placements = (0..3)

@@ -19,6 +19,7 @@ struct Pen<'a> {
     paper: egui::Color32,
     positive: egui::Color32,
     warning: egui::Color32,
+    construction: egui::Color32,
     reference: egui::Color32,
     danger: egui::Color32,
     dark: bool,
@@ -128,6 +129,21 @@ impl Pen<'_> {
     }
 
     fn dashed(&self, a: [f32; 2], b: [f32; 2], color: egui::Color32, width: f32) {
+        self.dashes(a, b, color, width, 2.4, 3.8);
+    }
+    /// Traços longos e vão curto: o padrão fica evidente mesmo no ícone de 16 pontos.
+    fn long_dashed(&self, a: [f32; 2], b: [f32; 2], color: egui::Color32, width: f32) {
+        self.dashes(a, b, color, width, 4.2, 6.6);
+    }
+    fn dashes(
+        &self,
+        a: [f32; 2],
+        b: [f32; 2],
+        color: egui::Color32,
+        width: f32,
+        dash: f32,
+        period: f32,
+    ) {
         let dx = b[0] - a[0];
         let dy = b[1] - a[1];
         let len = (dx * dx + dy * dy).sqrt();
@@ -137,7 +153,7 @@ impl Pen<'_> {
         let (ux, uy) = (dx / len, dy / len);
         let mut start = 0.;
         while start < len {
-            let end = (start + 2.4).min(len);
+            let end = (start + dash).min(len);
             self.painter.add(egui::Shape::line(
                 vec![
                     self.p(a[0] + ux * start, a[1] + uy * start),
@@ -145,7 +161,7 @@ impl Pen<'_> {
                 ],
                 egui::Stroke::new(self.px(width), color),
             ));
-            start += 3.8;
+            start += period;
         }
     }
 
@@ -305,6 +321,12 @@ pub(super) fn paint(
             | Icon::ConstraintEqual
             | Icon::ConstraintParallel
             | Icon::ConstraintPerpendicular
+            | Icon::ConstraintFix
+            | Icon::ConstraintConcentric
+            | Icon::ConstraintCollinear
+            | Icon::ConstraintSymmetry
+            | Icon::ConstraintPolygon
+            | Icon::ConstraintManager
     );
     let sketch = matches!(
         icon,
@@ -332,7 +354,6 @@ pub(super) fn paint(
             | Icon::Dimension
             | Icon::SnapMidpoint
             | Icon::SnapCenter
-            | Icon::LockClosed
             | Icon::LockOpen
     ) || constraint;
     let disabled = egui::Color32::from_gray(if dark { 112 } else { 165 });
@@ -342,12 +363,12 @@ pub(super) fn paint(
         if dark {
             egui::Color32::from_rgb(110, 204, 154)
         } else {
-            theme::GREEN
+            theme::green()
         }
     } else if dark {
         egui::Color32::from_rgb(124, 188, 248)
     } else {
-        theme::ACCENT
+        theme::accent()
     };
     let ink = if !enabled {
         disabled
@@ -385,8 +406,13 @@ pub(super) fn paint(
         if dark {
             egui::Color32::from_rgb(120, 210, 160)
         } else {
-            theme::GREEN
+            theme::green()
         }
+    } else {
+        disabled
+    };
+    let construction = if enabled {
+        theme::construction()
     } else {
         disabled
     };
@@ -394,7 +420,7 @@ pub(super) fn paint(
         if dark {
             egui::Color32::from_rgb(230, 180, 90)
         } else {
-            theme::WARNING
+            theme::warning()
         }
     } else {
         disabled
@@ -403,7 +429,7 @@ pub(super) fn paint(
         if dark {
             egui::Color32::from_rgb(178, 148, 232)
         } else {
-            theme::REFERENCE
+            theme::reference()
         }
     } else {
         disabled
@@ -412,7 +438,7 @@ pub(super) fn paint(
         if dark {
             egui::Color32::from_rgb(226, 122, 118)
         } else {
-            theme::DANGER
+            theme::danger()
         }
     } else {
         disabled
@@ -427,6 +453,7 @@ pub(super) fn paint(
         paper,
         positive,
         warning,
+        construction,
         reference,
         danger,
         dark,
@@ -549,25 +576,42 @@ fn draw(p: &Pen, icon: Icon) {
                 DETAIL,
             );
         }
-        Icon::Project => {
-            p.document();
+        Icon::PanCamera => {
+            // Mão aberta: quatro dedos e o polegar saem de uma palma única.
+            for (x, top) in [(6.5, 8.), (10., 4.5), (13.5, 4.), (17., 6.)] {
+                p.stroke(&[[x, 13.], [x, top]], p.ink);
+            }
+            p.stroke(&[[6.5, 15.], [3.5, 12.5]], p.ink);
             p.polygon(
-                &[[9.5, 12.5], [13., 11.], [16.5, 12.5], [13., 14.]],
+                &[
+                    [6.5, 12.],
+                    [17., 12.],
+                    [18.5, 15.],
+                    [16.5, 21.],
+                    [9., 21.],
+                    [6.5, 16.5],
+                ],
                 p.bright,
                 p.accent,
-                DETAIL,
-            );
-            p.detail(
-                &[[9.5, 12.5], [13., 14.], [13., 17.5], [9.5, 16.]],
-                p.accent,
-            );
-            p.detail(
-                &[[13., 14.], [16.5, 12.5], [16.5, 16.], [13., 17.5]],
-                p.accent,
+                MAIN,
             );
         }
-
-        // Modelagem.
+        Icon::OrbitCamera => {
+            // Órbita inclinada em volta do alvo, com o sentido marcado na ponta.
+            let points: Vec<[f32; 2]> = (0..=32)
+                .map(|index| {
+                    let angle = -0.5 + 5.2 * index as f32 / 32.;
+                    [12. + 9.5 * angle.cos(), 12. + 4.5 * angle.sin()]
+                })
+                .collect();
+            p.stroke(&points, p.ink);
+            if let [.., before, tip] = points.as_slice() {
+                p.head(*tip, [tip[0] - before[0], tip[1] - before[1]], p.accent);
+            }
+            p.disc(12., 12., 3.2, p.accent);
+        }
+        Icon::CollapseUp => p.stroke(&[[6., 15.], [12., 9.], [18., 15.]], p.ink),
+        Icon::ExpandDown => p.stroke(&[[6., 9.], [12., 15.], [18., 9.]], p.ink),
         Icon::Extrude => {
             p.cube();
             p.arrow([12., 12.], [12., 1.8], p.accent);
@@ -690,6 +734,184 @@ fn draw(p: &Pen, icon: Icon) {
                 MAIN,
             );
             p.fill(&[[11., 10.], [13., 10.], [13., 14.], [11., 14.]], p.accent);
+        }
+        Icon::Calibrate => {
+            // Paquímetro medindo uma peça.
+            p.stroke(&[[3., 6.], [21., 6.]], p.ink);
+            p.stroke(&[[5., 6.], [5., 13.]], p.ink);
+            p.stroke(&[[13., 6.], [13., 13.]], p.ink);
+            p.polygon(
+                &[[6., 15.], [12., 15.], [12., 21.], [6., 21.]],
+                p.surface,
+                p.accent,
+                MAIN,
+            );
+        }
+        Icon::PrintCheck => {
+            // Camadas depositadas, com a verificação concluída sobre elas.
+            p.stroke(&[[3., 21.], [21., 21.]], p.ink);
+            p.stroke(&[[3., 17.], [21., 17.]], p.ink);
+            p.stroke(&[[6., 13.], [18., 13.]], p.accent);
+            p.line(&[[7., 7.], [11., 10.5], [18., 3.]], p.positive, 2.4);
+        }
+        Icon::FitCheck => {
+            // Dois blocos encaixados, com a verificação concluída sobre eles.
+            p.polygon(
+                &[
+                    [3., 14.],
+                    [9., 14.],
+                    [9., 11.],
+                    [15., 11.],
+                    [15., 14.],
+                    [21., 14.],
+                    [21., 21.],
+                    [3., 21.],
+                ],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.polygon(
+                &[[10., 12.], [14., 12.], [14., 16.], [10., 16.]],
+                p.bright,
+                p.accent,
+                MAIN,
+            );
+            p.line(&[[9., 6.], [12., 9.], [18., 3.]], p.positive, 2.4);
+        }
+        Icon::ComponentCut => {
+            // Componente descendo para o recorte de mesma forma.
+            p.polygon(
+                &[
+                    [2., 11.],
+                    [7., 11.],
+                    [7., 20.],
+                    [17., 20.],
+                    [17., 11.],
+                    [22., 11.],
+                    [22., 22.],
+                    [2., 22.],
+                ],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.polygon(
+                &[[9., 3.], [15., 3.], [15., 10.], [9., 10.]],
+                p.bright,
+                p.accent,
+                MAIN,
+            );
+            p.stroke(&[[12., 12.], [12., 17.]], p.accent);
+            p.stroke(&[[10., 15.], [12., 17.], [14., 15.]], p.accent);
+        }
+        Icon::Lip => {
+            // Corte da parede: a borda sobe em degrau para encaixar a tampa.
+            p.polygon(
+                &[
+                    [5., 22.],
+                    [5., 11.],
+                    [10., 11.],
+                    [10., 5.],
+                    [14., 5.],
+                    [14., 22.],
+                ],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.polygon(
+                &[
+                    [3., 3.],
+                    [21., 3.],
+                    [21., 9.],
+                    [17., 9.],
+                    [17., 5.],
+                    [3., 5.],
+                ],
+                p.bright,
+                p.accent,
+                MAIN,
+            );
+        }
+        Icon::ScrewBoss => {
+            // Torre com furo central sobre o piso.
+            p.polygon(
+                &[[2., 19.], [22., 19.], [22., 22.], [2., 22.]],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.polygon(
+                &[[7., 5.], [17., 5.], [17., 19.], [7., 19.]],
+                p.bright,
+                p.ink,
+                MAIN,
+            );
+            p.fill(
+                &[[10.5, 5.], [13.5, 5.], [13.5, 14.], [10.5, 14.]],
+                p.accent,
+            );
+        }
+        Icon::SnapFit => {
+            // Haste em balanço com a cabeça que trava.
+            p.polygon(
+                &[[2., 19.], [22., 19.], [22., 22.], [2., 22.]],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.polygon(
+                &[
+                    [8., 19.],
+                    [8., 3.],
+                    [12., 3.],
+                    [16., 9.],
+                    [12., 9.],
+                    [12., 19.],
+                ],
+                p.bright,
+                p.accent,
+                MAIN,
+            );
+        }
+        Icon::BedFace => {
+            // Bloco descendo até apoiar a face na mesa.
+            p.polygon(
+                &[[8., 4.], [16., 4.], [16., 12.], [8., 12.]],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.fill(&[[8., 10.], [16., 10.], [16., 12.], [8., 12.]], p.accent);
+            p.polygon(
+                &[[2., 17.], [22., 17.], [22., 20.], [2., 20.]],
+                p.bright,
+                p.ink,
+                MAIN,
+            );
+        }
+        Icon::PrintProfile => {
+            // Bico sobre camadas depositadas: vale para qualquer impressora FDM.
+            p.polygon(
+                &[
+                    [8., 3.],
+                    [16., 3.],
+                    [16., 9.],
+                    [13., 14.],
+                    [11., 14.],
+                    [8., 9.],
+                ],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.stroke(&[[4., 17.], [20., 17.]], p.accent);
+            p.stroke(&[[4., 21.], [20., 21.]], p.ink);
+        }
+        Icon::CheckSolid => {
+            p.cube();
+            p.line(&[[7.5, 12.5], [10.8, 15.8], [16.8, 9.2]], p.positive, 2.4);
         }
         Icon::Split => {
             p.cube();
@@ -1275,15 +1497,17 @@ fn draw(p: &Pen, icon: Icon) {
             p.detail(&[[14.9, 6.5], [17.1, 8.7]], p.ink);
         }
         Icon::LineConstruction | Icon::LineInfinite => {
-            let color = p.accent;
+            // Mesmo traço e ângulo do ícone Linha; só o laranja e o tracejado longo
+            // distinguem a referência, e as pontas de seta distinguem a infinita.
+            let color = p.construction;
             if icon == Icon::LineConstruction {
-                p.dashed([3., 21.], [21., 3.], color, MAIN);
-                p.disc(3., 21., 1.6, color);
-                p.disc(21., 3., 1.6, color);
+                p.long_dashed([4., 19.], [20., 5.], color, 2.4);
+                p.disc(4., 19., 2.2, p.ink);
+                p.disc(20., 5., 2.2, p.ink);
             } else {
-                p.stroke(&[[1.5, 21.], [22.5, 2.]], color);
-                p.head([1.5, 21.], [-1., 1.], color);
-                p.head([22.5, 2.], [1., -1.], color);
+                p.long_dashed([2.5, 20.3], [21.5, 3.7], color, 2.4);
+                p.head([1., 21.6], [-8., 7.], color);
+                p.head([23., 2.4], [8., -7.], color);
             }
         }
         Icon::Rectangle => {
@@ -1399,6 +1623,53 @@ fn draw(p: &Pen, icon: Icon) {
             p.head([4., 12.], [-1., 0.], p.accent);
             p.head([20., 12.], [1., 0.], p.accent);
         }
+        Icon::ConstraintFix => {
+            // Alfinete: cabeça na cor de ação e haste presa ao plano.
+            p.ring(12., 8., 4.6, p.accent, 2.2);
+            p.stroke(&[[12., 12.6], [12., 21.]], p.ink);
+            p.detail(&[[7., 21.], [17., 21.]], p.ink);
+        }
+        Icon::ConstraintConcentric => {
+            p.ring(12., 12., 9., p.ink, MAIN);
+            p.ring(12., 12., 4.6, p.accent, 2.2);
+            p.disc(12., 12., 1.3, p.accent);
+        }
+        Icon::ConstraintCollinear => {
+            p.stroke(&[[3., 20.], [9.5, 13.5]], p.accent);
+            p.stroke(&[[14.5, 9.5], [21., 3.]], p.accent);
+            p.disc(12., 11.5, 1.2, p.ink);
+            p.disc(3., 20., 1.7, p.ink);
+            p.disc(21., 3., 1.7, p.ink);
+        }
+        Icon::ConstraintSymmetry => {
+            p.dashed([12., 2.], [12., 22.], p.accent, 1.5);
+            p.detail(&[[5., 12.], [19., 12.]], p.ink);
+            p.disc(5., 12., 2.6, p.ink);
+            p.disc(19., 12., 2.6, p.ink);
+        }
+        Icon::ConstraintPolygon => p.polygon(
+            &[
+                [12., 3.],
+                [20., 7.5],
+                [20., 16.5],
+                [12., 21.],
+                [4., 16.5],
+                [4., 7.5],
+            ],
+            p.bright,
+            p.accent,
+            MAIN,
+        ),
+        Icon::ConstraintManager => {
+            p.polygon(
+                &[[3., 5.], [21., 5.], [21., 19.], [3., 19.]],
+                p.bright,
+                p.accent,
+                MAIN,
+            );
+            p.detail(&[[7., 10.], [17., 10.]], p.ink);
+            p.detail(&[[7., 14.], [14., 14.]], p.ink);
+        }
         Icon::ConstraintHorizontalVertical => {
             p.stroke(&[[5., 4.], [5., 19.], [20., 19.]], p.accent);
             p.detail(&[[5., 14.], [10., 14.], [10., 19.]], p.ink);
@@ -1446,25 +1717,14 @@ fn draw(p: &Pen, icon: Icon) {
             p.ring(12., 12., 6., p.accent, 2.2);
             p.disc(12., 12., 1.6, p.accent);
         }
-        Icon::LockClosed | Icon::LockOpen => {
-            let open = icon == Icon::LockOpen;
-            if open {
-                let mut shackle = vec![[11.5, 11.], [11.5, 6.5]];
-                shackle.extend((0..=12).map(|index| {
-                    let angle = PI + PI * index as f32 / 12.;
-                    [16. + 4.5 * angle.cos(), 6.5 + 4.5 * angle.sin()]
-                }));
-                shackle.push([20.5, 10.]);
-                p.stroke(&shackle, p.ink);
-            } else {
-                let mut shackle = vec![[7.5, 11.], [7.5, 7.5]];
-                shackle.extend((0..=12).map(|index| {
-                    let angle = PI + PI * index as f32 / 12.;
-                    [12. + 4.5 * angle.cos(), 7.5 + 4.5 * angle.sin()]
-                }));
-                shackle.push([16.5, 11.]);
-                p.stroke(&shackle, p.ink);
-            }
+        Icon::LockOpen => {
+            let mut shackle = vec![[11.5, 11.], [11.5, 6.5]];
+            shackle.extend((0..=12).map(|index| {
+                let angle = PI + PI * index as f32 / 12.;
+                [16. + 4.5 * angle.cos(), 6.5 + 4.5 * angle.sin()]
+            }));
+            shackle.push([20.5, 10.]);
+            p.stroke(&shackle, p.ink);
             p.polygon(
                 &[[5., 11.], [19., 11.], [19., 21.], [5., 21.]],
                 p.surface,
@@ -1481,7 +1741,7 @@ fn draw(p: &Pen, icon: Icon) {
 pub(super) fn preview_sheet(ui: &mut egui::Ui) {
     let rect = ui.max_rect();
     let painter = ui.painter();
-    painter.rect_filled(rect, 0, theme::PANEL);
+    painter.rect_filled(rect, 0, theme::panel());
     let columns = 10;
     let margin = 16.;
     let header = 30.;
@@ -1495,7 +1755,7 @@ pub(super) fn preview_sheet(ui: &mut egui::Ui) {
         egui::Align2::LEFT_TOP,
         "Ícones do 3dnator",
         egui::FontId::proportional(15.),
-        theme::INK,
+        theme::ink(),
     );
     for (index, icon) in super::ALL.iter().enumerate() {
         let column = index % columns;
@@ -1508,13 +1768,13 @@ pub(super) fn preview_sheet(ui: &mut egui::Ui) {
             center - egui::vec2(0., label_top * 0.35),
             egui::Vec2::splat(icon_size),
         );
-        paint(painter, icon_rect, *icon, true, theme::INK, false);
+        paint(painter, icon_rect, *icon, true, theme::ink(), false);
         painter.text(
             center + egui::vec2(0., label_top * 0.6),
             egui::Align2::CENTER_TOP,
             format!("{icon:?}"),
             egui::FontId::proportional(font_size),
-            theme::MUTED,
+            theme::muted(),
         );
     }
     if rect.height() < 760. {
@@ -1525,7 +1785,7 @@ pub(super) fn preview_sheet(ui: &mut egui::Ui) {
         egui::pos2(rect.left() + margin, rect.bottom() - 74.),
         egui::pos2(rect.right() - margin, rect.bottom() - 14.),
     );
-    painter.rect_filled(strip, 8, theme::HEADER);
+    painter.rect_filled(strip, 8, theme::header());
     let dark_ink = egui::Color32::from_rgb(238, 243, 250);
     let sample = [
         Icon::New,

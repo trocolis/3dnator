@@ -36,12 +36,18 @@ pub(super) struct Draft {
 }
 impl Editor {
     pub(super) fn open_drawing(&mut self, record: Option<SheetRecord>) {
+        // A ferramenta fica na aba Montagem, onde não há peça ativa: um componente
+        // selecionado escolhe a peça; sem seleção, a folha é da montagem inteira.
+        let selected = self
+            .selected_instance()
+            .and_then(|id| self.current().session.document().instance(id))
+            .map(|instance| instance.part);
         let (id, target, spec, annotations) = record
             .map(|r| (Some(r.id), r.target, r.specification, r.annotations))
             .unwrap_or_else(|| {
                 (
                     None,
-                    self.current().active_part,
+                    self.current().active_part.or(selected),
                     Specification::default(),
                     Vec::new(),
                 )
@@ -197,7 +203,7 @@ impl Editor {
                     draft.preview_revision = None;
                 }
                 if draft.preview.is_some() && draft.preview_revision != Some(revision) {
-                    ui.colored_label(theme::WARNING, text(T::StaleDrawingPreview));
+                    ui.colored_label(theme::warning(), text(T::StaleDrawingPreview));
                 }
                 if let Some(sheet) = &draft.preview {
                     let width = ui.available_width().min(800.);
@@ -247,7 +253,7 @@ impl Editor {
                         }
                     }
                     if !sheet.annotation_warnings.is_empty() {
-                        ui.colored_label(theme::DANGER, text(T::DimensionReview));
+                        ui.colored_label(theme::danger(), text(T::DimensionReview));
                         for (id, message) in &sheet.annotation_warnings {
                             ui.small(format!("#{}: {message}", id.0));
                         }

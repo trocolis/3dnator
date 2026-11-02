@@ -79,21 +79,21 @@ impl Status {
     }
     pub fn indicator(&self, busy: bool) -> (&str, egui::Color32) {
         if let Some(error) = self.pending.front() {
-            return (&error.message, theme::DANGER);
+            return (&error.message, theme::danger());
         }
         if busy {
-            return (text(T::Loading), theme::ACCENT);
+            return (text(T::Loading), theme::accent());
         }
         match self.current.as_ref() {
             Some(notice) => (
                 &notice.message,
                 match notice.level {
-                    Level::Error => theme::DANGER,
-                    Level::Warning => theme::WARNING,
-                    Level::Information => theme::GREEN,
+                    Level::Error => theme::danger(),
+                    Level::Warning => theme::warning(),
+                    Level::Information => theme::green(),
                 },
             ),
-            None => (text(T::Ready), theme::GREEN),
+            None => (text(T::Ready), theme::green()),
         }
     }
     pub fn dismiss(&mut self) {
@@ -163,7 +163,7 @@ mod tests {
         let mut status = Status::default();
         status.set("Projeto salvo");
         assert!(!status.has_pending());
-        assert_eq!(status.indicator(false), ("Projeto salvo", theme::GREEN));
+        assert_eq!(status.indicator(false), ("Projeto salvo", theme::green()));
         status.warning("Corrija a medida");
         status.set(text(T::Loading));
         assert_eq!(status.indicator(true).0, text(T::Loading));
@@ -171,7 +171,7 @@ mod tests {
         assert!(status.pending.is_empty());
         assert_eq!(
             status.indicator(false),
-            ("Corrija a medida", theme::WARNING)
+            ("Corrija a medida", theme::warning())
         );
         status.error("Falha de importação");
         status.error("Falha de importação");

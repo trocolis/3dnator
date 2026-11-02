@@ -76,7 +76,7 @@ impl Editor {
             draft.part.is_some() && source.is_some() && !self.busy(),
             |ui| {
                 if others.is_empty() {
-                    ui.colored_label(theme::WARNING, text(T::NoOtherProjects));
+                    ui.colored_label(theme::warning(), text(T::NoOtherProjects));
                     return;
                 }
                 panel::row(ui, text(T::SourceProject), |ui| {
@@ -104,7 +104,7 @@ impl Editor {
                     ui.label(
                         egui::RichText::new(text(T::PartsField))
                             .small()
-                            .color(theme::MUTED),
+                            .color(theme::muted()),
                     );
                     egui::ScrollArea::vertical()
                         .max_height(220.)
@@ -142,7 +142,7 @@ impl Editor {
                         None => text(T::InsertAtRoot).to_owned(),
                     })
                     .small()
-                    .color(theme::MUTED),
+                    .color(theme::muted()),
                 );
             },
         );

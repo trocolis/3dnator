@@ -34,8 +34,8 @@ pub(super) fn rect(canvas: egui::Rect) -> egui::Rect {
 }
 
 /// Uma única região de arraste impede que a seleção mude de face durante um
-/// movimento. Home, Enquadrar e giros têm áreas próprias; os demais controles ficam no menu.
-/// Retorna o pedido de enquadramento para o editor respeitar o rascunho ativo.
+/// movimento. Home e giros têm áreas próprias; os demais controles ficam no menu.
+/// Retorna o pedido de enquadramento do menu para o editor respeitar o rascunho ativo.
 pub(super) fn show(ui: &mut egui::Ui, camera: &mut Camera, canvas: egui::Rect) -> bool {
     let area = rect(canvas);
     if !area.is_positive() {
@@ -67,12 +67,12 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
         )
     };
     let body = body_rect(area);
-    // O retângulo do cubo inclui vazios à esquerda. Os botões Home/Enquadrar
-    // recebem prioridade nesses vazios; a origem do gesto conserva um arraste
-    // iniciado no cubo mesmo se o cursor atravessar um botão depois.
+    // O retângulo do cubo inclui vazios à esquerda. O botão Home recebe prioridade
+    // nesses vazios; a origem do gesto conserva um arraste iniciado no cubo mesmo se o
+    // cursor atravessar o botão depois.
     let on_button = ui
         .input(|i| i.pointer.press_origin().or(i.pointer.hover_pos()))
-        .is_some_and(|p| control(2., 0.).contains(p) || control(2., 32.).contains(p));
+        .is_some_and(|p| control(2., 0.).contains(p));
     let response = ui.interact(
         body,
         ui.make_persistent_id("view_cube_body"),
@@ -96,21 +96,6 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
         // entre projeção ortográfica/perspectiva. A geometria não é modificada.
         camera.set_direction(Camera::default().direction());
         camera.fit(f64::from(aspect));
-        ui.ctx().request_repaint();
-    }
-    if icon_control(
-        ui,
-        &painter,
-        "view_fit",
-        control(2., 32.),
-        Icon::Fit,
-        T::Fit,
-    )
-    .clicked()
-    {
-        // O editor decide entre enquadrar o modelo ou o rascunho ativo. Não
-        // trocar orientação/projeção aqui nem ignorar o plano em edição.
-        fit_requested = true;
         ui.ctx().request_repaint();
     }
     // A referência visual usa somente duas setas largas. O gesto modificado
@@ -184,6 +169,8 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
         }
         ui.separator();
         if ui.button(text(T::Fit)).clicked() {
+            // O editor decide entre enquadrar o modelo ou o rascunho ativo. Não trocar
+            // orientação/projeção aqui nem ignorar o plano em edição.
             fit_requested = true;
             ui.close();
         }
@@ -239,7 +226,7 @@ fn icon_control(
 ) -> egui::Response {
     let response = ui.interact(rect, ui.make_persistent_id(id), egui::Sense::click());
     if response.hovered() {
-        painter.rect_filled(rect, 4, theme::BLUE_FILL);
+        painter.rect_filled(rect, 4, theme::blue_fill());
     }
     icons::paint_with_ink(
         painter,
@@ -247,9 +234,9 @@ fn icon_control(
         icon,
         true,
         if response.hovered() {
-            theme::ACCENT
+            theme::accent()
         } else {
-            theme::INK
+            theme::ink()
         },
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text(label)));
@@ -270,7 +257,7 @@ fn curved_control(
         egui::Sense::click(),
     );
     let color = if response.hovered() {
-        theme::ACCENT
+        theme::accent()
     } else {
         egui::Color32::from_rgb(201, 220, 239)
     };
@@ -328,7 +315,7 @@ fn curved_control(
         .collect();
     painter.add(egui::Shape::closed_line(
         outline,
-        egui::Stroke::new(0.6 * UI_SCALE, theme::MUTED),
+        egui::Stroke::new(0.6 * UI_SCALE, theme::muted()),
     ));
 
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text(label)));
@@ -560,7 +547,7 @@ fn paint_faces(painter: &egui::Painter, faces: &[ProjectedFace], hovered: Option
             .take(face.polygon.len())
         {
             if a.distance_sq(*b) > 0.25 {
-                painter.line_segment([*a, *b], egui::Stroke::new(0.8, theme::MUTED));
+                painter.line_segment([*a, *b], egui::Stroke::new(0.8, theme::muted()));
             }
         }
         if let Some(label) = face.label
@@ -576,13 +563,13 @@ fn paint_faces(painter: &egui::Painter, faces: &[ProjectedFace], hovered: Option
             let galley = painter.layout_no_wrap(
                 text(label).into(),
                 egui::FontId::proportional(font),
-                theme::INK,
+                theme::ink(),
             );
             // O texto acompanha a face e o giro para não esconder a orientação real.
             let pos = center - galley.size() * 0.5;
             let angle = face.label_direction.y.atan2(face.label_direction.x);
             painter.add(
-                egui::epaint::TextShape::new(pos, galley, theme::INK)
+                egui::epaint::TextShape::new(pos, galley, theme::ink())
                     .with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER),
             );
         }
@@ -826,15 +813,12 @@ mod tests {
         let position = area.min + egui::vec2(17., 47.) * UI_SCALE;
         frame(&context, &mut camera, pointer(position, true));
         let output = frame(&context, &mut camera, pointer(position, false));
-        assert!(output.fit_requested);
+        // Enquadrar saiu do controle: agora fica na barra de navegação e no menu do cubo.
+        assert!(!output.fit_requested);
         assert!(!output.canvas_clicked);
         assert!(norm(sub(camera.direction(), direction)) < 1e-12);
         assert!((camera.roll_angle() - roll).abs() < 1e-12);
         assert_eq!(camera.projection, nator_renderer::Projection::Perspective);
-        let mut expected = Camera::default();
-        expected.projection = camera.projection;
-        expected.fit(620. / 400.);
-        assert!((camera.span - expected.span).abs() < 1e-12);
     }
 
     #[test]

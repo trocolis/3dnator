@@ -1,12 +1,68 @@
-//! Catálogo em português. Os identificadores permanecem estáveis para futuras traduções.
+//! Catálogo de textos da interface. O português é a referência; inglês e espanhol ficam
+//! em `i18n/en.rs` e `i18n/es.rs`, com o mesmo `match` exaustivo, para que um texto novo
+//! sem tradução não compile.
+use std::sync::atomic::{AtomicU8, Ordering};
+
+mod en;
+mod es;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Language {
+    Portuguese,
+    Spanish,
+    English,
+}
+
+static LANGUAGE: AtomicU8 = AtomicU8::new(0);
+
+pub fn set_language(language: Language) {
+    LANGUAGE.store(language as u8, Ordering::Relaxed);
+}
+
+pub fn language() -> Language {
+    match LANGUAGE.load(Ordering::Relaxed) {
+        1 => Language::Spanish,
+        2 => Language::English,
+        _ => Language::Portuguese,
+    }
+}
+
+/// Idioma do sistema pelas variáveis de localidade (`pt_BR.UTF-8`, `es`, `en_US`...).
+/// Sem correspondência, português.
+pub fn system_language() -> Language {
+    ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.is_empty() && value != "C" && value != "POSIX")
+        .and_then(|value| from_locale(&value))
+        .unwrap_or(Language::Portuguese)
+}
+
+fn from_locale(value: &str) -> Option<Language> {
+    let code = value
+        .split([':', '_', '-', '.', '@'])
+        .next()?
+        .to_ascii_lowercase();
+    match code.as_str() {
+        "pt" => Some(Language::Portuguese),
+        "es" => Some(Language::Spanish),
+        "en" => Some(Language::English),
+        _ => None,
+    }
+}
+
+pub fn text(key: Text) -> &'static str {
+    match language() {
+        Language::Portuguese => pt(key),
+        Language::Spanish => es::text(key),
+        Language::English => en::text(key),
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Text {
-    GridIntersection,
-    GridMidpoint,
-    GridCenter,
-    GridLine,
+    ViewHome,
     ArrowInvalidValue,
-    ArrowValueHint,
     Label,
     LabelContent,
     LabelFont,
@@ -32,6 +88,7 @@ pub enum Text {
     ProjectionSelected,
     ProjectionPickHint,
     ProjectionFinish,
+    ProjectionNothingNew,
     SketchImage,
     ImagesFolder,
     ImageDrawHint,
@@ -70,12 +127,24 @@ pub enum Text {
     SketchCornersHint,
     SketchPreviewPreparing,
     SketchOffsetSelectHint,
-    SketchCenterIndicator,
     SketchProject,
-    JunctionStrong,
-    JunctionWeak,
-    JunctionStrengthen,
-    JunctionWeaken,
+    Restrict,
+    RestrictPickHint,
+    RestrictArmedHint,
+    OriginCoincidence,
+    EqualRestriction,
+    Collinear,
+    Symmetry,
+    RegularPolygon,
+    FixUnfix,
+    NormalReference,
+    LinkVertex,
+    DetachVertex,
+    RemoveVertex,
+    MergeAreas,
+    UnlinkedEnds,
+    FixElement,
+    ReleaseElement,
     JunctionToggleHint,
     PointOnCurve,
     SketchProjectHint,
@@ -101,8 +170,6 @@ pub enum Text {
     ViewRotateRight,
     ViewRollLeft,
     ViewRollRight,
-    #[allow(dead_code)]
-    ViewUpright,
     ViewCubeHint,
 
     MinimizeWindow,
@@ -117,15 +184,172 @@ pub enum Text {
     ModelTab,
     MoreTools,
     /// Identificador reservado da aba removida, preservado para futuras traduções.
-    #[allow(dead_code)]
-    InsertTab,
-    InspectTab,
+    PrintTab,
+    Calibrate,
+    CalibrateStepPrint,
+    CalibrateExport,
+    CalibrateStepHoles,
+    CalibrateStepFits,
+    CalibrateHole,
+    CalibrateApply,
+    HolePresetField,
+    HolePresetChoose,
+    PresetThrough,
+    PresetRecessed,
+    PresetSelfTap,
+    PresetInsert,
+    PresetNut,
+    CaptiveNutHead,
+    NutFlats,
+    NutDepth,
+    TeardropHole,
+    TeardropHint,
+    Fasteners,
+    FastenerAdd,
+    FastenerNew,
+    FastenerDiameter,
+    FastenerPilot,
+    FastenerInsertDiameter,
+    FastenerInsertLength,
+    FastenerNutFlats,
+    FastenerNutHeight,
+    FastenerHeadDiameter,
+    FastenerHeadHeight,
+    PrintCheck,
+    PrintCheckShort,
+    PrintCheckHint,
+    PrintCheckClean,
+    PrintNoFace,
+    PrintContact,
+    PrintSmallBase,
+    PrintRegions,
+    IssueOverhang,
+    IssueThinWall,
+    IssueGap,
+    BedFace,
+    BedFaceShort,
+    BedFaceField,
+    BedFaceHint,
+    BedSize,
+    BedTooSmall,
+    BedRemove,
+    ExportForPrint,
+    ExportForPrintShort,
+    ExportFormat,
+    ExportPrepareBed,
+    ExportOpenSlicer,
+    ExportSlicerCommand,
+    ExportSlicerHint,
+    ExportNotOpened,
+    ExportOversized,
+    ExportOverflow,
+    ExportSkipped,
+    ThreeMfFilter,
+    PrintProfile,
+    PrintProfileName,
+    PrintProfileLibrary,
+    PrintProfileChoose,
+    PrintProfileSave,
+    PrintProfileNoLibrary,
+    PrintProfileHint,
+    PrintProfileNames,
+    PrintNozzle,
+    PrintLayer,
+    PrintFitTight,
+    PrintFitSliding,
+    PrintFitFree,
+    PrintHoleCompensation,
+    PrintOverhang,
+    PrintDensity,
+    ComponentCut,
+    ComponentCutShort,
+    InsertionField,
+    FitClearance,
+    FloorClearance,
+    ComponentDepth,
+    ComponentHint,
+    ComponentFrozen,
+    Lip,
+    LipFace,
+    LipKindField,
+    LipRaised,
+    LipGroove,
+    LipReferenceField,
+    LipInner,
+    LipOuter,
+    LipInset,
+    LipHint,
+    FastenerHeight,
+    ScrewBoss,
+    ScrewBossShort,
+    BossOuter,
+    BossShallowHole,
+    BaseFillet,
+    SnapFit,
+    SnapHook,
+    SnapWindow,
+    SnapLength,
+    SnapThickness,
+    SnapWidth,
+    SnapOverhang,
+    SnapHead,
+    SnapWindowDepth,
+    SnapStrain,
+    SnapStrainHigh,
+    FitCheck,
+    FitCheckShort,
+    FitChecking,
+    FitInterference,
+    FitTouching,
+    FitTight,
+    FitClean,
+    FitCompared,
+    FitBeyond,
+    FitSkipped,
+    FitFailed,
+    FitAgain,
+    FitStale,
+    FitScopeField,
+    FitScopePart,
+    FitScopeAll,
+    ExcerptToggle,
+    ExcerptHint,
+    PrintMass,
+    PrintCost,
+    PrintPrice,
+    PrintInfill,
+    PrintWallLines,
+    PrintMaxStrain,
+    PrintEstimateHint,
+    PrintBedLimit,
     /// Identificador reservado da aba removida, preservado para futuras traduções.
-    #[allow(dead_code)]
-    ViewTab,
-    #[allow(dead_code)]
-    FileMenu,
     SettingsMenu,
+    SettingsAppearance,
+    SettingsDrawing,
+    SettingsShortcuts,
+    SettingsHelp,
+    SettingsAbout,
+    SettingsRecoveryHint,
+    SettingsAboutDescription,
+    SettingsAboutVersion,
+    SettingsAboutAuthor,
+    SettingsAboutAuthorValue,
+    SettingsAboutLicense,
+    SettingsAboutLicenseValue,
+    SettingsAboutRepository,
+    SettingsAboutRepositoryLink,
+    SettingsAboutProjectFormat,
+    SettingsAboutTechnologies,
+    SettingsAboutTechnologiesValue,
+    SettingsAboutCopyright,
+    SettingsUnit,
+    SettingsUnitMillimeter,
+    SettingsUnitInch,
+    SettingsUnitHint,
+    SettingsMouseStep,
+    SettingsMouseStepCustom,
+    SettingsMouseAngleStep,
+    SettingsMouseStepHint,
     ThroughShell,
     CuttingPlane,
     RevolveAxisHint,
@@ -139,6 +363,8 @@ pub enum Text {
     EndProfile,
     StartProfile,
     RuledLoft,
+    DevelopableLoft,
+    DevelopableLoftHint,
     UpdateHolePairs,
     LoftHint,
     LoftDifferentPlanes,
@@ -152,33 +378,15 @@ pub enum Text {
     NoMatchingTools,
     ChooseActivePart,
     /// Reservado para traduções da seção antiga, retirada da aba Peça.
-    #[allow(dead_code)]
-    ManageGroup,
     DocumentGroup,
     /// Rótulos reservados dos grupos das antigas abas Inserir e Vista.
-    #[allow(dead_code)]
-    ImportGroup,
-    #[allow(dead_code)]
-    SketchPlanes,
-    #[allow(dead_code)]
-    CameraGroup,
-    #[allow(dead_code)]
-    PanelsGroup,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    FinishGroup,
-    #[allow(dead_code)]
-    TimelineEmpty,
     ActivityGeometry,
     ActivityRelation,
     ActivityModify,
-    #[allow(dead_code)]
-    UnitsMm,
     BrowserEmpty,
     StartSketch,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    SelectionHint,
     SolidBodies,
     SketchesGroup,
 
@@ -188,19 +396,6 @@ pub enum Text {
     GroupMembers,
     SolidBody,
     ParametricHistory,
-    #[allow(dead_code)]
-    StatusMessage,
-    #[allow(dead_code)]
-    StatusAttention,
-    ViewHome,
-    #[allow(dead_code)]
-    ViewOrbitLeft,
-    #[allow(dead_code)]
-    ViewOrbitRight,
-    #[allow(dead_code)]
-    ViewOrbitUp,
-    #[allow(dead_code)]
-    ViewOrbitDown,
     ViewOrbitReverseHint,
     ZeroExtrusionHint,
     Extrude,
@@ -217,18 +412,13 @@ pub enum Text {
     TopologyIndex,
     KeptReference,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    VisualControls,
     BodyColor,
     NeutralColor,
     Isolate,
     ExitIsolation,
     TransparentToggle,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    LockSelection,
     NewBody,
-    ExportStl,
     ExportScope,
     ScopeBody,
     ScopePart,
@@ -250,42 +440,41 @@ pub enum Text {
     ExportAssemblyStep,
     FilesLabel,
     Occurrences,
-    MeasureSelection,
-    SetReference,
-    Volume,
-    Area,
-    CenterOfMass,
-    UniformDensity,
-    ExactMeasure,
-    ApproximateMeasure,
     FaceLabel,
     EdgeLabel,
     Length,
-    RadiusLabel,
     DiameterLabel,
     AngleLabel,
-    ParallelDistance,
-    MinDistance,
     DrawingRevision,
     DrawingDate,
     SketchOnFace,
     MirroredSuffix,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    SketchLinearPattern,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    SketchCircularPattern,
     HoleTool,
     LinearPattern,
     CircularPattern,
     MirrorBody,
     SplitBody,
     SplitShort,
-    #[allow(dead_code)]
-    AxisU,
-    #[allow(dead_code)]
-    AxisV,
+    CheckSolid,
+    CheckSolidShort,
+    CheckSolidHint,
+    CheckingSolid,
+    SolidHasNoDefects,
+    SolidMeshDefects,
+    SolidSliver,
+    SolidSliverWidth,
+    SolidSliverHint,
+    PrintSlivers,
+    Contact,
+    ContactOrigin,
+    RepairContact,
+    RepairModeField,
+    WeldContact,
+    WeldContactHint,
+    SeparateContact,
+    SeparateContactHint,
     HolePoints,
     NoHolePoints,
     HoleDiameter,
@@ -303,7 +492,6 @@ pub enum Text {
     ThreadDesignation,
     ThreadNominal,
     ThreadPitch,
-    PatternCount,
     SecondDirection,
     TotalAngle,
     KeepOriginal,
@@ -317,11 +505,7 @@ pub enum Text {
     MeshIsNotSolid,
     Tangent,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    Extend,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    Mirror,
     Drawing,
     DrawingTitle,
     Paper,
@@ -360,22 +544,12 @@ pub enum Text {
     Portrait,
     PngResolution,
     MeshDrawingNotice,
-    PickVertex,
-    PickEdge,
-    PickFace,
-    Measure,
-    ClearMeasurements,
-    AlignmentSource,
-    AlignSelection,
-    FreeMove,
-    RotatePivot,
-    RotateAngle,
-    MeshSelectionNotice,
     Title,
     NewProject,
     OpenProject,
     Save,
     SaveAs,
+    RecentProjects,
     Undo,
     Redo,
     Import,
@@ -384,9 +558,6 @@ pub enum Text {
     Untitled,
     MeshBody,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    Properties,
-    Dimensions,
     Triangles,
     Triangulation,
     Shadows,
@@ -402,35 +573,20 @@ pub enum Text {
     Ready,
     Navigation,
     Scale,
-    BoundaryEdges,
-    #[allow(dead_code)]
-    PrototypeNotice,
-    VolumeNotice,
     Failed,
     Export,
     Exported,
     Saved,
     Imported,
     Assembly,
-    #[allow(dead_code)]
     Construction,
     EditPart,
-    LeavePart,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    Rename,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    Apply,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
     Position,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    Rotation,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    DeleteBody,
     Close,
     Unsaved,
     SaveChanges,
@@ -445,14 +601,8 @@ pub enum Text {
     StlFilter,
     RecoveryNotice,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    History,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    NoHistory,
     /// Reservado do antigo painel Propriedades.
-    #[allow(dead_code)]
-    BodyPosition,
     FileAlreadyOpen,
     StaleResult,
     Sketch,
@@ -485,7 +635,6 @@ pub enum Text {
     SketchPickFirstTangent,
     SketchPickSecondTangent,
     SketchPickLine,
-    SketchTrimHint,
     SketchLineType,
     SketchLineNormal,
     SketchLineInfinite,
@@ -498,16 +647,12 @@ pub enum Text {
     SketchDimension,
     HorizontalVertical,
     SketchExtendShort,
-    SketchCircularShort,
-    SketchRectangularShort,
     SketchValue,
     SketchEntities,
     SketchSelectOne,
     SketchSelectTwo,
     SketchSelectDimension,
     SketchMirrorSelectionHint,
-    SketchCircularSelectionHint,
-    SketchRectangularSelectionHint,
     SketchTangentSelectionHint,
     SketchCoincidentSelectionHint,
     Parameters,
@@ -540,8 +685,6 @@ pub enum Text {
     DegreesOfFreedom,
     Redundant,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    SketchTools,
     Select,
     Line,
     Rectangle,
@@ -552,13 +695,9 @@ pub enum Text {
     ReferenceDimension,
     Entity,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    ApplyDimension,
     FixPoint,
     ConstructionGeometry,
     /// Identificador reservado da organização anterior do rascunho.
-    #[allow(dead_code)]
-    Offset,
     DeleteEntity,
     Parallel,
     Perpendicular,
@@ -690,6 +829,9 @@ pub enum Text {
     RepairDuplicate,
     RepairContained,
     RepairGap,
+    RepairLinkEnds,
+    RepairHorizontal,
+    RepairVertical,
     RepairCrossing,
     RepairCrossingHint,
     RepairNothing,
@@ -713,7 +855,39 @@ pub enum Text {
     MeshImportHint,
     ReferenceSketch,
     NewPartMenu,
-    NewEmptyPart,
+    AddFaceLines,
+    HelpSearch,
+    HelpSearchHint,
+    HelpNothingFound,
+    ShortcutsSystem,
+    ShortcutsWorkspace,
+    ShortcutsSketch,
+    ShortcutsModel,
+    ShortcutsAssembly,
+    ShortcutStroke,
+    ShortcutConflict,
+    ShortcutsHint,
+    ShortcutWaiting,
+    ShortcutsReset,
+    SettingsTheme,
+    SettingsSystem,
+    SettingsThemeLight,
+    SettingsThemeDark,
+    SettingsLanguage,
+    SettingsAppearanceHint,
+    SketchTextTool,
+    SketchTextHint,
+    SketchTextDirectionHint,
+    ReferencesFolder,
+    ReferenceModelHint,
+    CreatePartFromReference,
+    ReferenceNotEditable,
+    ReferenceFromStep,
+    ReferenceFromStl,
+    ReferenceFrom3mf,
+    ReferenceImportHint,
+    MergeCoplanarAreas,
+    ImportMenu,
     NewPartFromStep,
     NewPartFromStl,
     MovementMode,
@@ -727,7 +901,6 @@ pub enum Text {
     CopyNewInstance,
     CopyIndependent,
     NewPartName,
-    EmptyPartHint,
     StepPartHint,
     StlPartHint,
     MoveFreeHint,
@@ -745,19 +918,22 @@ pub enum Text {
     CopyPatternHint,
     ReferenceSketchHint,
     StepNeedsKernel,
+    LeavePart,
     ProjectNode,
+    CollapseTree,
+    ExpandTree,
+    MeasureTool,
+    SketchDiagnostics,
+    PanCamera,
+    OrbitCamera,
     PartsFolder,
     SubpartsFolder,
     StopEditPart,
 }
-pub fn text(key: Text) -> &'static str {
+fn pt(key: Text) -> &'static str {
     match key {
-        Text::GridIntersection => "Grade: cruzamento",
-        Text::GridMidpoint => "Grade: ponto médio",
-        Text::GridCenter => "Grade: centro da célula",
-        Text::GridLine => "Grade: linha",
+        Text::ViewHome => "Home: vista isométrica e enquadrar modelo",
         Text::ArrowInvalidValue => "Informe uma medida válida para esta ferramenta.",
-        Text::ArrowValueHint => "Enter fixa a medida · Esc restaura · OK conclui",
         Text::Label => "Rótulo",
         Text::LabelContent => "Texto",
         Text::LabelFont => "Fonte do sistema",
@@ -789,13 +965,16 @@ pub fn text(key: Text) -> &'static str {
             "Clique na origem ou na projeção para alternar a seleção. Nada é criado até Finalizar."
         }
         Text::ProjectionFinish => "Finalizar",
+        Text::ProjectionNothingNew => {
+            "Nada novo a projetar: essas linhas já estão no rascunho, como linhas da face (amarelas) ou projeções."
+        }
         Text::SketchImage => "Imagem",
         Text::ImagesFolder => "Imagens",
         Text::ImageDrawHint => {
             "Escolha dois cantos no desenho. Depois ajuste as propriedades e confirme com OK."
         }
         Text::ImageTransparency => "Transparência (%)",
-        Text::ImagePosition => "Posição na peça (mm)",
+        Text::ImagePosition => "Posição na peça",
         Text::ImageLoad => "Carregar imagem PNG ou JPEG",
         Text::ImageLocalPosition => "Posição no plano do rascunho",
         Text::ImageFileTooLarge => "Use uma imagem de até 32 MiB.",
@@ -845,7 +1024,6 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::ViewRollLeft => "Girar 45° à esquerda",
         Text::ViewRollRight => "Girar 45° à direita",
-        Text::ViewUpright => "Retornar à orientação de 0°",
         Text::ViewCubeHint => {
             "Cubo de orientação: clique em faces, arestas ou cantos; arraste para orbitar. Botão direito abre as opções da vista."
         }
@@ -861,10 +1039,160 @@ pub fn text(key: Text) -> &'static str {
         Text::Visibility => "Mostrar / ocultar",
         Text::ModelTab => "Construção",
         Text::MoreTools => "Mais ferramentas",
-        Text::InsertTab => "Inserir",
-        Text::InspectTab => "Inspecionar",
-        Text::ViewTab => "Vista",
-        Text::FileMenu => "Arquivo",
+        Text::PrintTab => "Impressão",
+        Text::Calibrate => "Calibrar",
+        Text::CalibrateStepPrint => {
+            "1. Imprima a peça com as suas configurações habituais. O canto cortado fica do lado dos maiores."
+        }
+        Text::CalibrateExport => "Exportar peça de calibração…",
+        Text::CalibrateStepHoles => "2. Meça cada furo, da esquerda para a direita:",
+        Text::CalibrateStepFits => {
+            "3. Teste o pino nos encaixes quadrados e escolha a folga de cada ajuste:"
+        }
+        Text::CalibrateHole => "Furo de",
+        Text::CalibrateApply => "Aplicar ao perfil",
+        Text::HolePresetField => "Fixação",
+        Text::HolePresetChoose => "Preencher…",
+        Text::PresetThrough => "Passante",
+        Text::PresetRecessed => "Cabeça embutida",
+        Text::PresetSelfTap => "Autoatarrachante",
+        Text::PresetInsert => "Inserto a quente",
+        Text::PresetNut => "Porca cativa",
+        Text::CaptiveNutHead => "Porca",
+        Text::NutFlats => "Entre faces",
+        Text::NutDepth => "Altura",
+        Text::TeardropHole => "Furo em gota",
+        Text::TeardropHint => "Ponta a 45° para cima: furos deitados imprimem sem suporte",
+        Text::Fasteners => "Fixadores",
+        Text::FastenerAdd => "Novo",
+        Text::FastenerNew => "Novo",
+        Text::FastenerDiameter => "Diâmetro",
+        Text::FastenerPilot => "Autoatarrachante",
+        Text::FastenerInsertDiameter => "Inserto, diâmetro",
+        Text::FastenerInsertLength => "Inserto, comprimento",
+        Text::FastenerNutFlats => "Porca, entre faces",
+        Text::FastenerNutHeight => "Porca, altura",
+        Text::FastenerHeadDiameter => "Cabeça, diâmetro",
+        Text::FastenerHeadHeight => "Cabeça, altura",
+        Text::PrintCheck => "Verificar impressão",
+        Text::PrintCheckShort => "Verificar",
+        Text::PrintCheckHint => {
+            "Estimativas pela geometria e pelo perfil. Clique em uma região para ir até ela."
+        }
+        Text::PrintCheckClean => "Nenhum problema encontrado.",
+        Text::PrintNoFace => "Sem face na mesa: avaliado na orientação da modelagem.",
+        Text::PrintContact => "Apoio",
+        Text::PrintSmallBase => "Apoio pequeno: a peça pode soltar da mesa.",
+        Text::PrintRegions => "região(ões)",
+        Text::IssueOverhang => "Balanços",
+        Text::IssueThinWall => "Paredes finas",
+        Text::IssueGap => "Frestas",
+        Text::BedFace => "Face na mesa",
+        Text::BedFaceShort => "Face na mesa",
+        Text::BedFaceField => "Face apoiada",
+        Text::BedFaceHint => {
+            "Clique em uma face plana. A escolha vale para a impressão e não muda a modelagem."
+        }
+        Text::BedSize => "Na mesa",
+        Text::BedTooSmall => "Maior que a mesa do perfil de impressão.",
+        Text::BedRemove => "Voltar à orientação da modelagem",
+        Text::ExportForPrint => "Exportar para impressão",
+        Text::ExportForPrintShort => "Exportar",
+        Text::ExportFormat => "Formato",
+        Text::ExportPrepareBed => "Preparar para a mesa",
+        Text::ExportOpenSlicer => "Abrir no fatiador",
+        Text::ExportSlicerCommand => "Comando",
+        Text::ExportSlicerHint => {
+            "Vazio usa o aplicativo padrão do sistema. {arquivo} marca onde entra o arquivo."
+        }
+        Text::ExportNotOpened => "Exportado, mas o fatiador não abriu",
+        Text::ExportOversized => "Maior que a mesa",
+        Text::ExportOverflow => "O conjunto ocupa mais de uma mesa",
+        Text::ExportSkipped => "Superfícies abertas, fora da exportação",
+        Text::ThreeMfFilter => "Modelo 3MF",
+        Text::PrintProfile => "Perfil de impressão",
+        Text::PrintProfileName => "Nome",
+        Text::PrintProfileLibrary => "Biblioteca",
+        Text::PrintProfileChoose => "Carregar",
+        Text::PrintProfileSave => "Salvar",
+        Text::PrintProfileNoLibrary => "Pasta de preferências indisponível.",
+        Text::PrintProfileHint => {
+            "Valores iniciais são regras práticas. Ajuste-os com medidas da sua impressora."
+        }
+        Text::PrintProfileNames => "Nas expressões",
+        Text::PrintNozzle => "Bico",
+        Text::PrintLayer => "Camada",
+        Text::PrintFitTight => "Folga justa",
+        Text::PrintFitSliding => "Folga deslizante",
+        Text::PrintFitFree => "Folga livre",
+        Text::PrintHoleCompensation => "Compensar furo",
+        Text::PrintOverhang => "Balanço máximo",
+        Text::PrintDensity => "Densidade",
+        Text::ComponentCut => "Recortar componente",
+        Text::ComponentCutShort => "Recortar",
+        Text::InsertionField => "Entra por",
+        Text::FitClearance => "Folga",
+        Text::FloorClearance => "Folga no fundo",
+        Text::ComponentDepth => "Comprimento",
+        Text::ComponentHint => "Clique no componente na área 3D. Ele pode estar em outra peça.",
+        Text::ComponentFrozen => {
+            "Silhueta capturada. Mudar a folga recalcula; mover o componente pede nova captura."
+        }
+        Text::Lip => "Ressalto",
+        Text::LipFace => "Face da borda",
+        Text::LipKindField => "Tipo",
+        Text::LipRaised => "Acrescenta",
+        Text::LipGroove => "Rebaixa",
+        Text::LipReferenceField => "Contorno",
+        Text::LipInner => "Interno",
+        Text::LipOuter => "Externo",
+        Text::LipInset => "Afastamento",
+        Text::LipHint => {
+            "Use Acrescenta num corpo e Rebaixa no outro, com as mesmas medidas: a folga fica só no rebaixo."
+        }
+        Text::FastenerHeight => "Altura",
+        Text::ScrewBoss => "Torre de parafuso",
+        Text::ScrewBossShort => "Torre",
+        Text::BossOuter => "Diâmetro externo",
+        Text::BossShallowHole => "Furo mais raso que a torre",
+        Text::BaseFillet => "Concordância",
+        Text::SnapFit => "Presilha",
+        Text::SnapHook => "Presilha",
+        Text::SnapWindow => "Janela",
+        Text::SnapLength => "Comprimento",
+        Text::SnapThickness => "Espessura",
+        Text::SnapWidth => "Largura",
+        Text::SnapOverhang => "Avanço",
+        Text::SnapHead => "Rampa",
+        Text::SnapWindowDepth => "Além da cabeça",
+        Text::SnapStrain => "Deformação estimada",
+        Text::SnapStrainHigh => "Acima do limite do perfil: alongue a haste ou reduza o avanço.",
+        Text::FitCheck => "Verificar encaixe",
+        Text::FitCheckShort => "Encaixe",
+        Text::FitChecking => "Comparando os corpos…",
+        Text::FitInterference => "Interferência",
+        Text::FitTouching => "Encostado",
+        Text::FitTight => "Folga pequena",
+        Text::FitClean => "Nenhuma interferência.",
+        Text::FitCompared => "Pares comparados",
+        Text::FitBeyond => "Pares sem comparar, tempo esgotado",
+        Text::FitSkipped => "Sem volume para comparar",
+        Text::FitFailed => "Falha ao comparar",
+        Text::FitAgain => "Verificar de novo",
+        Text::FitStale => "A montagem mudou.",
+        Text::FitScopeField => "Comparar",
+        Text::FitScopePart => "Peça em edição",
+        Text::FitScopeAll => "Componentes",
+        Text::ExcerptToggle => "Só um trecho",
+        Text::ExcerptHint => "Caixa em coordenadas da peça. O modelo não muda.",
+        Text::PrintMass => "Massa estimada",
+        Text::PrintCost => "Custo estimado",
+        Text::PrintPrice => "Preço por kg",
+        Text::PrintInfill => "Preenchimento",
+        Text::PrintWallLines => "Voltas de parede",
+        Text::PrintMaxStrain => "Deformação máxima",
+        Text::PrintEstimateHint => "Estimativa antes de fatiar, sem suportes.",
+        Text::PrintBedLimit => "Limitar ao tamanho da mesa",
         Text::Sweep => "Transição guiada",
         Text::RouteField => "Trajetória",
         Text::AutomaticRoute => "Automática",
@@ -877,6 +1205,10 @@ pub fn text(key: Text) -> &'static str {
         Text::EndProfile => "Área final",
         Text::UpdateHolePairs => "Atualizar correspondência dos furos",
         Text::RuledLoft => "Geratrizes retas",
+        Text::DevelopableLoft => "Superfície desenvolvível",
+        Text::DevelopableLoftHint => {
+            "De polígono convexo para círculo: triângulos planos e cones, sem torção, que aceitam casca. Outros perfis usam a transição comum."
+        }
         Text::LoftHint => {
             "Escolha uma área em cada plano. Os furos precisam corresponder pela ordem de criação e existir nos dois perfis."
         }
@@ -895,27 +1227,50 @@ pub fn text(key: Text) -> &'static str {
             "Sem seleção: usar a primeira face oposta única. Escolha a saída no mesmo corpo."
         }
         Text::SettingsMenu => "Configurações",
+        Text::SettingsAppearance => "Aparência",
+        Text::SettingsDrawing => "Desenho",
+        Text::SettingsShortcuts => "Atalho",
+        Text::SettingsHelp => "Ajuda",
+        Text::SettingsAbout => "Sobre",
+        Text::SettingsRecoveryHint => "Abra uma cópia automática para continuar o trabalho.",
+        Text::SettingsAboutDescription => {
+            "CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos."
+        }
+        Text::SettingsAboutVersion => "Versão",
+        Text::SettingsAboutAuthor => "Autor",
+        Text::SettingsAboutAuthorValue => "Bruno Trócolis",
+        Text::SettingsAboutLicense => "Licença",
+        Text::SettingsAboutLicenseValue => "MIT",
+        Text::SettingsAboutRepository => "Repositório",
+        Text::SettingsAboutRepositoryLink => "github.com/trocolis/3dnator",
+        Text::SettingsAboutProjectFormat => "Formato do projeto",
+        Text::SettingsAboutTechnologies => "Tecnologias",
+        Text::SettingsAboutTechnologiesValue => "Rust · egui/wgpu · Open CASCADE Technology",
+        Text::SettingsAboutCopyright => "© 2026 Bruno Trócolis",
+        Text::SettingsUnit => "Unidade de medida",
+        Text::SettingsUnitMillimeter => "Milímetro (mm)",
+        Text::SettingsUnitInch => "Polegada (in)",
+        Text::SettingsUnitHint => {
+            "Medidas e números digitados sem unidade usam esta escala; a geometria continua em milímetros."
+        }
+        Text::SettingsMouseStep => "Precisão do mouse",
+        Text::SettingsMouseStepCustom => "Personalizado",
+        Text::SettingsMouseAngleStep => "Precisão de ângulos",
+        Text::SettingsMouseStepHint => {
+            "Ao desenhar, mover, girar ou extrudar, o mouse anda em múltiplos da precisão. Digite uma medida para usar qualquer valor; no rascunho, Alt solta o cursor."
+        }
         Text::SketchXZ => "Rascunho XZ",
         Text::SketchYZ => "Rascunho YZ",
         Text::SearchTools => "Buscar ferramentas",
         Text::SearchHint => "Digite uma ferramenta…",
         Text::NoMatchingTools => "Nenhuma ferramenta encontrada.",
         Text::ChooseActivePart => "Selecione uma peça e use Construir nesta peça.",
-        Text::ManageGroup => "Gerenciar",
         Text::DocumentGroup => "Documentar",
-        Text::ImportGroup => "Importar",
-        Text::SketchPlanes => "Planos de rascunho",
-        Text::CameraGroup => "Câmera",
-        Text::PanelsGroup => "Painéis",
-        Text::FinishGroup => "Concluir",
         Text::ActivityGeometry => "Criar geometria",
         Text::ActivityRelation => "Editar relações",
         Text::ActivityModify => "Modificar geometria",
-        Text::TimelineEmpty => "As operações da peça ativa aparecem aqui.",
-        Text::UnitsMm => "Unidade: mm",
         Text::BrowserEmpty => "Seu projeto começa aqui",
         Text::StartSketch => "Crie um rascunho ou importe um modelo.",
-        Text::SelectionHint => "Escolha um elemento na árvore ou na área 3D.",
         Text::SolidBodies => "Corpos",
         Text::SketchesGroup => "Rascunhos",
 
@@ -947,7 +1302,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Sketch => "Rascunho",
         Text::AutomaticExtrusion => "Operação automática",
         Text::ExtrusionProfileHint => {
-            "Clique para adicionar/remover áreas no mesmo plano. Clique em outro plano ou face para usá-lo como limite."
+            "Clique em uma área: região do rascunho, parte da face delimitada por ele ou face plana. Clique de novo para retirar. Outro plano ou face vira o limite."
         }
         Text::ExtrusionMouseHint => {
             "A extrusão começa em 0 mm. Arraste a seta ou digite a distância. Clique em outro plano para terminar nele. Escolher uma operação desativa a sugestão automática."
@@ -990,7 +1345,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchPickFirstTangent => "Selecione a primeira linha de apoio.",
         Text::SketchPickSecondTangent => "Selecione a segunda linha, perpendicular à primeira.",
         Text::SketchPickLine => "Selecione uma linha do rascunho.",
-        Text::SketchTrimHint => "Clique no trecho que deseja aparar entre os encontros.",
         Text::SketchLineType => "Traço",
         Text::SketchLineNormal => "Normal",
         Text::SketchLineInfinite => "Infinita",
@@ -1009,11 +1363,26 @@ pub fn text(key: Text) -> &'static str {
             "Ângulo em relação ao eixo horizontal do rascunho; positivo no sentido anti-horário."
         }
         Text::SketchProject => "Projetar",
-        Text::JunctionStrong => "Junção forte",
-        Text::JunctionWeak => "Junção fraca",
-        Text::JunctionStrengthen => "Fortalecer ligação",
-        Text::JunctionWeaken => "Liberar ligação",
-        Text::JunctionToggleHint => "F: alternar junção forte/fraca antes do clique",
+        Text::Restrict => "Restringir",
+        Text::RestrictArmedHint => "Selecione os elementos da restrição; Esc cancela.",
+        Text::OriginCoincidence => "Coincidência com a origem",
+        Text::EqualRestriction => "Iguais",
+        Text::Collinear => "Colineares",
+        Text::Symmetry => "Simetria",
+        Text::RegularPolygon => "Polígono regular",
+        Text::FixUnfix => "Fixar/Liberar",
+        Text::NormalReference => "Normal/Referência",
+        Text::RestrictPickHint => "Selecione vértices ou arestas para ver as restrições possíveis.",
+        Text::LinkVertex => "Ligar vértice",
+        Text::DetachVertex => "Soltar vértice",
+        Text::RemoveVertex => "Remover vértice",
+        Text::MergeAreas => "Unir áreas",
+        Text::UnlinkedEnds => "Pontas sem ligação. Clique para ligar.",
+        Text::FixElement => "Fixar elemento",
+        Text::ReleaseElement => "Liberar elemento",
+        Text::JunctionToggleHint => {
+            "Duplo clique no vértice ou F na seleção fixa ou libera o elemento"
+        }
         Text::PointOnCurve => "Ponto sobre curva",
         Text::SketchProjectHint => {
             "Clique em uma face plana, aresta, arco ou vértice do componente; Esc encerra"
@@ -1029,14 +1398,13 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchOffsetSelectHint => "Selecione uma aresta ou um contorno conectado.",
         Text::SketchPreviewPreparing => "Preparando prévia…",
         Text::SketchCornersHint => {
-            "Selecione os segmentos; todos os cantos entre eles serão transformados."
+            "Selecione os segmentos ou um vértice; todos os cantos serão transformados."
         }
         Text::SketchDragHint => "Arraste uma aresta ou vértice para mover a geometria.",
         Text::SketchWholeChain => "Contorno conectado",
         Text::SketchOffsetMouseHint => {
             "Arraste a ponta da seta para ajustar a medida · Enter/OK: aplicar · Esc: cancelar"
         }
-        Text::SketchCenterIndicator => "Centro",
         Text::SketchMirrorAxis => "Eixo de espelhamento",
         Text::SketchMirrorAxisHint => "Escolha a linha no campo Eixo de espelhamento.",
         Text::SketchOffsetDouble => "Dupla",
@@ -1048,8 +1416,6 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::HorizontalVertical => "Horizontal/vertical",
         Text::SketchExtendShort => "Estender",
-        Text::SketchCircularShort => "Circular",
-        Text::SketchRectangularShort => "Retangular",
         Text::SketchValue => "Valor (mm)",
         Text::SketchEntities => "Entidades",
         Text::SketchSelectOne => "Selecione uma entidade no rascunho.",
@@ -1057,12 +1423,6 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchSelectDimension => "Selecione uma cota ou uma linha, círculo ou arco.",
         Text::SketchMirrorSelectionHint => {
             "Selecione os elementos no campo Entidades e escolha uma linha no campo Eixo de espelhamento."
-        }
-        Text::SketchCircularSelectionHint => {
-            "Selecione primeiro a entidade e depois um círculo ou arco que define o centro."
-        }
-        Text::SketchRectangularSelectionHint => {
-            "Selecione primeiro a entidade e depois uma linha para a direção. O valor é o espaçamento entre ocorrências."
         }
         Text::SketchTangentSelectionHint => {
             "Selecione uma linha e um arco com extremidade compartilhada."
@@ -1076,7 +1436,6 @@ pub fn text(key: Text) -> &'static str {
         Text::UnderConstrained => "Livre ou parcialmente restrito",
         Text::DegreesOfFreedom => "Graus de liberdade",
         Text::Redundant => "Há restrições redundantes",
-        Text::SketchTools => "Ferramentas do rascunho",
         Text::Select => "Selecionar",
         Text::Line => "Linha",
         Text::Rectangle => "Retângulo",
@@ -1086,10 +1445,8 @@ pub fn text(key: Text) -> &'static str {
         Text::Dimension => "Valor da cota / deslocamento",
         Text::ReferenceDimension => "Cota de referência",
         Text::Entity => "Entidade",
-        Text::ApplyDimension => "Aplicar cota",
         Text::FixPoint => "Fixar primeiro ponto / centro",
         Text::ConstructionGeometry => "Alternar traço Normal/Referência",
-        Text::Offset => "Criar deslocamento",
         Text::DeleteEntity => "Excluir entidades selecionadas",
         Text::Parallel => "Paralelas",
         Text::Perpendicular => "Perpendiculares",
@@ -1107,13 +1464,6 @@ pub fn text(key: Text) -> &'static str {
         Text::GroupMembers => "Selecione instâncias do mesmo nível",
         Text::SolidBody => "Sólido CAD",
         Text::ParametricHistory => "Histórico",
-        Text::StatusMessage => "Mensagem",
-        Text::StatusAttention => "Atenção",
-        Text::ViewHome => "Home: vista isométrica e enquadrar modelo",
-        Text::ViewOrbitLeft => "Girar vista para a esquerda",
-        Text::ViewOrbitRight => "Girar vista para a direita",
-        Text::ViewOrbitUp => "Girar vista para cima",
-        Text::ViewOrbitDown => "Girar vista para baixo",
         Text::ViewOrbitReverseHint => {
             "Passo de 45° ao redor da normal da face predominante. Shift+clique ou botão direito inverte o sentido."
         }
@@ -1133,21 +1483,18 @@ pub fn text(key: Text) -> &'static str {
             "Índice de aresta/face no corpo base; ao aplicar, vira referência pelas faces de origem"
         }
         Text::KeptReference => "Referência atual (mantida enquanto o índice não for alterado)",
-        Text::VisualControls => "Visualização",
         Text::BodyColor => "Cor do corpo",
         Text::NeutralColor => "Restaurar cor neutra",
         Text::Isolate => "Isolar",
         Text::ExitIsolation => "Sair do isolamento",
         Text::TransparentToggle => "Transparente",
-        Text::LockSelection => "Bloquear seleção",
         Text::NewBody => "Novo corpo",
-        Text::ExportStl => "Exportar STL",
         Text::ExportScope => "O que exportar",
         Text::ScopeBody => "Corpo selecionado",
-        Text::ScopePart => "Corpos da peça, um arquivo cada",
-        Text::ScopeDefinitions => "Cada definição uma vez, em coordenadas locais",
-        Text::ScopeJoined => "Montagem inteira em um único arquivo",
-        Text::ScopeOccurrences => "Todas as ocorrências, um arquivo cada",
+        Text::ScopePart => "Corpos da peça",
+        Text::ScopeDefinitions => "Cada definição uma vez",
+        Text::ScopeJoined => "Montagem inteira como um objeto",
+        Text::ScopeOccurrences => "Todas as ocorrências",
         Text::ExportQuality => "Qualidade",
         Text::QualityDraft => "Rascunho",
         Text::QualityStandard => "Padrão",
@@ -1161,40 +1508,49 @@ pub fn text(key: Text) -> &'static str {
         Text::ExportStep => "Exportar STEP…",
         Text::ExportPartStep => "Peça em STEP…",
         Text::ExportAssemblyStep => "Montagem em STEP…",
-        Text::FilesLabel => "arquivo(s)",
+        Text::FilesLabel => "objeto(s)",
         Text::Occurrences => "ocorrências na montagem",
-        Text::MeasureSelection => "Medir seleção",
-        Text::SetReference => "Usar como referência",
-        Text::Volume => "Volume",
-        Text::Area => "Área",
-        Text::CenterOfMass => "Centro de massa",
-        Text::UniformDensity => "densidade uniforme",
-        Text::ExactMeasure => "Medido no B-rep exato.",
-        Text::ApproximateMeasure => "Aproximado pela malha de exibição.",
         Text::FaceLabel => "Face",
         Text::EdgeLabel => "Aresta",
         Text::Length => "Comprimento",
-        Text::RadiusLabel => "Raio",
         Text::DiameterLabel => "Diâmetro",
         Text::AngleLabel => "Ângulo até a referência",
-        Text::ParallelDistance => "Distância entre faces paralelas",
-        Text::MinDistance => "Distância mínima até a referência",
         Text::DrawingRevision => "Revisão",
         Text::DrawingDate => "Data",
         Text::SketchOnFace => "Na face selecionada (plano capturado)",
         Text::MirroredSuffix => "espelhada",
-        Text::SketchLinearPattern => {
-            "Padrão linear ao longo da segunda linha (espaçamento = valor)"
-        }
-        Text::SketchCircularPattern => "Padrão circular em volta do centro do segundo",
         Text::HoleTool => "Furo",
         Text::LinearPattern => "Padrão linear",
         Text::CircularPattern => "Padrão circular",
         Text::MirrorBody => "Espelhar corpo",
         Text::SplitBody => "Dividir corpo",
         Text::SplitShort => "Dividir",
-        Text::AxisU => "Eixo U do plano do rascunho",
-        Text::AxisV => "Eixo V do plano do rascunho",
+        Text::CheckSolid => "Verificar sólido",
+        Text::CheckSolidShort => "Verificar",
+        Text::CheckSolidHint => "Escolha o corpo a verificar.",
+        Text::CheckingSolid => "Analisando o corpo…",
+        Text::SolidSliver => "Lasca menor que a precisão do STL",
+        Text::SolidSliverWidth => "Largura",
+        Text::SolidSliverHint => {
+            "Não muda a peça: a lasca sai da malha ao exportar. Para eliminá-la do modelo, ajuste o rascunho da operação indicada."
+        }
+        Text::PrintSlivers => {
+            "triângulos menores que a precisão do STL saem da malha ao exportar, perto de"
+        }
+        Text::SolidHasNoDefects => "Nenhum defeito encontrado: o corpo pode ser exportado.",
+        Text::SolidMeshDefects => {
+            "O STL deste corpo teria defeitos, mas não há contatos reparáveis. Procure frestas microscópicas entre rascunhos quase alinhados."
+        }
+        Text::Contact => "Contato",
+        Text::ContactOrigin => "Surgiu em",
+        Text::RepairContact => "Reparo de contato",
+        Text::RepairModeField => "Reparo",
+        Text::WeldContact => "Soldar",
+        Text::WeldContactHint => "Une os dois volumes acrescentando material ao longo do contato",
+        Text::SeparateContact => "Separar",
+        Text::SeparateContactHint => {
+            "Afasta os dois volumes removendo material ao longo do contato"
+        }
         Text::HolePoints => "Centros de círculo e pontos isolados do rascunho",
         Text::NoHolePoints => "O rascunho não tem centros de círculo nem pontos isolados.",
         Text::HoleDiameter => "Diâmetro",
@@ -1212,7 +1568,6 @@ pub fn text(key: Text) -> &'static str {
         Text::ThreadDesignation => "Designação",
         Text::ThreadNominal => "Diâmetro nominal",
         Text::ThreadPitch => "Passo",
-        Text::PatternCount => "Quantidade",
         Text::SecondDirection => "Segunda direção",
         Text::TotalAngle => "Ângulo total",
         Text::KeepOriginal => "Manter o original (peça simétrica)",
@@ -1221,12 +1576,10 @@ pub fn text(key: Text) -> &'static str {
         Text::KernelUnavailable => {
             "SDK OCCT necessário: compile com a feature occt para construir sólidos."
         }
-        Text::ModelFilter => "Modelos STL ou STEP",
+        Text::ModelFilter => "Modelos STL, STEP ou 3MF",
         Text::StepFilter => "Geometria STEP",
         Text::OutputExists => "O destino já existe; escolha um novo nome.",
         Text::Tangent => "Tangência",
-        Text::Extend => "Estender primeira linha até a segunda",
-        Text::Mirror => "Espelhar primeira linha pela segunda",
         #[cfg(feature = "occt")]
         Text::MeshIsNotSolid => "Malha não possui geometria CAD precisa para exportar STEP.",
         Text::Drawing => "Folha técnica",
@@ -1273,22 +1626,12 @@ pub fn text(key: Text) -> &'static str {
         Text::MeshDrawingNotice => {
             "A legenda identifica vistas do B-rep ou aproximadas da malha. Cortes de malha são aproximados; cotas gerais medem os limites projetados."
         }
-        Text::PickVertex => "Vértice da malha",
-        Text::PickEdge => "Aresta do triângulo",
-        Text::PickFace => "Face do triângulo",
-        Text::Measure => "Medir: capturar ponto selecionado",
-        Text::ClearMeasurements => "Limpar medidas",
-        Text::AlignmentSource => "Capturar origem do alinhamento",
-        Text::AlignSelection => "Alinhar origem capturada à seleção",
-        Text::FreeMove => "Mover livremente com arrasto esquerdo",
-        Text::RotatePivot => "Rotacionar seleção",
-        Text::RotateAngle => "Ângulo em graus",
-        Text::MeshSelectionNotice => "Seleção e medições na malha de apresentação.",
         Text::Title => "3Dnator · Projetos",
         Text::NewProject => "Novo",
         Text::OpenProject => "Abrir projeto",
         Text::Save => "Salvar",
         Text::SaveAs => "Salvar como…",
+        Text::RecentProjects => "Projetos recentes",
         Text::Undo => "Desfazer",
         Text::Redo => "Refazer",
         Text::Import => "Importar modelo",
@@ -1296,8 +1639,6 @@ pub fn text(key: Text) -> &'static str {
         Text::Project => "Árvore do projeto",
         Text::Untitled => "Sem título",
         Text::MeshBody => "Malha",
-        Text::Properties => "Propriedades",
-        Text::Dimensions => "Dimensões locais (mm)",
         Text::Triangles => "Triângulos",
         Text::Triangulation => "Mostrar triangulação",
         Text::Shadows => "Sombras",
@@ -1313,9 +1654,6 @@ pub fn text(key: Text) -> &'static str {
         Text::Ready => "Pronto",
         Text::Navigation => "Scroll: zoom · Meio: deslocar · Shift + meio: orbitar",
         Text::Scale => "Escala STL para milímetros",
-        Text::BoundaryEdges => "Arestas abertas",
-        Text::PrototypeNotice => "Rascunhos e corpos organizados por peça.",
-        Text::VolumeNotice => "A análise não verifica auto-interseções.",
         Text::Failed => "A operação falhou",
         Text::Export => "Exportar STL…",
         Text::Exported => "Exportação concluída",
@@ -1324,12 +1662,7 @@ pub fn text(key: Text) -> &'static str {
         Text::Assembly => "Montagem",
         Text::Construction => "Referência",
         Text::EditPart => "Construir nesta peça",
-        Text::LeavePart => "Voltar à montagem",
-        Text::Rename => "Renomear",
-        Text::Apply => "Aplicar posição",
         Text::Position => "Posição X / Y / Z (mm)",
-        Text::Rotation => "Rotação X / Y / Z (graus)",
-        Text::DeleteBody => "Excluir corpo",
         Text::Close => "Fechar",
         Text::Unsaved => "Alterações não salvas",
         Text::SaveChanges => "Salvar as alterações antes de fechar?",
@@ -1345,9 +1678,6 @@ pub fn text(key: Text) -> &'static str {
         Text::RecoveryNotice => {
             "Existem cópias de recuperação. Abra uma cópia para conferir e salvar o projeto."
         }
-        Text::History => "Edições da sessão",
-        Text::NoHistory => "Nenhuma edição para desfazer",
-        Text::BodyPosition => "Posição relativa à origem da peça",
         Text::FileAlreadyOpen => "Este arquivo já está aberto em outra aba.",
         Text::StaleResult => "Resultado ignorado: o projeto foi alterado durante a operação.",
         Text::TimelineFirst => "Ir para o início do histórico",
@@ -1489,6 +1819,9 @@ pub fn text(key: Text) -> &'static str {
         Text::RepairDuplicate => "Remover entidade duplicada",
         Text::RepairContained => "Remover trecho sobreposto",
         Text::RepairGap => "Unir pontas abertas",
+        Text::RepairLinkEnds => "Ligar pontas no mesmo lugar",
+        Text::RepairHorizontal => "Tornar horizontal",
+        Text::RepairVertical => "Tornar vertical",
         Text::RepairCrossing => "Cruzamento em",
         Text::RepairCrossingHint => "use Aparar para escolher o trecho",
         Text::RepairNothing => "Nenhum problema corrigível encontrado.",
@@ -1520,7 +1853,51 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::ReferenceSketch => "Rascunho de referência",
         Text::NewPartMenu => "Nova peça",
-        Text::NewEmptyPart => "Criar nova peça",
+        Text::AddFaceLines => "Trazer linhas da face",
+        Text::HelpSearch => "Buscar",
+        Text::HelpSearchHint => "Ex.: extrusão, atalho, medir",
+        Text::HelpNothingFound => "Nada encontrado. Tente outra palavra.",
+        Text::ShortcutsSystem => "Sistema",
+        Text::ShortcutsWorkspace => "Construção e montagem",
+        Text::ShortcutsSketch => "Rascunho",
+        Text::ShortcutsModel => "Construção",
+        Text::ShortcutsAssembly => "Montagem",
+        Text::ShortcutStroke => "Alternar traço de referência",
+        Text::ShortcutConflict => "Essa tecla já está em uso neste contexto",
+        Text::ShortcutsHint => {
+            "Clique na tecla de uma ação e pressione a nova combinação; Esc desiste. A mesma letra pode valer em contextos diferentes."
+        }
+        Text::ShortcutWaiting => "Pressione a tecla…",
+        Text::ShortcutsReset => "Restaurar padrões",
+        Text::SettingsTheme => "Tema",
+        Text::SettingsSystem => "Sistema",
+        Text::SettingsThemeLight => "Claro",
+        Text::SettingsThemeDark => "Escuro",
+        Text::SettingsLanguage => "Idioma",
+        Text::SettingsAppearanceHint => {
+            "Valem para todos os projetos, neste computador. Sistema segue o tema e o idioma do sistema operacional; fora de português, espanhol e inglês, vale o português."
+        }
+        Text::SketchTextTool => "Texto",
+        Text::SketchTextHint => "Clique no ponto de inserção do texto, no centro dele.",
+        Text::SketchTextDirectionHint => {
+            "Clique na direção do texto, ou confirme com a rotação do painel."
+        }
+        Text::ReferencesFolder => "Referências",
+        Text::ReferenceModelHint => {
+            "Modelo importado como referência: pode ser movido, ocultado e medido, mas não editado."
+        }
+        Text::CreatePartFromReference => "Criar peça",
+        Text::ReferenceNotEditable => {
+            "Referências não podem ser editadas. Use Criar peça no menu dela, na árvore."
+        }
+        Text::ReferenceFromStep => "Referência STEP",
+        Text::ReferenceFromStl => "Referência STL",
+        Text::ReferenceFrom3mf => "Referência 3MF",
+        Text::ReferenceImportHint => {
+            "Modelo só para posicionar as peças: fica em Referências e não pode ser editado."
+        }
+        Text::MergeCoplanarAreas => "Juntar áreas coplanares",
+        Text::ImportMenu => "Importar",
         Text::NewPartFromStep => "Criar a partir de STEP",
         Text::NewPartFromStl => "Criar a partir de STL",
         Text::MovementMode => "Modo de movimento",
@@ -1534,7 +1911,6 @@ pub fn text(key: Text) -> &'static str {
         Text::CopyNewInstance => "Nova instância",
         Text::CopyIndependent => "Cópia independente",
         Text::NewPartName => "Peça",
-        Text::EmptyPartHint => "Peça vazia ao lado das existentes, já ativa para construção.",
         Text::StepPartHint => {
             "Cada definição do arquivo vira uma peça independente, com cores e hierarquia."
         }
@@ -1568,9 +1944,33 @@ pub fn text(key: Text) -> &'static str {
         Text::StepNeedsKernel => {
             "Indisponível: este executável foi compilado sem o núcleo OCCT (--features occt)."
         }
+        Text::LeavePart => "Voltar à montagem",
         Text::ProjectNode => "Projeto",
+        Text::CollapseTree => "Recolher a árvore",
+        Text::ExpandTree => "Mostrar a árvore",
+        Text::MeasureTool => "Medir",
+        Text::SketchDiagnostics => "Diagnóstico do rascunho",
+        Text::PanCamera => "Arrastar: mover a câmera com o botão esquerdo",
+        Text::OrbitCamera => "Rotacionar: girar a câmera com o botão esquerdo",
         Text::PartsFolder => "Peças",
         Text::SubpartsFolder => "Sub-peças",
         Text::StopEditPart => "Concluir a edição da peça",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locales_choose_the_language_and_fall_back_to_portuguese() {
+        assert_eq!(from_locale("pt_BR.UTF-8"), Some(Language::Portuguese));
+        assert_eq!(from_locale("es_AR.UTF-8"), Some(Language::Spanish));
+        assert_eq!(from_locale("en_US:en"), Some(Language::English));
+        assert_eq!(from_locale("de_DE.UTF-8"), None);
+        // O idioma global não muda aqui: os testes de janela rodam em paralelo.
+        assert_eq!(pt(Text::Save), "Salvar");
+        assert_eq!(en::text(Text::Save), "Save");
+        assert_eq!(es::text(Text::Save), "Guardar");
     }
 }

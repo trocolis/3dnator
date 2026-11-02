@@ -53,7 +53,15 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 35: transições guiadas com trajetórias associativas.
 /// Versão 36: rótulos com contornos persistidos e cores intrínsecas por face.
 /// Versão 37: extrusão nula com base explícita subdivide faces, sem alterar volume.
-pub const FORMAT_VERSION: u32 = 37;
+/// Versão 39: `RepairContacts` solda ou separa contatos em linha do sólido.
+/// Versão 40: `print_profile` guarda o perfil de impressão do projeto.
+/// Versão 41: corpos guardam em `print_down` a direção que aponta para a mesa.
+/// Versão 42: tabela de fixadores no perfil; porca cativa e furo em gota em `HoleSpec`.
+/// Versão 43: novas restrições de rascunho (`PointsHorizontal`, `PointsVertical`, `Collinear`,
+/// `Symmetric`, `OriginOnCurve`, `EqualRadius` e `CircleTangent`).
+/// Versão 44: operações `ComponentCut`, `Lip`, `ScrewBoss` e `SnapFit`, e preço, preenchimento,
+/// voltas de parede e deformação máxima no perfil de impressão.
+pub const FORMAT_VERSION: u32 = 46;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -91,6 +99,8 @@ struct Manifest {
     sheets: Vec<nator_document::SheetRecord>,
     #[serde(default)]
     settings: nator_document::Settings,
+    #[serde(default)]
+    print_profile: nator_document::print_profile::PrintProfile,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     reference_sketches: Vec<SketchRecordData>,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -118,6 +128,9 @@ struct PartRecord {
     history_marker: Option<usize>,
     #[serde(default, skip_serializing_if = "is_default")]
     folders: nator_document::PartFolders,
+    /// Versão 46: modelo importado só como referência.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    reference: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +217,9 @@ struct BodyRecord {
     /// Face de origem de cada triângulo da malha de um sólido (`faces/<id>.bin`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     faces_path: Option<String>,
+    /// Direção unitária, local ao corpo, que aponta para a mesa de impressão.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    print_down: Option<[f64; 3]>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -405,6 +421,8 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
             ));
         }
     }
+    manifest.print_profile.validate().map_err(error)?;
+    let inherited = manifest.print_profile.parameters();
     let mut parts = Vec::new();
     let mut total_triangles = 0_usize;
     for mut part in manifest.parts {
@@ -471,6 +489,9 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                         .collect(),
                 ),
                 color: body.color_srgb.map(RgbColor::new),
+                print_down: body
+                    .print_down
+                    .filter(|d| (nator_geometry::norm(*d) - 1.).abs() < 1e-6),
                 brep,
                 face_names: Arc::new(body.face_names),
                 id: BodyId(body.id),
@@ -504,10 +525,15 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                     visible: w.visible,
                 })
                 .collect(),
-            parameters: part.parameters,
+            // As expressões são validadas ao montar o documento: o perfil vem antes disso.
+            parameters: nator_document::parameters::Parameters {
+                inherited: inherited.clone(),
+                ..part.parameters
+            },
             features: part.features,
             history_marker: part.history_marker,
             folders: part.folders,
+            reference: part.reference,
         });
     }
     if !outlines.is_empty() {
@@ -679,6 +705,9 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
         .map_err(error)?;
     document.restore_sheets(manifest.sheets).map_err(error)?;
     document.set_settings(manifest.settings).map_err(error)?;
+    document
+        .set_print_profile(manifest.print_profile)
+        .map_err(error)?;
     document
         .restore_reference_sketches(
             manifest
@@ -886,6 +915,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                     .collect(),
                 history_marker: p.history_marker,
                 folders: p.folders,
+                reference: p.reference,
                 sketches: p
                     .sketches
                     .iter()
@@ -924,12 +954,14 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                             .map(|c| c.map(RgbColor::channels))
                             .collect(),
                         faces_path: b.geometry.triangle_faces().map(|_| faces_path(b.id.0)),
+                        print_down: b.print_down,
                     })
                     .collect(),
             })
             .collect(),
         sheets: document.sheets().to_vec(),
         settings: document.settings(),
+        print_profile: document.print_profile().clone(),
         folders: document.folders(),
         reference_sketches: document
             .reference_sketches()
@@ -1252,6 +1284,16 @@ mod tests {
             {"name": "X", "output": 1, "operation": {"Fillet": {"base": 2, "edge": 3}}}
         ]}]});
         assert!(migrate_to_7(&mut broken).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn older_profiles_get_valid_estimate_fields() -> Result<(), Box<dyn Error>> {
+        let old = serde_json::json!({"name": "Antigo", "nozzle_mm": 0.6});
+        let profile: nator_document::print_profile::PrintProfile = serde_json::from_value(old)?;
+        profile.validate()?;
+        assert_eq!(profile.infill_pct, 20.);
+        assert_eq!(profile.price_per_kg, 0.);
         Ok(())
     }
 
@@ -1605,15 +1647,40 @@ mod tests {
     }
 
     #[test]
+    fn older_settings_open_with_the_default_unit_and_mouse_precision() -> Result<(), Box<dyn Error>>
+    {
+        let settings: nator_document::Settings = serde_json::from_str(r#"{"display_decimals":4}"#)?;
+        assert_eq!(
+            settings,
+            nator_document::Settings {
+                display_decimals: 4,
+                ..nator_document::Settings::default()
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
     fn settings_and_thumbnail_round_trip() -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("miniatura.3dnator");
         let mut doc = document()?;
-        doc.set_settings(nator_document::Settings {
+        let settings = nator_document::Settings {
             display_decimals: 4,
-        })?;
+            mouse_step_mm: 0.01,
+            mouse_angle_step_deg: 0.5,
+            unit: nator_document::LengthUnit::Inch,
+        };
+        doc.set_settings(settings)?;
         write_project(&path, &doc)?;
-        assert_eq!(read_project(&path)?.settings().display_decimals, 4);
+        assert_eq!(read_project(&path)?.settings(), settings);
+        // Centímetro e metro saíram: projetos antigos abrem em milímetro.
+        for old in ["\"Centimeter\"", "\"Meter\""] {
+            assert_eq!(
+                serde_json::from_str::<nator_document::LengthUnit>(old)?,
+                nator_document::LengthUnit::Millimeter
+            );
+        }
         let png = read_thumbnail(&path)?.ok_or("Miniatura ausente")?;
         assert!(png.starts_with(b"\x89PNG"));
         // A miniatura não é preta nem vazia: há pixels do fundo e do modelo.
@@ -1634,7 +1701,8 @@ mod tests {
         assert!(read_thumbnail(&empty)?.is_none());
         assert!(
             doc.set_settings(nator_document::Settings {
-                display_decimals: 9
+                display_decimals: 9,
+                ..nator_document::Settings::default()
             })
             .is_err()
         );

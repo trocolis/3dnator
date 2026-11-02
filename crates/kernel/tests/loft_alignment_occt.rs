@@ -29,6 +29,7 @@ fn loft_aligns_circle_seams_and_preserves_rectangle_circle_symmetry() -> Result<
                 (&first, a.first().ok_or("Perfil")?),
                 (&last, b.first().ok_or("Perfil")?),
                 ruled,
+                false,
                 "loft",
             )?;
             let expected = std::f64::consts::PI * 20. * (25. + 15. + 9.) / 3.;
@@ -56,6 +57,7 @@ fn loft_aligns_circle_seams_and_preserves_rectangle_circle_symmetry() -> Result<
             (&first, a.first().ok_or("Perfil")?),
             (&last, b.first().ok_or("Perfil")?),
             ruled,
+            false,
             "loft",
         )?;
         let volume = solid.volume()?;
@@ -96,6 +98,7 @@ fn circular_loft_on_an_inclined_plane_keeps_its_mirror_plane() -> Result<()> {
         (&a, ra.first().ok_or("Área")?),
         (&b, rb.first().ok_or("Área")?),
         true,
+        false,
         "inclined",
     )?;
     let volume = solid.volume()?;

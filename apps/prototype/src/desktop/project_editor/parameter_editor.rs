@@ -105,15 +105,15 @@ impl Editor {
                             {
                                 Ok(value) => {
                                     ui.monospace(match parameter.dimension {
-                                        Dimension::Length => format!("{} mm", self.mm(value)),
+                                        Dimension::Length => self.length(value),
                                         Dimension::Angle => {
-                                            format!("{} graus", self.mm(value.to_degrees()))
+                                            format!("{} graus", self.number(value.to_degrees()))
                                         }
-                                        Dimension::Scalar => self.mm(value),
+                                        Dimension::Scalar => self.number(value),
                                     });
                                 }
                                 Err(error) => {
-                                    ui.colored_label(theme::DANGER, error.to_string());
+                                    ui.colored_label(theme::danger(), error.to_string());
                                 }
                             }
                             ui.end_row();
@@ -142,10 +142,15 @@ impl Editor {
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     ui.horizontal(|ui| {
                         if ui.button(text(T::ApplyParameter)).clicked() {
+                            let settings = command_panel::settings(ui.ctx());
                             command = Some(Command::SetParameter {
                                 part: draft.part,
                                 name: draft.name.trim().into(),
-                                expression: Some(draft.expression.clone()),
+                                expression: Some(if draft.dimension == Dimension::Length {
+                                    settings.unit.normalize_expression(&draft.expression)
+                                } else {
+                                    draft.expression.clone()
+                                }),
                                 dimension: draft.dimension,
                             });
                         }

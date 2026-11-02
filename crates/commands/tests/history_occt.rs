@@ -50,11 +50,13 @@ fn feature(
     })?)
 }
 
+/// Etapa simples sobre `base`: reflete o corpo no plano X = `x` / 2.
 fn translate(base: BodyId, x: f64) -> Operation {
-    Operation::Transform {
+    Operation::Mirror {
         base,
-        translation: [x, 0., 0.],
-        rotation: [0.; 3],
+        origin: [x / 2., 0., 0.],
+        normal: [1., 0., 0.],
+        keep_original: false,
     }
 }
 

@@ -5,6 +5,10 @@
 //! - Entidade contida: linha inteira sobre outra linha colinear, que já a cobre.
 //! - Folga pequena: duas pontas abertas mais próximas que a tolerância; o reparo acrescenta
 //!   uma restrição de coincidência, e o solver fecha a folga respeitando as demais.
+//! - Pontas sem ligação: dois extremos no mesmo lugar, sem relação entre eles. O contorno
+//!   fecha agora, mas o solver pode afastá-los ou deixar uma folga residual.
+//! - Quase alinhada: linha a menos de `ALIGNED_DEGREES` de horizontal ou vertical, sem
+//!   restrição de direção; costuma ser um vértice torto, e vira fresta depois de impresso.
 //!
 //! Cruzamentos não têm reparo automático (exigem decidir onde aparar) e são só relatados.
 use crate::*;
@@ -12,6 +16,10 @@ use std::collections::{HashMap, HashSet};
 
 /// Coincidência geométrica usada para reconhecer extremos iguais.
 const SAME: f64 = 1e-6;
+/// Extremos a esta distância estão no mesmo lugar para o usuário, mesmo com folga real.
+const NEAR: f64 = 1e-4;
+/// Abaixo disto, a inclinação de uma linha dificilmente é intencional.
+const ALIGNED_DEGREES: f64 = 1.;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fix {
@@ -21,6 +29,14 @@ pub enum Fix {
     RemoveContained { entity: u64, within: u64 },
     /// Une as pontas abertas `a` e `b`, afastadas de `gap` mm.
     CloseGap { a: u64, b: u64, gap: f64 },
+    /// Liga os extremos `a` e `b`, afastados de `gap` mm e sem relação entre si.
+    LinkEnds { a: u64, b: u64, gap: f64 },
+    /// Alinha `line`, inclinada `degrees` em relação ao eixo.
+    AlmostAligned {
+        line: u64,
+        horizontal: bool,
+        degrees: f64,
+    },
 }
 impl Fix {
     /// Entidades e pontos envolvidos, para realce na prévia.
@@ -28,12 +44,13 @@ impl Fix {
         match *self {
             Self::RemoveDuplicate { entity, keeps } => vec![entity, keeps],
             Self::RemoveContained { entity, within } => vec![entity, within],
-            Self::CloseGap { .. } => Vec::new(),
+            Self::CloseGap { .. } | Self::LinkEnds { .. } => Vec::new(),
+            Self::AlmostAligned { line, .. } => vec![line],
         }
     }
     pub fn points(&self) -> Vec<u64> {
         match *self {
-            Self::CloseGap { a, b, .. } => vec![a, b],
+            Self::CloseGap { a, b, .. } | Self::LinkEnds { a, b, .. } => vec![a, b],
             _ => Vec::new(),
         }
     }
@@ -183,6 +200,66 @@ pub fn suggest(sketch: &Sketch, tolerance: f64) -> Result<Report> {
             report.fixes.push(Fix::CloseGap { a, b, gap });
         }
     }
+    // Só a ligação dirigente mantém as pontas juntas. A fraca de projetos antigos não prende.
+    let linked = |a: u64, b: u64| {
+        sketch.constraints.iter().any(|c| {
+            !c.reference
+                && matches!(c.kind, ConstraintKind::Coincident { a: x, b: y }
+                if (x == a && y == b) || (x == b && y == a))
+        })
+    };
+    for (i, (a, p)) in ends.iter().enumerate() {
+        for (b, q) in &ends[i + 1..] {
+            let gap = distance(*p, *q);
+            if a != b
+                && gap < NEAR
+                && !used.contains(a)
+                && !used.contains(b)
+                && !linked(*a, *b)
+                && !sketch.entities.iter().any(|e| {
+                    let ids = e.point_ids();
+                    ids.contains(a) && ids.contains(b)
+                })
+            {
+                used.insert(*a);
+                used.insert(*b);
+                report.fixes.push(Fix::LinkEnds { a: *a, b: *b, gap });
+            }
+        }
+    }
+    // Direção já definida por restrição é intenção explícita, por menor que seja o ângulo.
+    let directed = |line: u64| {
+        sketch.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::Horizontal { line: other }
+            | ConstraintKind::Vertical { line: other } => other == line,
+            ConstraintKind::LineAngle {
+                line: x,
+                reference: y,
+                ..
+            }
+            | ConstraintKind::Angle { a: x, b: y, .. }
+            | ConstraintKind::Parallel { a: x, b: y }
+            | ConstraintKind::Collinear { a: x, b: y }
+            | ConstraintKind::Perpendicular { a: x, b: y } => x == line || y == line,
+            _ => false,
+        })
+    };
+    for entity in profile.iter().filter(|e| !removed.contains(&e.id)) {
+        if !matches!(entity.curve, Curve::Line { .. }) || directed(entity.id) {
+            continue;
+        }
+        let (a, b) = sketch.line(entity.id)?;
+        let [dx, dy] = sub(b, a).map(f64::abs);
+        let degrees = dx.min(dy).atan2(dx.max(dy)).to_degrees();
+        // Abaixo disto a inclinação é ruído numérico, sem efeito na peça.
+        if degrees > 1e-6 && degrees < ALIGNED_DEGREES {
+            report.fixes.push(Fix::AlmostAligned {
+                line: entity.id,
+                horizontal: dx > dy,
+                degrees,
+            });
+        }
+    }
     let (_, diagnostics) = profiles::analyze(sketch)?;
     report.crossings = diagnostics.crossings;
     Ok(report)
@@ -225,6 +302,73 @@ fn remove_entity(sketch: &mut Sketch, id: u64) -> Result<()> {
     Ok(())
 }
 
+/// `point` é extremo de uma das linhas quase alinhadas de `fixes`, fora `except`.
+fn touches_crooked(
+    sketch: &Sketch,
+    fixes: &[Fix],
+    point: u64,
+    except: Option<u64>,
+) -> Result<bool> {
+    let position = sketch.point(point)?;
+    for fix in fixes {
+        if let Fix::AlmostAligned { line, .. } = fix
+            && Some(*line) != except
+        {
+            let (a, b) = sketch.line(*line)?;
+            if distance(a, position) < SAME || distance(b, position) < SAME {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Reúne duas pontas antes da coincidência. Sozinho, o solver dividiria a folga entre elas,
+/// e meio mícron basta para desalinhar o rascunho de outro que dependa da posição antiga.
+/// Fica parada a ponta que definirá a direção de uma linha corrigida.
+fn join(next: &mut Sketch, original: &Sketch, fixes: &[Fix], a: u64, b: u64) -> Result<()> {
+    let keep_b =
+        touches_crooked(original, fixes, b, None)? && !touches_crooked(original, fixes, a, None)?;
+    let (kept, moved) = if keep_b { (b, a) } else { (a, b) };
+    let (kept, moved) = (next.point(kept)?, next.point(moved)?);
+    for point in &mut next.points {
+        if distance(point.position, moved) < SAME {
+            point.position = kept;
+        }
+    }
+    Ok(())
+}
+
+/// Endireita a linha movendo só a ponta torta. Sozinho, o solver dividiria o erro entre as
+/// duas pontas e tiraria do lugar a que estava certa. A ponta torta é a que encosta em outra
+/// linha quase alinhada; sem essa pista, fica a de origem da linha, que costuma estar ancorada.
+fn align(
+    next: &mut Sketch,
+    original: &Sketch,
+    fixes: &[Fix],
+    line: u64,
+    horizontal: bool,
+) -> Result<()> {
+    let Curve::Line { start, end } = next.entity(line)?.curve else {
+        return Err(SketchError("Linha esperada.".into()));
+    };
+    let crooked = |point| touches_crooked(original, fixes, point, Some(line));
+    let (kept, moved) = if crooked(start)? && !crooked(end)? {
+        (end, start)
+    } else {
+        (start, end)
+    };
+    let (kept, moved) = (next.point(kept)?, next.point(moved)?);
+    // Pontos no mesmo lugar acompanham a ponta: são o mesmo vértice para o usuário.
+    let axis = usize::from(horizontal);
+    for point in &mut next.points {
+        if distance(point.position, moved) < NEAR {
+            point.position[axis] = kept[axis];
+        }
+    }
+    Ok(())
+}
+
 /// Aplica os reparos escolhidos a uma cópia. A coincidência acrescentada ainda precisa ser
 /// resolvida pelo solver; o resultado só é publicado se a solução for consistente.
 pub fn apply(sketch: &Sketch, fixes: &[Fix]) -> Result<Sketch> {
@@ -237,10 +381,22 @@ pub fn apply(sketch: &Sketch, fixes: &[Fix]) -> Result<Sketch> {
                     remove_entity(&mut next, entity)?;
                 }
             }
-            Fix::CloseGap { a, b, .. } => {
-                next.point(a)?;
-                next.point(b)?;
+            Fix::CloseGap { a, b, .. } | Fix::LinkEnds { a, b, .. } => {
+                join(&mut next, sketch, fixes, a, b)?;
                 next.add_constraint(ConstraintKind::Coincident { a, b }, false)?;
+            }
+            Fix::AlmostAligned {
+                line, horizontal, ..
+            } => {
+                align(&mut next, sketch, fixes, line, horizontal)?;
+                next.add_constraint(
+                    if horizontal {
+                        ConstraintKind::Horizontal { line }
+                    } else {
+                        ConstraintKind::Vertical { line }
+                    },
+                    false,
+                )?;
             }
         }
     }
@@ -299,6 +455,113 @@ mod tests {
         assert!(solved.entity(duplicate).is_err() && solved.entity(contained).is_err());
         // O rascunho original não muda.
         assert_eq!(sketch.entities.len(), 6);
+        Ok(())
+    }
+
+    #[test]
+    fn crooked_lines_are_aligned_unless_their_direction_is_constrained() -> TestResult {
+        let mut sketch = Sketch::new("Torto", Plane::xy());
+        // Mesma inclinação do defeito real: 0,0094 mm em 6,95 mm.
+        let crooked = sketch.add_line([0., 0.], [6.95, 0.0094], false)?;
+        let straight = sketch.add_line([6.95, 0.0094], [6.95, 10.], false)?;
+        let inclined = sketch.add_line([6.95, 10.], [0., 12.], false)?;
+        sketch.add_constraint(ConstraintKind::Vertical { line: straight }, false)?;
+        // As pontas soltas também geram `LinkEnds`: aqui só interessa a direção.
+        let aligned = |s: &Sketch| -> Result<Vec<Fix>> {
+            Ok(suggest(s, 0.)?
+                .fixes
+                .into_iter()
+                .filter(|f| matches!(f, Fix::AlmostAligned { .. }))
+                .collect())
+        };
+        let fixes = aligned(&sketch)?;
+        let [
+            Fix::AlmostAligned {
+                line,
+                horizontal: true,
+                degrees,
+            },
+        ] = fixes[..]
+        else {
+            return Err(format!("{fixes:?}").into());
+        };
+        assert_eq!(line, crooked);
+        assert!(degrees > 0.05 && degrees < 0.1);
+        assert_ne!(line, inclined);
+        let solved = solver::solve(&apply(&sketch, &fixes)?)?.sketch;
+        let (a, b) = solved.line(crooked)?;
+        assert!((a[1] - b[1]).abs() < 1e-6);
+        // A origem ancorada não se move: o erro não é dividido entre as pontas.
+        assert!(a[1].abs() < 1e-9);
+        // A intenção explícita silencia o aviso.
+        let mut intended = sketch.clone();
+        intended.add_constraint(
+            ConstraintKind::Perpendicular {
+                a: crooked,
+                b: straight,
+            },
+            false,
+        )?;
+        assert!(aligned(&intended)?.is_empty());
+        Ok(())
+    }
+
+    /// Duas linhas tortas no mesmo vértice, como no defeito real: as outras pontas estão
+    /// certas, então o canto corrigido é o cruzamento das direções que elas definem.
+    #[test]
+    fn crooked_corner_moves_alone_to_where_its_good_ends_point() -> TestResult {
+        let mut sketch = Sketch::new("Canto", Plane::xy());
+        let vertical = sketch.add_line([61.32017, -27.98186], [61.31773, -26.19134], false)?;
+        let horizontal = sketch.add_line([68.27, -26.18187], [61.31773, -26.19134], false)?;
+        let fixes = suggest(&sketch, 0.)?.fixes;
+        let solved = solver::solve(&apply(&sketch, &fixes)?)?.sketch;
+        let (bottom, top) = solved.line(vertical)?;
+        let (right, left) = solved.line(horizontal)?;
+        assert!(distance(top, [61.32017, -26.18187]) < 1e-6, "{top:?}");
+        assert!(distance(left, top) < 1e-6);
+        assert!(distance(bottom, [61.32017, -27.98186]) < 1e-6);
+        assert!(distance(right, [68.27, -26.18187]) < 1e-6);
+        Ok(())
+    }
+
+    /// Caso real: juntar as pontas não pode tirar do lugar a que uma linha torta usa como
+    /// referência, ou o rascunho deixa de alinhar com outro por poucos mícrons.
+    #[test]
+    fn closing_a_tiny_gap_keeps_the_end_that_defines_a_corrected_line() -> TestResult {
+        let mut sketch = Sketch::new("Folga", Plane::xy());
+        sketch.add_line([68.27, -11.68], [68.27, -26.181879], false)?;
+        sketch.add_line([68.27, -26.181871], [61.31773, -26.19134], false)?;
+        let fixes = suggest(&sketch, 0.5)?.fixes;
+        assert!(fixes.iter().any(|f| matches!(f, Fix::CloseGap { .. })));
+        let solved = solver::solve(&apply(&sketch, &fixes)?)?.sketch;
+        for point in &solved.points {
+            if point.position[1] < -20. {
+                assert!((point.position[1] + 26.181871).abs() < 1e-8, "{point:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn coincident_ends_without_a_link_are_reported_once() -> TestResult {
+        let mut sketch = Sketch::new("Sem ligação", Plane::xy());
+        // Folga residual do solver: fecha a área, mas nada mantém as pontas juntas.
+        sketch.add_line([0., 0.], [10., 0.], false)?;
+        sketch.add_line([10. + 8e-8, 0.], [10., 10.], false)?;
+        sketch.add_line([10., 10.], [0., 0.], false)?;
+        assert_eq!(profiles::regions(&sketch)?.len(), 1);
+        let links = |s: &Sketch| -> Result<usize> {
+            Ok(suggest(s, 0.)?
+                .fixes
+                .iter()
+                .filter(|f| matches!(f, Fix::LinkEnds { .. }))
+                .count())
+        };
+        assert_eq!(links(&sketch)?, 3);
+        let report = suggest(&sketch, 0.)?;
+        let solved = solver::solve(&apply(&sketch, &report.fixes)?)?.sketch;
+        assert_eq!(links(&solved)?, 0);
+        assert_eq!(profiles::regions(&solved)?.len(), 1);
         Ok(())
     }
 

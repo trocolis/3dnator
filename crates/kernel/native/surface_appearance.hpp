@@ -9,7 +9,7 @@ namespace {
 struct PaintPiece {TopoDS_Face face; int source; int material;};
 std::vector<PaintPiece> paint_pieces(const Shape* body,const std::size_t* faces,const Shape* const* tools,std::size_t count) {
         if (count==0 || count>255) throw std::runtime_error("Quantidade de pinturas inválida.");
-        const auto original=map_of(body->value,TopAbs_FACE);
+        const auto& original = faces_of(body);
         std::vector<PaintPiece> pieces;
         for (int i=1;i<=original.Extent();++i) pieces.push_back({TopoDS::Face(original(i)),i-1,0});
         for (std::size_t layer=0;layer<count;++layer) {
@@ -88,7 +88,7 @@ extern "C" bool nator_face_common_area(const Shape* first,std::size_t a,const Sh
 // suporte de uma subdivisão sem confundir faces coplanares afastadas.
 extern "C" bool nator_face_mask_area(const Shape* body,std::size_t index,const Shape* mask,double* output) noexcept {
     return guarded([&] {
-        const auto faces=map_of(body->value,TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face inexistente.");
         BRepAlgoAPI_Common common(faces(static_cast<int>(index)+1),mask->value);
         if (!common.IsDone()) throw std::runtime_error("Não foi possível delimitar a face pelo perfil.");
@@ -109,7 +109,7 @@ extern "C" Shape* nator_painted_solid(const Shape* body,const std::size_t* faces
             paint_origins(output,pieces);
             return;
         }
-        const auto original_faces=map_of(body->value,TopAbs_FACE);
+        const auto& original_faces = faces_of(body);
         std::vector<PaintPiece> sewn_pieces;
         TopoDS_Compound compound; BRep_Builder builder; builder.MakeCompound(compound);
         std::size_t solids=0;

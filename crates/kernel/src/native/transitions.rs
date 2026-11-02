@@ -10,6 +10,11 @@ unsafe extern "C" {
         guide: *const c_void,
         wire: usize,
     ) -> *mut c_void;
+    fn nator_loft_developable(
+        first: *const c_void,
+        last: *const c_void,
+        wire: usize,
+    ) -> *mut c_void;
     fn nator_loft_wire(
         first: *const c_void,
         last: *const c_void,
@@ -18,10 +23,13 @@ unsafe extern "C" {
     ) -> *mut c_void;
 }
 impl Solid {
+    /// Com `developable`, um polígono convexo e um círculo viram triângulos planos e cones
+    /// oblíquos, que aceitam casca. Outros pares seguem a transição comum do OCCT.
     pub fn loft(
         first: (&Sketch, &Region),
         last: (&Sketch, &Region),
         ruled: bool,
+        developable: bool,
         owner: &str,
     ) -> Result<Self, KernelError> {
         owner_name(owner)?;
@@ -31,16 +39,27 @@ impl Solid {
         let a = Self::profile(first.0, first.1, [0.; 3])?;
         let b = Self::profile(last.0, last.1, [0.; 3])?;
         let build = |wire| -> Result<Self, KernelError> {
-            // SAFETY: perfis vivos, índice limitado aos contornos acima. A
-            // ponte devolve forma exclusiva e converte exceções em KernelError.
-            let mut solid = Self::from_pointer(unsafe {
-                nator_loft_wire(
-                    a.face.pointer.as_ptr(),
-                    b.face.pointer.as_ptr(),
-                    wire,
-                    ruled,
-                )
-            })?;
+            let common = || {
+                // SAFETY: perfis vivos, índice limitado aos contornos acima. A
+                // ponte devolve forma exclusiva e converte exceções em KernelError.
+                Self::from_pointer(unsafe {
+                    nator_loft_wire(
+                        a.face.pointer.as_ptr(),
+                        b.face.pointer.as_ptr(),
+                        wire,
+                        ruled,
+                    )
+                })
+            };
+            let mut solid = if developable {
+                // SAFETY: as mesmas garantias de `nator_loft_wire`.
+                Self::from_pointer(unsafe {
+                    nator_loft_developable(a.face.pointer.as_ptr(), b.face.pointer.as_ptr(), wire)
+                })
+                .or_else(|_| common())?
+            } else {
+                common()?
+            };
             solid.faces = naming::sweep_names(owner, &solid.origins()?, &[]);
             solid.volume()?;
             Ok(solid)

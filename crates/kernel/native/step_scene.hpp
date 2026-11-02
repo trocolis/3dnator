@@ -21,6 +21,8 @@ struct StepBody {
     TopoDS_Shape shape;
     std::array<int, 3> color{-1, -1, -1};
     std::vector<std::array<int,3>> face_colors;
+    // Superfícies abertas, fora de qualquer sólido: não têm volume e viram malha.
+    bool surface = false;
 };
 struct StepPart { std::string name; std::vector<StepBody> bodies; };
 struct StepOccurrence {
@@ -51,6 +53,14 @@ std::array<int,3> step_color(const Handle(XCAFDoc_ColorTool)& colors, const TDF_
     double r, g, b;
     color.Values(r, g, b, Quantity_TOC_sRGB);
     return {int(std::lround(r * 255)), int(std::lround(g * 255)), int(std::lround(b * 255))};
+}
+std::array<int,3> shape_color(const Handle(XCAFDoc_ColorTool)& colors, const TopoDS_Shape& shape) {
+    Quantity_Color color;
+    if (!colors->GetColor(shape, XCAFDoc_ColorSurf, color) &&
+        !colors->GetColor(shape, XCAFDoc_ColorGen, color)) return {-1,-1,-1};
+    double r, g, b;
+    color.Values(r, g, b, Quantity_TOC_sRGB);
+    return {int(std::lround(r*255)),int(std::lround(g*255)),int(std::lround(b*255))};
 }
 void set_step_name(const TDF_Label& label, const std::string& name) {
     TDataStd_Name::Set(label, TCollection_ExtendedString(name.c_str(), true));
@@ -119,25 +129,39 @@ StepScene* nator_step_scene_read(const char* path) noexcept {
                     auto solid = it.Current();
                     if (!BRepCheck_Analyzer(solid).IsValid()) throw std::runtime_error("Sólido STEP inválido.");
                     auto color = step_color(colors,label);
-                    Quantity_Color specific;
-                    if (colors->GetColor(solid, XCAFDoc_ColorSurf, specific) || colors->GetColor(solid, XCAFDoc_ColorGen, specific)) {
-                        double r, g, b; specific.Values(r, g, b, Quantity_TOC_sRGB);
-                        color = {int(std::lround(r*255)),int(std::lround(g*255)),int(std::lround(b*255))};
-                    }
+                    const auto specific = shape_color(colors, solid);
+                    if (specific[0] >= 0) color = specific;
                     std::vector<std::array<int,3>> face_colors;
                     const auto faces=map_of(solid,TopAbs_FACE);
-                    for (int f=1;f<=faces.Extent();++f) {
-                        auto rgb=std::array<int,3>{-1,-1,-1};
-                        Quantity_Color surface;
-                        if (colors->GetColor(faces(f),XCAFDoc_ColorSurf,surface) || colors->GetColor(faces(f),XCAFDoc_ColorGen,surface)) {
-                            double r,g,b; surface.Values(r,g,b,Quantity_TOC_sRGB);
-                            rgb={int(std::lround(r*255)),int(std::lround(g*255)),int(std::lround(b*255))};
-                        }
-                        face_colors.push_back(rgb);
-                    }
-                    bodies.push_back({step_name(label), solid, color, std::move(face_colors)});
+                    for (int f=1;f<=faces.Extent();++f) face_colors.push_back(shape_color(colors,faces(f)));
+                    bodies.push_back({step_name(label), solid, color, std::move(face_colors), false});
                 }
-                if (bodies.empty()) throw std::runtime_error("STEP contém uma peça sem sólidos; superfícies abertas não são suportadas.");
+                // Cascas e faces fora de sólidos, como a serigrafia exportada pelo KiCad.
+                // Juntas formam um corpo por definição, para não multiplicar itens na árvore.
+                TopoDS_Compound surfaces;
+                BRep_Builder builder;
+                builder.MakeCompound(surfaces);
+                bool open = false;
+                for (TopExp_Explorer it(shape, TopAbs_SHELL, TopAbs_SOLID); it.More(); it.Next()) {
+                    builder.Add(surfaces, it.Current());
+                    open = true;
+                }
+                for (TopExp_Explorer it(shape, TopAbs_FACE, TopAbs_SHELL); it.More(); it.Next()) {
+                    builder.Add(surfaces, it.Current());
+                    open = true;
+                }
+                if (open) {
+                    if (++body_count > max_step_elements) throw std::runtime_error("STEP excede dez mil corpos.");
+                    auto color = step_color(colors,label);
+                    std::vector<std::array<int,3>> face_colors;
+                    const auto faces=map_of(surfaces,TopAbs_FACE);
+                    for (int f=1;f<=faces.Extent();++f) {
+                        face_colors.push_back(shape_color(colors,faces(f)));
+                        if (color[0] < 0) color = face_colors.back();
+                    }
+                    bodies.push_back({step_name(label), surfaces, color, std::move(face_colors), true});
+                }
+                if (bodies.empty()) throw std::runtime_error("STEP contém uma peça sem sólidos nem superfícies.");
                 scene->parts[index].bodies = std::move(bodies);
             }
             visiting.erase(key);
@@ -166,6 +190,11 @@ Shape* nator_step_body(const StepScene* scene, std::size_t part, std::size_t bod
         return b.shape;
     });
 }
+bool nator_step_body_surface(const StepScene* scene, std::size_t part, std::size_t body) noexcept {
+    bool surface = false;
+    guarded([&] { surface = scene->parts.at(part).bodies.at(body).surface; });
+    return surface;
+}
 bool nator_step_face_colors(const StepScene* scene,std::size_t part,std::size_t body,int* colors,std::size_t count) noexcept {
     return guarded([&] {
         const auto& b=scene->parts.at(part).bodies.at(body);
@@ -186,9 +215,9 @@ bool nator_step_add_part(StepScene* scene, const char* name) noexcept {
 }
 bool nator_step_add_body(StepScene* scene, std::size_t part, const Shape* body, const char* name, const int* color, const int* face_colors,std::size_t count) noexcept {
     return guarded([&] {
-        const auto faces=map_of(body->value,TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (count && count!=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Contagem de cores STEP incompatível.");
-        StepBody result{name,body->value,{color[0],color[1],color[2]}, {}};
+        StepBody result{name,body->value,{color[0],color[1],color[2]}, {}, false};
         for (std::size_t f=0;f<count;++f) result.face_colors.push_back({face_colors[f*3],face_colors[f*3+1],face_colors[f*3+2]});
         scene->parts.at(part).bodies.push_back(std::move(result));
     });

@@ -1,6 +1,7 @@
 //! Projeções do modelo são preparadas fora da interface, sem limites arbitrários de
 //! ocorrências/vértices. A chave acompanha documento, visibilidade e referencial editado.
 use super::*;
+use nator_commands::{point_snap::PointKind, sketch_projection::SnapGeometry};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Key {
@@ -13,13 +14,20 @@ pub(super) struct Key {
 pub(super) struct Cache {
     key: Option<Key>,
     pub points: Vec<Point2>,
-    running: Option<Receiver<Result<Vec<Point2>, String>>>,
+    /// O que cada apoio representa, para o ícone junto ao cursor.
+    pub marks: Vec<(Point2, PointKind)>,
+    pub curves: Vec<nator_sketch::profiles::Segment>,
+    pub chains: Vec<Vec<Point2>>,
+    running: Option<Receiver<Result<SnapGeometry, String>>>,
 }
 impl Default for Cache {
     fn default() -> Self {
         Self {
             key: None,
             points: vec![[0., 0.]],
+            marks: Vec::new(),
+            curves: Vec::new(),
+            chains: Vec::new(),
             running: None,
         }
     }
@@ -36,6 +44,9 @@ impl Cache {
             // Descartar a entrega anterior antes de consultar outra revisão ou plano.
             self.key = Some(key);
             self.points = vec![[0., 0.]];
+            self.marks.clear();
+            self.curves.clear();
+            self.chains.clear();
             self.running = None;
             let occurrences = document
                 .occurrences()
@@ -49,7 +60,7 @@ impl Cache {
             std::thread::Builder::new()
                 .name("sketch-projection".into())
                 .spawn(move || {
-                    let result = nator_commands::sketch_projection::points(
+                    let result = nator_commands::sketch_projection::snap_geometry(
                         &document,
                         &occurrences,
                         key.sketch,
@@ -67,7 +78,11 @@ impl Cache {
             match receiver.try_recv() {
                 Ok(result) => {
                     self.running = None;
-                    self.points = result?;
+                    let geometry = result?;
+                    self.points = geometry.points.iter().map(|(p, _)| *p).collect();
+                    self.marks = geometry.points;
+                    self.curves = geometry.curves;
+                    self.chains = geometry.chains;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.running = None;
@@ -78,6 +93,32 @@ impl Cache {
         }
         Ok(())
     }
+    /// Ícone do tipo de captura, mostrado só enquanto o cursor está sobre o apoio.
+    pub fn snap_icon(&self, kind: Kind, point: Point2) -> Option<icons::Icon> {
+        use icons::Icon;
+        Some(match kind {
+            Kind::Endpoint(_) | Kind::Intersection => Icon::ConstraintCoincident,
+            Kind::Midpoint(_) | Kind::CurveMidpoint(_) | Kind::ProjectedMidpoint => {
+                Icon::SnapMidpoint
+            }
+            Kind::Center(_) | Kind::RegionCenter => Icon::SnapCenter,
+            Kind::Tangent => Icon::ConstraintTangent,
+            Kind::OnCurve(_) | Kind::ProjectedEdge => Icon::ConstraintCollinear,
+            Kind::Projected => match self
+                .marks
+                .iter()
+                .find(|(p, _)| nator_sketch::distance(*p, point) < 1e-7)
+                .map(|(_, mark)| *mark)
+            {
+                Some(PointKind::EdgeMidpoint) => Icon::SnapMidpoint,
+                Some(PointKind::CircleCenter | PointKind::ArcCenter | PointKind::FaceCenter) => {
+                    Icon::SnapCenter
+                }
+                _ => Icon::ConstraintCoincident,
+            },
+            Kind::Alignment | Kind::Step => return None,
+        })
+    }
     #[cfg(all(test, feature = "occt"))]
     pub fn ready(&self) -> bool {
         self.key.is_some() && self.running.is_none()
@@ -87,6 +128,26 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cursor_icon_tells_what_was_captured() {
+        use icons::Icon;
+        let cache = Cache {
+            marks: vec![
+                ([1., 0.], PointKind::EdgeMidpoint),
+                ([2., 0.], PointKind::CircleCenter),
+                ([3., 0.], PointKind::Vertex),
+            ],
+            ..Default::default()
+        };
+        assert!(cache.snap_icon(Kind::Midpoint(1), [0., 0.]) == Some(Icon::SnapMidpoint));
+        assert!(cache.snap_icon(Kind::Center(1), [0., 0.]) == Some(Icon::SnapCenter));
+        assert!(cache.snap_icon(Kind::Tangent, [0., 0.]) == Some(Icon::ConstraintTangent));
+        assert!(cache.snap_icon(Kind::Projected, [1., 0.]) == Some(Icon::SnapMidpoint));
+        assert!(cache.snap_icon(Kind::Projected, [2., 0.]) == Some(Icon::SnapCenter));
+        assert!(cache.snap_icon(Kind::Projected, [3., 0.]) == Some(Icon::ConstraintCoincident));
+        assert!(cache.snap_icon(Kind::Step, [0., 0.]).is_none());
+    }
 
     #[test]
     fn plane_and_view_changes_discard_queued_old_projections()
@@ -115,11 +176,15 @@ mod tests {
             placement: Placement::default(),
         };
         let (sender, receiver) = mpsc::channel();
-        sender.send(Ok(vec![[999., 999.]]))?;
+        sender.send(Ok(SnapGeometry {
+            points: vec![([999., 999.], PointKind::Vertex)],
+            ..Default::default()
+        }))?;
         let mut cache = Cache {
             key: Some(old),
             points: vec![[10., 5.]],
             running: Some(receiver),
+            ..Default::default()
         };
         let mut key = old;
         key.plane.origin = [100., 0., 40.];

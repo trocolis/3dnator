@@ -9,7 +9,7 @@ use super::KernelError;
 use std::f64::consts::PI;
 
 /// Folga acima da superfície de entrada, em mm.
-const CLEARANCE_MM: f64 = 1.;
+pub(crate) const CLEARANCE_MM: f64 = 1.;
 
 /// Cabeça do furo, na superfície de entrada.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,6 +25,11 @@ pub enum HoleHead {
         diameter: f64,
         angle: f64,
     },
+    /// Alojamento sextavado: medida entre faces e profundidade, em mm.
+    Nut {
+        across_flats: f64,
+        depth: f64,
+    },
 }
 
 /// Geometria avaliada de um furo, em mm e radianos.
@@ -36,6 +41,8 @@ pub struct HoleGeometry {
     pub head: HoleHead,
     /// Ângulo total da ponta de broca (por exemplo 118°); `None` deixa o fundo plano.
     pub tip_angle: Option<f64>,
+    /// Direção de cima na impressão: a seção vira gota, com ponta a 45° nessa direção.
+    pub teardrop: Option<[f64; 3]>,
 }
 
 fn positive(value: f64, name: &str) -> Result<(), KernelError> {
@@ -65,6 +72,19 @@ pub(crate) fn profile(hole: &HoleGeometry) -> Result<Vec<([f64; 2], &'static str
     let mut points = Vec::new();
     let top = match hole.head {
         HoleHead::Simple => radius,
+        HoleHead::Nut {
+            across_flats,
+            depth,
+        } => {
+            positive(across_flats, "Medida da porca")?;
+            positive(depth, "Profundidade da porca")?;
+            if across_flats <= hole.diameter || depth >= hole.depth {
+                return Err(KernelError(
+                    "A porca deve ser mais larga e mais rasa que o furo.".into(),
+                ));
+            }
+            radius
+        }
         HoleHead::Counterbore { diameter, depth } => {
             positive(diameter, "Diâmetro do rebaixo")?;
             positive(depth, "Profundidade do rebaixo")?;
@@ -93,7 +113,10 @@ pub(crate) fn profile(hole: &HoleGeometry) -> Result<Vec<([f64; 2], &'static str
     };
     points.push(([0., -CLEARANCE_MM], "top"));
     match hole.head {
-        HoleHead::Simple => points.push(([radius, -CLEARANCE_MM], "wall")),
+        // O alojamento sextavado entra por cima, unido a este cilindro.
+        HoleHead::Simple | HoleHead::Nut { .. } => {
+            points.push(([radius, -CLEARANCE_MM], "wall"));
+        }
         HoleHead::Counterbore { depth, .. } => {
             points.push(([top, -CLEARANCE_MM], "cbore_wall"));
             points.push(([top, depth], "cbore_floor"));
@@ -131,6 +154,13 @@ pub fn removed_volume(hole: &HoleGeometry) -> f64 {
         .unwrap_or(0.);
     match hole.head {
         HoleHead::Simple => cylinder(r, hole.depth) + tip,
+        HoleHead::Nut {
+            across_flats,
+            depth,
+        } => {
+            let hexagon = 3_f64.sqrt() / 2. * across_flats * across_flats;
+            hexagon * depth + cylinder(r, hole.depth - depth) + tip
+        }
         HoleHead::Counterbore { diameter, depth } => {
             cylinder(diameter / 2., depth) + cylinder(r, hole.depth - depth) + tip
         }
@@ -156,6 +186,7 @@ mod tests {
             depth: 10.,
             head: HoleHead::Simple,
             tip_angle: Some(118_f64.to_radians()),
+            teardrop: None,
         };
         assert_eq!(roles(&simple)?, ["top", "wall", "tip", "axis"]);
         let counterbore = HoleGeometry {
@@ -164,6 +195,7 @@ mod tests {
                 depth: 6.,
             },
             tip_angle: None,
+            teardrop: None,
             ..simple
         };
         assert_eq!(
@@ -176,6 +208,7 @@ mod tests {
                 angle: 90_f64.to_radians(),
             },
             tip_angle: None,
+            teardrop: None,
             ..simple
         };
         let points = profile(&countersink)?;
@@ -192,6 +225,7 @@ mod tests {
             depth: 10.,
             head: HoleHead::Simple,
             tip_angle: None,
+            teardrop: None,
         };
         for head in [
             HoleHead::Counterbore {

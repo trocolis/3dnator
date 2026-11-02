@@ -22,6 +22,7 @@ fn sketch_context(doc: &Document, sketch: SketchId) -> C {
 pub(super) fn context(command: &Command, doc: &Document) -> C {
     match command {
         Command::UpdateSketch { id, .. }
+        | Command::AddFaceLines { id }
         | Command::RemoveSketch { id }
         | Command::RenameSketch { id, .. } => sketch_context(doc, *id),
         Command::AddReferenceImage { image } | Command::UpdateReferenceImage { image } => {
@@ -46,12 +47,11 @@ pub(super) fn context(command: &Command, doc: &Document) -> C {
         | Command::AddWorkPlane { part, .. } => C::Part(*part),
         Command::MoveBody { id, .. }
         | Command::CopyBody { id, .. }
+        | Command::TransferBody { id, .. }
         | Command::RemoveBody { id }
         | Command::RenameBody { id, .. }
+        | Command::SetPrintFace { body: id, .. }
         | Command::SetBodyColor { id, .. } => owner(doc, *id).map(C::Part).unwrap_or(C::Keep),
-        Command::PaintSurface { body, .. } | Command::ClearSurfacePaint { body, .. } => {
-            owner(doc, *body).map(C::Part).unwrap_or(C::Keep)
-        }
         Command::PaintSurfaces { targets, .. } => targets
             .first()
             .and_then(|t| {
@@ -219,7 +219,7 @@ pub(super) fn intent(command: &Command, doc: &Document) -> Option<Intent> {
         }
         Command::MoveInstance { id, .. } => (K::Move, Some(T::Instance(*id))),
         Command::MoveBody { id, .. } => (K::Move, Some(T::Body(*id))),
-        Command::CopyBody { .. } => (K::Copy, None),
+        Command::CopyBody { .. } | Command::TransferBody { .. } => (K::Copy, None),
         Command::DuplicateInstance { .. }
         | Command::CloneInstance { .. }
         | Command::CopyInstanceAt { .. } => (K::Copy, None),
@@ -239,9 +239,7 @@ pub(super) fn intent(command: &Command, doc: &Document) -> Option<Intent> {
                 painting::Target::Body(b) | painting::Target::Face { body: b, .. } => *b,
             })),
         ),
-        Command::PaintSurface { body, .. } | Command::SetBodyColor { id: body, .. } => {
-            (K::Paint, Some(T::Body(*body)))
-        }
+        Command::SetBodyColor { id: body, .. } => (K::Paint, Some(T::Body(*body))),
         Command::AddWorkPlane { .. } => (K::WorkPlane, None),
         Command::AddReferenceImage { image } => (K::Image, Some(T::Image(image.id))),
         _ => return None,

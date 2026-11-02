@@ -12,13 +12,17 @@ use super::{
     live_preview::PreviewStatus,
     *,
 };
+use nator_commands::solid_check;
+use nator_document::PaintBoundary;
 use nator_document::features::{
-    BooleanMode, Combine, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec, HoleSpec,
-    LabelSpec, LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, SweepRoute, ThreadSpec,
-    UntilFace, signature,
+    BooleanMode, Combine, ContactRepair, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec,
+    HoleSpec, LabelSpec, LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, SweepRoute,
+    ThreadSpec, UntilFace, signature,
 };
+use nator_document::print_profile::{Fastener, HolePreset};
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
+pub(super) mod fastening;
 pub(super) mod label;
 mod measure;
 mod revolve;
@@ -37,11 +41,18 @@ pub(super) enum Tool {
     Fillet,
     Chamfer,
     Shell,
+    MergeFaces,
     Hole,
     LinearPattern,
     CircularPattern,
     Mirror,
     Split,
+    CheckSolid,
+    BedFace,
+    ComponentCut,
+    Lip,
+    ScrewBoss,
+    SnapFit,
 }
 impl Tool {
     pub(super) fn label(self) -> T {
@@ -55,11 +66,18 @@ impl Tool {
             Self::Fillet => T::Fillet,
             Self::Chamfer => T::Chamfer,
             Self::Shell => T::Shell,
+            Self::MergeFaces => T::MergeAreas,
             Self::Hole => T::HoleTool,
             Self::LinearPattern => T::RectangularPattern,
             Self::CircularPattern => T::CircularPattern,
             Self::Mirror => T::MirrorBody,
             Self::Split => T::SplitBody,
+            Self::CheckSolid => T::CheckSolid,
+            Self::BedFace => T::BedFace,
+            Self::ComponentCut => T::ComponentCut,
+            Self::Lip => T::Lip,
+            Self::ScrewBoss => T::ScrewBoss,
+            Self::SnapFit => T::SnapFit,
         }
     }
     pub(super) fn icon(self) -> Icon {
@@ -73,10 +91,17 @@ impl Tool {
             Self::Fillet => Icon::Fillet,
             Self::Chamfer => Icon::Chamfer,
             Self::Shell => Icon::Shell,
+            Self::MergeFaces => Icon::Join,
             Self::Mirror => Icon::Mirror,
             Self::LinearPattern | Self::CircularPattern => Icon::Pattern,
             Self::Split => Icon::Split,
             Self::Join | Self::Cut | Self::Intersect => Icon::Boolean,
+            Self::CheckSolid => Icon::CheckSolid,
+            Self::BedFace => Icon::BedFace,
+            Self::ComponentCut => Icon::ComponentCut,
+            Self::Lip => Icon::Lip,
+            Self::ScrewBoss => Icon::ScrewBoss,
+            Self::SnapFit => Icon::SnapFit,
         }
     }
     /// Ferramentas que partem de um rascunho de perfil.
@@ -91,7 +116,10 @@ impl Tool {
         match self {
             Self::Extrude | Self::Revolve | Self::Loft | Self::Sweep => Field::Profile,
             Self::Fillet | Self::Chamfer => Field::Edges,
-            Self::Shell | Self::Label => Field::Faces,
+            Self::Shell | Self::MergeFaces | Self::Label | Self::BedFace | Self::Lip => {
+                Field::Faces
+            }
+            Self::ComponentCut => Field::Component,
             _ => Field::Base,
         }
     }
@@ -113,10 +141,15 @@ const PLANES: [(&str, [f64; 3]); 3] = [
 /// Referência escolhida na área 3D ou gravada na operação em edição.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Kept {
-    PlanarFace(FaceRef, nator_sketch::Plane),
+    /// Face plana clicada e, na escolha do perfil, as condições da célula sob o cursor.
+    PlanarFace(FaceRef, nator_sketch::Plane, Vec<PaintBoundary>),
     Edge(EdgeRef),
+    /// Arestas que chegam ao vértice clicado em Arredondar ou Chanfrar.
+    Edges(Vec<EdgeRef>),
     Face(FaceRef),
     Body(BodyId),
+    /// Corpo de qualquer peça, com a posição da ocorrência clicada na montagem.
+    Component(BodyId, nator_geometry::Placement),
 }
 
 /// O que o próximo clique na área 3D deve selecionar para o painel.
@@ -125,6 +158,7 @@ pub(super) enum Awaiting {
     Edge,
     Face,
     Body,
+    Component,
 }
 
 /// Campo de seleção do painel.
@@ -143,6 +177,7 @@ pub(super) enum Field {
     EndProfile,
     SweepAxis,
     SweepPath,
+    Component,
 }
 
 /// Direção da extrusão, como nos CADs de mercado. Os limites gravados continuam sendo
@@ -278,6 +313,12 @@ struct HoleDraft {
     head_angle: String,
     tip: bool,
     tip_angle: String,
+    nut_flats: String,
+    nut_depth: String,
+    /// Direção de cima gravada na gota; `None` mantém a seção circular.
+    teardrop: Option<[f64; 3]>,
+    /// Posição do fixador na tabela do perfil.
+    fastener: usize,
     reverse: bool,
     thread: bool,
     thread_designation: String,
@@ -298,12 +339,60 @@ impl Default for HoleDraft {
             head_angle: "90 deg".into(),
             tip: true,
             tip_angle: "118 deg".into(),
+            nut_flats: "5.5 mm".into(),
+            nut_depth: "2.6 mm".into(),
+            teardrop: None,
+            fastener: 2,
             reverse: false,
             thread: false,
             thread_designation: "M6".into(),
             thread_nominal: "6 mm".into(),
             thread_pitch: "1 mm".into(),
             kept_points: None,
+        }
+    }
+}
+
+impl HoleDraft {
+    /// Preenche o painel com uma especificação gravada ou com um preset de fixação.
+    fn load(&mut self, spec: HoleSpec) {
+        self.diameter = spec.diameter;
+        self.through = spec.depth.is_none();
+        if let Some(depth) = spec.depth {
+            self.depth = depth;
+        }
+        match spec.head {
+            HoleHeadSpec::Simple => self.head = 0,
+            HoleHeadSpec::Counterbore { diameter, depth } => {
+                self.head = 1;
+                self.head_diameter = diameter;
+                self.head_depth = depth;
+            }
+            HoleHeadSpec::Countersink { diameter, angle } => {
+                self.head = 2;
+                self.head_diameter = diameter;
+                self.head_angle = angle;
+            }
+            HoleHeadSpec::Nut {
+                across_flats,
+                depth,
+            } => {
+                self.head = 3;
+                self.nut_flats = across_flats;
+                self.nut_depth = depth;
+            }
+        }
+        self.tip = spec.tip_angle.is_some();
+        if let Some(angle) = spec.tip_angle {
+            self.tip_angle = angle;
+        }
+        self.teardrop = spec.teardrop;
+        self.reverse = spec.reverse;
+        self.thread = spec.thread.is_some();
+        if let Some(thread) = spec.thread {
+            self.thread_designation = thread.designation;
+            self.thread_nominal = thread.nominal;
+            self.thread_pitch = thread.pitch;
         }
     }
 }
@@ -356,7 +445,7 @@ pub(super) struct Draft {
     region: Option<usize>,
     kept_region: Option<RegionRef>,
     /// Face plana como alternativa a um perfil de rascunho.
-    face_profile: Option<(BodyId, FaceRef)>,
+    face_profile: Option<FaceArea>,
     automatic: bool,
     auto_preferred: Option<BodyId>,
     interaction: extrusion::Interaction,
@@ -364,6 +453,7 @@ pub(super) struct Draft {
     additional_profiles: Vec<ProfileRef>,
     end_profile: Option<ProfileRef>,
     ruled: bool,
+    developable: bool,
     sweep_route: SweepRoute,
     hole_pairs: Option<Vec<nator_document::features::HolePair>>,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
@@ -383,6 +473,8 @@ pub(super) struct Draft {
     exit_face: Option<FaceRef>,
     /// Resultado da extrusão: 0 novo corpo, 1 união, 2 corte, 3 interseção com `combine_target`.
     combine: usize,
+    /// Na união, junta as faces novas às vizinhas no mesmo plano.
+    merge_coplanar: bool,
     combine_target: Option<BodyId>,
     /// Face limite da extrusão (corpo e face), escolhida por clique.
     until: Option<ExtrusionLimit>,
@@ -397,6 +489,16 @@ pub(super) struct Draft {
     label: LabelSpec,
     label_drag: Option<label::Drag>,
     measure: measure::Interaction,
+    /// Contatos marcados para reparo, pelos nomes das faces em volta de cada um.
+    contacts: Vec<Vec<String>>,
+    repair_mode: ContactRepair,
+    /// Análise do corpo base na revisão indicada; refeita quando o documento muda.
+    report: Option<(u64, Result<solid_check::Report, String>)>,
+    /// Tamanho na mesa para o corpo e a face indicados, calculado uma vez por escolha.
+    bed_size: Option<(BodyId, FaceRef, Result<[f64; 3], String>)>,
+    /// Remoção da orientação pedida no painel.
+    clear_bed: bool,
+    fastening: fastening::FasteningDraft,
 }
 impl Draft {
     fn new(tab: u64, part: PartId, tool: Tool) -> Self {
@@ -418,6 +520,7 @@ impl Draft {
             additional_profiles: vec![],
             end_profile: None,
             ruled: true,
+            developable: true,
             sweep_route: SweepRoute::Automatic,
             hole_pairs: None,
             kept_axis: None,
@@ -430,11 +533,12 @@ impl Draft {
             through_shell: false,
             exit_face: None,
             combine: 0,
+            merge_coplanar: true,
             combine_target: None,
             until: None,
             extrude: ExtrudeDraft::default(),
             size: match tool {
-                Tool::Fillet | Tool::Chamfer => "2 mm".into(),
+                Tool::CheckSolid => "0.05 mm".into(),
                 _ => "2 mm".into(),
             },
             angle: "360 deg".into(),
@@ -445,6 +549,12 @@ impl Draft {
             label: Default::default(),
             label_drag: None,
             measure: Default::default(),
+            contacts: Vec::new(),
+            repair_mode: ContactRepair::Weld,
+            report: None,
+            bed_size: None,
+            clear_bed: false,
+            fastening: Default::default(),
         }
     }
     pub fn edit(tab: u64, part: PartId, feature: Feature) -> Self {
@@ -472,8 +582,13 @@ impl Draft {
                 to,
                 combine,
                 until,
+                boundaries,
             } => {
-                d.face_profile = Some((base, face));
+                d.face_profile = Some(FaceArea {
+                    body: base,
+                    face,
+                    boundaries,
+                });
                 d.extrude = ExtrudeDraft::from_limits(from, to);
                 if let Some(combine) = combine {
                     d.combine = match combine.mode {
@@ -482,6 +597,7 @@ impl Draft {
                         BooleanMode::Intersect => 3,
                     };
                     d.combine_target = Some(combine.target);
+                    d.merge_coplanar = combine.merge_coplanar;
                 }
                 d.extrude.to_face = until.is_some();
                 d.until = until;
@@ -504,6 +620,7 @@ impl Draft {
                         BooleanMode::Intersect => 3,
                     };
                     d.combine_target = Some(combine.target);
+                    d.merge_coplanar = combine.merge_coplanar;
                 }
                 d.extrude.to_face = until.is_some();
                 d.until = until;
@@ -525,6 +642,7 @@ impl Draft {
                 start,
                 end,
                 ruled,
+                developable,
                 holes,
             } => {
                 d.tool = Tool::Loft;
@@ -532,6 +650,7 @@ impl Draft {
                 d.kept_region = Some(start.region);
                 d.end_profile = Some(end);
                 d.ruled = ruled;
+                d.developable = developable;
                 d.hole_pairs = holes;
             }
             Operation::Revolve {
@@ -589,6 +708,18 @@ impl Draft {
                 d.size = distance;
                 d.chamfer_angle = angle;
             }
+            Operation::RepairContacts {
+                base,
+                contacts,
+                mode,
+                radius,
+            } => {
+                d.tool = Tool::CheckSolid;
+                d.base = Some(base);
+                d.contacts = contacts;
+                d.repair_mode = mode;
+                d.size = radius;
+            }
             Operation::Shell {
                 base,
                 face,
@@ -616,37 +747,8 @@ impl Draft {
                 d.tool = Tool::Hole;
                 d.base = Some(base);
                 d.sketch = Some(sketch);
-                let h = &mut d.hole;
-                h.kept_points = Some(points);
-                h.diameter = spec.diameter;
-                h.through = spec.depth.is_none();
-                if let Some(depth) = spec.depth {
-                    h.depth = depth;
-                }
-                match spec.head {
-                    HoleHeadSpec::Simple => h.head = 0,
-                    HoleHeadSpec::Counterbore { diameter, depth } => {
-                        h.head = 1;
-                        h.head_diameter = diameter;
-                        h.head_depth = depth;
-                    }
-                    HoleHeadSpec::Countersink { diameter, angle } => {
-                        h.head = 2;
-                        h.head_diameter = diameter;
-                        h.head_angle = angle;
-                    }
-                }
-                h.tip = spec.tip_angle.is_some();
-                if let Some(angle) = spec.tip_angle {
-                    h.tip_angle = angle;
-                }
-                h.reverse = spec.reverse;
-                if let Some(thread) = spec.thread {
-                    h.thread = true;
-                    h.thread_designation = thread.designation;
-                    h.thread_nominal = thread.nominal;
-                    h.thread_pitch = thread.pitch;
-                }
+                d.hole.kept_points = Some(points);
+                d.hole.load(spec);
             }
             Operation::Pattern { base, layout } => {
                 d.base = Some(base);
@@ -713,7 +815,59 @@ impl Draft {
                 d.base = Some(base);
                 d.output = Some(division);
             }
-            Operation::Transform { .. } => {}
+            Operation::ComponentCut {
+                base,
+                outline,
+                clearance,
+                floor,
+                depth,
+            } => {
+                d.tool = Tool::ComponentCut;
+                d.base = Some(base);
+                let f = &mut d.fastening;
+                f.keep_outline(outline);
+                f.clearance = clearance;
+                f.floor = floor;
+                f.through = depth.is_none();
+                f.depth = depth.unwrap_or_else(|| f.depth.clone());
+            }
+            Operation::MergeFaces { base, faces } => {
+                d.tool = Tool::MergeFaces;
+                d.base = Some(base);
+                let mut faces = faces.into_iter().map(Kept::Face);
+                d.kept_topology = faces.next();
+                d.extra_topology = faces.collect();
+            }
+            Operation::Lip { base, face, spec } => {
+                d.tool = Tool::Lip;
+                d.base = Some(base);
+                d.kept_topology = Some(Kept::Face(face));
+                d.fastening.lip = spec;
+            }
+            Operation::ScrewBoss {
+                base,
+                sketch,
+                points,
+                spec,
+            } => {
+                d.tool = Tool::ScrewBoss;
+                d.base = Some(base);
+                d.sketch = Some(sketch);
+                d.fastening.points = Some(points);
+                d.fastening.boss = spec;
+            }
+            Operation::SnapFit {
+                base,
+                sketch,
+                points,
+                spec,
+            } => {
+                d.tool = Tool::SnapFit;
+                d.base = Some(base);
+                d.sketch = Some(sketch);
+                d.fastening.points = Some(points);
+                d.fastening.snap = spec;
+            }
         }
         d
     }
@@ -727,8 +881,9 @@ fn describe_topology(kept: &Kept) -> String {
         Kept::Edge(EdgeRef::Index { index, .. }) | Kept::Face(FaceRef::Index { index, .. }) => {
             format!("#{index}")
         }
-        Kept::PlanarFace(face, _) => describe_topology(&Kept::Face(face.clone())),
-        Kept::Body(id) => format!("#{}", id.0),
+        Kept::PlanarFace(face, ..) => describe_topology(&Kept::Face(face.clone())),
+        Kept::Edges(edges) => format!("{} × {}", text(T::EdgesField), edges.len()),
+        Kept::Body(id) | Kept::Component(id, _) => format!("#{}", id.0),
     }
 }
 
@@ -754,6 +909,31 @@ fn hole_points(sketch: &Sketch) -> Vec<u64> {
     points
 }
 
+/// Face plana usada como perfil. Sem condições, a extrusão vale para a face inteira.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct FaceArea {
+    pub(super) body: BodyId,
+    pub(super) face: FaceRef,
+    pub(super) boundaries: Vec<PaintBoundary>,
+}
+
+/// Referência de uma face plana clicada. Falha em faces curvas, que não são áreas;
+/// `cell` acrescenta as condições dos rascunhos visíveis sobre a face.
+pub(super) fn planar_area(
+    document: &Document,
+    pick: &nator_document::assembly::Pick,
+    cell: bool,
+) -> Result<Kept, String> {
+    let face = document.face_at(pick).map_err(|e| e.to_string())?;
+    let (plane, _) = sketch_scene::face_plane(document, pick, pick.placement)?;
+    let boundaries = if cell {
+        nator_commands::painting::boundaries(document, pick).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+    Ok(Kept::PlanarFace(face, plane, boundaries))
+}
+
 impl Draft {
     /// Tipo de elemento que o próximo clique deve selecionar, se o painel estiver esperando.
     pub(super) fn awaiting(&self) -> Option<Awaiting> {
@@ -766,6 +946,7 @@ impl Draft {
                 Some(Awaiting::Face)
             }
             Field::Base | Field::ToolBody | Field::Target => Some(Awaiting::Body),
+            Field::Component => Some(Awaiting::Component),
             Field::Profile
             | Field::RevolveAxis
             | Field::EndProfile
@@ -778,6 +959,14 @@ impl Draft {
     }
     pub(super) fn planar_pick(&self) -> bool {
         self.accepts_face_profile() || self.choosing_cutting_plane()
+    }
+    /// Extrusão esperando uma área: só regiões, células e faces planas respondem.
+    pub(super) fn choosing_area(&self) -> bool {
+        self.tool == Tool::Extrude && matches!(self.field, None | Some(Field::Profile))
+    }
+    /// Face ou célula escolhida como perfil.
+    pub(super) fn face_area(&self) -> Option<&FaceArea> {
+        self.face_profile.as_ref()
     }
     pub(super) fn choose_cutting_plane(
         &mut self,
@@ -951,21 +1140,41 @@ impl Draft {
     /// Aplica uma seleção gráfica ao campo ativo. Arestas e faces alternam: clicar de novo
     /// numa já escolhida a retira.
     pub(super) fn apply_pick(&mut self, body: BodyId, kept: Kept) {
-        if let Kept::PlanarFace(face, plane) = kept {
+        if let Kept::Edges(edges) = kept {
+            // Outro corpo troca a seleção; um vértice do mesmo corpo só acrescenta.
+            for edge in edges {
+                let edge = Kept::Edge(edge);
+                if self.base != Some(body) || !self.references().any(|kept| *kept == edge) {
+                    self.apply_pick(body, edge);
+                }
+            }
+            return;
+        }
+        if let Kept::PlanarFace(face, plane, boundaries) = kept {
             if self.choosing_cutting_plane() {
                 self.choose_cutting_plane(Some(UntilFace { body, face }.into()), None);
                 return;
             }
+            // A guia só chega com a prévia; até lá, a própria face já é reconhecida.
             let coplanar = self.interaction.guide.is_some_and(|g| {
                 nator_geometry::norm(nator_geometry::cross(g.normal, plane.normal())) < 1e-7
                     && nator_geometry::dot(nator_geometry::sub(plane.origin, g.origin), g.normal)
                         .abs()
                         < 1e-6
-            });
+            }) || self
+                .face_profile
+                .as_ref()
+                .is_some_and(|area| area.body == body && area.face == face);
             if (self.tool == Tool::Extrude && self.complete() && !coplanar)
                 || self.field == Some(Field::UntilFace)
             {
                 self.choose_limit(UntilFace { body, face }.into());
+            } else if self.choosing_area() {
+                self.choose_face_area(FaceArea {
+                    body,
+                    face,
+                    boundaries,
+                });
             } else {
                 self.apply_pick(body, Kept::Face(face));
             }
@@ -1005,6 +1214,8 @@ impl Draft {
                 if self.base != Some(id) {
                     self.kept_topology = None;
                     self.extra_topology.clear();
+                    self.contacts.clear();
+                    self.report = None;
                 }
                 self.base = Some(id);
                 self.field = match self.tool {
@@ -1012,6 +1223,7 @@ impl Draft {
                         Some(Field::ToolBody)
                     }
                     Tool::Split => Some(Field::CuttingPlane),
+                    Tool::ComponentCut if !self.fastening.has_outline() => Some(Field::Component),
                     _ => None,
                 };
             }
@@ -1023,6 +1235,18 @@ impl Draft {
                 self.automatic = false;
                 self.combine_target = Some(id);
                 self.field = None;
+            }
+            (Some(Field::Component), Kept::Component(body, pose)) => {
+                self.fastening.component = Some((body, pose));
+                self.fastening.outline = None;
+                self.field = None;
+            }
+            // Só uma face pode ficar apoiada: o novo clique substitui a escolha.
+            (Some(Field::Faces), kept @ Kept::Face(_))
+                if matches!(self.tool, Tool::BedFace | Tool::Lip) =>
+            {
+                self.base = Some(body);
+                self.kept_topology = Some(kept);
             }
             (Some(Field::Edges | Field::Faces), kept @ (Kept::Edge(_) | Kept::Face(_))) => {
                 if self.base != Some(body) {
@@ -1048,12 +1272,98 @@ impl Draft {
             _ => {}
         }
     }
+    /// Corpo que ainda precisa ser analisado para o painel de verificação.
+    fn pending_check(&self, revision: u64) -> Option<BodyId> {
+        let current = self.report.as_ref().is_some_and(|r| r.0 == revision);
+        self.base
+            .filter(|_| self.tool == Tool::CheckSolid && !current)
+    }
+    /// Uma operação nova marca tudo o que a análise achou; ao editar, valem as marcas gravadas
+    /// que ainda existem, para que um contato perdido não bloqueie a correção do reparo.
+    pub(super) fn receive_check(
+        &mut self,
+        tab: u64,
+        revision: u64,
+        body: BodyId,
+        report: Result<solid_check::Report, String>,
+    ) {
+        if self.tab != tab || self.base != Some(body) {
+            return;
+        }
+        if let Ok(report) = &report {
+            let found = report.contacts.iter().map(|c| c.faces.clone());
+            if self.output.is_none() {
+                self.contacts = found.collect();
+            } else {
+                let found = found.collect::<Vec<_>>();
+                self.contacts.retain(|faces| found.contains(faces));
+            }
+        }
+        self.report = Some((revision, report));
+    }
+    /// Calcula o tamanho só quando o corpo ou a face mudam, não a cada quadro.
+    fn refresh_bed_size(&mut self, document: &Document) {
+        let (Tool::BedFace, Some(body), Some(Kept::Face(face))) =
+            (self.tool, self.base, &self.kept_topology)
+        else {
+            return;
+        };
+        if self
+            .bed_size
+            .as_ref()
+            .is_some_and(|(b, f, _)| *b == body && f == face)
+        {
+            return;
+        }
+        let size = document
+            .body(body)
+            .ok_or_else(|| text(T::BodyField).to_owned())
+            .and_then(|record| record.print_direction(face).map_err(|e| e.to_string()))
+            .and_then(|down| {
+                nator_commands::export::size_on_bed(document, body, Some(down))
+                    .ok_or_else(|| text(T::Failed).to_owned())
+            });
+        self.bed_size = Some((body, face.clone(), size));
+    }
+    /// Polilinhas dos contatos analisados, em coordenadas da peça, para o realce 3D.
+    pub(super) fn contact_lines(&self) -> impl Iterator<Item = &Vec<nator_geometry::Point3>> {
+        self.report
+            .iter()
+            .filter_map(|(_, report)| report.as_ref().ok())
+            .flat_map(|report| &report.contacts)
+            .flat_map(|contact| &contact.segments)
+    }
+    /// Lascas analisadas, em coordenadas da peça, marcadas na cena.
+    pub(super) fn sliver_points(&self) -> impl Iterator<Item = nator_geometry::Point3> {
+        self.report
+            .iter()
+            .filter_map(|(_, report)| report.as_ref().ok())
+            .flat_map(|report| &report.slivers)
+            .map(|sliver| sliver.center)
+    }
     pub(super) fn describe(kept: &Kept) -> String {
         describe_topology(kept)
     }
     pub(super) fn choose_face_profile(&mut self, body: BodyId, face: FaceRef) {
-        self.face_profile = Some((body, face));
-        self.auto_preferred = Some(body);
+        self.set_face_area(FaceArea {
+            body,
+            face,
+            boundaries: Vec::new(),
+        });
+    }
+    /// Clicar de novo na área escolhida a retira, como nas regiões de rascunho.
+    fn choose_face_area(&mut self, area: FaceArea) {
+        if self.face_profile.as_ref() == Some(&area) {
+            self.face_profile = None;
+            self.interaction = extrusion::Interaction::default();
+            self.field = Some(Field::Profile);
+        } else {
+            self.set_face_area(area);
+        }
+    }
+    fn set_face_area(&mut self, area: FaceArea) {
+        self.auto_preferred = Some(area.body);
+        self.face_profile = Some(area);
         self.sketch = None;
         self.kept_region = None;
         self.region = None;
@@ -1085,9 +1395,14 @@ impl Draft {
                     diameter: h.head_diameter.clone(),
                     angle: h.head_angle.clone(),
                 },
+                3 => HoleHeadSpec::Nut {
+                    across_flats: h.nut_flats.clone(),
+                    depth: h.nut_depth.clone(),
+                },
                 _ => HoleHeadSpec::Simple,
             },
             tip_angle: (h.tip && !h.through).then(|| h.tip_angle.clone()),
+            teardrop: h.teardrop,
             reverse: h.reverse,
             thread: h.thread.then(|| ThreadSpec {
                 designation: h.thread_designation.clone(),
@@ -1153,13 +1468,25 @@ impl Draft {
             Tool::Join | Tool::Cut | Tool::Intersect => {
                 self.base.is_some() && self.tool_body.is_some() && self.base != self.tool_body
             }
-            Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::Label => {
-                self.base.is_some() && self.kept_topology.is_some()
+            Tool::Fillet
+            | Tool::Chamfer
+            | Tool::Shell
+            | Tool::Label
+            | Tool::BedFace
+            | Tool::Lip => self.base.is_some() && self.kept_topology.is_some(),
+            Tool::MergeFaces => {
+                self.base.is_some()
+                    && self.kept_topology.is_some()
+                    && !self.extra_topology.is_empty()
             }
-            Tool::Hole => self.base.is_some() && self.sketch.is_some(),
+            Tool::Hole | Tool::ScrewBoss | Tool::SnapFit => {
+                self.base.is_some() && self.sketch.is_some()
+            }
+            Tool::ComponentCut => self.base.is_some() && self.fastening.has_outline(),
             Tool::Split => {
                 self.base.is_some() && (self.cutting_plane.is_some() || self.fixed_plane.is_some())
             }
+            Tool::CheckSolid => self.base.is_some() && !self.contacts.is_empty(),
             _ => self.base.is_some(),
         }
     }
@@ -1228,16 +1555,18 @@ impl Draft {
                             2 => BooleanMode::Cut,
                             _ => BooleanMode::Intersect,
                         },
+                        merge_coplanar: self.combine == 1 && self.merge_coplanar,
                     });
                 let until = self.until.clone().filter(|_| self.extrude.to_face);
-                if let Some((base, face)) = &self.face_profile {
+                if let Some(area) = &self.face_profile {
                     return Operation::ExtrudeFace {
-                        base: *base,
-                        face: face.clone(),
+                        base: area.body,
+                        face: area.face.clone(),
                         from,
                         to,
                         combine,
                         until,
+                        boundaries: area.boundaries.clone(),
                     };
                 }
                 Operation::Extrude {
@@ -1270,6 +1599,7 @@ impl Draft {
                     region: RegionRef::Index(0),
                 }),
                 ruled: self.ruled,
+                developable: self.developable,
                 holes: self.hole_pairs.clone(),
             },
             Tool::Revolve => {
@@ -1295,6 +1625,13 @@ impl Draft {
                     Tool::Cut => BooleanMode::Cut,
                     _ => BooleanMode::Intersect,
                 },
+            },
+            // `BedFace` não entra no histórico: `command` responde antes de chegar aqui.
+            Tool::CheckSolid | Tool::BedFace => Operation::RepairContacts {
+                base,
+                contacts: self.contacts.clone(),
+                mode: self.repair_mode,
+                radius: self.size.clone(),
             },
             Tool::Fillet => Operation::Fillet {
                 base,
@@ -1333,6 +1670,49 @@ impl Draft {
                         record.map(|r| hole_points(&r.sketch)).unwrap_or_default()
                     }),
                     spec: self.hole_spec(),
+                }
+            }
+            Tool::ComponentCut => Operation::ComponentCut {
+                base,
+                outline: self.fastening.captured(),
+                clearance: self.fastening.clearance.clone(),
+                floor: self.fastening.floor.clone(),
+                depth: (!self.fastening.through).then(|| self.fastening.depth.clone()),
+            },
+            Tool::MergeFaces => Operation::MergeFaces {
+                base,
+                faces: self
+                    .references()
+                    .filter_map(|kept| match kept {
+                        Kept::Face(face) => Some(face.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+            },
+            Tool::Lip => Operation::Lip {
+                base,
+                face,
+                spec: self.fastening.lip.clone(),
+            },
+            Tool::ScrewBoss | Tool::SnapFit => {
+                let points =
+                    self.fastening.points.clone().unwrap_or_else(|| {
+                        record.map(|r| hole_points(&r.sketch)).unwrap_or_default()
+                    });
+                if self.tool == Tool::ScrewBoss {
+                    Operation::ScrewBoss {
+                        base,
+                        sketch,
+                        points,
+                        spec: self.fastening.boss.clone(),
+                    }
+                } else {
+                    Operation::SnapFit {
+                        base,
+                        sketch,
+                        points,
+                        spec: self.fastening.snap.clone(),
+                    }
                 }
             }
             Tool::LinearPattern => {
@@ -1392,12 +1772,31 @@ impl Draft {
         self.command(part)
     }
     /// Medida principal (distância da extrusão, raio, espessura), para capturas de ensaio.
+    pub(super) fn preset_hole_for_capture(&mut self) {
+        let m3 = nator_document::print_profile::PrintProfile::default().fasteners[2].clone();
+        self.hole.load(HolePreset::CaptiveNut.spec(&m3));
+    }
+    /// Rascunho dos pontos e fixador comum, para capturas de torres e presilhas.
+    pub(super) fn prepare_fastening_for_capture(&mut self, sketch: SketchId) {
+        self.sketch = Some(sketch);
+        let m3 = nator_document::print_profile::PrintProfile::default().fasteners[2].clone();
+        self.fastening.load_boss(HolePreset::HeatInsert, &m3);
+    }
     pub(super) fn set_size_for_capture(&mut self, value: &str) {
         self.size = value.into();
         self.extrude.distance = value.into();
     }
     /// Comando que o OK aplicaria.
     fn command(&self, part: &nator_document::Part) -> Command {
+        if self.tool == Tool::BedFace {
+            return Command::SetPrintFace {
+                body: self.base.unwrap_or(BodyId(0)),
+                face: match &self.kept_topology {
+                    Some(Kept::Face(face)) => Some(face.clone()),
+                    _ => None,
+                },
+            };
+        }
         let operation = self.operation(part);
         if self.tool == Tool::Split && self.output.is_none() {
             return Command::SplitBody {
@@ -1427,6 +1826,7 @@ impl Draft {
                     Tool::Cut => T::Cut,
                     Tool::Intersect => T::Intersect,
                     Tool::LinearPattern => T::LinearPattern,
+                    Tool::CheckSolid => T::RepairContact,
                     tool => tool.label(),
                 })
                 .into(),
@@ -1508,8 +1908,22 @@ impl Editor {
                 d.combine_target = suggestion;
                 d.auto_preferred = suggestion;
             }
-            Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::Label => {
+            Tool::Fillet
+            | Tool::Chamfer
+            | Tool::Shell
+            | Tool::MergeFaces
+            | Tool::Label
+            | Tool::BedFace
+            | Tool::Lip => {
                 d.base = suggestion;
+            }
+            Tool::ComponentCut => {
+                d.base = suggestion;
+                d.field = Some(if suggestion.is_none() {
+                    Field::Base
+                } else {
+                    Field::Component
+                });
             }
             Tool::Join | Tool::Cut | Tool::Intersect => {
                 let bodies = self
@@ -1542,10 +1956,13 @@ impl Editor {
                 };
             }
             Tool::Hole
+            | Tool::ScrewBoss
+            | Tool::SnapFit
             | Tool::LinearPattern
             | Tool::CircularPattern
             | Tool::Mirror
-            | Tool::Split => {
+            | Tool::Split
+            | Tool::CheckSolid => {
                 d.base = suggestion;
                 d.field = if suggestion.is_none() {
                     Some(Field::Base)
@@ -1556,7 +1973,7 @@ impl Editor {
                 };
             }
         }
-        if matches!(tool, Tool::Shell | Tool::Label)
+        if matches!(tool, Tool::Shell | Tool::Label | Tool::BedFace | Tool::Lip)
             && self.pick_mode == navigation::PickMode::Face
             && let Some(pick) = self.current().picked.as_ref().filter(|pick| {
                 pick.part == part
@@ -1570,20 +1987,6 @@ impl Editor {
             d.apply_pick(pick.body, Kept::Face(face));
             d.capture_label_pick(pick);
         }
-        // Concluir o rascunho aberto mantém o perfil visível para a seleção.
-        if tool == Tool::Extrude
-            && self.current().sketch_edit.is_none()
-            && self.pick_mode == navigation::PickMode::Face
-            && let Some(pick) = self.current().picked.as_ref().filter(|p| {
-                p.part == part
-                    && self
-                        .current()
-                        .is_selected(Selection::Body { part, id: p.body })
-            })
-            && let Ok(face) = self.current().session.document().face_at(pick)
-        {
-            d.apply_pick(pick.body, Kept::Face(face));
-        }
         if self.current().sketch_edit.is_some() {
             self.finish_sketch();
         }
@@ -1595,6 +1998,35 @@ impl Editor {
         let Some(draft) = self.feature_edit.as_ref() else {
             return;
         };
+        // A face já selecionada vale pela célula do clique, que exige o núcleo.
+        if draft.choosing_area() {
+            let part = draft.part();
+            let Some(pick) = self.current().picked.clone().filter(|p| {
+                p.part == part
+                    && self.pick_mode == navigation::PickMode::Face
+                    && self.current().sketch_edit.is_none()
+                    && self
+                        .current()
+                        .is_selected(Selection::Body { part, id: p.body })
+            }) else {
+                return;
+            };
+            let tab = self.current().id;
+            let revision = self.current().session.revision();
+            let document = self.current().session.document().clone();
+            self.start(context, None, move || {
+                let kept = planar_area(&document, &pick, true).ok();
+                Ok(Outcome::Picked {
+                    tab,
+                    revision,
+                    pick: Some(pick),
+                    mode: navigation::PickMode::Face,
+                    additive: false,
+                    topology: kept.map(Ok),
+                })
+            });
+            return;
+        }
         if draft.awaiting() != Some(Awaiting::Edge) || self.pick_mode != navigation::PickMode::Edge
         {
             return;
@@ -1650,6 +2082,37 @@ impl Editor {
                         .ok_or_else(|| text(T::FindingClosedAreas).to_owned())
                 })
             });
+        let revision = self
+            .tabs
+            .iter()
+            .find(|t| t.id == d.tab)
+            .map_or(0, |t| t.session.revision());
+        if let Some(body) = d.pending_check(revision)
+            && !self.busy()
+        {
+            self.check_solid(ctx, d.tab, d.part, body);
+        }
+        let mut bed = None;
+        let mut fasteners = Vec::new();
+        let mut max_strain_pct = 0.;
+        if let Some(document) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == d.tab)
+            .map(|t| t.session.document())
+        {
+            d.refresh_bed_size(document);
+            bed = document.print_profile().bed_mm;
+            if matches!(d.tool, Tool::Hole | Tool::ScrewBoss) {
+                fasteners = document.print_profile().fasteners.clone();
+            }
+            max_strain_pct = document.print_profile().max_strain_pct;
+            if let Some(tab) = self.tabs.iter().find(|t| t.id == d.tab)
+                && let Ok(target) = sketch_scene::part_placement(tab, d.part)
+            {
+                d.fastening.refresh_outline(document, target);
+            }
+        }
         let command = d.command(&part);
         if d.tool == Tool::Label {
             if let Some(spec) = self.normalized_label_preview(&command) {
@@ -1696,14 +2159,14 @@ impl Editor {
                     || matches!(self.preview_status(&command), PreviewStatus::Ready)),
             |ui| {
                 if !nator_kernel::is_available() {
-                    ui.colored_label(theme::WARNING, text(T::KernelUnavailable));
+                    ui.colored_label(theme::warning(), text(T::KernelUnavailable));
                 }
                 if self
                     .pending_failure
                     .as_ref()
                     .is_some_and(|p| p.fixing && Some(p.failure.output) == d.output)
                 {
-                    ui.colored_label(theme::WARNING, text(T::FixingFailure));
+                    ui.colored_label(theme::warning(), text(T::FixingFailure));
                 }
                 match d.tool {
                     Tool::Label => label::panel(ui, &mut d, &self.label_fonts.names),
@@ -1713,17 +2176,27 @@ impl Editor {
                             ui.label(
                                 egui::RichText::new(text(T::ZeroExtrusionHint))
                                     .small()
-                                    .color(theme::MUTED),
+                                    .color(theme::muted()),
                             );
                         }
                     }
                     Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
                     Tool::Loft | Tool::Sweep => loft_panel(ui, &mut d, &part, &regions),
                     Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
-                    Tool::Fillet | Tool::Chamfer | Tool::Shell => topology_panel(ui, &mut d, &part),
-                    Tool::Hole => hole_panel(ui, &mut d, &part, record),
+                    Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::MergeFaces => {
+                        topology_panel(ui, &mut d, &part)
+                    }
+                    Tool::Hole => hole_panel(ui, &mut d, &part, record, &fasteners),
                     Tool::LinearPattern | Tool::CircularPattern => pattern_panel(ui, &mut d, &part),
                     Tool::Mirror | Tool::Split => plane_panel(ui, &mut d, &part),
+                    Tool::CheckSolid => check_panel(ui, &mut d, &part),
+                    Tool::BedFace => bed_panel(ui, &mut d, &part, bed),
+                    Tool::ComponentCut => fastening::component_panel(ui, &mut d, &part),
+                    Tool::Lip => fastening::lip_panel(ui, &mut d),
+                    Tool::ScrewBoss => fastening::boss_panel(ui, &mut d, &part, record, &fasteners),
+                    Tool::SnapFit => {
+                        fastening::snap_panel(ui, &mut d, &part, record, max_strain_pct)
+                    }
                 }
             },
         );
@@ -1733,6 +2206,13 @@ impl Editor {
         let command = d.command(&part);
         let complete = d.complete() && nator_kernel::is_available();
         if outcome.cancel {
+            self.close_feature_panel(&d);
+            return;
+        }
+        if d.clear_bed
+            && let Some(body) = d.base
+        {
+            self.prepare_command(ctx, tab, Command::SetPrintFace { body, face: None });
             self.close_feature_panel(&d);
             return;
         }
@@ -1754,6 +2234,23 @@ impl Editor {
             self.preview_command(tab, None, None, None);
         }
         self.feature_edit = Some(d);
+    }
+
+    /// A análise lê os B-reps do histórico: fica no trabalhador, como as medições.
+    fn check_solid(&mut self, context: &egui::Context, tab: u64, part: PartId, body: BodyId) {
+        let Some(target) = self.tabs.iter().find(|t| t.id == tab) else {
+            return;
+        };
+        let document = target.session.document().clone();
+        let revision = target.session.revision();
+        self.start(context, None, move || {
+            Ok(Outcome::SolidChecked {
+                tab,
+                revision,
+                body,
+                report: solid_check::inspect(&document, part, body).map_err(|e| e.to_string()),
+            })
+        });
     }
 
     pub(super) fn cancel_feature_tool(&mut self) {
@@ -1812,7 +2309,7 @@ fn profile_rows(
         .or_else(|| {
             d.face_profile
                 .as_ref()
-                .and_then(|(body, _)| body_name(part, Some(*body)))
+                .and_then(|area| body_name(part, Some(area.body)))
         });
     let selection = panel::selection(
         ui,
@@ -1844,15 +2341,15 @@ fn profile_rows(
                 T::ProfileHint
             }))
             .small()
-            .color(theme::MUTED),
+            .color(theme::muted()),
         );
     }
     match regions {
         Some(Err(message)) => {
-            ui.colored_label(theme::WARNING, message);
+            ui.colored_label(theme::warning(), message);
         }
         Some(Ok(list)) if list.is_empty() => {
-            ui.colored_label(theme::WARNING, text(T::NoRegions));
+            ui.colored_label(theme::warning(), text(T::NoRegions));
         }
         _ => {}
     }
@@ -1868,12 +2365,14 @@ fn extrude_panel(
     ui.label(
         egui::RichText::new(text(T::ExtrusionMouseHint))
             .small()
-            .color(theme::MUTED),
+            .color(theme::muted()),
     );
     let e = &mut d.extrude;
     if let Some((from, to)) = &mut e.custom {
-        panel::row(ui, text(T::FromField), |ui| panel::expression(ui, from));
-        panel::row(ui, text(T::ToField), |ui| panel::expression(ui, to));
+        panel::row(ui, text(T::FromField), |ui| {
+            panel::length_expression(ui, from)
+        });
+        panel::row(ui, text(T::ToField), |ui| panel::length_expression(ui, to));
         if ui.small_button(text(T::OneSide)).clicked() {
             e.custom = None;
         }
@@ -1932,21 +2431,21 @@ fn extrude_panel(
         } else {
             let e = &mut d.extrude;
             panel::row(ui, text(T::DistanceField), |ui| {
-                panel::expression(ui, &mut e.distance);
+                panel::length_expression(ui, &mut e.distance);
                 if icons::button(ui, Icon::Flip, text(T::FlipDirection), false, e.flip).clicked() {
                     e.flip = !e.flip;
                 }
             });
             if e.direction == Direction::TwoSides {
                 panel::row(ui, text(T::Distance2Field), |ui| {
-                    panel::expression(ui, &mut e.distance2)
+                    panel::length_expression(ui, &mut e.distance2)
                 });
             }
         }
         let e = &mut d.extrude;
         if e.direction == Direction::OneSide {
             panel::row(ui, text(T::StartOffset), |ui| {
-                panel::expression(ui, &mut e.offset)
+                panel::length_expression(ui, &mut e.offset)
             });
         }
     }
@@ -1976,6 +2475,9 @@ fn operation_rows(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
         if d.combine > 0 && d.combine_target.is_none() {
             d.field = Some(Field::Target);
         }
+    }
+    if d.combine == 1 && !d.automatic {
+        ui.checkbox(&mut d.merge_coplanar, text(T::MergeCoplanarAreas));
     }
     if d.combine > 0 {
         let name = body_name(part, d.combine_target);
@@ -2026,6 +2528,8 @@ fn loft_panel(
     }
     if d.tool == Tool::Loft {
         ui.checkbox(&mut d.ruled, text(T::RuledLoft));
+        ui.checkbox(&mut d.developable, text(T::DevelopableLoft))
+            .on_hover_text(text(T::DevelopableLoftHint));
     } else {
         sweep_controls(ui, d, part);
     }
@@ -2039,7 +2543,7 @@ fn loft_panel(
             T::SweepHint
         }))
         .small()
-        .color(theme::MUTED),
+        .color(theme::muted()),
     );
 }
 
@@ -2164,7 +2668,7 @@ fn revolve_panel(
         ui.label(
             egui::RichText::new(text(T::RevolveAxisHint))
                 .small()
-                .color(theme::MUTED),
+                .color(theme::muted()),
         );
     }
     let mut full = d.angle.trim() == "360 deg";
@@ -2228,7 +2732,7 @@ fn combine_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) 
 }
 
 fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
-    let field = if d.tool == Tool::Shell {
+    let field = if matches!(d.tool, Tool::Shell | Tool::MergeFaces) {
         Field::Faces
     } else {
         Field::Edges
@@ -2256,13 +2760,13 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
     }
     if let Some(name) = body_name(part, d.base).filter(|_| chosen > 0) {
         panel::row(ui, text(T::BodyField), |ui| {
-            ui.label(egui::RichText::new(name).color(theme::MUTED))
+            ui.label(egui::RichText::new(name).color(theme::muted()))
         });
     }
     match d.tool {
         Tool::Fillet => {
             panel::row(ui, text(T::RadiusField), |ui| {
-                panel::expression(ui, &mut d.size)
+                panel::length_expression(ui, &mut d.size)
             });
         }
         Tool::Chamfer => {
@@ -2280,7 +2784,7 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
                 }
             });
             panel::row(ui, text(T::DistanceField), |ui| {
-                panel::expression(ui, &mut d.size)
+                panel::length_expression(ui, &mut d.size)
             });
             if let Some(angle) = &mut d.chamfer_angle {
                 panel::row(ui, text(T::Angle), |ui| panel::expression(ui, angle));
@@ -2288,7 +2792,7 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
         }
         _ => {
             panel::row(ui, text(T::ThicknessField), |ui| {
-                panel::expression(ui, &mut d.size)
+                panel::length_expression(ui, &mut d.size)
             });
             panel::row(ui, text(T::DirectionField), |ui| {
                 panel::choice(
@@ -2326,7 +2830,7 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
             ui.label(
                 egui::RichText::new(text(T::AutomaticExitHint))
                     .small()
-                    .color(theme::MUTED),
+                    .color(theme::muted()),
             );
         }
     }
@@ -2344,11 +2848,53 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
         });
 }
 
+/// Fixação pronta para peças impressas: preenche os campos, que continuam editáveis.
+fn hole_presets(ui: &mut egui::Ui, d: &mut Draft, fasteners: &[Fastener]) {
+    let label = |preset: HolePreset| {
+        text(match preset {
+            HolePreset::Through => T::PresetThrough,
+            HolePreset::RecessedHead => T::PresetRecessed,
+            HolePreset::SelfTapping => T::PresetSelfTap,
+            HolePreset::HeatInsert => T::PresetInsert,
+            HolePreset::CaptiveNut => T::PresetNut,
+        })
+    };
+    let mut chosen = None;
+    panel::row(ui, text(T::HolePresetField), |ui| {
+        egui::ComboBox::from_id_salt("hole_fastener")
+            .width(60.)
+            .selected_text(
+                fasteners
+                    .get(d.hole.fastener)
+                    .map_or("—", |f| f.name.as_str()),
+            )
+            .show_ui(ui, |ui| {
+                for (index, fastener) in fasteners.iter().enumerate() {
+                    ui.selectable_value(&mut d.hole.fastener, index, &fastener.name);
+                }
+            });
+        egui::ComboBox::from_id_salt("hole_preset")
+            .width(110.)
+            .selected_text(text(T::HolePresetChoose))
+            .show_ui(ui, |ui| {
+                for preset in HolePreset::ALL {
+                    if ui.button(label(preset)).clicked() {
+                        chosen = Some(preset);
+                    }
+                }
+            });
+    });
+    if let (Some(preset), Some(fastener)) = (chosen, fasteners.get(d.hole.fastener)) {
+        d.hole.load(preset.spec(fastener));
+    }
+}
+
 fn hole_panel(
     ui: &mut egui::Ui,
     d: &mut Draft,
     part: &nator_document::Part,
     record: Option<&nator_document::SketchRecord>,
+    fasteners: &[Fastener],
 ) {
     body_selection(ui, d, part, Field::Base, T::BodyField);
     let points = record.map(|r| hole_points(&r.sketch)).unwrap_or_default();
@@ -2371,12 +2917,19 @@ fn hole_panel(
             ui.label(format!("{}: {}", text(T::KeptReference), kept.len()));
         }
         None if points.is_empty() => {
-            ui.colored_label(theme::WARNING, text(T::NoHolePoints));
+            ui.colored_label(theme::warning(), text(T::NoHolePoints));
         }
         None => {
             ui.label(format!("{}: {}", text(T::HolePoints), points.len()));
         }
     }
+    hole_presets(ui, d, fasteners);
+    // Cima na impressão: o oposto da face na mesa, ou Z enquanto ela não foi escolhida.
+    let up = d
+        .base
+        .and_then(|id| part.bodies.iter().find(|b| b.id == id))
+        .and_then(|b| b.print_down.map(|down| b.placement.apply_vector(down)))
+        .map_or([0., 0., 1.], |down| down.map(|v| -v));
     let h = &mut d.hole;
     panel::row(ui, text(T::HoleType), |ui| {
         panel::choice(
@@ -2386,19 +2939,27 @@ fn hole_panel(
                 (0, Icon::Hole, T::HeadSimple),
                 (1, Icon::Shell, T::Counterbore),
                 (2, Icon::Chamfer, T::Countersink),
+                (3, Icon::Pattern, T::CaptiveNutHead),
             ],
         );
     });
     panel::row(ui, text(T::HoleDiameter), |ui| {
-        panel::expression(ui, &mut h.diameter)
+        panel::length_expression(ui, &mut h.diameter)
     });
-    if h.head > 0 {
+    if h.head == 3 {
+        panel::row(ui, text(T::NutFlats), |ui| {
+            panel::length_expression(ui, &mut h.nut_flats)
+        });
+        panel::row(ui, text(T::NutDepth), |ui| {
+            panel::length_expression(ui, &mut h.nut_depth)
+        });
+    } else if h.head > 0 {
         panel::row(ui, text(T::HeadDiameter), |ui| {
-            panel::expression(ui, &mut h.head_diameter)
+            panel::length_expression(ui, &mut h.head_diameter)
         });
         if h.head == 1 {
             panel::row(ui, text(T::HeadDepth), |ui| {
-                panel::expression(ui, &mut h.head_depth)
+                panel::length_expression(ui, &mut h.head_depth)
             });
         } else {
             panel::row(ui, text(T::HeadAngle), |ui| {
@@ -2418,14 +2979,31 @@ fn hole_panel(
     });
     if !h.through {
         panel::row(ui, text(T::HoleDepth), |ui| {
-            panel::expression(ui, &mut h.depth)
+            panel::length_expression(ui, &mut h.depth)
         });
-        ui.checkbox(&mut h.tip, text(T::DrillPoint));
+        ui.add_enabled_ui(h.teardrop.is_none(), |ui| {
+            ui.checkbox(&mut h.tip, text(T::DrillPoint));
+        });
         if h.tip {
             panel::row(ui, text(T::Angle), |ui| {
                 panel::expression(ui, &mut h.tip_angle)
             });
         }
+    }
+    let mut drop = h.teardrop.is_some();
+    ui.add_enabled_ui(matches!(h.head, 0 | 3), |ui| {
+        if ui
+            .checkbox(&mut drop, text(T::TeardropHole))
+            .on_hover_text(text(T::TeardropHint))
+            .changed()
+        {
+            h.teardrop = drop.then_some(up);
+            h.tip &= !drop;
+        }
+    });
+    // Rebaixo e escareado não têm seção em gota.
+    if !matches!(h.head, 0 | 3) {
+        h.teardrop = None;
     }
     ui.checkbox(&mut h.reverse, text(T::ReverseDirection));
     ui.checkbox(&mut h.thread, text(T::ThreadToggle));
@@ -2434,10 +3012,10 @@ fn hole_panel(
             ui.text_edit_singleline(&mut h.thread_designation)
         });
         panel::row(ui, text(T::ThreadNominal), |ui| {
-            panel::expression(ui, &mut h.thread_nominal)
+            panel::length_expression(ui, &mut h.thread_nominal)
         });
         panel::row(ui, text(T::ThreadPitch), |ui| {
-            panel::expression(ui, &mut h.thread_pitch)
+            panel::length_expression(ui, &mut h.thread_pitch)
         });
     }
 }
@@ -2469,7 +3047,7 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) 
         });
     } else {
         panel::row(ui, text(T::SpacingField), |ui| {
-            panel::expression(ui, &mut l.spacing)
+            panel::length_expression(ui, &mut l.spacing)
         });
         ui.checkbox(&mut l.second, text(T::SecondDirection));
         if l.second {
@@ -2480,10 +3058,184 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) 
                 ui.add(egui::DragValue::new(&mut l.second_count).range(1..=1000))
             });
             panel::row(ui, text(T::SpacingField), |ui| {
-                panel::expression(ui, &mut l.second_spacing)
+                panel::length_expression(ui, &mut l.second_spacing)
             });
         }
     }
+}
+
+/// Face apoiada e o tamanho resultante. A orientação vale só para a impressão.
+fn bed_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part, bed: Option<[f64; 3]>) {
+    let description = d.kept_topology.as_ref().map(describe_topology);
+    let s = panel::selection(
+        ui,
+        text(T::BedFaceField),
+        usize::from(d.kept_topology.is_some()),
+        description.as_deref(),
+        d.field == Some(Field::Faces),
+    );
+    if s.activate {
+        d.field = Some(Field::Faces);
+    }
+    if s.clear {
+        d.kept_topology = None;
+        d.bed_size = None;
+        d.field = Some(Field::Faces);
+    }
+    let body = d
+        .base
+        .and_then(|id| part.bodies.iter().find(|b| b.id == id));
+    if let Some(body) = body {
+        panel::row(ui, text(T::BodyField), |ui| {
+            ui.label(egui::RichText::new(&body.name).color(theme::muted()))
+        });
+    }
+    panel::hint(ui, text(T::BedFaceHint));
+    if let Some((.., Ok(size))) = &d.bed_size {
+        let settings = panel::settings(ui.ctx());
+        let [x, y, z] = size.map(|v| settings.format_compact_length(v));
+        panel::row(ui, text(T::BedSize), |ui| {
+            ui.label(format!("{x} × {y} × {z} {}", settings.unit.suffix()))
+        });
+        if bed.is_some_and(|b| (0..3).any(|i| size[i] > b[i])) {
+            ui.colored_label(theme::warning(), text(T::BedTooSmall));
+        }
+    }
+    if body.is_some_and(|b| b.print_down.is_some()) && ui.button(text(T::BedRemove)).clicked() {
+        d.clear_bed = true;
+    }
+}
+
+/// Resultado da análise e, havendo contatos, as escolhas do reparo.
+fn check_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    body_selection(ui, d, part, Field::Base, T::BodyField);
+    if d.base.is_none() {
+        d.contacts.clear();
+        d.report = None;
+        panel::hint(ui, text(T::CheckSolidHint));
+        return;
+    }
+    let report = match d.report.as_ref().map(|(_, report)| report) {
+        None => {
+            panel::hint(ui, text(T::CheckingSolid));
+            return;
+        }
+        Some(Err(error)) => {
+            ui.colored_label(theme::warning(), error);
+            return;
+        }
+        Some(Ok(report)) => report,
+    };
+    for sliver in &report.slivers {
+        let settings = panel::settings(ui.ctx());
+        let [x, y, z] = sliver.center.map(|v| settings.format_compact_length(v));
+        ui.colored_label(theme::warning(), text(T::SolidSliver));
+        panel::hint(ui, &format!("X {x}   Y {y}   Z {z}"));
+        panel::hint(
+            ui,
+            &format!(
+                "{} {:.7} mm · {}",
+                text(T::SolidSliverWidth),
+                sliver.width,
+                sliver.face
+            )
+            .replace('.', ","),
+        );
+        if let Some(origin) = &sliver.origin {
+            let sketch = origin
+                .sketch
+                .as_ref()
+                .map(|name| format!(" · {name}"))
+                .unwrap_or_default();
+            panel::hint(
+                ui,
+                &format!(
+                    "{}: {}. {}{sketch}",
+                    text(T::ContactOrigin),
+                    origin.step,
+                    origin.name
+                ),
+            );
+        }
+        panel::hint(ui, text(T::SolidSliverHint));
+    }
+    if report.contacts.is_empty() {
+        panel::hint(
+            ui,
+            text(if report.unexplained_mesh_defects() {
+                T::SolidMeshDefects
+            } else {
+                T::SolidHasNoDefects
+            }),
+        );
+        return;
+    }
+    let settings = panel::settings(ui.ctx());
+    let length = |value| panel::Quantity::Length.compact(value, settings);
+    let mut toggled = None;
+    for (index, contact) in report.contacts.iter().enumerate() {
+        let mut marked = d.contacts.contains(&contact.faces);
+        let label = format!(
+            "{} {} · {} {}",
+            text(T::Contact),
+            index + 1,
+            length(contact.length),
+            panel::Quantity::Length.unit(settings)
+        );
+        if ui.checkbox(&mut marked, label).changed() {
+            toggled = Some((contact.faces.clone(), marked));
+        }
+        if let Some([x, y, z]) = contact.segments.first().and_then(|s| s.first()).copied() {
+            panel::hint(
+                ui,
+                &format!("X {}   Y {}   Z {}", length(x), length(y), length(z)),
+            );
+        }
+        if let Some(origin) = &contact.origin {
+            let sketch = origin
+                .sketch
+                .as_ref()
+                .map(|name| format!(" · {name}"))
+                .unwrap_or_default();
+            panel::hint(
+                ui,
+                &format!(
+                    "{}: {}. {}{sketch}",
+                    text(T::ContactOrigin),
+                    origin.step,
+                    origin.name
+                ),
+            );
+        }
+    }
+    match toggled {
+        Some((faces, true)) => d.contacts.push(faces),
+        Some((faces, false)) => d.contacts.retain(|c| *c != faces),
+        None => {}
+    }
+    panel::row(ui, text(T::RepairModeField), |ui| {
+        panel::choice_hints(
+            ui,
+            &mut d.repair_mode,
+            &[
+                (
+                    ContactRepair::Weld,
+                    Icon::Boolean,
+                    T::WeldContact,
+                    T::WeldContactHint,
+                ),
+                (
+                    ContactRepair::Separate,
+                    Icon::Split,
+                    T::SeparateContact,
+                    T::SeparateContactHint,
+                ),
+            ],
+        )
+    });
+    panel::row(ui, text(T::RadiusField), |ui| {
+        panel::length_expression(ui, &mut d.size)
+    });
 }
 
 fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
@@ -2525,7 +3277,7 @@ fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
         ui.label(
             egui::RichText::new(text(T::CuttingPlaneHint))
                 .small()
-                .color(theme::MUTED),
+                .color(theme::muted()),
         );
         ui.checkbox(&mut d.layout.flip, text(T::FlipSide));
         return;
@@ -2535,12 +3287,8 @@ fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
         axis_choice(ui, &mut l.plane, &PLANES)
     });
     panel::row(ui, text(T::OffsetField), |ui| {
-        ui.add(
-            egui::DragValue::new(&mut l.offset)
-                .speed(0.5)
-                .suffix(" mm")
-                .max_decimals(4),
-        )
+        let context = ui.ctx().clone();
+        ui.add(panel::length_value(&context, &mut l.offset, -1e7..=1e7))
     });
     if mirror {
         ui.checkbox(&mut l.keep_original, text(T::KeepOriginal));
@@ -2552,6 +3300,170 @@ fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check_report(body: BodyId, faces: &[&[&str]]) -> solid_check::Report {
+        solid_check::Report {
+            slivers: Vec::new(),
+            body,
+            contacts: faces
+                .iter()
+                .map(|names| solid_check::Contact {
+                    faces: names.iter().map(|n| (*n).to_owned()).collect(),
+                    segments: vec![vec![[0.; 3], [0., 0., 1.]]],
+                    length: 1.,
+                    origin: None,
+                })
+                .collect(),
+            mesh: nator_geometry::Topology {
+                boundary_edges: 0,
+                non_manifold_edges: faces.len(),
+                inconsistent_edges: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn fastening_operations_come_back_unchanged_from_the_panel()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use nator_document::features::{ComponentOutline, LipKind, LipReference, LipSpec};
+        let mut document = Document::new("Painel")?;
+        let mesh = std::sync::Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?));
+        let (id, _) = document.add_mesh(None, "Malha".into(), mesh)?;
+        let part = document.part(id).ok_or("Peça")?.clone();
+        let body = BodyId(7);
+        let (u, v) = ([0., 1., 0.], [0., 0., 1.]);
+        let outline = ComponentOutline {
+            source: "Conector".into(),
+            plane: nator_sketch::Plane {
+                origin: [5., 0., 0.],
+                u,
+                v,
+            },
+            contours: vec![vec![[0., 0.], [4., 0.], [4., 3.]]],
+        };
+        let defaults = fastening::FasteningDraft::default();
+        let spec = LipSpec {
+            kind: LipKind::Groove,
+            reference: LipReference::Outer,
+            ..defaults.lip.clone()
+        };
+        for operation in [
+            Operation::ComponentCut {
+                base: body,
+                outline,
+                clearance: "folga_livre".into(),
+                floor: "1 mm".into(),
+                depth: Some("7 mm".into()),
+            },
+            Operation::Lip {
+                base: body,
+                face: FaceRef::Named("b7:rim".into()),
+                spec,
+            },
+            Operation::ScrewBoss {
+                base: body,
+                sketch: SketchId(3),
+                points: vec![11, 12],
+                spec: defaults.boss.clone(),
+            },
+            Operation::SnapFit {
+                base: body,
+                sketch: SketchId(3),
+                points: vec![13],
+                spec: defaults.snap.clone(),
+            },
+        ] {
+            let feature = Feature {
+                name: "Fixação".into(),
+                output: BodyId(8),
+                operation: operation.clone(),
+                suppressed: false,
+            };
+            let draft = Draft::edit(1, PartId(2), feature);
+            assert!(draft.complete(), "{operation:?}");
+            assert_eq!(
+                format!("{:?}", draft.operation(&part)),
+                format!("{operation:?}")
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_component_tool_waits_for_the_silhouette_before_allowing_ok() {
+        let mut draft = Draft::new(1, PartId(2), Tool::ComponentCut);
+        draft.base = Some(BodyId(7));
+        assert_eq!(draft.field, Some(Field::Component));
+        assert_eq!(draft.awaiting(), Some(Awaiting::Component));
+        assert!(!draft.complete());
+        draft.apply_pick(BodyId(9), Kept::Component(BodyId(9), Default::default()));
+        assert!(draft.field.is_none());
+        // O clique sozinho ainda não capturou a silhueta.
+        assert!(!draft.complete());
+    }
+
+    #[test]
+    fn hole_presets_fill_the_panel_and_come_back_unchanged() {
+        use nator_document::print_profile::PrintProfile;
+        let profile = PrintProfile::default();
+        for fastener in &profile.fasteners {
+            for preset in HolePreset::ALL {
+                let spec = preset.spec(fastener);
+                let mut draft = Draft::new(1, PartId(2), Tool::Hole);
+                draft.hole.load(spec.clone());
+                assert_eq!(draft.hole_spec(), spec, "{preset:?} {}", fastener.name);
+            }
+        }
+        // Uma gota gravada volta com a direção original.
+        let mut draft = Draft::new(1, PartId(2), Tool::Hole);
+        draft.hole.load(HoleSpec {
+            teardrop: Some([0., 1., 0.]),
+            ..HolePreset::Through.spec(&profile.fasteners[0])
+        });
+        assert_eq!(draft.hole_spec().teardrop, Some([0., 1., 0.]));
+    }
+
+    #[test]
+    fn new_checks_mark_every_contact_and_edits_keep_what_still_exists() {
+        const FIRST: &[&str] = &["a", "b", "c", "d"];
+        const SECOND: &[&str] = &["e", "f", "g", "h"];
+        let body = BodyId(7);
+        let mut draft = Draft::new(1, PartId(2), Tool::CheckSolid);
+        draft.base = Some(body);
+        assert!(!draft.complete());
+        assert_eq!(draft.pending_check(5), Some(body));
+        draft.receive_check(1, 5, body, Ok(check_report(body, &[FIRST, SECOND])));
+        assert_eq!(draft.contacts.len(), 2);
+        assert!(draft.complete());
+        assert_eq!(draft.pending_check(5), None);
+        // Revisão nova refaz a análise; resposta de outra aba ou corpo é ignorada.
+        assert_eq!(draft.pending_check(6), Some(body));
+        draft.receive_check(2, 6, body, Ok(check_report(body, &[])));
+        draft.receive_check(1, 6, BodyId(8), Ok(check_report(body, &[])));
+        assert_eq!(draft.contacts.len(), 2);
+
+        let feature = Feature {
+            name: "Reparo".into(),
+            output: BodyId(9),
+            operation: Operation::RepairContacts {
+                base: body,
+                contacts: vec![
+                    FIRST.iter().map(|n| (*n).to_owned()).collect(),
+                    SECOND.iter().map(|n| (*n).to_owned()).collect(),
+                ],
+                mode: ContactRepair::Separate,
+                radius: "0.1 mm".into(),
+            },
+            suppressed: false,
+        };
+        let mut edit = Draft::edit(1, PartId(2), feature);
+        assert!(edit.tool == Tool::CheckSolid && edit.repair_mode == ContactRepair::Separate);
+        assert_eq!(edit.size, "0.1 mm");
+        edit.receive_check(1, 5, body, Ok(check_report(body, &[SECOND])));
+        assert_eq!(edit.contacts.len(), 1);
+        edit.receive_check(1, 6, body, Ok(check_report(body, &[])));
+        assert!(!edit.complete());
+    }
 
     #[test]
     fn shell_exit_is_independent_from_openings_and_stays_in_the_same_body() {

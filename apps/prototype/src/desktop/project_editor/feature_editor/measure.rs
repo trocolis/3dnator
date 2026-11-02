@@ -91,6 +91,7 @@ impl Editor {
                 .ok()
                 .filter(|v| *v > 0. && *v <= 1e7)
         };
+        let settings = panel::settings(ui.ctx());
         let value = length(&d.size).unwrap_or(1.);
         let tip = start + axis * (value as f32 * scale).max(36.);
         let tip = egui::pos2(
@@ -124,6 +125,7 @@ impl Editor {
                 axis,
                 pixels_per_unit: scale,
                 initial: value,
+                step: settings.mouse_step_mm,
             });
         }
         let dragging = d.measure.drag.is_some();
@@ -131,8 +133,8 @@ impl Editor {
             && !d.measure.input.typing
             && let Some(pointer) = ui.input(|i| i.pointer.interact_pos())
         {
-            let value = drag.value(pointer).clamp(1e-6, 1e7);
-            d.size = format!("{value} mm");
+            let value = drag.value(pointer).clamp(settings.mouse_step_mm, 1e7);
+            d.size = settings.unit.expression(value);
         }
         let value = length(&d.size).unwrap_or(value);
         let label = match d.tool {
@@ -147,10 +149,11 @@ impl Editor {
             value,
             dragging,
             label,
+            panel::Quantity::Length,
             length,
         );
         if let Some(value) = edit.value {
-            d.size = format!("{value} mm");
+            d.size = settings.unit.expression(value);
         }
         if edit.finished || !ui.input(|i| i.pointer.primary_down()) {
             d.measure.drag = None;

@@ -2,7 +2,6 @@
 //! por seleção, valores e revisão; respostas antigas nunca são aplicadas.
 use super::*;
 use nator_sketch::{
-    edit,
     modifications::{self, OffsetMode},
     movement,
 };
@@ -11,6 +10,8 @@ use nator_sketch::{
 pub(super) struct Request {
     pub action: EditAction,
     selected: Vec<u64>,
+    /// Vértices escolhidos em Arredondar/Chanfrar; vazio vale para todos os cantos.
+    corners: Vec<Point2>,
     axis: Option<u64>,
     stroke: LineType,
     mode: OffsetMode,
@@ -34,6 +35,7 @@ impl Request {
             action,
             points: None,
             selected: work.selected.clone(),
+            corners: work.operation.corners.clone(),
             axis: work.mirror_axis,
             stroke: work.operation_line_type,
             mode: work.offset_mode,
@@ -57,6 +59,7 @@ impl Request {
         Self {
             action: EditAction::Move,
             selected: circles,
+            corners: Vec::new(),
             axis: None,
             stroke: LineType::Normal,
             mode: OffsetMode::Normal,
@@ -104,15 +107,12 @@ impl Request {
                     .map_err(sketch_error)?;
             }
             EditAction::Fillet | EditAction::Chamfer => {
-                edit::apply(
+                nator_sketch::corners::refine(
                     &mut next,
-                    self.action,
                     &self.selected,
-                    edit::Options {
-                        value_mm: self.value,
-                        count: 2,
-                        reference: false,
-                    },
+                    &self.corners,
+                    self.value,
+                    self.action == EditAction::Fillet,
                 )
                 .map_err(sketch_error)?;
             }
@@ -260,6 +260,8 @@ pub(super) struct Interaction {
     pub seed: Option<u64>,
     pub handle_drag: Option<operation_handles::Drag>,
     pub floating: distance_arrow::Input,
+    /// Vértices clicados em Arredondar/Chanfrar; limitam a operação a esses cantos.
+    pub corners: Vec<Point2>,
     pub focus: bool,
     pub second_side: bool,
     pub confirm: bool,
@@ -275,6 +277,7 @@ impl Default for Interaction {
             seed: None,
             handle_drag: None,
             floating: Default::default(),
+            corners: Vec::new(),
             focus: false,
             second_side: false,
             confirm: false,
@@ -300,7 +303,7 @@ fn floating(ui: &egui::Ui, position: egui::Pos2, work: &mut Workspace) -> bool {
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
                 .fill(egui::Color32::WHITE)
-                .stroke(egui::Stroke::new(1., theme::ACCENT))
+                .stroke(egui::Stroke::new(1., theme::accent()))
                 .corner_radius(4)
                 .inner_margin(4)
                 .show(ui, |ui| {
@@ -424,6 +427,7 @@ pub(super) fn canvas(
         );
         result.blocked |= handles.blocked;
         if work.operation.floating.active() || work.operation.handle_drag.is_some() {
+            let unit = work.settings.unit;
             let expression = if work.operation.second_side {
                 &mut work.offset_second_expression
             } else {
@@ -449,10 +453,11 @@ pub(super) fn canvas(
                 value,
                 work.operation.handle_drag.is_some(),
                 T::SketchValue,
+                command_panel::Quantity::Length,
                 parse,
             );
             if let Some(value) = edit.value {
-                *expression = format!("{value} mm");
+                *expression = unit.expression(value);
                 work.operation.confirm = false;
             }
             if edit.finished {

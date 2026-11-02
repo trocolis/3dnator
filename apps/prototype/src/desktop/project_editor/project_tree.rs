@@ -1,7 +1,8 @@
-//! Árvore do projeto: Projeto → Peças, Rascunhos (de referência) e Origem; cada peça →
-//! Corpos, Subpeças, Rascunhos, Planos e Origem (oculta por padrão). Descendentes têm visibilidade
-//! própria, gravada no documento e com desfazer; a efetiva combina a dos nós acima, e um
-//! nó oculto por um ancestral aparece esmaecido. O lápis de uma peça entra na edição dela.
+//! Árvore do projeto: Peças, Rascunhos (de referência) e Origem, sob a barra de título
+//! Projeto; cada peça → Corpos, Subpeças, Rascunhos, Planos e Origem (oculta por padrão). Os
+//! nós têm visibilidade própria, gravada no documento e com desfazer; a efetiva combina a dos
+//! nós acima, e um nó oculto por um ancestral aparece esmaecido. O lápis de uma peça entra na
+//! edição dela.
 //! Pastas vazias permanecem acessíveis para criar elementos pelo menu de contexto.
 //!
 //! Desenhar a árvore só colhe intenções; o editor as aplica depois (`Editor::tree`).
@@ -34,6 +35,13 @@ pub(super) enum Intent {
     OpenSection,
     RemoveSection,
     OpenDrawing(Box<SheetRecord>),
+}
+
+/// O que está sendo arrastado na árvore; a peça sob o cursor recebe ao soltar.
+#[derive(Clone, Copy)]
+enum Dragged {
+    Body(BodyId),
+    Instance(InstanceId),
 }
 
 pub(super) struct Tree<'a> {
@@ -159,6 +167,16 @@ impl<'a> Tree<'a> {
                         browser::RenameTarget::Sketch(record.id),
                         record.sketch.name.clone(),
                     )));
+                    ui.close();
+                }
+                // Rascunhos antigos sobre faces ganham as linhas da face sob pedido.
+                if self.document.sketch_part(record.id).is_some()
+                    && ui.button(text(T::AddFaceLines)).clicked()
+                {
+                    self.intents
+                        .push(Intent::Command(Box::new(Command::AddFaceLines {
+                            id: record.id,
+                        })));
                     ui.close();
                 }
                 if ui.button(text(T::DeleteFeature)).clicked() {
@@ -309,26 +327,14 @@ impl<'a> Tree<'a> {
         });
     }
 
-    /// Raiz Projeto, seguida de grupos, análises e folhas técnicas.
+    /// Conteúdo do projeto, seguido de grupos, análises e folhas técnicas. O título e o botão
+    /// de recolher ficam na barra do painel (`views.rs`).
     pub fn show(&mut self, ui: &mut egui::Ui) {
         // Recuo curto: a hierarquia tem até quatro níveis antes dos elementos.
         ui.spacing_mut().indent = 14.;
         ui.spacing_mut().item_spacing.y = 0.;
         ui.spacing_mut().interact_size.y = 20.;
-        let id = self.id("project");
-        self.node(
-            ui,
-            id,
-            true,
-            |tree, ui| {
-                // O cubo é a marca do aplicativo; a raiz não tem olho nem ação
-                // de ocultação, permanecendo acessível em qualquer projeto.
-                icons::entry_styled(ui, Icon::Cube, text(T::ProjectNode), false, false)
-                    .on_hover_text(tree.document.name())
-                    .clicked()
-            },
-            |tree, ui| tree.project_body(ui, true),
-        );
+        self.project_body(ui, true);
         self.groups(ui);
         self.analyses(ui);
         self.sheets(ui);
@@ -336,11 +342,12 @@ impl<'a> Tree<'a> {
 
     fn project_body(&mut self, ui: &mut egui::Ui, shown: bool) {
         let document = self.document;
-        let roots = document
+        let is_reference = |i: &&Instance| document.part(i.part).is_some_and(|p| p.reference);
+        let (imported, roots): (Vec<_>, Vec<_>) = document
             .instances()
             .iter()
             .filter(|i| i.parent.is_none())
-            .collect::<Vec<_>>();
+            .partition(is_reference);
         self.folder(
             ui,
             self.id("parts"),
@@ -357,13 +364,28 @@ impl<'a> Tree<'a> {
                             ui.label(
                                 egui::RichText::new(text(T::StartSketch))
                                     .small()
-                                    .color(theme::MUTED),
+                                    .color(theme::muted()),
                             );
                         });
                     });
                 }
                 for instance in roots {
                     tree.part(ui, instance, vec![instance.id.0], shown, 0);
+                }
+            },
+        );
+        // Modelos importados só como referência: movidos e ocultados, nunca editados.
+        self.folder(
+            ui,
+            self.id("imported"),
+            Folder::References,
+            Icon::Folder,
+            format!("{} ({})", text(T::ReferencesFolder), imported.len()),
+            shown,
+            imported.is_empty(),
+            |tree, ui, shown| {
+                for instance in imported {
+                    tree.reference_part(ui, instance, shown);
                 }
             },
         );
@@ -427,6 +449,52 @@ impl<'a> Tree<'a> {
         });
     }
 
+    /// Modelo de referência: olho, nome, seleção e o menu com Criar peça. Sem pastas
+    /// internas nem edição, porque nada nele pode ser alterado.
+    fn reference_part(&mut self, ui: &mut egui::Ui, instance: &'a Instance, parent_shown: bool) {
+        let shown = parent_shown && instance.visible;
+        self.leaf(ui, |tree, ui| {
+            if tree.eye(ui, instance.visible, true) {
+                tree.intents
+                    .push(Intent::Command(Box::new(Command::SetInstanceVisibility {
+                        id: instance.id,
+                        visible: !instance.visible,
+                    })));
+            }
+            let response = icons::entry_styled(
+                ui,
+                Icon::Import,
+                &instance.name,
+                tree.tab.is_selected(Selection::Instance(instance.id)),
+                !shown,
+            )
+            .on_hover_text(text(T::ReferenceModelHint));
+            if response.clicked() {
+                tree.intents
+                    .push(Intent::Select(Selection::Instance(instance.id)));
+            }
+            response.context_menu(|ui| {
+                ui.add_enabled_ui(!tree.busy, |ui| {
+                    if ui.button(text(T::CreatePartFromReference)).clicked() {
+                        tree.intents
+                            .push(Intent::Command(Box::new(Command::SetPartReference {
+                                part: instance.part,
+                                reference: false,
+                            })));
+                        ui.close();
+                    }
+                    if ui.button(text(T::DeleteFeature)).clicked() {
+                        tree.intents
+                            .push(Intent::Command(Box::new(Command::RemoveInstance {
+                                id: instance.id,
+                            })));
+                        ui.close();
+                    }
+                });
+            });
+        });
+    }
+
     /// Nó de uma peça (instância), com as pastas da definição. `path` distingue as
     /// ocorrências de uma subpeça quando o pai aparece mais de uma vez.
     fn part(
@@ -483,7 +551,39 @@ impl<'a> Tree<'a> {
                     tree.tab.is_selected(Selection::Instance(instance.id)),
                     !shown,
                 )
+                .interact(egui::Sense::drag())
                 .on_hover_text(&part.name);
+                if !tree.busy {
+                    response.dnd_set_drag_payload(Dragged::Instance(instance.id));
+                }
+                if response.dnd_hover_payload::<Dragged>().is_some() {
+                    ui.painter().rect_stroke(
+                        response.rect,
+                        3,
+                        egui::Stroke::new(1.5, theme::accent()),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                if let Some(dragged) = response.dnd_release_payload::<Dragged>() {
+                    match *dragged {
+                        Dragged::Body(id) if !part.bodies.iter().any(|b| b.id == id) => {
+                            tree.intents
+                                .push(Intent::Command(Box::new(Command::TransferBody {
+                                    id,
+                                    destination: part.id,
+                                })));
+                        }
+                        Dragged::Instance(id) if id != instance.id => {
+                            tree.intents.push(Intent::Command(Box::new(
+                                Command::ReparentInstance {
+                                    id,
+                                    parent: Some(part.id),
+                                },
+                            )));
+                        }
+                        _ => {}
+                    }
+                }
                 if response.clicked() {
                     tree.intents
                         .push(Intent::Select(Selection::Instance(instance.id)));
@@ -603,9 +703,9 @@ impl<'a> Tree<'a> {
                 !(parent_shown && record.visible),
             )
             .on_hover_text(format!(
-                "{}: {} mm",
+                "{}: {}",
                 text(T::OffsetField),
-                nator_drawing::format_mm(record.plane.offset)
+                command_panel::settings(ui.ctx()).length_label(record.plane.offset)
             ));
             let editable = !tree.busy && tree.tab.sketch_edit.is_none();
             if response.clicked() && !tree.busy {
@@ -672,7 +772,11 @@ impl<'a> Tree<'a> {
                 &body.name,
                 tree.tab.is_selected(target),
                 !(parent_shown && body.visible),
-            );
+            )
+            .interact(egui::Sense::drag());
+            if !tree.busy {
+                response.dnd_set_drag_payload(Dragged::Body(body.id));
+            }
             if response.clicked() {
                 tree.intents.push(Intent::Select(target));
             }

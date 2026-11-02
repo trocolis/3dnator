@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 37
+# Formato de projeto — versão interna 46
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 37; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 46; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -17,6 +17,12 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 45, `ExtrudeFace` admite `boundaries`, lista opcional de até 64 `{ "mask": { "sketch": id, "region": RegionRef }, "inside": bool }`, a mesma estrutura das camadas de pintura. As condições são combinadas por interseção e reduzem o prisma da face à célula escolhida, inclusive o lado de fora de um contorno. Sem o campo, vale a face inteira, como nos arquivos anteriores. Os rascunhos citados são dependências da operação e devem continuar paralelos à face; célula vazia falha, sem recorrer à face inteira. Com limites iguais e `combine`, a célula divide a face sem alterar o volume.
+
+A operação `Transform` foi removida: nenhuma versão da interface a criava. Um arquivo que ainda a contenha é recusado na leitura, com erro.
+
+Também desde a versão 45, `RegionRef` admite `Cell { seed, entities }`, usada nas condições de área e de pintura: a parte de uma face dividida por traços abertos do rascunho, calculada como se o contorno exato da face fizesse parte do desenho. `seed` é um ponto da parte no plano do rascunho, em nanômetros inteiros, e `entities` lista os traços que a delimitam, com o lado em que ela fica (`[id, invertido]`). Se o recálculo não encontrar a mesma lista no ponto, a operação falha, em vez de passar para a parte vizinha. `MergeFaces { base, faces }` une faces coplanares vizinhas; exige pelo menos duas.
 
 Desde a versão 36, `Label {base, face, spec}` guarda texto de uma linha (até 128 caracteres), família, negrito/itálico/sublinhado, expressões de tamanho/profundidade/rotação, cor RGB e modo (`Surface`, `Raised`, `Engraved`). Posição é local à peça; UV normalizado acompanha o apoio. A normal é uma dica de apresentação e o núcleo sempre recalcula a base tangente. `label_outlines` mapeia cada operação ao caminho `labels/<output>.brep` (até 16 MiB); `outline_key` identifica texto/família/estilo. O manifesto não duplica os bytes. Sem alteração do conteúdo/estilo, o recálculo usa os contornos salvos e não consulta fontes. Caminhos, duplicatas, ausência de contornos e referências sem operação são recusados.
 
@@ -67,11 +73,20 @@ Modos de Espelhar e Deslocamento continuam sendo intenções de criação, grava
 
 Mover, seleção conectada, prévias e atalhos não acrescentam campos ao manifesto. O nome de interface Referência conserva a representação `construction`; retas infinitas continuam exigindo esse sinalizador.
 
-Desde a versão 24, `PointOnCurve { point, curve }` liga um apoio à circunferência de um círculo/arco, acompanhando seu centro e raio no recálculo. `PointOnLine` continua sendo a incidência à reta suporte. Ligações geométricas `Coincident`, `Midpoint`, `PointOnLine` e `PointOnCurve` com `reference = true` são fracas: seus alvos são preservados, mas não acrescentam resíduos ao solver. Com `false`, são fortes. A força não equivale a uma restrição `Fixed` de posição absoluta.
+Desde a versão 24, `PointOnCurve { point, curve }` liga um apoio à circunferência de um círculo/arco, acompanhando seu centro e raio no recálculo. `PointOnLine` continua sendo a incidência à reta suporte. Ligações geométricas `Coincident`, `Midpoint`, `PointOnLine` e `PointOnCurve` com `reference = true` aparecem em projetos antigos: são lidas e preservadas, mas não acrescentam resíduos ao solver e a interface as trata como ausência de ligação. O aplicativo não cria mais esse tipo. Ligar não equivale a uma restrição `Fixed` de posição absoluta.
 
-Abrir um ponto compartilhado por entidades cria cópias coincidentes e ligações fracas entre os apoios. Cruzamentos podem ter um ponto auxiliar com incidências às curvas, sem dividir as entidades; esse apoio é preservado pela limpeza de pontos enquanto houver suporte. Ao liberar um apoio auxiliar sem cotas ou outras relações próprias, ele é removido e o cruzamento volta a ser virtual. Não há campo novo nos pontos para a força: ela é derivada dos apoios compartilhados e das restrições. O formato anterior já permite as ligações geométricas existentes; nenhum projeto antigo exige reconstrução dos contornos.
+Soltar um ponto compartilhado por entidades cria cópias na mesma posição, sem restrição entre os apoios. Cruzamentos podem ter um ponto auxiliar com incidências às curvas, sem dividir as entidades; esse apoio é preservado pela limpeza de pontos enquanto houver suporte. Ao liberar um apoio auxiliar sem cotas ou outras relações próprias, ele é removido e o cruzamento volta a ser virtual. Não há campo nos pontos para a ligação: ela é derivada dos apoios compartilhados e das restrições. O formato anterior já permite as ligações geométricas existentes; nenhum projeto antigo exige reconstrução dos contornos.
 
 Desde a versão 23, pontos e entidades de rascunho aceitam `projected`, omitido quando falso. Projetar captura coordenadas no plano local do rascunho, sem vínculo posterior com o componente de origem. Os apoios projetados e raios dos círculos projetados são constantes do solver e recebem também restrições explícitas `Fixed`/`Radius`. A marca distingue o traço lilás e o preenchimento claro das regiões fechadas. A geometria continua disponível para captura, dimensionamento e perfis. Círculos/arcos paralelos ao plano são analíticos; curvas inclinadas e outras curvas usam polilinhas com desvio máximo de 0,01 mm. Projetos anteriores abrem sem marcas de projeção.
+
+Desde a versão 46, pontos e entidades aceitam também `face`, omitido quando falso: as linhas da face onde o rascunho foi criado, trazidas como desenho fixo em amarelo. Elas são sempre `projected` (constantes do solver, com `Fixed`/`Radius`), não acompanham mudanças posteriores do corpo e não podem ser movidas, aparadas, apagadas nem arredondadas; servem de apoio a restrições e cotas e delimitam áreas. Pontos aceitam ainda `precision`, em mm, omitido em pontos anteriores: a precisão de desenho vigente quando o ponto foi criado. Ao desenhar, a ponta nova a menos dessa distância de um ponto mais antigo vai para a posição dele com uma `Coincident`; ao construir áreas e sólidos, uma cópia do rascunho funde pontas a menos da própria precisão (0,001 mm nos pontos sem o campo), mantendo a posição do ponto mais antigo ou fixo e sem colapsar traços. O rascunho gravado não muda.
+
+Também na versão 46:
+
+- Rascunhos aceitam `texts`, omitido quando vazio: blocos de texto com `id`, `anchor` (ponto de inserção, um ponto comum do rascunho), `content`, `font`, `bold`, `italic`, `underline`, `size` (mm), `rotation` (radianos), `contours` (polilinhas do contorno das letras em fonte de tamanho 1, centradas na origem) e os IDs `points` e `entities` gerados. As linhas geradas são `projected` (fixas) e são recolocadas a partir do ponto de inserção a cada solução, com os mesmos IDs enquanto o desenho não muda.
+- `Combine` aceita `merge_coplanar`, omitido quando falso: na união, cada face nova da extrusão se junta às vizinhas no mesmo plano. Projetos anteriores, sem o campo, recalculam sem a junção.
+- Peças aceitam `reference`, omitido quando falso: modelo importado só como referência, que não pode ser editado. `folders.references` guarda a visibilidade da pasta Referências (verdadeiro quando ausente).
+- A unidade do documento (`settings.unit`) é `Millimeter` ou `Inch`. `Centimeter` e `Meter`, de versões anteriores, são lidos como `Millimeter`; a geometria sempre esteve em milímetros.
 
 O manifesto registra `format = "3dnator"`, `schema_version`, versão do aplicativo que gravou, UUID do documento, nome, contador de identificadores, peças, instâncias, grupos e folhas técnicas. O campo opcional `recovery` distingue uma cópia automática de um projeto normal; quando ausente, vale `false`.
 
@@ -155,6 +170,8 @@ As variantes `Index` (`RegionRef::Index`, `EdgeRef::Index`, `FaceRef::Index`) gu
 
 Quando a origem de uma referência desaparece ou fica ambígua, o recálculo falha com uma mensagem pedindo nova seleção. Nenhuma outra região, aresta ou face é escolhida no lugar.
 
+Referências por índice (`FaceRef::Index`, `EdgeRef::Index`) ficam para faces e arestas sem nome único. A assinatura vale para o B-rep gravado: quando um recálculo refaz o corpo, a operação reencontra a face pelo nome e por um ponto exato sobre ela, ou a aresta pelo ponto no meio dela, e grava o novo índice e a nova assinatura. Sem resultado único, a referência fica como está e a operação falha com erro explícito.
+
 ## Migrações
 
 - 28 → 29: condições automáticas de célula em `boundaries` e `base_color_srgb` opcionais na aparência. Campos ausentes conservam a pintura anterior; cache continua com material de um byte por triângulo.
@@ -178,7 +195,14 @@ Quando a origem de uma referência desaparece ou fica ambígua, o recálculo fal
 - Versões 1 a 6: campos acrescentados ao longo dessas versões (rascunhos, parâmetros, histórico, B-rep, subconjuntos, grupos, folhas) são opcionais e assumem valores vazios quando ausentes.
 - 6 → 7 (`migrate_to_7`): antes da desserialização tipada, a região numérica de extrusões/revoluções vira `{"Index": n}`, e o par `edge`/`face` + `signature` de arredondamento, chanfro e casca vira `{"Index": {"index": n, "signature": s}}`. Um histórico com campos ausentes é rejeitado inteiro, sem migração parcial.
 
-- 36 → 37: sem novos campos; extrusões nulas com base explícita representam subdivisões de face sem volume. Projetos anteriores conservam sua geometria e operações.
+- 36 → 37: sem novos campos; extrusões nulas com base explícita representam subdivisões de face sem volume. Projetos anteriores conservam sua geometria e operações. Ainda nesta versão, `settings` acrescenta `mouse_step_mm` (0,001 a 1000; ausente vale 1), `mouse_angle_step_deg` (0,01 a 90; ausente vale 1) e `unit` (`Millimeter`, `Centimeter` ou `Meter`; ausente vale `Millimeter`). São opcionais e não afetam a geometria: as expressões guardam a unidade explícita.
+- 43 → 44: novas operações `ComponentCut { base, outline, clearance, floor, depth }`, com a silhueta do componente gravada na própria operação para as peças continuarem independentes, `Lip { base, face, spec }`, `ScrewBoss { base, sketch, points, spec }` e `SnapFit { base, sketch, points, spec }`. `print_profile` ganha `price_per_kg`, `infill_pct`, `wall_lines` e `max_strain_pct`; ausentes, valem os padrões. Projetos anteriores não mudam.
+- 42 → 43: novas restrições de rascunho `PointsHorizontal`, `PointsVertical`, `Collinear`, `Symmetric { a, b, axis }`, `OriginOnCurve { curve }`, `EqualRadius` e `CircleTangent { a, b, internal }`. Projetos anteriores abrem sem mudanças. `Tangent` também aceita o centro de um arco em `point`, para arcos que tocam a reta longe das pontas, e `Concentric` passa a aceitar arcos.
+- 41 → 42: `print_profile.fasteners` guarda a tabela de fixadores; ausente, vale a tabela padrão. `HoleHeadSpec` ganha `Nut { across_flats, depth }`, e `HoleSpec` ganha `teardrop`, a direção de cima da impressão gravada no furo. Projetos anteriores não mudam.
+- 40 → 41: `print_down` em corpos guarda a direção unitária, local ao corpo, que aponta para a mesa de impressão. Ausente, vale a orientação da modelagem; um valor não unitário é descartado na leitura.
+- 39 → 40: `print_profile` guarda o perfil de impressão do projeto. Ausente, vale o perfil genérico. Os valores herdados pelas expressões não são gravados nas peças.
+- 38 → 39: nova operação `RepairContacts { base, contacts, mode, radius }`. Cada item de `contacts` lista os nomes ordenados das faces em volta do contato; `mode` é `Weld` ou `Separate`. Projetos anteriores não mudam.
+- 37 → 38: `Loft` acrescenta `developable` (ausente vale falso). Verdadeiro liga polígono convexo e círculo com triângulos planos e cones oblíquos; outros pares usam a transição comum. Projetos anteriores conservam sua geometria.
 
 ## Integridade e limites
 

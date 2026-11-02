@@ -138,6 +138,14 @@ pub enum RegionRef {
     Area(Vec<(u64, bool)>),
     /// Entidades do contorno externo no momento da seleção (`profiles::find_region`).
     Boundary(Vec<u64>),
+    /// Parte de uma face dividida por traços abertos do rascunho, como se o contorno da
+    /// face fizesse parte dele. `seed` é um ponto da parte no plano do rascunho, em
+    /// nanômetros inteiros, e `entities` os traços que a delimitam, cada um com o lado
+    /// em que a parte fica. Conferir os dois impede cair na parte vizinha em silêncio.
+    Cell {
+        seed: [i64; 2],
+        entities: Vec<(u64, bool)>,
+    },
     /// Formato até a versão 6: posição na lista de regiões ordenada por área. Mantida só
     /// para abrir projetos antigos; a próxima edição da operação a converte em `Boundary`.
     Index(usize),
@@ -211,6 +219,10 @@ pub enum Operation {
         to: String,
         combine: Option<Combine>,
         until: Option<ExtrusionLimit>,
+        /// Célula da face delimitada por rascunhos, inclusive o lado de fora de um
+        /// contorno: o prisma é a interseção destas condições. Vazia usa a face inteira.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        boundaries: Vec<PaintBoundary>,
     },
     /// Com limites iguais e base explícita, subdivide as faces coplanares sem alterar volume.
     Extrude {
@@ -250,6 +262,10 @@ pub enum Operation {
         end: ProfileRef,
         #[serde(default)]
         ruled: bool,
+        /// Polígono convexo → círculo em triângulos planos e cones, que aceitam casca.
+        /// Outros pares seguem a transição comum. Ausente em projetos anteriores.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        developable: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holes: Option<Vec<HolePair>>,
     },
@@ -304,11 +320,6 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exit_face: Option<FaceRef>,
     },
-    Transform {
-        base: BodyId,
-        translation: [f64; 3],
-        rotation: [f64; 3],
-    },
     /// Furos centrados em pontos de um rascunho, furando contra a normal do plano do
     /// rascunho (a favor dela com `reverse`).
     Hole {
@@ -341,6 +352,158 @@ pub enum Operation {
     /// Resultado complementar de uma divisão. Consulta o mesmo plano da etapa
     /// primária, impedindo divergência entre os lados durante edição/recálculo.
     SplitRemainder { base: BodyId, division: BodyId },
+    /// Elimina contatos em linha com um pino de `radius` ao longo de cada um. `contacts`
+    /// guarda os nomes ordenados das faces em volta do contato: se ele deixar de existir,
+    /// a operação falha em vez de agir sobre outra geometria.
+    RepairContacts {
+        base: BodyId,
+        contacts: Vec<Vec<String>>,
+        mode: ContactRepair,
+        radius: String,
+    },
+    /// Passagem de um componente: a silhueta na direção de inserção, afastada de `clearance`,
+    /// removida do corpo desde o fundo do componente até a abertura.
+    ComponentCut {
+        base: BodyId,
+        outline: ComponentOutline,
+        clearance: String,
+        /// Folga abaixo do ponto mais fundo do componente.
+        floor: String,
+        /// Comprimento da passagem a partir do fundo; `None` atravessa o corpo até a saída.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        depth: Option<String>,
+    },
+    /// Une áreas vizinhas no mesmo plano, retirando a linha divisória. Volume igual.
+    MergeFaces { base: BodyId, faces: Vec<FaceRef> },
+    /// Ressalto ou rebaixo ao longo do contorno de uma face plana, para fechar tampas.
+    Lip {
+        base: BodyId,
+        face: FaceRef,
+        spec: LipSpec,
+    },
+    /// Torres de parafuso sobre pontos de um rascunho, ao longo da normal do plano (contra ela
+    /// com `reverse`).
+    ScrewBoss {
+        base: BodyId,
+        sketch: SketchId,
+        points: Vec<u64>,
+        spec: BossSpec,
+    },
+    /// Presilhas em balanço sobre pontos de um rascunho, ou a janela que as recebe.
+    SnapFit {
+        base: BodyId,
+        sketch: SketchId,
+        points: Vec<u64>,
+        spec: SnapSpec,
+    },
+}
+
+/// Se a operação acrescenta o ressalto ou abre o rebaixo que o recebe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LipKind {
+    Lip,
+    Groove,
+}
+
+/// Contorno da face a partir do qual o anel é medido.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LipReference {
+    Outer,
+    Inner,
+}
+
+/// Anel medido a partir do contorno de referência, para dentro do material da face.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LipSpec {
+    pub kind: LipKind,
+    pub reference: LipReference,
+    /// Distância do contorno até o início do anel.
+    pub inset: String,
+    pub width: String,
+    /// Altura do ressalto. O rebaixo correspondente desce a mesma medida mais a folga.
+    pub height: String,
+    /// Só no rebaixo: alarga o anel e aprofunda o corte em relação ao ressalto.
+    pub clearance: String,
+}
+
+/// Torre com furo para parafuso, medida a partir do plano do rascunho.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BossSpec {
+    pub outer_diameter: String,
+    pub hole_diameter: String,
+    pub height: String,
+    /// Profundidade do furo a partir do topo; `None` desce até a base da torre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hole_depth: Option<String>,
+    /// Raio de concordância na base: sem ele, a torre quebra rente ao piso.
+    pub fillet: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+}
+
+/// Se a operação acrescenta a presilha ou abre a janela que a recebe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SnapKind {
+    Hook,
+    Window,
+}
+
+/// Haste em balanço com cabeça. A janela usa as mesmas medidas, para os dois lados
+/// continuarem casados quando uma delas muda.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SnapSpec {
+    pub kind: SnapKind,
+    /// Comprimento da haste até a face de retenção.
+    pub length: String,
+    pub thickness: String,
+    pub width: String,
+    /// Quanto a cabeça avança além da haste.
+    pub overhang: String,
+    /// Altura da rampa de entrada.
+    pub head: String,
+    /// Raio na raiz da haste, onde a tensão é maior.
+    pub fillet: String,
+    /// Direção da cabeça no plano do rascunho, a partir do eixo U.
+    pub angle: String,
+    /// Só na janela: folga em volta da cabeça.
+    pub clearance: String,
+    /// Só na janela: quanto ela avança além da cabeça, para atravessar a parede.
+    pub window: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+}
+impl SnapSpec {
+    /// Deformação na raiz ao passar a cabeça, pela fórmula da viga em balanço de seção
+    /// retangular: 1,5 × espessura × avanço / comprimento². Estimativa para avisar, não cálculo
+    /// de engenharia.
+    pub fn strain(thickness: f64, overhang: f64, length: f64) -> f64 {
+        1.5 * thickness * overhang / (length * length)
+    }
+}
+
+/// Limite de pontos da silhueta gravada em uma operação de recorte.
+pub const MAX_OUTLINE_POINTS: usize = 100_000;
+
+/// Silhueta de um componente, congelada ao criar o recorte para as peças continuarem
+/// independentes: mudar a folga recalcula, mas mover o componente pede nova captura.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ComponentOutline {
+    /// Corpo de origem, só para o usuário reconhecer o recorte.
+    pub source: String,
+    /// Plano no ponto mais fundo do componente, em coordenadas da peça. A normal aponta para
+    /// a abertura, contra a direção de inserção.
+    pub plane: nator_sketch::Plane,
+    /// Contornos externos no plano, em mm.
+    pub contours: Vec<Vec<[f64; 2]>>,
+}
+
+/// Como o reparo elimina um contato em linha.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContactRepair {
+    /// Une os dois volumes acrescentando material.
+    Weld,
+    /// Afasta os dois volumes removendo material.
+    Separate,
 }
 
 /// Furo com medidas em expressões dos parâmetros da peça.
@@ -355,13 +518,28 @@ pub struct HoleSpec {
     pub reverse: bool,
     /// Rosca simplificada: registrada para documentação, sem hélice na geometria.
     pub thread: Option<ThreadSpec>,
+    /// Direção de cima na impressão: a seção vira gota, que imprime sem suporte em furos
+    /// deitados. Fica gravada na operação para o furo não mudar se a face na mesa mudar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teardrop: Option<[f64; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HoleHeadSpec {
     Simple,
-    Counterbore { diameter: String, depth: String },
-    Countersink { diameter: String, angle: String },
+    Counterbore {
+        diameter: String,
+        depth: String,
+    },
+    Countersink {
+        diameter: String,
+        angle: String,
+    },
+    /// Alojamento sextavado de porca cativa: medida entre faces e profundidade.
+    Nut {
+        across_flats: String,
+        depth: String,
+    },
 }
 
 /// Rosca registrada no furo: designação (por exemplo `M6`), diâmetro nominal, passo e
@@ -406,6 +584,10 @@ pub const MAX_OCCURRENCES: usize = 1000;
 pub struct Combine {
     pub target: BodyId,
     pub mode: BooleanMode,
+    /// Na união, junta numa só face cada face nova da extrusão com as vizinhas no mesmo
+    /// plano. Ausente em projetos anteriores, que assim recalculam sem mudança.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_coplanar: bool,
 }
 
 /// Limite de extrusão por uma face plana de um corpo da mesma peça. A distância é recalculada
@@ -495,12 +677,17 @@ impl Operation {
             | Self::Chamfer { base, .. }
             | Self::Shell { base, .. }
             | Self::Label { base, .. }
-            | Self::Transform { base, .. }
             | Self::Hole { base, .. }
             | Self::Pattern { base, .. }
             | Self::Mirror { base, .. }
             | Self::Split { base, .. }
-            | Self::SplitRemainder { base, .. } => vec![*base],
+            | Self::SplitRemainder { base, .. }
+            | Self::RepairContacts { base, .. }
+            | Self::ComponentCut { base, .. }
+            | Self::Lip { base, .. }
+            | Self::MergeFaces { base, .. }
+            | Self::ScrewBoss { base, .. }
+            | Self::SnapFit { base, .. } => vec![*base],
             _ => Vec::new(),
         }
     }
@@ -528,12 +715,68 @@ impl Operation {
         bodies.dedup();
         bodies
     }
+    /// Referências de face da operação, com o corpo a que cada uma pertence.
+    pub fn face_refs_mut(&mut self) -> Vec<(BodyId, &mut FaceRef)> {
+        fn limit(until: Option<&mut ExtrusionLimit>) -> Option<(BodyId, &mut FaceRef)> {
+            match until {
+                Some(ExtrusionLimit::Face(limit)) => Some((limit.body, &mut limit.face)),
+                _ => None,
+            }
+        }
+        match self {
+            Self::ExtrudeFace {
+                base, face, until, ..
+            } => std::iter::once((*base, face))
+                .chain(limit(until.as_mut()))
+                .collect(),
+            Self::Extrude { until, .. } => limit(until.as_mut()).into_iter().collect(),
+            Self::Split { cutting_plane, .. } => {
+                limit(cutting_plane.as_mut()).into_iter().collect()
+            }
+            Self::Label { base, face, .. } | Self::Lip { base, face, .. } => vec![(*base, face)],
+            Self::MergeFaces { base, faces } => faces.iter_mut().map(|f| (*base, f)).collect(),
+            Self::Shell {
+                base,
+                face,
+                additional_faces,
+                exit_face,
+                ..
+            } => std::iter::once(face)
+                .chain(additional_faces)
+                .chain(exit_face)
+                .map(|face| (*base, face))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+    /// Referências de aresta da operação, com o corpo a que cada uma pertence.
+    pub fn edge_refs_mut(&mut self) -> Vec<(BodyId, &mut EdgeRef)> {
+        match self {
+            Self::Fillet {
+                base,
+                edge,
+                additional_edges,
+                ..
+            }
+            | Self::Chamfer {
+                base,
+                edge,
+                additional_edges,
+                ..
+            } => std::iter::once(edge)
+                .chain(additional_edges)
+                .map(|edge| (*base, edge))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
     pub fn uses_sketch(&self, id: SketchId) -> bool {
         self.sketch() == Some(id)
             || matches!(self,Self::Loft {end,..} | Self::Sweep {end,..} if end.sketch==id)
             || matches!(self,Self::Sweep {route:SweepRoute::Axis {sketch,..}|SweepRoute::Sketch {sketch,..},..} if *sketch==id)
             || matches!(self,Self::Revolve {additional_profiles,axis_sketch,..} if *axis_sketch==Some(id) || additional_profiles.iter().any(|p|p.sketch==id))
             || matches!(self,Self::Extrude{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::ExtrudeFace{until:Some(ExtrusionLimit::Sketch{sketch}),..}|Self::Split{cutting_plane:Some(ExtrusionLimit::Sketch{sketch}),..} if *sketch==id)
+            || matches!(self,Self::ExtrudeFace{boundaries,..} if boundaries.iter().any(|b|b.mask.sketch==id))
     }
     pub fn uses_work_plane(&self, id: WorkPlaneId) -> bool {
         matches!(self,
@@ -546,7 +789,9 @@ impl Operation {
             Self::Loft { start, .. } | Self::Sweep { start, .. } => Some(start.sketch),
             Self::Extrude { sketch, .. }
             | Self::Revolve { sketch, .. }
-            | Self::Hole { sketch, .. } => Some(*sketch),
+            | Self::Hole { sketch, .. }
+            | Self::ScrewBoss { sketch, .. }
+            | Self::SnapFit { sketch, .. } => Some(*sketch),
             _ => None,
         }
     }
@@ -599,6 +844,7 @@ impl Feature {
                 face,
                 combine,
                 until,
+                boundaries,
                 ..
             } => {
                 body(base)?;
@@ -610,6 +856,9 @@ impl Feature {
                 }
                 if let Some(limit) = until {
                     limit.remap(bodies, sketches)?;
+                }
+                for boundary in boundaries {
+                    sketch(&mut boundary.mask.sketch)?;
                 }
             }
             Operation::Extrude {
@@ -654,11 +903,33 @@ impl Feature {
             }
             Operation::Hole {
                 base, sketch: id, ..
+            }
+            | Operation::ScrewBoss {
+                base, sketch: id, ..
+            }
+            | Operation::SnapFit {
+                base, sketch: id, ..
             } => {
                 body(base)?;
                 sketch(id)?;
             }
-            Operation::Pattern { base, .. } | Operation::Mirror { base, .. } => body(base)?,
+            Operation::Lip { base, face, .. } => {
+                body(base)?;
+                if let FaceRef::Named(name) = face {
+                    *name = remap_face_name(name, bodies);
+                }
+            }
+            Operation::MergeFaces { base, faces } => {
+                body(base)?;
+                for face in faces {
+                    if let FaceRef::Named(name) = face {
+                        *name = remap_face_name(name, bodies);
+                    }
+                }
+            }
+            Operation::Pattern { base, .. }
+            | Operation::Mirror { base, .. }
+            | Operation::ComponentCut { base, .. } => body(base)?,
             Operation::Split {
                 base,
                 cutting_plane,
@@ -672,6 +943,14 @@ impl Feature {
             Operation::SplitRemainder { base, division } => {
                 body(base)?;
                 body(division)?;
+            }
+            Operation::RepairContacts { base, contacts, .. } => {
+                body(base)?;
+                for face in contacts.iter_mut().flatten() {
+                    *face = remap_face_name(face, bodies);
+                }
+                // Os nomes mudam de dono ao clonar: a ordem é parte da referência.
+                contacts.iter_mut().for_each(|contact| contact.sort());
             }
             Operation::Boolean { base, tool, .. } => {
                 body(base)?;
@@ -721,7 +1000,6 @@ impl Feature {
                     }
                 }
             }
-            Operation::Transform { base, .. } => body(base)?,
         }
         Ok(())
     }
@@ -794,15 +1072,32 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 from,
                 to,
                 until,
+                combine,
+                boundaries,
                 ..
             } => {
                 if let FaceRef::Named(name) = face {
                     validate_face_name(name)?;
                 }
+                if boundaries.len() > 64 {
+                    return Err(DocumentError(
+                        "Área de extrusão com delimitações em excesso.".into(),
+                    ));
+                }
+                for boundary in boundaries {
+                    validate_region(&boundary.mask.region)?;
+                    if !part.sketches.iter().any(|s| s.id == boundary.mask.sketch) {
+                        return Err(DocumentError(
+                            "Rascunho que delimita a área inexistente.".into(),
+                        ));
+                    }
+                }
                 let a = part.parameters.evaluate(from, Length)?;
+                // Só uma célula pode dividir a face em zero; a face inteira não muda nada.
+                let imprint = combine.is_some() && !boundaries.is_empty();
                 if let Some(limit) = until {
                     limit.validate(part)?;
-                } else if (a - part.parameters.evaluate(to, Length)?).abs() < 1e-7 {
+                } else if (a - part.parameters.evaluate(to, Length)?).abs() < 1e-7 && !imprint {
                     return Err(DocumentError(
                         "Extrusão deve ter comprimento não nulo.".into(),
                     ));
@@ -1025,13 +1320,142 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                     return Err(DocumentError("Dimensão deve ser positiva.".into()));
                 }
             }
-            Operation::Transform {
-                translation,
-                rotation,
+            Operation::ComponentCut {
+                outline,
+                clearance,
+                floor,
+                depth,
                 ..
             } => {
-                Placement::new(*translation, *rotation)
+                outline
+                    .plane
+                    .validate()
                     .map_err(|e| DocumentError(e.to_string()))?;
+                let points = outline.contours.iter().map(Vec::len).sum::<usize>();
+                if points > MAX_OUTLINE_POINTS
+                    || outline.contours.is_empty()
+                    || outline.contours.iter().any(|c| c.len() < 3)
+                    || outline
+                        .contours
+                        .iter()
+                        .flatten()
+                        .flatten()
+                        .any(|v| !v.is_finite())
+                {
+                    return Err(DocumentError("Silhueta do componente inválida.".into()));
+                }
+                if part.parameters.evaluate(clearance, Length)? < 0.
+                    || part.parameters.evaluate(floor, Length)? < 0.
+                {
+                    return Err(DocumentError("Folga não pode ser negativa.".into()));
+                }
+                if let Some(depth) = depth
+                    && part.parameters.evaluate(depth, Length)? <= 0.
+                {
+                    return Err(DocumentError("Dimensão deve ser positiva.".into()));
+                }
+            }
+            Operation::MergeFaces { faces, .. } => {
+                if faces.len() < 2 || faces.len() > 1000 {
+                    return Err(DocumentError(
+                        "União de áreas exige pelo menos duas faces.".into(),
+                    ));
+                }
+                for face in faces {
+                    if let FaceRef::Named(name) = face {
+                        validate_face_name(name)?;
+                    }
+                }
+            }
+            Operation::Lip { face, spec, .. } => {
+                if let FaceRef::Named(name) = face {
+                    validate_face_name(name)?;
+                }
+                let length = |e: &str| part.parameters.evaluate(e, Length);
+                if length(&spec.width)? <= 0. || length(&spec.height)? <= 0. {
+                    return Err(DocumentError("Dimensão deve ser positiva.".into()));
+                }
+                if length(&spec.inset)? < 0. || length(&spec.clearance)? < 0. {
+                    return Err(DocumentError("Folga não pode ser negativa.".into()));
+                }
+            }
+            Operation::ScrewBoss {
+                points,
+                sketch,
+                spec,
+                ..
+            } => {
+                validate_points(part, *sketch, points)?;
+                let length = |e: &str| part.parameters.evaluate(e, Length);
+                let (outer, hole) = (length(&spec.outer_diameter)?, length(&spec.hole_diameter)?);
+                let height = length(&spec.height)?;
+                if hole <= 0. || height <= 0. {
+                    return Err(DocumentError("Dimensão deve ser positiva.".into()));
+                }
+                if outer <= hole {
+                    return Err(DocumentError(
+                        "A torre precisa ser mais larga que o furo.".into(),
+                    ));
+                }
+                let fillet = length(&spec.fillet)?;
+                if fillet < 0. || fillet >= height {
+                    return Err(DocumentError(
+                        "A concordância deve ser menor que a altura da torre.".into(),
+                    ));
+                }
+                if let Some(depth) = &spec.hole_depth
+                    && length(depth)? <= 0.
+                {
+                    return Err(DocumentError("Dimensão deve ser positiva.".into()));
+                }
+            }
+            Operation::SnapFit {
+                points,
+                sketch,
+                spec,
+                ..
+            } => {
+                validate_points(part, *sketch, points)?;
+                let length = |e: &str| part.parameters.evaluate(e, Length);
+                for value in [
+                    &spec.length,
+                    &spec.thickness,
+                    &spec.width,
+                    &spec.overhang,
+                    &spec.head,
+                ] {
+                    if length(value)? <= 0. {
+                        return Err(DocumentError("Dimensão deve ser positiva.".into()));
+                    }
+                }
+                part.parameters.evaluate(&spec.angle, Angle)?;
+                let fillet = length(&spec.fillet)?;
+                if fillet < 0. || fillet >= length(&spec.length)? {
+                    return Err(DocumentError(
+                        "A concordância deve ser menor que a haste.".into(),
+                    ));
+                }
+                if length(&spec.clearance)? < 0. || length(&spec.window)? < 0. {
+                    return Err(DocumentError("Folga não pode ser negativa.".into()));
+                }
+            }
+            Operation::RepairContacts {
+                contacts, radius, ..
+            } => {
+                if contacts.is_empty() || contacts.len() >= MAX_OCCURRENCES {
+                    return Err(DocumentError(
+                        "O reparo precisa de 1 a 1000 contatos.".into(),
+                    ));
+                }
+                for contact in contacts {
+                    if contact.len() < 3 {
+                        return Err(DocumentError("Contato do reparo inválido.".into()));
+                    }
+                    contact.iter().try_for_each(|f| validate_face_name(f))?;
+                }
+                if part.parameters.evaluate(radius, Length)? <= 0. {
+                    return Err(DocumentError("Dimensão deve ser positiva.".into()));
+                }
             }
             Operation::Hole {
                 points,
@@ -1039,21 +1463,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 sketch,
                 ..
             } => {
-                if points.is_empty() || points.len() > MAX_OCCURRENCES {
-                    return Err(DocumentError(
-                        "A operação de furo precisa de 1 a 1000 pontos.".into(),
-                    ));
-                }
-                let record = part.sketches.iter().find(|s| s.id == *sketch);
-                if points
-                    .iter()
-                    .any(|p| record.is_some_and(|r| r.sketch.point(*p).is_err()))
-                {
-                    return Err(DocumentError(
-                        "Um ponto do furo não existe mais no rascunho; selecione os pontos novamente."
-                            .into(),
-                    ));
-                }
+                validate_points(part, *sketch, points)?;
                 validate_hole(spec, &part.parameters)?;
             }
             Operation::Pattern { layout, .. } => validate_pattern(layout, &part.parameters)?,
@@ -1122,6 +1532,26 @@ fn validate_hole(
         HoleHeadSpec::Countersink { diameter, angle } => {
             positive(parameters, diameter, Length)?;
             positive(parameters, angle, Angle)?;
+        }
+        HoleHeadSpec::Nut {
+            across_flats,
+            depth,
+        } => {
+            positive(parameters, across_flats, Length)?;
+            positive(parameters, depth, Length)?;
+        }
+    }
+    if let Some(up) = spec.teardrop {
+        validate_direction(up, "A direção da gota")?;
+        if spec.tip_angle.is_some()
+            || matches!(
+                spec.head,
+                HoleHeadSpec::Counterbore { .. } | HoleHeadSpec::Countersink { .. }
+            )
+        {
+            return Err(DocumentError(
+                "O furo em gota exige fundo plano, sem rebaixo nem escareado.".into(),
+            ));
         }
     }
     if let Some(thread) = &spec.thread {
@@ -1268,6 +1698,11 @@ pub(crate) fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
             "Referência de área vazia ou excessiva.".into(),
         ));
     }
+    if let RegionRef::Cell { entities, .. } = region
+        && (entities.is_empty() || entities.len() > nator_sketch::MAX_ENTITIES)
+    {
+        return Err(DocumentError("Parte de face inválida.".into()));
+    }
     if let RegionRef::Boundary(ids) = region
         && (ids.is_empty() || ids.len() > nator_sketch::MAX_ENTITIES)
     {
@@ -1279,6 +1714,26 @@ pub(crate) fn validate_region(region: &RegionRef) -> Result<(), DocumentError> {
 }
 
 /// Nomes de faces são curtos e sem NUL; vazio significa "sem nome" e não é referenciável.
+/// Pontos do rascunho que posicionam furos, torres e presilhas.
+fn validate_points(part: &Part, sketch: SketchId, points: &[u64]) -> Result<(), DocumentError> {
+    if points.is_empty() || points.len() > MAX_OCCURRENCES {
+        return Err(DocumentError(
+            "A operação precisa de 1 a 1000 pontos.".into(),
+        ));
+    }
+    let record = part.sketches.iter().find(|s| s.id == sketch);
+    if points
+        .iter()
+        .any(|p| record.is_some_and(|r| r.sketch.point(*p).is_err()))
+    {
+        return Err(DocumentError(
+            "Um ponto da operação não existe mais no rascunho; selecione os pontos novamente."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_face_name(name: &str) -> Result<(), DocumentError> {
     if name.is_empty() || name.len() > 256 || name.contains('\0') {
         return Err(DocumentError("Nome de face inválido.".into()));
@@ -1354,6 +1809,7 @@ mod tests {
     fn chain() -> Result<Part, Box<dyn Error>> {
         let asset = Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?));
         let body = |id: u64| Body {
+            print_down: None,
             intrinsic_colors: Default::default(),
             id: BodyId(id),
             name: format!("Corpo {id}"),
@@ -1365,10 +1821,11 @@ mod tests {
             visible: id > 11,
             color: None,
         };
-        let transform = |base: u64| Operation::Transform {
+        let transform = |base: u64| Operation::Mirror {
             base: BodyId(base),
-            translation: [1., 0., 0.],
-            rotation: [0.; 3],
+            origin: [1., 0., 0.],
+            normal: [1., 0., 0.],
+            keep_original: false,
         };
         let feature = |output: u64, operation| Feature {
             name: format!("Operação {output}"),
@@ -1390,6 +1847,7 @@ mod tests {
             ],
             history_marker: None,
             folders: PartFolders::default(),
+            reference: false,
         })
     }
 

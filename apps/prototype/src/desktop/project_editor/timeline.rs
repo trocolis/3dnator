@@ -62,11 +62,16 @@ pub(super) fn operation_icon(operation: &Operation) -> Icon {
         Operation::Fillet { .. } => Icon::Fillet,
         Operation::Chamfer { .. } => Icon::Chamfer,
         Operation::Shell { .. } => Icon::Shell,
+        Operation::RepairContacts { .. } => Icon::CheckSolid,
         Operation::Boolean { .. } => Icon::Boolean,
         Operation::Pattern { .. } => Icon::Pattern,
         Operation::Mirror { .. } => Icon::Mirror,
         Operation::Split { .. } | Operation::SplitRemainder { .. } => Icon::Split,
-        Operation::Transform { .. } => Icon::Move,
+        Operation::ComponentCut { .. } => Icon::ComponentCut,
+        Operation::Lip { .. } => Icon::Lip,
+        Operation::MergeFaces { .. } => Icon::Join,
+        Operation::ScrewBoss { .. } => Icon::ScrewBoss,
+        Operation::SnapFit { .. } => Icon::SnapFit,
     }
 }
 
@@ -97,24 +102,24 @@ fn paint_tile(ui: &egui::Ui, response: &egui::Response, operation: &Operation, l
     let rect = response.rect;
     let painter = ui.painter();
     let fill = if look.failed {
-        egui::Color32::from_rgb(253, 225, 225)
+        theme::failed_fill()
     } else if look.affected {
-        egui::Color32::from_rgb(255, 238, 214)
+        theme::affected_fill()
     } else if look.selected {
-        theme::BLUE_FILL
+        theme::blue_fill()
     } else if response.hovered() {
-        egui::Color32::from_rgb(240, 245, 251)
+        theme::subtle()
     } else {
-        egui::Color32::WHITE
+        theme::surface()
     };
     let stroke = if look.failed {
-        egui::Stroke::new(1.5, theme::DANGER)
+        egui::Stroke::new(1.5, theme::danger())
     } else if look.affected {
-        egui::Stroke::new(1.5, theme::WARNING)
+        egui::Stroke::new(1.5, theme::warning())
     } else if look.selected {
-        egui::Stroke::new(1.5, theme::ACCENT)
+        egui::Stroke::new(1.5, theme::accent())
     } else {
-        egui::Stroke::new(1., theme::BORDER)
+        egui::Stroke::new(1., theme::border())
     };
     painter.rect(rect, 4, fill, stroke, egui::StrokeKind::Inside);
     let icon = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.));
@@ -132,7 +137,7 @@ fn paint_tile(ui: &egui::Ui, response: &egui::Response, operation: &Operation, l
                     rect.left_bottom() + egui::vec2(5., -5.),
                     rect.right_top() + egui::vec2(-5., 5.),
                 ],
-                egui::Stroke::new(1.5, theme::DANGER),
+                egui::Stroke::new(1.5, theme::danger()),
             );
         }
         // Posterior ao marcador: véu claro sobre a operação.
@@ -254,7 +259,7 @@ impl Editor {
                                 ui.allocate_exact_size(egui::vec2(9., TILE), egui::Sense::drag());
                             let response = response.on_hover_text(text(T::HistoryMarker));
                             let color = if response.hovered() || drag == Some(Drag::Marker) {
-                                theme::ACCENT
+                                theme::accent()
                             } else {
                                 egui::Color32::from_rgb(77, 141, 201)
                             };
@@ -398,7 +403,7 @@ impl Editor {
                             egui::vec2(3., TILE + 4.),
                         ),
                         1,
-                        theme::ACCENT,
+                        theme::accent(),
                     );
                 }
             }
@@ -591,7 +596,7 @@ impl Editor {
             ui.add_enabled_ui(!self.busy(), |ui| {
                 ui.horizontal(|ui| {
                     if ui
-                        .button(egui::RichText::new(text(T::DeleteAll)).color(theme::DANGER))
+                        .button(egui::RichText::new(text(T::DeleteAll)).color(theme::danger()))
                         .clicked()
                     {
                         decision = Some(true);
@@ -653,7 +658,7 @@ impl Editor {
                 ui.heading(text(T::RebuildFailedTitle));
             });
             ui.label(egui::RichText::new(&failure.name).strong());
-            ui.colored_label(theme::DANGER, &failure.message);
+            ui.colored_label(theme::danger(), &failure.message);
             if !names.is_empty() {
                 ui.label(format!("{} {names}", text(T::RebuildFailedAffected)));
             }

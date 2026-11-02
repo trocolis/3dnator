@@ -37,16 +37,23 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
     };
     let result = match *c {
         ConstraintKind::Tangent { line, arc, point } => {
-            if let Curve::Circle { center, radius } = s.entity(arc)?.curve {
-                // Círculos completos não têm extremos. O campo `point` identifica
-                // seu centro; a distância à reta suporte deve ser igual ao raio.
-                if point != center {
+            let center = match s.entity(arc)?.curve {
+                Curve::Circle { center, .. } | Curve::Arc { center, .. } => Some(center),
+                Curve::Line { .. } => None,
+            };
+            let circle = matches!(s.entity(arc)?.curve, Curve::Circle { .. });
+            // Círculos completos não têm extremos, e um arco pode tocar a reta longe das
+            // pontas. Nos dois casos `point` identifica o centro; a distância à reta
+            // suporte deve ser igual ao raio.
+            if center == Some(point) || circle {
+                if center != Some(point) {
                     return Err(SketchError(
                         "Centro inválido na tangência do círculo.".into(),
                     ));
                 }
                 let (a, _) = s.line(line)?;
-                return checked(cross(sub(s.point(center)?, a), direction(line)?).abs() - radius)
+                let (position, radius) = s.radial(arc)?;
+                return checked(cross(sub(position, a), direction(line)?).abs() - radius)
                     .map(|value| vec![value]);
             }
             if !s.entity(line)?.point_ids().contains(&point)
@@ -170,8 +177,41 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
             vec![distance(s.point(point)?, center) - radius]
         }
         ConstraintKind::Concentric { a, b } => {
-            let d = sub(s.circle(a)?.0, s.circle(b)?.0);
+            let d = sub(s.radial(a)?.0, s.radial(b)?.0);
             vec![d[0], d[1]]
+        }
+        ConstraintKind::PointsHorizontal { a, b } => vec![s.point(b)?[1] - s.point(a)?[1]],
+        ConstraintKind::PointsVertical { a, b } => vec![s.point(b)?[0] - s.point(a)?[0]],
+        ConstraintKind::Collinear { a, b } => {
+            let (origin, _) = s.line(a)?;
+            let (start, end) = s.line(b)?;
+            let d = direction(a)?;
+            vec![cross(sub(start, origin), d), cross(sub(end, origin), d)]
+        }
+        ConstraintKind::Symmetric { a, b, axis } => {
+            let (origin, _) = s.line(axis)?;
+            let (p, q) = (s.point(a)?, s.point(b)?);
+            let d = direction(axis)?;
+            vec![
+                cross(sub(scale(add(p, q), 0.5), origin), d),
+                dot(sub(p, q), d),
+            ]
+        }
+        ConstraintKind::OriginOnCurve { curve } => {
+            if s.line(curve).is_ok() {
+                let (a, _) = s.line(curve)?;
+                vec![cross(sub([0., 0.], a), direction(curve)?)]
+            } else {
+                let (center, radius) = s.radial(curve)?;
+                vec![distance(center, [0., 0.]) - radius]
+            }
+        }
+        ConstraintKind::EqualRadius { a, b } => vec![s.radial(a)?.1 - s.radial(b)?.1],
+        ConstraintKind::CircleTangent { a, b, internal } => {
+            let (first, r) = s.radial(a)?;
+            let (second, q) = s.radial(b)?;
+            let touch = if internal { (r - q).abs() } else { r + q };
+            vec![distance(first, second) - touch]
         }
     };
     if result.iter().any(|v| !v.is_finite()) {
@@ -296,6 +336,79 @@ fn linear_solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     }
     Some(b)
 }
+/// Quais variáveis as restrições determinam por completo: eliminação de Gauss-Jordan com a
+/// tolerância de `rank`. Uma variável pivô cuja linha não depende de nenhuma coluna livre não
+/// pode mudar enquanto as restrições valerem.
+fn determined_variables(mut matrix: Vec<Vec<f64>>, columns: usize) -> Vec<bool> {
+    let mut pivots = Vec::new();
+    for column in 0..columns {
+        let row = pivots.len();
+        if row == matrix.len() {
+            break;
+        }
+        let Some(pivot) = (row..matrix.len())
+            .max_by(|&a, &b| matrix[a][column].abs().total_cmp(&matrix[b][column].abs()))
+        else {
+            break;
+        };
+        if matrix[pivot][column].abs() < 1e-7 {
+            continue;
+        }
+        matrix.swap(row, pivot);
+        let denominator = matrix[row][column];
+        for value in &mut matrix[row][column..] {
+            *value /= denominator;
+        }
+        let reduced = matrix[row].clone();
+        for (index, other) in matrix.iter_mut().enumerate() {
+            let factor = other[column];
+            if index != row && factor != 0. {
+                for k in column..columns {
+                    other[k] -= factor * reduced[k];
+                }
+            }
+        }
+        pivots.push(column);
+    }
+    let mut determined = vec![false; columns];
+    for (row, column) in pivots.iter().enumerate() {
+        determined[*column] = matrix[row]
+            .iter()
+            .enumerate()
+            .all(|(k, value)| k == *column || value.abs() < 1e-7);
+    }
+    determined
+}
+
+/// Apoios e raios que não podem mudar sem violar as restrições dirigentes.
+#[derive(Debug, Default)]
+pub(crate) struct Determined {
+    pub points: HashSet<u64>,
+    pub radii: HashSet<u64>,
+}
+pub(crate) fn determined(sketch: &Sketch) -> Result<Determined> {
+    let x = variables(sketch);
+    let r = residuals(sketch)?;
+    let variables = determined_variables(jacobian(sketch, &x, &r)?, x.len());
+    let mut result = Determined::default();
+    let mut offset = 0;
+    for point in sketch.points.iter().filter(|p| !p.projected) {
+        if variables[offset] && variables[offset + 1] {
+            result.points.insert(point.id);
+        }
+        offset += 2;
+    }
+    for entity in &sketch.entities {
+        if matches!(entity.curve, Curve::Circle { .. }) && !entity.projected {
+            if variables[offset] {
+                result.radii.insert(entity.id);
+            }
+            offset += 1;
+        }
+    }
+    Ok(result)
+}
+
 fn rank(mut matrix: Vec<Vec<f64>>, columns: usize) -> usize {
     let mut row = 0;
     for column in 0..columns {
@@ -487,6 +600,8 @@ fn solve_internal(source: &Sketch, stationary: &[bool]) -> Result<Report> {
             .iter()
             .filter(|e| e.projected && matches!(e.curve, Curve::Arc { .. }))
             .count();
+    // O ponto de inserção dos textos pode ter se movido: as linhas acompanham.
+    text::place_all(&mut sketch)?;
     Ok(Report {
         sketch,
         status,

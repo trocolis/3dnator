@@ -12,17 +12,19 @@ pub fn distance_to(curve: &Segment, cursor: Point2) -> f64 {
     distance(crate::curve_geometry::point(curve, parameter), cursor)
 }
 
-fn point(sketch: &mut Sketch, position: Point2) -> Result<u64> {
+fn point(sketch: &mut Sketch, position: Point2, face: bool) -> Result<u64> {
     if let Some(point) = sketch
         .points
-        .iter()
+        .iter_mut()
         .find(|p| p.projected && distance(p.position, position) < EPSILON)
     {
+        point.face |= face;
         return Ok(point.id);
     }
     let id = sketch.add_point(position)?;
     if let Some(point) = sketch.points.iter_mut().find(|p| p.id == id) {
         point.projected = true;
+        point.face = face;
     }
     sketch.add_constraint(
         ConstraintKind::Fixed {
@@ -76,10 +78,25 @@ fn same(a: &Segment, b: &Segment) -> bool {
 /// é inócuo; apoios coincidentes são compartilhados para fechar os contornos.
 /// O chamador publica o resultado por comando, oferecendo desfazer/refazer.
 pub fn insert(sketch: &mut Sketch, curves: &[Segment], vertices: &[Point2]) -> Result<bool> {
+    insert_marked(sketch, curves, vertices, false)
+}
+
+/// Linhas da face onde o rascunho está: fixas, em amarelo, sem graus de liberdade.
+/// Bordas compartilhadas por duas faces do mesmo plano entram uma vez só.
+pub fn insert_face(sketch: &mut Sketch, curves: &[Segment]) -> Result<bool> {
+    insert_marked(sketch, curves, &[], true)
+}
+
+fn insert_marked(
+    sketch: &mut Sketch,
+    curves: &[Segment],
+    vertices: &[Point2],
+    face: bool,
+) -> Result<bool> {
     let mut next = sketch.clone();
     let before = (next.points.len(), next.entities.len());
     for vertex in vertices {
-        point(&mut next, *vertex)?;
+        point(&mut next, *vertex, face)?;
     }
     for curve in curves {
         if next
@@ -96,12 +113,12 @@ pub fn insert(sketch: &mut Sketch, curves: &[Segment], vertices: &[Point2]) -> R
                     continue;
                 }
                 Curve::Line {
-                    start: point(&mut next, a)?,
-                    end: point(&mut next, b)?,
+                    start: point(&mut next, a, face)?,
+                    end: point(&mut next, b, face)?,
                 }
             }
             Segment::Circle { center, radius } => Curve::Circle {
-                center: point(&mut next, center)?,
+                center: point(&mut next, center, face)?,
                 radius,
             },
             Segment::Arc {
@@ -110,15 +127,16 @@ pub fn insert(sketch: &mut Sketch, curves: &[Segment], vertices: &[Point2]) -> R
                 b,
                 clockwise,
             } => Curve::Arc {
-                center: point(&mut next, center)?,
-                start: point(&mut next, a)?,
-                end: point(&mut next, b)?,
+                center: point(&mut next, center, face)?,
+                start: point(&mut next, a, face)?,
+                end: point(&mut next, b, face)?,
                 clockwise,
             },
         };
         let id = next.add_curve(shape, false)?;
         if let Some(entity) = next.entities.iter_mut().find(|e| e.id == id) {
             entity.projected = true;
+            entity.face = face;
         }
         if let Segment::Circle { radius, .. } = *curve {
             next.add_constraint(
@@ -236,6 +254,157 @@ mod tests {
             }
         );
         assert!(!report.redundant);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod face_lines {
+    use super::*;
+    use crate::{edit, junctions, movement, solver, tools};
+
+    /// Quadrado da face e um traço desenhado sobre ele.
+    fn face_with_a_stroke() -> Result<(Sketch, u64)> {
+        let mut sketch = Sketch::new("Face", Plane::xy());
+        let square = [[0., 0.], [20., 0.], [20., 20.], [0., 20.]];
+        let curves = (0..4)
+            .map(|i| Segment::Line {
+                a: square[i],
+                b: square[(i + 1) % 4],
+            })
+            .collect::<Vec<_>>();
+        assert!(insert_face(&mut sketch, &curves)?);
+        let stroke = sketch.add_line([8., 0.], [8., 20.], false)?;
+        Ok((sketch, stroke))
+    }
+
+    #[test]
+    fn face_lines_are_fixed_yellow_references_that_delimit_areas() -> Result<()> {
+        let (sketch, _) = face_with_a_stroke()?;
+        let face = sketch
+            .entities
+            .iter()
+            .filter(|e| e.face)
+            .collect::<Vec<_>>();
+        assert_eq!(face.len(), 4);
+        assert!(face.iter().all(|e| e.projected && !e.construction));
+        assert!(sketch.points.iter().filter(|p| p.face).all(|p| p.projected));
+        // O traço sobre a face já separa duas áreas, sem refazer o contorno.
+        assert_eq!(crate::areas::regions(&sketch)?.len(), 2);
+        // Só a face: nada a resolver, zero graus de liberdade.
+        let mut only = Sketch::new("Só a face", Plane::xy());
+        insert_face(
+            &mut only,
+            &[Segment::Circle {
+                center: [0., 0.],
+                radius: 5.,
+            }],
+        )?;
+        assert!(matches!(
+            solver::solve(&only)?.status,
+            solver::Status::FullyConstrained
+        ));
+        // Repetir não duplica as linhas.
+        let mut again = sketch.clone();
+        let square = [[0., 0.], [20., 0.]];
+        assert!(!insert_face(
+            &mut again,
+            &[Segment::Line {
+                a: square[0],
+                b: square[1],
+            }]
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn face_lines_cannot_be_trimmed_deleted_moved_or_rounded() -> Result<()> {
+        let (sketch, stroke) = face_with_a_stroke()?;
+        let face = sketch
+            .entities
+            .iter()
+            .find(|e| e.face)
+            .map(|e| e.id)
+            .ok_or_else(|| SketchError("Linha da face ausente.".into()))?;
+        let options = edit::Options {
+            value_mm: 2.,
+            reference: false,
+        };
+        for action in [
+            edit::Action::Delete,
+            edit::Action::Move,
+            edit::Action::Construction,
+        ] {
+            let mut copy = sketch.clone();
+            assert!(edit::apply(&mut copy, action, &[face], options).is_err());
+            assert_eq!(copy.entities, sketch.entities);
+        }
+        let mut copy = sketch.clone();
+        assert!(tools::trim(&mut copy, face, [4., 0.]).is_err());
+        let corner = sketch
+            .entities
+            .iter()
+            .filter(|e| e.face)
+            .take(2)
+            .map(|e| e.id)
+            .collect::<Vec<_>>();
+        assert!(edit::apply(&mut sketch.clone(), edit::Action::Fillet, &corner, options).is_err());
+        let corner_point = sketch
+            .points
+            .iter()
+            .find(|p| p.face)
+            .map(|p| p.id)
+            .ok_or_else(|| SketchError("Vértice da face ausente.".into()))?;
+        assert!(movement::dragged(&sketch, &[corner_point], &[], [1., 1.]).is_err());
+        let mut copy = sketch.clone();
+        assert!(!junctions::dissolve(&mut copy, [0., 0.])?);
+        // O traço desenhado continua livre para editar.
+        let mut copy = sketch.clone();
+        assert!(edit::apply(&mut copy, edit::Action::Delete, &[stroke], options).is_ok());
+        Ok(())
+    }
+
+    /// As linhas da face servem de apoio às restrições: o traço se ajusta e elas não mudam.
+    #[test]
+    fn face_lines_anchor_constraints_and_dimensions() -> Result<()> {
+        let (mut sketch, _) = face_with_a_stroke()?;
+        // Lado inferior (y = 0) e esquerdo (x = 0) do quadrado.
+        let side = |s: &Sketch, horizontal: bool| -> Result<u64> {
+            for e in s.entities.iter().filter(|e| e.face) {
+                let (a, b) = s.line(e.id)?;
+                let axis = usize::from(horizontal);
+                if a[axis].abs() < 1e-9 && b[axis].abs() < 1e-9 {
+                    return Ok(e.id);
+                }
+            }
+            Err(SketchError("Lado ausente.".into()))
+        };
+        let (bottom, left) = (side(&sketch, true)?, side(&sketch, false)?);
+        let before = sketch.line(bottom)?;
+        let line = sketch.add_line([3., 2.], [15., 6.], false)?;
+        let start = sketch.entity(line)?.point_ids()[0];
+        sketch.add_constraint(ConstraintKind::Parallel { a: line, b: bottom }, false)?;
+        sketch.add_constraint(
+            ConstraintKind::PointOnLine {
+                point: start,
+                line: left,
+            },
+            false,
+        )?;
+        sketch.add_constraint(
+            ConstraintKind::PointLineDistance {
+                point: start,
+                line: bottom,
+                value: 5.,
+            },
+            false,
+        )?;
+        let solved = solver::solve(&sketch)?;
+        assert_ne!(solved.status, solver::Status::Conflict);
+        let (a, b) = solved.sketch.line(line)?;
+        assert!(a[0].abs() < 1e-6 && (a[1] - 5.).abs() < 1e-6, "{a:?}");
+        assert!((a[1] - b[1]).abs() < 1e-6);
+        assert_eq!(solved.sketch.line(bottom)?, before);
         Ok(())
     }
 }

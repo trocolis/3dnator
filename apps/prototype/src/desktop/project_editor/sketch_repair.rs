@@ -20,7 +20,7 @@ pub(super) struct RepairDraft {
     error: Option<String>,
 }
 
-fn describe(fix: &Fix) -> String {
+fn describe(fix: &Fix, settings: nator_document::Settings) -> String {
     match fix {
         Fix::RemoveDuplicate { entity, keeps } => {
             format!("{} #{entity} (= #{keeps})", text(T::RepairDuplicate))
@@ -28,7 +28,24 @@ fn describe(fix: &Fix) -> String {
         Fix::RemoveContained { entity, within } => {
             format!("{} #{entity} (⊂ #{within})", text(T::RepairContained))
         }
-        Fix::CloseGap { a, b, gap } => format!("{} #{a} · #{b} ({gap:.3} mm)", text(T::RepairGap)),
+        Fix::CloseGap { a, b, gap } => format!(
+            "{} #{a} · #{b} ({})",
+            text(T::RepairGap),
+            settings.length_label(*gap)
+        ),
+        Fix::LinkEnds { a, b, .. } => format!("{} #{a} · #{b}", text(T::RepairLinkEnds)),
+        Fix::AlmostAligned {
+            line,
+            horizontal,
+            degrees,
+        } => format!(
+            "{} #{line} ({degrees:.3}°)",
+            text(if *horizontal {
+                T::RepairHorizontal
+            } else {
+                T::RepairVertical
+            })
+        ),
     }
 }
 
@@ -108,27 +125,26 @@ impl Editor {
             any && !self.busy(),
             |ui| {
                 panel::row(ui, text(T::RepairTolerance), |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut draft.tolerance)
-                            .range(0.001..=50.)
-                            .speed(0.05)
-                            .suffix(" mm")
-                            .max_decimals(3),
-                    )
+                    let context = ui.ctx().clone();
+                    ui.add(panel::length_value(
+                        &context,
+                        &mut draft.tolerance,
+                        0.001..=50.,
+                    ))
                 });
                 if let Some(error) = &draft.error {
-                    ui.colored_label(theme::DANGER, error);
+                    ui.colored_label(theme::danger(), error);
                 }
                 if let Some(report) = &draft.report {
                     if report.fixes.is_empty() {
-                        ui.label(egui::RichText::new(text(T::RepairNothing)).color(theme::GREEN));
+                        ui.label(egui::RichText::new(text(T::RepairNothing)).color(theme::green()));
                     }
                     for (fix, chosen) in report.fixes.iter().zip(&mut draft.chosen) {
-                        ui.checkbox(chosen, describe(fix));
+                        ui.checkbox(chosen, describe(fix, panel::settings(ui.ctx())));
                     }
                     for point in &report.crossings {
                         ui.colored_label(
-                            theme::WARNING,
+                            theme::warning(),
                             format!(
                                 "{} ({:.2}; {:.2}) — {}",
                                 text(T::RepairCrossing),
@@ -142,7 +158,7 @@ impl Editor {
                 ui.label(
                     egui::RichText::new(text(T::RepairHint))
                         .small()
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             },
         );
@@ -221,7 +237,7 @@ impl Editor {
         for point in &report.crossings {
             if let Some(p) = frame.screen(*point) {
                 let s = 7.;
-                let stroke = egui::Stroke::new(2.5, theme::DANGER);
+                let stroke = egui::Stroke::new(2.5, theme::danger());
                 painter.line_segment([p + egui::vec2(-s, -s), p + egui::vec2(s, s)], stroke);
                 painter.line_segment([p + egui::vec2(-s, s), p + egui::vec2(s, -s)], stroke);
             }

@@ -2,6 +2,169 @@
 
 ## Não lançado
 
+## 0.29.0 — 02/11/2026
+
+- **Medir** foi refeito, sem painel. Cada clique escolhe um vértice, uma aresta ou uma face, e a medida aparece desenhada na cena. Um alvo mostra a própria medida: coordenadas, comprimento (com raio e diâmetro se for circular) ou área. Dois alvos mostram a menor distância, ou o ângulo se forem arestas ou faces não paralelas. Duplo clique no segundo alvo decompõe a distância em ΔX, ΔY e ΔZ. Esc apaga a medição e, sem medição, sai do Medir. Saíram o relatório, o alinhamento e a rotação que ficavam no painel antigo.
+- **Junção automática de áreas:** na união, as faces novas da extrusão que continuam faces existentes no mesmo plano viram uma só área. As divisões feitas de propósito pela extrusão zero continuam. A opção **Juntar áreas coplanares** fica no painel; projetos anteriores recalculam sem a junção.
+- **Importar como referência:** o menu Importar da Montagem traz STEP, STL e 3MF para a pasta **Referências**. A referência se move, oculta e mede, mas não se edita. **Criar peça**, no menu dela, a transforma em peça. Também passou a ler 3MF (só a malha, em milímetros).
+- **Texto** no rascunho, depois de Projetar: texto de uma linha com as opções do Rótulo, sem cor, colocado com dois cliques (ponto de inserção e direção). As letras são linhas fixas que delimitam áreas; o ponto de inserção aceita restrições e cotas. Duplo clique numa letra reabre o bloco. Na faixa, Imagem passou para o menu ▾ da seção, para a faixa caber em 1280 pontos.
+- **Configurações:** a aba Geral saiu e a unidade e as precisões foram para Desenho. As unidades agora são milímetro e polegada; projetos em centímetro ou metro abrem em milímetro. Em polegada, a precisão do mouse oferece 1/64, 1/32 e 1/16 in.
+- **Aparência:** tema claro, escuro ou do sistema e idioma Português, Español ou English (ou o do sistema, com português como padrão). A ajuda ainda está só em português.
+- **Atalhos** configuráveis por contexto, com aviso de conflito. Novos padrões: E Extrusão, R Revolução, F Arredondar e C Chanfrar na Construção, e M Mover na Montagem.
+- **Ajuda:** tutorial curto por tarefa e lista dos atalhos em vigor, com busca.
+- Peças e rascunhos novos com o nome padrão recebem número em qualquer dos três idiomas ("Part 2", "Boceto 3").
+- Formato `.3dnator` 46 também ganha `texts` nos rascunhos, `merge_coplanar` no `Combine`, `reference` nas peças e a unidade polegada.
+
+## 0.28.0 — 02/11/2026
+
+- Rascunho criado sobre a face de um corpo já traz, em amarelo, todas as linhas das faces do corpo nesse plano: contorno, furos e divisões. São referências fixas, sem graus de liberdade, usadas por restrições e cotas e que delimitam áreas, mas não se movem, não se aparam, não se apagam nem se arredondam. Elas não acompanham mudanças posteriores do corpo. Para rascunhos antigos, **Trazer linhas da face** no menu do rascunho na árvore. A projeção lilás ganhou a mesma proteção.
+- Vértices próximos se fundem pela precisão de desenho, contra micro-fendas na impressão. Uma ponta nova a menos de um passo de um vértice mais antigo vai para ele e fica ligada, também com valor digitado; perto de uma linha da face ou projeção, vai para a linha. Traços menores que a precisão são recusados. Cada ponto guarda a precisão em que foi criado. Áreas e extrusões fundem as pontas a essa distância, 0,001 mm nos pontos antigos, sem mexer no ponto mais antigo nem no rascunho gravado.
+- Corrigido: Projetar e a captura de arestas e vértices de outros corpos pareciam não funcionar em projetos com componentes importados grandes. A ponte com o OCCT remontava os mapas de arestas, faces e vizinhanças do sólido a cada consulta, o que tornava a leitura quadrática. Agora eles são montados uma vez por sólido. No projeto de teste com placa de circuito e ESP32 (123 ocorrências), a consulta do Projetar caiu de 24 s para 2,3 s e a da captura de 33 s para 4,4 s.
+- Corrigido: em rascunho sobre uma face, Projetar a própria face ou suas arestas fechava a ferramenta sem acrescentar nada, porque essas linhas já vêm em amarelo. Agora avisa que não há nada novo, mantém a ferramenta aberta e não grava etapa vazia no desfazer.
+- Corrigido: editar um rascunho de uma peça com pintura em faces de nome repetido falhava com "A geometria mudou", porque a pintura por índice não acompanhava o corpo refeito.
+- Formato `.3dnator` 46: `face` em pontos e entidades de rascunho e `precision` nos pontos.
+
+## 0.27.0 — 02/11/2026
+
+- **Diagnóstico do rascunho** saiu do menu **Restringir ▾** e virou um botão compacto ao lado de **Dimensionar**.
+- Ao editar um rascunho, um balão no canto, junto da árvore, mostra os graus de liberdade, ou que ele está totalmente restrito ou em conflito. O valor é calculado já ao abrir, não só depois da primeira edição.
+- Na extrusão, o campo da distância abre com foco assim que a seta aparece: basta digitar e dar Enter; Esc devolve o valor anterior. Arrastar a seta continua funcionando.
+- Um rascunho novo e vazio sobre uma face enquadra a face, em vez da origem do plano.
+- Na Montagem, **Nova peça** cria direto uma peça vazia. Peças a partir de STEP e STL ficam no menu **Importar**, ao lado.
+
+## 0.26.2 — 02/11/2026
+
+- Limpeza do código: saíram os padrões linear e circular do rascunho, sem entrada na interface; a operação `Transform`, que nenhuma tela criava; os comandos `PaintSurface` e `ClearSurfacePaint`, substituídos por `PaintSurfaces`; 45 textos sem uso, os ícones `LockClosed` e `Project` e todos os `allow(dead_code)` que os escondiam. Um projeto que ainda contenha `Transform` é recusado ao abrir. A Transição guiada continua, porque projetos existentes a usam.
+
+## 0.26.1 — 02/11/2026
+
+- Corrigido "Triângulo degenerado ou fora do intervalo numérico" em Verificar sólido, Verificar impressão e na exportação. Bastava uma lasca de milionésimos de milímetro, deixada por um rascunho quase alinhado a uma parede, para tudo parar sem dizer onde. Agora STL e 3MF eliminam esses triângulos e vedam as frestas de largura desprezível que o gerador de malha do OCCT deixa em faces finas demais; a malha sai fechada e o volume não muda. Furos de verdade continuam abertos e acusados.
+- **Verificar sólido** lista cada lasca com posição, largura, face e a operação e o rascunho de origem, e marca o ponto na cena. **Verificar impressão** avisa quantos triângulos saem da malha e onde. O erro de triângulo degenerado também passou a citar as coordenadas.
+- Importar STL ignora triângulos de área zero, em vez de recusar o arquivo.
+- O STL grava no cabeçalho a contagem real de triângulos e normal nula nos de área zero.
+
+## 0.26.0 — 02/11/2026
+
+- Traços abertos de um rascunho sobre uma face agora delimitam áreas: uma linha que atravessa a face a divide em duas, como se o contorno da face fizesse parte do desenho, sem refazê-lo. Vale para o realce, a extrusão e a pintura, inclusive em bordas curvas e furos. O traço precisa chegar às bordas; um que para no meio não divide nada. Se ele mudar a ponto de a área escolhida trocar de lado, a operação falha com erro.
+- **Unir áreas**, em Construção, junta áreas vizinhas no mesmo plano numa só face e tira a linha divisória, sem mudar o volume. Faces em planos diferentes são recusadas.
+- Na árvore, arraste um corpo até outra peça para movê-lo, na mesma posição do mundo, ou uma peça até outra para torná-la subpeça. O corpo chega como sólido sem histórico; se a peça de origem depende dele, ele continua lá, oculto.
+- Arredondar e Chanfrar em sólidos aceitam vértice: clicar perto dele escolhe todas as arestas que chegam ali.
+- Formato `.3dnator` 45: operação `MergeFaces` e `RegionRef::Cell`, a parte de uma face dividida por traços abertos.
+
+## 0.25.0 — 02/11/2026
+
+- Campos flutuantes de medida agora mostram só a caixa do valor. Se o campo perdeu o foco, a primeira tecla o devolve e já entra no valor. O que ele mede e um valor inválido aparecem ao passar o mouse; inválido também deixa a borda vermelha.
+- Precisão do mouse passa a 0,4 mm por padrão, com atalhos para 0,2, 0,4, 0,6 e 0,8 e a opção **Personalizado**. Projetos existentes mantêm a sua. Um clique a menos de um passo de um vértice liga nele, evitando falsas conexões muito próximas; Alt solta o cursor.
+- Ao desenhar, o cursor captura arestas projetadas e seus pontos médios e, numa linha já iniciada, a tangente a círculos, arcos e elipses, inclusive os projetados do modelo. Um ícone junto ao cursor mostra o que foi capturado e nada fica marcado no desenho. A tangente só posiciona: não cria restrição.
+- **Remover vértice**, no botão direito ou com Del, une duas retas numa só aresta. Entre retas colineares as regras da reta mantida continuam; num canto elas saem, porque a direção muda.
+- Arredondar e Chanfrar aceitam escolher os cantos por vértice: dá para tratar três cantos de um retângulo. Clicar numa linha volta à escolha por linhas.
+- Cruzamento com linha de referência continua imaginário: serve para captura, não oferece **Ligar** e não muda áreas nem o corpo.
+- Aparar não perde cliques: os feitos durante o cálculo do corte anterior entram em fila.
+- Mover e Copiar: trocar entre Livre e os alinhamentos continua de onde parou. O movimento acumulado segue para o novo tipo, e os cliques valem para a posição exibida.
+- Durante Mover, o objeto mostra só as linhas na posição original; ao confirmar, elas somem.
+- Projetar mostra só linhas e vértices também durante a escolha, sem preenchimento que esconda o que está atrás.
+- Abrir um rascunho oculto não mexe mais no histórico: ele só passa a aparecer se for editado e confirmado.
+- Concluir um rascunho de referência volta à aba Montagem.
+- Os painéis de ferramentas agora se movem também arrastando o texto do título, não só a área vazia da barra.
+- Importar imagem de referência abre na pasta do projeto, como já faziam STL e STEP.
+- Soltar vértice deixou de usar cadeado no menu. Ícones de traço de referência e infinito seguem o traço normal, em laranja e com tracejado mais longo.
+
+## 0.24.0 — 02/11/2026
+
+- Com a ferramenta **Extrusão** ativa, só áreas respondem ao cursor: regiões de rascunho, partes de uma face plana delimitadas pelos rascunhos visíveis e faces planas sem desenho. A área sob o mouse é realçada antes do clique; faces curvas e outros elementos não reagem. Clicar de novo na área escolhida a retira.
+- Corrigida a extrusão da área externa de um contorno, que era aplicada à face inteira. Clicar fora do contorno agora extruda só essa parte da face, com a área escolhida marcada na cena. A célula acompanha o rascunho no recálculo, e o rascunho fica protegido contra exclusão. Se a área deixar de existir, a operação falha com erro explícito. Com distância zero, a célula divide a face sem mudar o volume.
+- A prévia de uma extrusão unida a um corpo não pinta mais o corpo inteiro: destaca só o material novo. Com distância zero, nada é pintado.
+- Formato `.3dnator` 45: `ExtrudeFace` ganha `boundaries`, opcional.
+
+## 0.23.1 — 02/11/2026
+
+- Corrigido o erro "A geometria mudou: selecione novamente a aresta/face desta operação" ao editar rascunhos. Faces e arestas com nome repetido ficam guardadas por índice e assinatura dos bytes do B-rep, e qualquer recálculo que mudasse a última casa decimal invalidava a referência, com a geometria no mesmo lugar. Agora o recálculo reencontra a face pelo nome e por um ponto exato sobre ela, e a aresta pelo ponto no meio dela. Sem resultado único, a operação continua falhando com erro explícito, sem escolher outra geometria.
+- Confirmar um rascunho que não alimenta o histórico nem uma pintura não recalcula mais a peça.
+
+## 0.23.0 — 02/11/2026
+
+- **Recortar componente** (aba Impressão) abre no corpo a passagem de um componente, inclusive de outra peça: a silhueta na direção de inserção, com a folga aplicada em 2D, do fundo do componente até a abertura. Funciona em STEP real, onde o deslocamento exato do núcleo falhava: 1.259 de 1.259 cortes nos componentes de um projeto real, contra 203 de 370 corpos. A silhueta fica gravada na operação: mudar a folga ou recalibrar recalcula, mas mover o componente pede nova captura. Vãos internos da silhueta ficam preenchidos.
+- **Verificar encaixe** compara os corpos como estão posicionados e lista interferências com o volume, peças encostadas e folgas menores que a justa do perfil. O clique marca o ponto na cena. Com uma peça em edição, compara os corpos dela entre si e com o resto; em **Componentes**, um componente com o outro, sem acusar o que há dentro de um módulo importado. A comparação para em 60 s e informa o que ficou de fora.
+- **Ressalto** acrescenta ou rebaixa um anel ao longo do contorno interno ou externo de uma face plana, para fechar tampas. O rebaixo usa as mesmas medidas mais a folga, na largura e na profundidade. O lado junto ao contorno usa o próprio contorno da face; o lado deslocado é aproximado por retas a 0,01 mm.
+- **Torre de parafuso** ergue torres com furo sobre pontos de um rascunho, com concordância na base. Os presets de autoatarrachante e inserto a quente usam a tabela de fixadores e citam o perfil. Uma torre que não encosta no corpo é recusada.
+- **Presilha** cria hastes em balanço com cabeça e rampa sobre pontos de um rascunho, com raio na raiz, e mostra a deformação estimada ao passar a cabeça, avisando acima do limite do perfil. **Janela** usa as mesmas medidas para abrir no outro corpo o vão que recebe a cabeça.
+- **Exportar para impressão** ganha **Só um trecho**: uma caixa em coordenadas da peça, desenhada na cena, limita o que sai, para testar um encaixe sem imprimir tudo. O modelo não muda. Vale para corpo ou peça; corpos de malha ficam de fora com aviso.
+- **Verificar impressão** mostra a massa estimada e, com preço no perfil, o custo: paredes pela área da superfície e o resto pelo preenchimento. É uma estimativa antes de fatiar, sem suportes. O perfil ganha preço por kg, preenchimento, voltas de parede e deformação máxima.
+- Formato `.3dnator` 44: operações `ComponentCut`, `Lip`, `ScrewBoss` e `SnapFit`; novos campos no perfil. Dependência nova: `i_overlay`, para união e deslocamento de polígonos 2D.
+- Novos cenários de captura `component-cut`, `fit-check`, `lip`, `screw-boss` e `snap-fit`.
+
+## 0.22.0 — 02/11/2026
+
+- Vértices e arestas do rascunho mostram o estado de restrição de cada elemento, em vez de uma cor para o rascunho inteiro. Vértice livre é vazado, parcial é cheio, restringido é cheio com anel e fixado é um quadrado. Arestas ficam azuis enquanto puderem se mover e verdes quando determinadas. Em conflito, só os elementos envolvidos ficam vermelhos.
+- Saíram os selos de ângulo reto, tangência, ponto médio e centro e o texto de junção junto ao cursor. O losango de centro continua.
+- A distinção entre junção forte e fraca e o cadeado foram removidos. Capturar vértice, centro ou ponto médio liga; capturar cruzamento ou o meio de uma curva só posiciona. Projetos antigos abrem iguais: ligações fracas não tinham efeito no solver e passam a valer como ausência de ligação.
+- Nova seção **Restringir** na aba Rascunho, com Dimencionar, seis ícones (Horizontal/vertical, Coincidência, Tangência, Iguais, Paralelas e Perpendiculares) e a lista completa no rótulo **Restringir ▾**: Normal/Referência, Diagnóstico do rascunho, Fixar/Liberar, Ponto médio, Concentricidade, Colineares, Simetria e Polígono regular. Dá para escolher os elementos antes ou depois: sem a seleção completa, a ferramenta fica à espera dos cliques.
+- O botão direito sobre vértice ou aresta mostra só o que vale para o elemento, com Ligar e Soltar vértice. Os dois menus listam o que já afeta a seleção, com × para remover.
+- Direção e comprimento são aplicados girando a linha, pela ponta fixada ou pelo meio, em vez de deixar o solver esticá-la. Sem isso, Paralelas numa linha a 56° a deixava 74% mais longa.
+- **Coincidência** aceita vértices, arestas e a origem do rascunho, que agora pode ser selecionada e tem marca própria no rascunho. Um vértice vai para a origem, e uma aresta passa a passar por ela. Levar à origem um vértice fixado em outro lugar troca a fixação, sem conflito.
+- Tangência passa a valer entre círculos e entre reta e arco sem extremo comum; Iguais, entre círculos e arcos; Horizontal/vertical, entre dois vértices; Concentricidade, em arcos.
+- Formato `.3dnator` 43: novas restrições `PointsHorizontal`, `PointsVertical`, `Collinear`, `Symmetric`, `OriginOnCurve`, `EqualRadius` e `CircleTangent`.
+- Clicar num vértice seleciona só o vértice, e Ctrl+clique acumula vértices e arestas. Duplo clique no vértice ou F fixa e libera; fixar uma aresta prende os dois vértices.
+- Pontas no mesmo lugar sem ligação ganham um ícone de alerta; o clique liga as pontas.
+- Novos cenários de captura `restriction-marks` e `restrict-menu`.
+- Barra de navegação centrada na base da área de edição, com **Selecionar**, **Medir**, **Home**, **Enquadrar**, **Arrastar** e **Rotacionar**. Arrastar e Rotacionar movem a câmera com o botão esquerdo e suspendem a ferramenta em uso sem cancelá-la: um novo clique devolve o botão a ela. O botão Enquadrar saiu do controle de vista, que mantém o Home; Enquadrar segue no menu do cubo.
+- **Medir** abre sem seleção prévia e atualiza o relatório a cada clique no modelo.
+- A aba **Inspecionar** foi removida. **Folha técnica** e **STEP** vão para Montagem, **Parâmetros** para o menu do último grupo da Construção e **Corte de seção** para os dois lugares. A folha técnica aberta em Montagem é do componente selecionado; sem seleção, da montagem inteira.
+- O nó **Projeto** virou a barra de título da árvore, com um botão que recolhe a árvore para cima. Recolhida, resta só a barra, sobre o canto da área de edição, que ocupa toda a largura.
+- A peça em edição saiu do topo da árvore e aparece num balão no topo da área de edição; no lugar do fechar há um ícone de salvar, que conclui a edição e volta à montagem.
+- **Selecionar** saiu das abas e fica só na barra de navegação. O item de mesmo nome no menu da aba Rascunho passa a se chamar **Diagnóstico do rascunho** e continua abrindo a situação do solver, a lista de restrições e Reparar rascunho.
+- Esc desativa a ferramenta aberta, um nível por vez, e conserva o modo de navegação. Sem ferramenta ativa, Medir, Arrastar e Rotacionar voltam a Selecionar.
+- Novos cenários de captura `tree-collapsed` e `navigation-pan`.
+
+## 0.21.0 — 02/11/2026
+
+- **Calibrar** (aba Impressão) exporta uma peça de teste com cinco furos e seis encaixes quadrados de folga crescente, mais um pino. Com as medidas do que saiu impresso, ajusta a compensação de furo e as três folgas do perfil, para qualquer impressora ou fatiador.
+- **Furo** volta a ser acessível: a ferramenta existia, mas não aparecia na faixa nem na busca. Agora fica na aba Construção.
+- Presets de **Fixação** preenchem o furo para parafuso passante, cabeça embutida, autoatarrachante, inserto a quente e porca cativa. As medidas citam o perfil: recalibrar a impressora ajusta os furos já feitos.
+- **Porca cativa** é um novo tipo de furo, com alojamento sextavado. **Furo em gota** troca o topo da seção por uma ponta a 45°, para furos deitados imprimirem sem suporte; a direção fica gravada no furo.
+- A tabela de **Fixadores** (M2 a M5 de início) fica no perfil de impressão e pode ser editada, ampliada e guardada na biblioteca. Medidas de insertos variam por fabricante.
+- Botões da faixa ficaram 5 px mais estreitos para as 17 ferramentas da aba Construção caberem em 1280 px. Formato `.3dnator` 42: fixadores no perfil, `Nut` e `teardrop` em furos.
+- **Verificar impressão** (aba Impressão) analisa o corpo na orientação da mesa e pinta os problemas na própria cena: balanços acima do ângulo do perfil, paredes finas (menos de 2 × bico nas laterais e 2 × camada nas faces horizontais) e frestas menores que o bico. O painel lista cada região com área e medida, e o clique leva a câmera até ela. Também mostra o tamanho na mesa, a área de apoio e avisos de mesa pequena ou apoio insuficiente.
+- As análises são estimativas geométricas e valem para qualquer impressora ou fatiador. Em cantos e chanfros, só conta uma superfície de frente, para não confundir parede vizinha com fresta. As cores somem ao fechar o painel e não entram no projeto.
+- A exportação para impressão valida corpo a corpo, antes de gravar, citando o corpo e a posição na modelagem. **Montagem inteira** mantém um sólido por corpo: peças encostadas deixam de ser acusadas como defeito, e a posição relativa entre elas é preservada.
+- Superfícies abertas, como a serigrafia de placas importadas de STEP, ficam fora da exportação e são informadas. Sólidos com defeito continuam impedindo a exportação.
+- Com uma peça em edição e nenhum corpo selecionado, o painel de exportação parte dos corpos dessa peça.
+- **Face na mesa** (aba Impressão) escolhe a face plana que fica apoiada, mostra o tamanho resultante e avisa se ele passar da mesa do perfil. A orientação vale só para a impressão: a modelagem não muda, e a escolha acompanha o corpo pelas operações seguintes.
+- **Exportar para impressão** grava 3MF ou STL. O 3MF Core traz um objeto por corpo, em milímetros, sem configurações de fatiador. **Preparar para a mesa** aplica a face escolhida, leva a base a Z = 0, centra na mesa e distribui os objetos e suas cópias em fileiras, avisando o que não couber.
+- **Abrir no fatiador** usa o aplicativo padrão do sistema ou um comando pessoal, com `{arquivo}` marcando a posição do arquivo. O comando roda sem shell.
+- O seletor **O que exportar** ficou compacto, para manter os botões visíveis em janelas menores. Formato `.3dnator` 41: corpos ganham `print_down`.
+- Nova aba **Impressão**, com **Perfil de impressão** e **Exportar STL**, que sai de Inspecionar. O perfil usa só grandezas físicas, para servir a qualquer impressora ou fatiador: bico, camada, folgas justa, deslizante e livre, compensação de furo, balanço máximo, densidade e, opcionalmente, o tamanho da mesa.
+- Os valores do perfil entram nas expressões de todas as peças como `bico`, `camada`, `parede`, `folga_justa`, `folga_deslizante`, `folga_livre` e `compensacao_furo`. Um parâmetro da peça com o mesmo nome tem prioridade, e mudar o perfil recalcula só as peças que citam o valor alterado.
+- A biblioteca pessoal guarda perfis entre projetos; cada projeto mantém sua própria cópia. Formato `.3dnator` 40: novo campo `print_profile`.
+- **Reparar rascunho** aponta linhas a menos de 1° da horizontal ou vertical e pontas no mesmo lugar sem ligação. Ao corrigir, só a ponta torta se move: o solver não divide mais o erro entre as duas pontas, o que desalinharia o rascunho de outros que dependem dele.
+- **Verificar sólido** avalia a malha na precisão do STL e avisa quando frestas microscópicas colapsariam ao exportar.
+- **Verificar sólido** (aba Construção) analisa o corpo e lista contatos em linha: arestas com mais de duas faces, onde dois volumes do mesmo sólido se tocam só ao longo de uma linha. O painel mostra comprimento, posição e a operação em que cada contato surgiu, e o marca no modelo. **Soldar** une os volumes e **Separar** os afasta com um pino de raio ajustável (padrão 0,05 mm), gravado no histórico como **Reparo de contato**.
+- O reparo identifica o contato pelos nomes das faces em volta dele: se uma edição o eliminar, a operação falha com erro explícito em vez de agir sobre outra geometria.
+- O erro de exportação STL informa quantas arestas têm defeito, a posição da primeira e indica Verificar sólido; ao exportar vários arquivos, cita o arquivo afetado.
+- Formato `.3dnator` 39: nova operação `RepairContacts`.
+- Extrusões, revoluções e transições voltam a aceitar áreas com folga residual do solver entre pontas sem ligação (até 2e-6 mm): o contorno é emendado antes de chegar ao OCCT, que só conecta arestas a 1e-7 mm e recusava a área com "Não foi possível construir o contorno".
+- Trocar o tipo de movimentação na montagem preserva as escolhas de origem/destino e o campo em edição, sem reiniciar o alinhamento.
+- Arredondar e Chanfrar aceitam um vértice: as linhas que terminam nele entram na seleção do canto, tanto ao clicar no vértice quanto ao abrir a ferramenta com ele selecionado.
+
+## 0.20.0 — 02/11/2026
+
+- Menu **Abrir** da barra de título reúne a abertura de projeto e os recentes (persistidos entre sessões); **Salvar** abre um menu com Salvar e Salvar como. O seletor de importação começa na pasta do projeto aberto.
+- Rascunhos ocultos voltam a ficar ocultos ao confirmar ou cancelar sem mudanças; ao sair da edição a faixa retorna sempre à aba Construção, inclusive para rascunhos de referência. A primeira tecla devolve o foco ao campo flutuante de medidas. O atalho `I` alterna a reta normal e infinita.
+- Junções: o botão de cadeado deixa de alternar ligação forte/fraca; o duplo clique no vértice faz essa alternância e o cadeado, junto ao vértice selecionado, fixa ou libera o elemento (`F`). Áreas projetadas deixam de ser preenchidas e mostram apenas contornos e vértices. Os painéis de ferramentas aceitam reposicionamento pela barra de título e o Aparar não abre painel de propriedades.
+
+## 0.19.0 — 02/11/2026
+
+- O botão **Configurações** da barra de título abre um painel da aplicação com as abas **Geral**, **Aparência**, **Desenho**, **Atalho**, **Ajuda** e **Sobre**. As casas decimais exibidas continuam em Desenho e a recuperação automática em Ajuda; as demais abas ficam como esqueleto para a próxima etapa.
+- O Loft ganha a opção **Superfície desenvolvível**, ligada em novas transições: de polígono convexo para círculo, cada lado vira um triângulo plano e cada canto um cone oblíquo, sem a torção que impedia a casca. A superfície é exata (o fecho convexo dos perfis) e o círculo continua um círculo. Outros pares de perfis e transições já existentes não mudam.
+- A **Casca** passa a funcionar nessas transições, para dentro e para fora, passante ou com fundo: a parede é calculada pelos planos tangentes do corpo, uniforme e com bordas nos planos dos perfis. A face deslocada é poliédrica, com desvio de até 0,005 mm; a superfície original continua exata.
+- Novos cenários de captura `settings` e `settings-general` para revisar o painel.
+- Formato `.3dnator` 38: `Loft` acrescenta `developable`.
+- **Configurações → Geral → Precisão do mouse** define, por documento, o passo linear (0,001 a 1000 mm; padrão 1 mm) e o de ângulos (0,01° a 90°; padrão 1°). No rascunho, o primeiro ponto cai em múltiplos da precisão e cada medida seguinte (comprimento, ângulo, largura, altura, raio e abertura) anda em passos a partir dele, com o valor limpo nos campos dinâmicos. A precisão vale também para arrastar elementos, setas de extrusão, raio, chanfro, casca e deslocamento, Mover (translação e rotação), corte, plano deslocado, imagem de referência e rótulos. Apoios exatos (vértices, centros, curvas e guias) têm prioridade; Alt solta o cursor no rascunho; medidas digitadas aceitam qualquer valor, inclusive intermediário.
+- A atração suave à grade do rascunho foi substituída pela precisão do mouse; a grade passa a mostrar múltiplos dela, com pelo menos 20 pontos entre as linhas.
+- **Configurações → Geral → Unidade de medida** escolhe mm, cm ou m. Campos, cotas, medições, setas, prévias e parâmetros passam a mostrar a unidade, e o número digitado sem unidade vale nela. A geometria continua em milímetros e o texto gravado leva a unidade explícita (`12 cm`), de modo que trocar a unidade depois não altera o modelo. As casas exibidas aumentam quando for preciso para não esconder a precisão do mouse. Folhas técnicas e arquivos STL/STEP continuam em milímetros.
+- Na montagem, a captura em múltiplos de 45° do anel de rotação fica ativa só com precisão de 1° ou mais que passe por 45°.
+- A aba **Sobre** exibe ícone, descrição, versão, autor, licença MIT, repositório, formato do projeto e tecnologias; o cenário `settings-about` permite revisão visual.
+
 ## 0.18.0 — 30/10/2026
 
 - Os painéis das ferramentas de rascunho passam a usar os mesmos seletores compactos de ícone dos painéis de Mover, Extrusão e Alinhar: traço, modo de linha/retângulo/círculo, modo de deslocamento e filtro de Projetar ocupam uma linha rotulada, com dica por opção no tooltip.

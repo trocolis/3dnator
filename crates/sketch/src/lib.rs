@@ -4,11 +4,13 @@ use std::{collections::HashSet, error::Error, fmt};
 
 pub mod areas;
 pub mod connected;
+pub mod constraint_state;
 pub mod corners;
 mod curve_geometry;
 pub mod dimensions;
 pub mod drafting;
 pub mod edit;
+pub mod fusion;
 pub mod indicators;
 pub mod junctions;
 pub mod lines;
@@ -18,13 +20,16 @@ mod path_offset;
 pub mod profiles;
 pub mod projection;
 pub mod repair;
+pub mod restrict;
 pub mod snapping;
 pub mod solver;
+pub mod text;
 pub mod tools;
 pub mod topology;
 pub type Point2 = [f64; 2];
-pub const MAX_POINTS: usize = 512;
-pub const MAX_ENTITIES: usize = 1024;
+/// Textos geram muitas linhas fixas: os limites comportam alguns blocos por rascunho.
+pub const MAX_POINTS: usize = 4096;
+pub const MAX_ENTITIES: usize = 4096;
 pub const MAX_CONSTRAINTS: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,6 +142,20 @@ pub struct Point {
     /// Apoio capturado por Projetar, em coordenadas locais do rascunho.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub projected: bool,
+    /// Vértice de uma linha da face onde o rascunho foi criado. Também é `projected`:
+    /// fixo e fora do solver; a marca só muda a cor e a origem.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub face: bool,
+    /// Precisão de desenho (mm) vigente quando o ponto foi criado. Guia a fusão de
+    /// vértices próximos e não muda se a configuração mudar; ausente em pontos antigos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<f64>,
+}
+impl Point {
+    /// Precisão própria do ponto; pontos sem registro usam `fusion::LEGACY_PRECISION`.
+    pub fn precision(&self) -> f64 {
+        self.precision.unwrap_or(fusion::LEGACY_PRECISION)
+    }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Curve {
@@ -164,6 +183,10 @@ pub struct Entity {
     /// capturada é mantida por restrições explícitas, persistidas com o rascunho.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub projected: bool,
+    /// Linha da face onde o rascunho foi criado: referência fixa como a projeção, em
+    /// amarelo, que delimita áreas e não pode ser alterada.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub face: bool,
     /// Dois pontos parametrizam posição/direção, mas não limitam a reta. Somente
     /// linhas de construção podem ser infinitas; os apoios não são extremos.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -310,6 +333,43 @@ pub enum ConstraintKind {
         a: u64,
         b: u64,
     },
+    /// Dois apoios na mesma altura, sem linha entre eles.
+    PointsHorizontal {
+        a: u64,
+        b: u64,
+    },
+    /// Dois apoios na mesma coluna, sem linha entre eles.
+    PointsVertical {
+        a: u64,
+        b: u64,
+    },
+    /// As duas pontas de `b` sobre a reta suporte de `a`.
+    Collinear {
+        a: u64,
+        b: u64,
+    },
+    /// `a` e `b` espelhados pela reta suporte de `axis`. Com `a == b`, o apoio fica no eixo.
+    Symmetric {
+        a: u64,
+        b: u64,
+        axis: u64,
+    },
+    /// Reta suporte, círculo ou arco passando pela origem do rascunho.
+    OriginOnCurve {
+        curve: u64,
+    },
+    /// Mesmo raio em círculos ou arcos.
+    EqualRadius {
+        a: u64,
+        b: u64,
+    },
+    /// Círculos ou arcos que se tocam; `internal` quando um fica dentro do outro.
+    CircleTangent {
+        a: u64,
+        b: u64,
+        #[serde(default, skip_serializing_if = "is_false")]
+        internal: bool,
+    },
 }
 fn is_false(value: &bool) -> bool {
     !*value
@@ -379,8 +439,26 @@ pub struct Sketch {
     /// Ordem original dos dois elementos cotados, preservada para futuras edições.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub dimension_targets: std::collections::BTreeMap<u64, [dimensions::Target; 2]>,
+    /// Blocos de texto: cada um gera linhas fixas a partir do seu ponto de inserção.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<text::SketchText>,
 }
 impl Sketch {
+    /// Projeções e linhas da face são referências fixas: nenhuma edição as altera.
+    pub fn locked(&self, entity: u64) -> bool {
+        self.entities
+            .iter()
+            .any(|e| e.id == entity && (e.projected || e.face))
+    }
+    /// Erro comum das ferramentas que tentam alterar uma referência fixa.
+    pub fn refuse_locked(&self, entities: &[u64]) -> Result<()> {
+        if entities.iter().any(|id| self.locked(*id)) {
+            return Err(SketchError(
+                "Linhas da face e projeções são referências fixas: não podem ser alteradas.".into(),
+            ));
+        }
+        Ok(())
+    }
     /// Apoios da parametrização de retas infinitas não viram extremos visíveis
     /// nem capturas pontuais. Pontos isolados e compartilhados continuam visíveis.
     pub fn visible_points(&self) -> impl Iterator<Item = &Point> {
@@ -402,6 +480,8 @@ impl Sketch {
                 hidden.remove(&id);
             }
         }
+        // Os vértices das letras não são apoios do usuário: só o ponto de inserção aparece.
+        hidden.extend(self.texts.iter().flat_map(|t| t.points.iter().copied()));
         self.points.iter().filter(move |p| !hidden.contains(&p.id))
     }
     pub fn new(name: impl Into<String>, plane: Plane) -> Self {
@@ -415,6 +495,7 @@ impl Sketch {
             dimension_expressions: std::collections::BTreeMap::new(),
             dimension_labels: std::collections::BTreeMap::new(),
             dimension_targets: std::collections::BTreeMap::new(),
+            texts: Vec::new(),
         }
     }
     fn allocate(&mut self) -> Result<u64> {
@@ -536,6 +617,8 @@ impl Sketch {
             id,
             position,
             projected: false,
+            face: false,
+            precision: None,
         });
         Ok(id)
     }
@@ -549,6 +632,7 @@ impl Sketch {
             curve,
             construction,
             projected: false,
+            face: false,
             infinite: false,
         });
         Ok(id)

@@ -9,7 +9,7 @@
 extern "C" {
 bool nator_opposite_face(const Shape* body, std::size_t index, std::size_t* output) noexcept {
     return guarded([&] {
-        const auto faces=map_of(body->value,TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face de entrada inexistente.");
         const auto face=TopoDS::Face(faces(static_cast<int>(index)+1));
         BRepAdaptor_Surface surface(face);

@@ -122,7 +122,6 @@ pub(super) fn settings(ui: &mut egui::Ui, work: &mut Workspace) {
                 );
             });
         }
-        Tool::Trim => panel::hint(ui, text(T::SketchTrimHint)),
         _ => {}
     }
     if previous

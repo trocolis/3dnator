@@ -2,7 +2,7 @@
 #![cfg(feature = "occt")]
 use nator_commands::{Command, Effect, Session};
 use nator_document::{
-    Document, PaintMask, SurfacePaint,
+    Document, PaintMask,
     features::{FaceRef, Operation, RegionRef, body_owner},
 };
 use nator_geometry::RgbColor;
@@ -90,27 +90,29 @@ fn paint_masks_preserve_solid_support_projected_profiles_recalculate_and_roundtr
         .geometry
         .clone();
     let face = FaceRef::Named(format!("{}:end", body_owner(body)));
-    session.execute(Command::PaintSurface {
-        body,
-        paint: SurfacePaint {
-            boundaries: Vec::new(),
+    use nator_commands::painting::Target;
+    session.execute(Command::PaintSurfaces {
+        targets: vec![Target::Face {
+            body,
             face: face.clone(),
-            mask: None,
-            color: RgbColor::new([50, 50, 220]),
-        },
+            boundaries: Vec::new(),
+        }],
+        color: RgbColor::new([50, 50, 220]),
     })?;
     assert!((painted_area(session.document(), body, 1)? - 400.).abs() < 1e-6);
-    session.execute(Command::PaintSurface {
-        body,
-        paint: SurfacePaint {
-            boundaries: Vec::new(),
+    session.execute(Command::PaintSurfaces {
+        targets: vec![Target::Face {
+            body,
             face: face.clone(),
-            mask: Some(PaintMask {
-                sketch: mask_id,
-                region: reference,
-            }),
-            color: RgbColor::new([220, 50, 50]),
-        },
+            boundaries: vec![nator_document::PaintBoundary {
+                mask: PaintMask {
+                    sketch: mask_id,
+                    region: reference,
+                },
+                inside: true,
+            }],
+        }],
+        color: RgbColor::new([220, 50, 50]),
     })?;
     let area = 100. - 4. * std::f64::consts::PI;
     assert!((painted_area(session.document(), body, 2)? - area).abs() < 0.1);
@@ -240,8 +242,6 @@ fn paint_masks_preserve_solid_support_projected_profiles_recalculate_and_roundtr
     cloned.clone_part(part, "Cópia".into())?;
     cloned.validate()?;
     assert_eq!(cloned.appearances().len(), 2);
-    session.execute(Command::ClearSurfacePaint { body, face })?;
-    assert!(session.document().body_appearance(body).is_none());
     Ok(())
 }
 
@@ -427,6 +427,7 @@ fn body_and_localized_colors_survive_extrusion_and_occurrence_colors() -> Result
         combine: Some(nator_document::features::Combine {
             target: base,
             mode: nator_document::features::BooleanMode::Join,
+            merge_coplanar: false,
         }),
         until: None,
     };
@@ -634,5 +635,76 @@ fn cell_highlight_matches_paint_regions_holes_complements_and_world_placement() 
             .flat_map(|t| mesh.triangle_points(*t))
             .all(|p| (placement.inverse_apply(p)[2] - 5.).abs() < 1e-6)
     );
+    Ok(())
+}
+
+/// Pinturas por índice (faces de nome repetido) acompanham o corpo refeito: antes, qualquer
+/// edição de rascunho da peça falhava com "A geometria mudou".
+#[test]
+fn paint_by_index_follows_the_rebuilt_body() -> Result<()> {
+    let mut profile = Sketch::new("Placa", Plane::xy());
+    profile.add_rectangle([0., 0.], [20., 20.], false)?;
+    let mut doc = Document::new("Pintura")?;
+    let (part, sketch) = doc.add_sketch(None, profile)?;
+    let mut session = Session::new(doc)?;
+    let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+        part,
+        name: "Placa".into(),
+        operation: Operation::Extrude {
+            sketch,
+            region: RegionRef::Index(0),
+            from: "0 mm".into(),
+            to: "5 mm".into(),
+            combine: None,
+            until: None,
+        },
+    })?
+    else {
+        return Err("Corpo ausente".into());
+    };
+    let mut doc = session.document().clone();
+    let record = doc.body(body).ok_or("Corpo")?;
+    let bytes = record.brep.clone().ok_or("B-rep")?;
+    let index = record
+        .face_names
+        .iter()
+        .position(|n| n.ends_with(":end"))
+        .ok_or("Face do topo")?;
+    let stale = nator_document::features::signature(&bytes);
+    doc.set_surface_appearance(nator_document::SurfaceAppearance {
+        body,
+        base_color: None,
+        layers: vec![nator_document::SurfacePaint {
+            boundaries: Vec::new(),
+            face: FaceRef::Index {
+                index,
+                signature: stale,
+            },
+            mask: None,
+            color: RgbColor::new([200, 30, 30]),
+        }],
+        source_signature: stale,
+        geometry: None,
+        materials: std::sync::Arc::new(Vec::new()),
+    })?;
+    let mut session = Session::new(doc)?;
+    let mut wider = Sketch::new("Placa", Plane::xy());
+    wider.add_rectangle([0., 0.], [30., 20.], false)?;
+    session.execute(Command::UpdateSketch {
+        id: sketch,
+        sketch: wider,
+    })?;
+    let doc = session.document();
+    let appearance = doc.body_appearance(body).ok_or("Pintura perdida")?;
+    // A camada segue a face refeita: pelo nome, se único, ou pelo índice com a assinatura nova.
+    let fresh = doc.body(body).and_then(|b| b.brep.clone()).ok_or("B-rep")?;
+    match &appearance.layers[0].face {
+        FaceRef::Named(name) => assert!(name.ends_with(":end"), "{name}"),
+        FaceRef::Index { signature, .. } => {
+            assert_eq!(*signature, nator_document::features::signature(&fresh));
+        }
+    }
+    // O topo inteiro, agora com 30 × 20 mm, sai pintado.
+    assert!((painted_area(doc, body, 1)? - 600.).abs() < 1e-6);
     Ok(())
 }

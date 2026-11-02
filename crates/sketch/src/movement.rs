@@ -20,6 +20,7 @@ pub fn translated(sketch: &Sketch, selected: &[u64], delta: Point2) -> Result<Sk
             "Selecione elementos e um deslocamento finito.".into(),
         ));
     }
+    sketch.refuse_locked(selected)?;
     let selected = points(sketch, selected)?;
     let mut next = sketch.clone();
     for point in &mut next.points {
@@ -39,6 +40,15 @@ pub fn dragged(sketch: &Sketch, points: &[u64], circles: &[u64], delta: Point2) 
     if points.is_empty() || delta.iter().any(|v| !v.is_finite() || v.abs() > 1e12) {
         return Err(SketchError(
             "Escolha um apoio e um deslocamento finito.".into(),
+        ));
+    }
+    if sketch
+        .points
+        .iter()
+        .any(|p| p.projected && points.contains(&p.id))
+    {
+        return Err(SketchError(
+            "Linhas da face e projeções são referências fixas: não podem ser movidas.".into(),
         ));
     }
     let mut next = sketch.clone();

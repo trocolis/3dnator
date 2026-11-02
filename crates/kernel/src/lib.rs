@@ -27,6 +27,8 @@ mod native;
 #[cfg(any(feature = "occt", test))]
 mod tessellation;
 #[cfg(feature = "occt")]
+pub use native::fastening::SnapGeometry;
+#[cfg(feature = "occt")]
 pub use native::{
     Solid, StepAssembly, StepBody, StepOccurrence, StepPart, projected_edges, version,
 };
@@ -114,6 +116,32 @@ pub struct EdgeMeasure {
     pub straight: bool,
     /// Raio de arestas circulares.
     pub radius: Option<f64>,
+}
+
+/// Curva exata de uma aresta, em mm, no referencial do sólido.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EdgeGeometry {
+    Line([f64; 3], [f64; 3]),
+    Circle {
+        center: [f64; 3],
+        radius: f64,
+        start: [f64; 3],
+        middle: [f64; 3],
+        end: [f64; 3],
+        closed: bool,
+    },
+    /// Elipse ou curva livre, amostrada em passos pequenos do parâmetro.
+    Curve(Vec<[f64; 3]>),
+}
+
+/// Contato em linha: aresta compartilhada por mais de duas faces. `faces` traz os nomes
+/// ordenados, que identificam o contato; `points` é a polilinha de apresentação, em mm.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contact {
+    pub edge: usize,
+    pub faces: Vec<String>,
+    pub points: Vec<[f64; 3]>,
+    pub length: f64,
 }
 
 /// Pontos de apoio de cotas, em mm no referencial do sólido consultado. Superfícies

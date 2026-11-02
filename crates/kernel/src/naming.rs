@@ -91,6 +91,13 @@ pub(crate) fn indexed_names(owner: &str, count: usize) -> Vec<String> {
     (0..count).map(|i| format!("{owner}:f{i}")).collect()
 }
 
+/// Faces do pino de um reparo. O prefixo do dono mantém o remapeamento ao clonar a peça.
+pub(crate) fn contact_names(owner: &str, sequence: usize, count: usize) -> Vec<String> {
+    (0..count)
+        .map(|i| format!("{owner}:contact{sequence}:f{i}"))
+        .collect()
+}
+
 fn named(names: &[String], index: i32) -> Option<&str> {
     let name = names.get(usize::try_from(index).ok()?)?;
     (!name.is_empty()).then_some(name.as_str())

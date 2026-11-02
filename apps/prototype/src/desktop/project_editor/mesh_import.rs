@@ -20,6 +20,8 @@ pub(super) struct MeshImportDraft {
     /// Índice em `UNITS`, ou `None` para o fator personalizado.
     unit: Option<usize>,
     custom: f64,
+    /// Importação só como referência (menu Importar).
+    pub(super) reference: bool,
 }
 
 impl MeshImportDraft {
@@ -39,6 +41,7 @@ impl MeshImportDraft {
             mesh: Arc::new(mesh),
             unit: Some(0),
             custom,
+            reference: false,
         }
     }
     fn scale(&self) -> f64 {
@@ -75,7 +78,7 @@ impl Editor {
                         text(T::Triangles).to_lowercase()
                     ))
                     .small()
-                    .color(theme::MUTED),
+                    .color(theme::muted()),
                 );
                 panel::row(ui, text(T::FileUnit), |ui| {
                     ui.spacing_mut().item_spacing.x = 2.;
@@ -104,24 +107,24 @@ impl Editor {
                 panel::row(ui, text(T::FileSize), |ui| {
                     ui.monospace(format!(
                         "{} × {} × {} {unit}",
-                        self.mm(size[0]),
-                        self.mm(size[1]),
-                        self.mm(size[2])
+                        self.number(size[0]),
+                        self.number(size[1]),
+                        self.number(size[2])
                     ))
                 });
                 let scale = draft.scale();
                 panel::row(ui, text(T::ResultSize), |ui| {
                     ui.monospace(format!(
-                        "{} × {} × {} mm",
+                        "{} × {} × {}",
                         self.mm(size[0] * scale),
                         self.mm(size[1] * scale),
-                        self.mm(size[2] * scale)
+                        self.length(size[2] * scale)
                     ))
                 });
                 ui.label(
                     egui::RichText::new(text(T::MeshImportHint))
                         .small()
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             },
         );
@@ -131,6 +134,7 @@ impl Editor {
         if outcome.ok {
             let scale = draft.scale();
             self.import_scale = draft.custom;
+            self.import_reference = draft.reference;
             let MeshImportDraft {
                 tab,
                 revision,

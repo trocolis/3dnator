@@ -7,7 +7,7 @@ extern "C" {
 bool nator_face_polygon(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         std::fill(output,output+13,0.);
-        const auto faces=map_of(body->value,TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face de apoio inexistente.");
         const auto face=TopoDS::Face(faces(int(index)+1));
         if (BRepAdaptor_Surface(face).GetType()!=GeomAbs_Plane) return;
@@ -40,7 +40,7 @@ bool nator_face_polygon(const Shape* body,std::size_t index,double* output) noex
 }
 bool nator_face_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
-        const auto faces=map_of(body->value,TopAbs_FACE);
+        const auto& faces = faces_of(body);
         if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face da cota inexistente.");
         const auto face=TopoDS::Face(faces(int(index)+1));
         GProp_GProps properties; BRepGProp::SurfaceProperties(face,properties);
@@ -69,6 +69,24 @@ bool nator_face_anchors(const Shape* body,std::size_t index,double* output) noex
         }
     });
 }
+// Distância até a face e o ponto dela mais próximo de `point`.
+bool nator_face_nearest(const Shape* body,std::size_t index,const double* point,double* output) noexcept {
+    return guarded([&] {
+        const auto& faces = faces_of(body);
+        if (index>=static_cast<std::size_t>(faces.Extent())) throw std::runtime_error("Face inexistente.");
+        const TopoDS_Vertex vertex=BRepBuilderAPI_MakeVertex(gp_Pnt(point[0],point[1],point[2]));
+        BRepExtrema_DistShapeShape distance(faces(static_cast<int>(index)+1),vertex);
+        if (!distance.IsDone()||distance.NbSolution()==0) {
+            throw std::runtime_error("Não foi possível medir a distância até a face.");
+        }
+        const gp_Pnt nearest=distance.PointOnShape1(1);
+        output[0]=distance.Value();
+        output[1]=nearest.X();
+        output[2]=nearest.Y();
+        output[3]=nearest.Z();
+    });
+}
+
 bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         const auto edge=edge_at(body,index);
@@ -115,8 +133,7 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
         }
         // Uma costura cilíndrica possui duas curvas paramétricas na mesma face.
         // Seus extremos não são vértices geométricos para a captura pelo usuário.
-        TopTools_IndexedDataMapOfShapeListOfShape ancestors;
-        TopExp::MapShapesAndAncestors(body->value,TopAbs_EDGE,TopAbs_FACE,ancestors);
+        const auto& ancestors=ancestors_of(body);
         if (ancestors.Contains(edge)) {
             for (const auto& shape:ancestors.FindFromKey(edge)) {
                 if (BRep_Tool::IsClosed(edge,TopoDS::Face(shape))) {output[15]=1.;break;}

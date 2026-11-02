@@ -12,8 +12,6 @@ pub(in crate::desktop::project_editor) fn edit_label(action: Action) -> T {
         Action::Chamfer => T::SketchChamfer,
         Action::Extend => T::SketchExtendShort,
         Action::Mirror => T::MirrorShort,
-        Action::CircularPattern => T::CircularPattern,
-        Action::RectangularPattern => T::RectangularPattern,
         Action::Dimension => T::SketchDimension,
         Action::HorizontalVertical => T::HorizontalVertical,
         Action::Coincident => T::Coincident,
@@ -34,8 +32,6 @@ pub(in crate::desktop::project_editor) fn edit_icon(action: Action) -> Icon {
         Action::Chamfer => Icon::SketchChamfer,
         Action::Extend => Icon::Line,
         Action::Mirror => Icon::SketchMirror,
-        Action::CircularPattern => Icon::CircularPattern,
-        Action::RectangularPattern => Icon::RectangularPattern,
         Action::Dimension => Icon::Dimension,
         Action::HorizontalVertical => Icon::ConstraintHorizontalVertical,
         Action::Coincident => Icon::ConstraintCoincident,
@@ -54,8 +50,6 @@ fn hint(action: Action) -> T {
         Action::Move => T::SketchSelectOne,
         Action::Fillet | Action::Chamfer => T::SketchCornersHint,
         Action::Mirror => T::SketchMirrorSelectionHint,
-        Action::CircularPattern => T::SketchCircularSelectionHint,
-        Action::RectangularPattern => T::SketchRectangularSelectionHint,
         Action::Tangent => T::SketchTangentSelectionHint,
         Action::Coincident => T::SketchCoincidentSelectionHint,
         _ if action.selection_count() == 1 => T::SketchSelectOne,
@@ -148,7 +142,6 @@ fn candidate(
         &work.selected,
         Options {
             value_mm: value,
-            count: work.pattern_count,
             reference: work.reference,
         },
     )
@@ -171,9 +164,20 @@ impl Editor {
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
         };
+        let vertices = work.selected_vertices.clone();
         work.select_tool(Tool::Select);
         work.tool_panel_open = false;
         work.active_action = Some(action);
+        work.operation.corners.clear();
+        if matches!(action, Action::Fillet | Action::Chamfer)
+            && let Some(source) = &source
+        {
+            for vertex in vertices {
+                if junction_tool::corner_lines(source, vertex).len() >= 2 {
+                    work.toggle_corner(source, vertex);
+                }
+            }
+        }
         work.operation.floating = Default::default();
         work.operation.selecting = work.selected.is_empty();
         work.operation.focus = action == Action::Offset && !work.selected.is_empty();
@@ -329,7 +333,12 @@ impl Editor {
                             T::SketchValue
                         }),
                         |ui| {
-                            if panel::expression(ui, &mut work.dimension_expression).changed() {
+                            let field = if angular {
+                                panel::expression
+                            } else {
+                                panel::length_expression
+                            };
+                            if field(ui, &mut work.dimension_expression).changed() {
                                 work.operation.confirm = false;
                             }
                         },
@@ -338,7 +347,9 @@ impl Editor {
                 if action == Action::Offset {
                     if work.offset_mode == nator_sketch::modifications::OffsetMode::Double {
                         panel::row(ui, text(T::SketchOffsetSecond), |ui| {
-                            if panel::expression(ui, &mut work.offset_second_expression).changed() {
+                            if panel::length_expression(ui, &mut work.offset_second_expression)
+                                .changed()
+                            {
                                 work.operation.confirm = false;
                             }
                         });
@@ -346,11 +357,6 @@ impl Editor {
                     {
                         panel::hint(ui, text(T::SketchOffsetPerSide));
                     }
-                }
-                if action.is_pattern() {
-                    panel::row(ui, text(T::PatternCount), |ui| {
-                        ui.add(egui::DragValue::new(&mut work.pattern_count).range(2..=100));
-                    });
                 }
                 if action == Action::Dimension {
                     ui.checkbox(&mut work.reference, text(T::ReferenceDimension));
@@ -379,7 +385,7 @@ impl Editor {
                 match result {
                     Ok(_) => work.operation.floating.valid(),
                     Err(message) => {
-                        ui.label(egui::RichText::new(message).small().color(theme::DANGER));
+                        ui.label(egui::RichText::new(message).small().color(theme::danger()));
                         false
                     }
                 }

@@ -66,6 +66,9 @@ pub fn center_is_linked(sketch: &Sketch, circle: u64) -> Result<bool> {
         .filter(|c| !c.reference)
         .any(|c| match c.kind {
             ConstraintKind::Coincident { a, b }
+            | ConstraintKind::PointsHorizontal { a, b }
+            | ConstraintKind::PointsVertical { a, b }
+            | ConstraintKind::Symmetric { a, b, .. }
             | ConstraintKind::Distance { a, b, .. }
             | ConstraintKind::DeltaX { a, b, .. }
             | ConstraintKind::DeltaY { a, b, .. }
@@ -74,7 +77,9 @@ pub fn center_is_linked(sketch: &Sketch, circle: u64) -> Result<bool> {
             | ConstraintKind::PointOnLine { point, .. }
             | ConstraintKind::PointOnCurve { point, .. }
             | ConstraintKind::PointLineDistance { point, .. } => point == center,
-            ConstraintKind::Concentric { a, b } => a == circle || b == circle,
+            ConstraintKind::Concentric { a, b } | ConstraintKind::CircleTangent { a, b, .. } => {
+                a == circle || b == circle
+            }
             _ => false,
         }))
 }

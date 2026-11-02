@@ -6,8 +6,35 @@ unsafe extern "C" {
     fn nator_face_polygon(body: *const c_void, index: usize, output: *mut f64) -> bool;
     fn nator_face_anchors(body: *const c_void, index: usize, output: *mut f64) -> bool;
     fn nator_edge_anchors(body: *const c_void, index: usize, output: *mut f64) -> bool;
+    fn nator_face_nearest(
+        body: *const c_void,
+        index: usize,
+        point: *const f64,
+        output: *mut f64,
+    ) -> bool;
 }
 impl Solid {
+    /// Distância de `point` até a face e o ponto dela mais próximo.
+    pub fn face_nearest(
+        &self,
+        index: usize,
+        point: [f64; 3],
+    ) -> Result<(f64, [f64; 3]), KernelError> {
+        let mut out = [0.; 4];
+        // SAFETY: sólido vivo, ponto de três doubles e destino de quatro, sem retenção.
+        if !unsafe {
+            nator_face_nearest(
+                self.pointer.as_ptr(),
+                index,
+                point.as_ptr(),
+                out.as_mut_ptr(),
+            )
+        } {
+            return Err(last_error());
+        }
+        Ok((out[0], [out[1], out[2], out[3]]))
+    }
+
     /// Centro do contorno externo triangular/retangular, no plano da face. Não é
     /// centro de massa: um furo assimétrico não desloca este ponto de referência.
     pub fn face_polygon_center(&self, index: usize) -> Result<Option<[f64; 3]>, KernelError> {

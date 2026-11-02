@@ -40,6 +40,10 @@ pub struct Parameter {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Parameters {
     pub entries: BTreeMap<String, Parameter>,
+    /// Comprimentos em mm herdados do perfil de impressão do documento. Não são gravados
+    /// com a peça, e um parâmetro de mesmo nome em `entries` tem prioridade.
+    #[serde(skip)]
+    pub inherited: BTreeMap<String, f64>,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Quantity {
@@ -48,6 +52,13 @@ pub struct Quantity {
     angle: i8,
 }
 impl Quantity {
+    fn length(value: f64) -> Self {
+        Self {
+            value,
+            length: 1,
+            angle: 0,
+        }
+    }
     fn scalar(value: f64) -> Self {
         Self {
             value,
@@ -162,6 +173,11 @@ impl Context<'_> {
         }
         if let Some(value) = self.memo.get(name) {
             return Ok(*value);
+        }
+        if !self.table.entries.contains_key(name)
+            && let Some(value) = self.table.inherited.get(name)
+        {
+            return Quantity::length(*value).finite();
         }
         if self.visiting.len() > 128 || !self.visiting.insert(name.into()) {
             return Err(DocumentError(format!(

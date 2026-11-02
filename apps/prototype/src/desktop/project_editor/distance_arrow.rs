@@ -24,7 +24,11 @@ impl Arrow {
                 .is_some_and(|p| p.distance(self.tip) < 16.)
     }
     pub fn paint(&self, painter: &egui::Painter, active: bool) {
-        let color = if active { theme::GREEN } else { theme::ACCENT };
+        let color = if active {
+            theme::green()
+        } else {
+            theme::accent()
+        };
         let axis = self.direction.normalized();
         let side = egui::vec2(-axis.y, axis.x) * 5.;
         painter.line_segment([self.origin, self.tip], egui::Stroke::new(1.5, color));
@@ -44,10 +48,17 @@ pub(super) struct Drag {
     pub axis: egui::Vec2,
     pub pixels_per_unit: f32,
     pub initial: f64,
+    /// Precisão do mouse, na mesma unidade do valor; zero mantém o valor contínuo.
+    pub step: f64,
 }
 impl Drag {
     pub fn value(&self, pointer: egui::Pos2) -> f64 {
-        self.initial
-            + f64::from((pointer - self.pointer).dot(self.axis) / self.pixels_per_unit.max(1e-5))
+        nator_sketch::drafting::snap_to_step(
+            self.initial
+                + f64::from(
+                    (pointer - self.pointer).dot(self.axis) / self.pixels_per_unit.max(1e-5),
+                ),
+            self.step,
+        )
     }
 }

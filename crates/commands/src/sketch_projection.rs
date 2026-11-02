@@ -1,6 +1,6 @@
 //! Apoios do modelo projetados ortogonalmente no plano local de um rascunho.
 //! Consultar no trabalhador: os apoios CAD são exatos e não uma amostra da tesselação.
-use crate::point_snap::{body_anchors, reference_points};
+use crate::point_snap::{PointKind, body_anchors, reference_points};
 use nator_document::{Document, DocumentError, SketchId, assembly::Occurrence};
 use nator_geometry::Placement;
 use nator_sketch::profiles::Segment;
@@ -403,22 +403,29 @@ pub fn elements_for_sketch(
                             .as_ref()
                             .map(|(_, f)| f.as_slice())
                             .or_else(|| body.geometry.triangle_faces());
+                        let face_count = solid.face_count()?;
+                        // Triângulos agrupados por face numa passada só. Percorrer a malha
+                        // inteira para cada face era quadrático: uma placa de circuito
+                        // importada, com milhares de faces, levava dezenas de segundos.
+                        let mut by_face = vec![Vec::new(); face_count];
+                        if let Some(owners) = triangle_faces {
+                            for (triangle, owner) in mesh.triangles().iter().zip(owners) {
+                                if let Some(list) = by_face.get_mut(*owner as usize) {
+                                    list.push(*triangle);
+                                }
+                            }
+                        }
                         let mut faces = Vec::new();
-                        for face in 0..solid.face_count()? {
+                        for (face, owned) in by_face.iter().enumerate() {
                             let face_edges = solid.face_edges(face)?;
                             let curves = face_edges
                                 .iter()
                                 .copied()
                                 .flat_map(|i| edges[i].clone())
                                 .collect::<Vec<_>>();
-                            let triangles = mesh
-                                .triangles()
+                            let triangles = owned
                                 .iter()
-                                .enumerate()
-                                .filter(|(i, _)| {
-                                    triangle_faces.is_some_and(|f| f[*i] as usize == face)
-                                })
-                                .map(|(_, t)| mesh.triangle_points(*t).map(project))
+                                .map(|t| mesh.triangle_points(*t).map(project))
                                 .collect();
                             if !curves.is_empty() {
                                 faces.push(Element {
@@ -428,15 +435,9 @@ pub fn elements_for_sketch(
                                             .iter()
                                             .map(|i| world_edges[*i].clone())
                                             .collect(),
-                                        triangles: mesh
-                                            .triangles()
+                                        triangles: owned
                                             .iter()
-                                            .enumerate()
-                                            .filter(|(i, _)| {
-                                                triangle_faces
-                                                    .is_some_and(|f| f[*i] as usize == face)
-                                            })
-                                            .map(|(_, t)| {
+                                            .map(|t| {
                                                 mesh.triangle_points(*t).map(|p| source.apply(p))
                                             })
                                             .collect(),
@@ -673,8 +674,22 @@ pub fn points(
     plane: Plane,
     target: Placement,
 ) -> Result<Vec<Point2>, DocumentError> {
+    Ok(marked_points(document, occurrences, edited, plane, target)?
+        .into_iter()
+        .map(|(point, _)| point)
+        .collect())
+}
+
+/// Apoios com o que cada um representa, para o ícone junto ao cursor.
+fn marked_points(
+    document: &Document,
+    occurrences: &[Occurrence],
+    edited: SketchId,
+    plane: Plane,
+    target: Placement,
+) -> Result<Vec<(Point2, PointKind)>, DocumentError> {
     plane.validate().map_err(|e| DocumentError(e.to_string()))?;
-    let mut result = vec![[0., 0.]];
+    let mut result = vec![([0., 0.], PointKind::Vertex)];
     let mut bodies = HashMap::new();
     let mut sketches = HashMap::new();
     let project =
@@ -695,7 +710,7 @@ pub fn points(
                 .compose(body.placement)
                 .map_err(|e| DocumentError(e.to_string()))?;
             if let Some(anchors) = bodies.get(&body.id) {
-                result.extend(anchors.iter().map(|a| project(a.point, source)));
+                result.extend(anchors.iter().map(|a| (project(a.point, source), a.kind)));
             }
         }
         for record in part
@@ -707,11 +722,12 @@ pub fn points(
                 entry.insert(reference_points(&record.sketch)?);
             }
             if let Some(anchors) = sketches.get(&record.id) {
-                result.extend(
-                    anchors
-                        .iter()
-                        .map(|p| project(record.sketch.plane.world(*p), occurrence.placement)),
-                );
+                result.extend(anchors.iter().map(|p| {
+                    (
+                        project(record.sketch.plane.world(*p), occurrence.placement),
+                        PointKind::Vertex,
+                    )
+                }));
             }
         }
     }
@@ -720,20 +736,72 @@ pub fn points(
         .iter()
         .filter(|s| s.id != edited && document.shows_reference_sketch(s))
     {
-        result.extend(
-            reference_points(&record.sketch)?
-                .into_iter()
-                .map(|p| project(record.sketch.plane.world(p), Placement::default())),
-        );
+        result.extend(reference_points(&record.sketch)?.into_iter().map(|p| {
+            (
+                project(record.sketch.plane.world(p), Placement::default()),
+                PointKind::Vertex,
+            )
+        }));
     }
-    if result.iter().flatten().any(|v| !v.is_finite()) {
+    if result.iter().flat_map(|(p, _)| p).any(|v| !v.is_finite()) {
         return Err(DocumentError(
             "Ponto projetado fora do intervalo numérico.".into(),
         ));
     }
     // Faces em alturas distintas podem produzir o mesmo apoio em um plano paralelo.
     // A ordem não é identidade topológica: só elimina duplicações numéricas na captura.
-    result.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
-    result.dedup_by(|a, b| nator_sketch::distance(*a, *b) < 1e-9);
+    result.sort_by(|(a, _), (b, _)| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    result.dedup_by(|(a, _), (b, _)| nator_sketch::distance(*a, *b) < 1e-9);
+    Ok(result)
+}
+
+/// Tudo o que o cursor pode capturar do que já existe fora do rascunho.
+#[derive(Debug, Clone, Default)]
+pub struct SnapGeometry {
+    pub points: Vec<(Point2, PointKind)>,
+    pub curves: Vec<Segment>,
+    pub chains: Vec<Vec<Point2>>,
+}
+
+/// Curva inclinada chega como muitas retas curtas: é uma cadeia, não vários segmentos.
+const CHAIN_SEGMENTS: usize = 8;
+
+pub fn snap_geometry(
+    document: &Document,
+    occurrences: &[Occurrence],
+    edited: SketchId,
+    plane: Plane,
+    target: Placement,
+) -> Result<SnapGeometry, DocumentError> {
+    let mut result = SnapGeometry {
+        points: marked_points(document, occurrences, edited, plane, target)?,
+        ..Default::default()
+    };
+    for element in elements_for_sketch(document, occurrences, plane, target, Some(edited))?
+        .into_iter()
+        .filter(|e| e.kind == Kind::Edge)
+    {
+        let lines = element
+            .curves
+            .iter()
+            .filter(|c| matches!(c, Segment::Line { .. }))
+            .count();
+        if lines >= CHAIN_SEGMENTS && lines == element.curves.len() {
+            result.chains.push(
+                element
+                    .curves
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, curve)| match *curve {
+                        Segment::Line { a, b } if i == 0 => vec![a, b],
+                        Segment::Line { b, .. } => vec![b],
+                        _ => Vec::new(),
+                    })
+                    .collect(),
+            );
+        } else {
+            result.curves.extend(element.curves);
+        }
+    }
     Ok(result)
 }

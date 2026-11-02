@@ -108,7 +108,7 @@ impl Cache {
                     .strong()
                     .color(egui::Color32::WHITE),
             )
-            .fill(theme::ACCENT)
+            .fill(theme::accent())
             .min_size(egui::vec2(64., 26.));
             if ui
                 .add_enabled(
@@ -292,9 +292,14 @@ impl Cache {
                         .iter()
                         .flat_map(|e| e.vertices.iter().copied())
                         .collect::<Vec<_>>();
-                    let result = nator_sketch::projection::insert(&mut next, &curves, &vertices)
-                        .map(|_| next)
-                        .map_err(sketch_error);
+                    // Linhas que já estão no rascunho (inclusive as da face, em amarelo) não
+                    // geram revisão vazia: o aviso explica e a ferramenta continua aberta.
+                    let result =
+                        match nator_sketch::projection::insert(&mut next, &curves, &vertices) {
+                            Ok(true) => Ok(next),
+                            Ok(false) => Err(text(T::ProjectionNothingNew).to_owned()),
+                            Err(error) => Err(sketch_error(error)),
+                        };
                     let _ = sender.send(result);
                     context.request_repaint();
                 }) {
@@ -484,7 +489,7 @@ fn paint_source(
     element: &Element,
     hovered: bool,
 ) {
-    let stroke = egui::Stroke::new(if hovered { 2.5 } else { 1.5 }, theme::GREEN);
+    let stroke = egui::Stroke::new(if hovered { 2.5 } else { 1.5 }, theme::green());
     let world = |p| sketch_scene::project(&frame.camera, frame.bounds, frame.rect, p);
     for curve in element.source.curves.iter().chain(&element.source.contours) {
         let points = curve.iter().filter_map(|p| world(*p)).collect::<Vec<_>>();
@@ -498,59 +503,52 @@ fn paint_source(
         }
     }
 }
+/// Bordas de uma área triangulada: arestas usadas por um único triângulo.
+fn triangle_outline(triangles: &[[Point2; 3]]) -> Vec<[Point2; 2]> {
+    let key = |p: Point2| p.map(|v| (v * 1e6).round() as i64);
+    let mut edges = std::collections::HashMap::new();
+    for triangle in triangles {
+        for i in 0..3 {
+            let (a, b) = (triangle[i], triangle[(i + 1) % 3]);
+            let id = if key(a) <= key(b) {
+                (key(a), key(b))
+            } else {
+                (key(b), key(a))
+            };
+            edges.entry(id).or_insert(([a, b], 0_u32)).1 += 1;
+        }
+    }
+    edges
+        .into_values()
+        .filter(|(_, count)| *count == 1)
+        .map(|(edge, _)| edge)
+        .collect()
+}
 fn paint_target(frame: &sketch_scene::Frame, painter: &egui::Painter, element: &Element) {
-    let polygons = element
-        .contours
-        .iter()
-        .map(|c| c.iter().filter_map(|p| frame.screen(*p)).collect())
-        .collect::<Vec<Vec<_>>>();
-    profile_pick::fill(painter, &polygons, theme::PROJECTED_FILL);
-    for triangle in &element.triangles {
-        let points = triangle
+    // Só linhas e vértices: um preenchimento esconderia o que serve de referência.
+    let stroke = egui::Stroke::new(2.5, theme::projected());
+    for contour in &element.contours {
+        let mut points = contour
             .iter()
             .filter_map(|p| frame.screen(*p))
             .collect::<Vec<_>>();
-        if points.len() == 3 {
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                theme::PROJECTED_FILL,
-                egui::Stroke::NONE,
-            ));
+        points.extend(points.first().copied());
+        painter.add(egui::Shape::line(points, stroke));
+    }
+    for [a, b] in triangle_outline(&element.triangles) {
+        if let (Some(a), Some(b)) = (frame.screen(a), frame.screen(b)) {
+            painter.line_segment([a, b], stroke);
         }
     }
     for curve in &element.curves {
-        frame.path(
-            painter,
-            curve.sample(128),
-            egui::Stroke::new(2.5, theme::PROJECTED),
-            false,
-        );
+        frame.path(painter, curve.sample(128), stroke, false);
     }
     for point in &element.vertices {
         if let Some(at) = frame.screen(*point) {
-            painter.circle_filled(at, 5., theme::PROJECTED);
+            painter.circle_filled(at, 5., theme::projected());
         }
     }
 }
-pub(super) fn paint_regions(
-    frame: &sketch_scene::Frame,
-    painter: &egui::Painter,
-    regions: &[profiles::Region],
-) {
-    for region in regions {
-        let polygons = std::iter::once(&region.outer)
-            .chain(&region.holes)
-            .map(|wire| {
-                wire.sample(128)
-                    .into_iter()
-                    .filter_map(|p| frame.screen(p))
-                    .collect()
-            })
-            .collect::<Vec<Vec<_>>>();
-        profile_pick::fill(painter, &polygons, theme::PROJECTED_FILL);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

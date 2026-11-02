@@ -3,7 +3,7 @@ members = ["crates/geometry", "crates/sketch", "crates/kernel", "crates/document
 resolver = "3"
 
 [workspace.package]
-version = "0.18.0"
+version = "0.29.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
@@ -20,6 +20,7 @@ nator-renderer = { path = "crates/renderer" }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 uuid = { version = "1.27", features = ["v4"] }
+i_overlay = "9.1"
 wgpu = { version = "30.0", default-features = false, features = ["std", "wgsl", "vulkan", "dx12", "metal"] }
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 

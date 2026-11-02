@@ -190,12 +190,12 @@ impl Editor {
                     }
                 });
                 panel::row(ui, text(T::OffsetField), |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut section.offset)
-                            .speed(0.5)
-                            .suffix(" mm")
-                            .max_decimals(3),
-                    );
+                    let context = ui.ctx().clone();
+                    ui.add(panel::length_value(
+                        &context,
+                        &mut section.offset,
+                        -1e7..=1e7,
+                    ));
                     if icons::button(ui, Icon::Flip, text(T::FlipSide), false, section.flip)
                         .clicked()
                     {
@@ -205,7 +205,7 @@ impl Editor {
                 ui.label(
                     egui::RichText::new(text(T::SectionHint))
                         .small()
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             },
         );
@@ -233,6 +233,7 @@ impl Editor {
             return false;
         };
         let plane = section.plane();
+        let settings = self.current().session.document().settings();
         let rect = response.rect;
         let camera = self.viewport.camera.clone();
         let center = bounds.center();
@@ -322,8 +323,9 @@ impl Editor {
             // O deslocamento cresce no sentido da normal sem inversão.
             let sign = if section.flip { -1. } else { 1. };
             let delta = f64::from((p - origin).dot(per_mm) / per_mm.length_sq());
+            let next = settings.snap_length(offset + sign * delta);
             if let Some(current) = &mut self.current_mut().section {
-                current.offset = ((offset + sign * delta) * 100.).round() / 100.;
+                current.offset = next;
             }
             ui.ctx().request_repaint();
         }
@@ -348,6 +350,7 @@ impl Editor {
                 offset,
                 dragging || draft.dragging.is_some(),
                 T::DistanceField,
+                panel::Quantity::Length,
                 |s| panel::parse_number(s, panel::Quantity::Length).filter(|v| v.abs() <= 1e7),
             );
             value = edit.value;

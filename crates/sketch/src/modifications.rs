@@ -383,7 +383,7 @@ mod tests {
             sketch.entity(created[0])?.point_ids()[1],
             sketch.entity(created[1])?.point_ids()[0]
         );
-        assert!(junctions::at(&sketch, [-12., 0.])?.is_some_and(|j| j.strong));
+        assert!(junctions::at(&sketch, [-12., 0.])?.is_some_and(|j| j.linked));
         Ok(())
     }
 

@@ -74,6 +74,32 @@ fn new_sketch(destination: Option<PartId>, reference: bool, plane: Plane) -> Com
         }
     }
 }
+
+/// Rascunho novo sobre a face clicada já nasce com as linhas das faces do corpo naquele
+/// plano: fixas, em amarelo, delimitando áreas. Sem núcleo ou sem face plana, vazio.
+fn new_sketch_on_face(
+    document: &Document,
+    destination: Option<PartId>,
+    reference: bool,
+    plane: Plane,
+    pick: &Pick,
+) -> Command {
+    let mut command = new_sketch(destination, reference, plane);
+    if let Command::AddSketch {
+        destination: Some(part),
+        sketch,
+    } = &mut command
+        && *part == pick.part
+        && let Ok(lines) =
+            nator_commands::features::face_lines(document, pick.part, plane, Some(pick.body))
+    {
+        let mut outlined = sketch.clone();
+        if nator_sketch::projection::insert_face(&mut outlined, &lines).is_ok() {
+            *sketch = outlined;
+        }
+    }
+    command
+}
 pub(super) struct CameraTransition {
     pub from: Camera,
     pub to: Camera,
@@ -181,10 +207,14 @@ impl Frame {
         };
         let stroke = egui::Stroke::new(
             1.5,
-            if entity.projected {
-                theme::PROJECTED
+            if entity.face {
+                theme::face_line()
+            } else if sketch.text_of(entity.id).is_some() {
+                color
+            } else if entity.projected {
+                theme::projected()
             } else if entity.construction {
-                theme::CONSTRUCTION
+                theme::construction()
             } else {
                 color
             },
@@ -499,12 +529,9 @@ impl Editor {
             }
             let pick = pick.ok_or_else(|| text(T::ChooseSketchPlane).to_owned())?;
             let plane = face_plane(&document, &pick, placement)?.0;
-            let command = PreparedCommand::new(
-                document,
-                revision,
-                new_sketch(destination, reference, plane),
-            )
-            .map_err(|e| e.to_string())?;
+            let command = new_sketch_on_face(&document, destination, reference, plane, &pick);
+            let command =
+                PreparedCommand::new(document, revision, command).map_err(|e| e.to_string())?;
             Ok(Outcome::Prepared { tab, command })
         });
     }
@@ -532,12 +559,9 @@ impl Editor {
                 });
             }
             let plane = face_plane(&document, &pick, placement)?.0;
-            let command = PreparedCommand::new(
-                document,
-                revision,
-                new_sketch(destination, reference, plane),
-            )
-            .map_err(|e| e.to_string())?;
+            let command = new_sketch_on_face(&document, destination, reference, plane, &pick);
+            let command =
+                PreparedCommand::new(document, revision, command).map_err(|e| e.to_string())?;
             Ok(Outcome::Prepared { tab, command })
         });
     }
@@ -607,6 +631,27 @@ impl Editor {
         {
             return;
         }
+        // Um rascunho oculto só passa a aparecer se foi editado e confirmado.
+        let reveal = self.current().sketch_edit.as_ref().and_then(|work| {
+            if work.original_visible {
+                return None;
+            }
+            let original = work.original_sketch.as_ref()?;
+            let current = self
+                .current()
+                .session
+                .document()
+                .sketch(work.id)?
+                .sketch
+                .clone();
+            let changed = serde_json::to_value(original)
+                .and_then(|before| serde_json::to_value(&current).map(|after| before != after))
+                .unwrap_or(false);
+            changed.then_some(work.id)
+        });
+        if let Some(id) = reveal {
+            self.execute(Command::SetSketchVisibility { id, visible: true });
+        }
         if let Some(work) = self.current_mut().sketch_edit.take() {
             let mut next = self.viewport.camera.clone();
             next.copy_orientation(&work.previous_camera);
@@ -661,6 +706,10 @@ impl Editor {
                 limits = Some((point, point));
             }
         }
+        // Rascunho ainda vazio sobre uma face: enquadra a face, não a origem do plano.
+        if limits.is_none() {
+            limits = self.face_limits(&sketch);
+        }
         if let Some((min, max)) = limits {
             center = std::array::from_fn(|i| min[i] * 0.5 + max[i] * 0.5);
             extent = std::array::from_fn(|i| (max[i] - min[i]).max(10.));
@@ -685,6 +734,39 @@ impl Editor {
             self.viewport.camera = next;
             self.current_mut().camera_transition = None;
         }
+    }
+    /// Limites, no plano do rascunho, das faces dos corpos da peça que estão nesse plano.
+    fn face_limits(&self, sketch: &Sketch) -> Option<(Point2, Point2)> {
+        let part = self
+            .current()
+            .session
+            .document()
+            .part(self.current().active_part?)?;
+        let normal = sketch.plane.normal();
+        let mut limits: Option<(Point2, Point2)> = None;
+        for body in part.shown_bodies() {
+            let mesh = body.geometry.mesh();
+            for triangle in mesh.triangles() {
+                let points = mesh
+                    .triangle_points(*triangle)
+                    .map(|p| body.placement.apply(p));
+                let on_plane = points.iter().all(|p| {
+                    nator_geometry::dot(nator_geometry::sub(*p, sketch.plane.origin), normal).abs()
+                        < 1e-4
+                });
+                if !on_plane {
+                    continue;
+                }
+                for point in points.map(|p| sketch.plane.project(p)) {
+                    let (min, max) = limits.get_or_insert((point, point));
+                    for axis in 0..2 {
+                        min[axis] = min[axis].min(point[axis]);
+                        max[axis] = max[axis].max(point[axis]);
+                    }
+                }
+            }
+        }
+        limits
     }
     pub(super) fn visible_sketches(&self, ui: &egui::Ui, rect: egui::Rect) -> bool {
         let doc = self.current().session.document();
@@ -723,11 +805,11 @@ impl Editor {
                 };
                 for point in record.sketch.visible_points() {
                     if let Some(p) = frame.screen(point.position) {
-                        painter.circle_filled(p, 2., theme::ACCENT);
+                        painter.circle_filled(p, 2., theme::accent());
                     }
                 }
                 for entity in &record.sketch.entities {
-                    frame.entity(&painter, &record.sketch, entity, theme::ACCENT);
+                    frame.entity(&painter, &record.sketch, entity, theme::accent());
                 }
             }
         }
@@ -745,11 +827,11 @@ impl Editor {
             };
             for point in record.sketch.visible_points() {
                 if let Some(p) = frame.screen(point.position) {
-                    painter.circle_filled(p, 2.5, theme::REFERENCE);
+                    painter.circle_filled(p, 2.5, theme::reference());
                 }
             }
             for entity in &record.sketch.entities {
-                frame.entity(&painter, &record.sketch, entity, theme::REFERENCE);
+                frame.entity(&painter, &record.sketch, entity, theme::reference());
             }
         }
         visible
@@ -865,7 +947,7 @@ impl Editor {
                         dot(center, camera.direction()),
                         Candidate::Work(record.id),
                         record.name.clone(),
-                        theme::WORK_PLANE,
+                        theme::work_plane(),
                         points,
                         Some((label, egui::Align2::LEFT_BOTTOM)),
                     ));
@@ -902,9 +984,9 @@ impl Editor {
                 continue;
             };
             for (axis, label, color) in [
-                ([size, 0., 0.], "X", theme::DANGER),
-                ([0., size, 0.], "Y", theme::GREEN),
-                ([0., 0., size], "Z", theme::ACCENT),
+                ([size, 0., 0.], "X", theme::danger()),
+                ([0., size, 0.], "Y", theme::green()),
+                ([0., 0., size], "Z", theme::accent()),
             ] {
                 if let Some(end) = screen(axis) {
                     painter.line_segment([origin, end], egui::Stroke::new(1.4, color));
@@ -917,8 +999,8 @@ impl Editor {
                     );
                 }
             }
-            painter.circle_filled(origin, 3., theme::INK);
-            painter.circle_stroke(origin, 6., egui::Stroke::new(1., theme::INK));
+            painter.circle_filled(origin, 3., theme::ink());
+            painter.circle_stroke(origin, 6., egui::Stroke::new(1., theme::ink()));
         }
         // Como nas ferramentas de desenho, o ícone da ferramenta acompanha o cursor sobre
         // a área 3D, sem substituir o ponteiro nem cobrir a ponta usada no clique.
@@ -1019,13 +1101,13 @@ impl Editor {
                 else {
                     continue;
                 };
-                paint_patch(&painter, &points, theme::WORK_PLANE, false);
+                paint_patch(&painter, &points, theme::work_plane(), false);
                 painter.text(
                     points[3] + (points[1] - points[3]) * 0.06,
                     egui::Align2::LEFT_BOTTOM,
                     &record.name,
                     egui::FontId::proportional(12.),
-                    theme::WORK_PLANE,
+                    theme::work_plane(),
                 );
                 drawn = true;
             }

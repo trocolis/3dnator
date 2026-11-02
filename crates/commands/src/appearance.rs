@@ -17,7 +17,7 @@ fn prepare(
     body: BodyId,
     layers: Vec<SurfacePaint>,
 ) -> Result<Prepared, DocumentError> {
-    use crate::features::{face_index, region, source};
+    use crate::features::{face_index, mask_area, source};
     use nator_document::features::FaceRef;
     let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
     let part = doc
@@ -71,9 +71,10 @@ fn prepare(
                 let margin = (to - from).abs().max(1.);
                 let mut mask_solid: Option<nator_kernel::Solid> = None;
                 for reference in mask.region.selections() {
+                    let (outline, area) = mask_area(sketch, reference, &solid, face)?;
                     let prism = nator_kernel::Solid::extrude(
-                        sketch,
-                        &region(sketch, reference)?,
+                        &outline,
+                        &area,
                         from - margin,
                         to + margin,
                         "paint",
@@ -190,6 +191,7 @@ pub(super) fn step_body(
         (solid, colors)
     };
     Ok(nator_kernel::StepBody {
+        surface: false,
         name: record.name.clone(),
         solid,
         color: base_color.or(record.color),

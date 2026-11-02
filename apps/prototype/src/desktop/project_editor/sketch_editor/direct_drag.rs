@@ -70,13 +70,15 @@ pub(super) fn canvas(
             .ok()
             .flatten();
         let points = if let Some(point) = vertex {
-            work.selected_vertex = Some(point.position);
+            if !work.selected_vertices.contains(&point.position) {
+                work.selected_vertices = vec![point.position];
+            }
             vec![point.id]
         } else if let Some(id) = entity {
             if !work.selected.contains(&id) {
                 work.selected = vec![id];
             }
-            work.selected_vertex = None;
+            work.selected_vertices.clear();
             nator_sketch::movement::points(source, &work.selected).unwrap_or_default()
         } else {
             vec![]
@@ -111,7 +113,7 @@ pub(super) fn canvas(
             .input(|i| i.pointer.interact_pos())
             .and_then(|p| frame.cursor(p))
         {
-            drag.delta = nator_sketch::sub(at, drag.origin);
+            drag.delta = nator_sketch::sub(at, drag.origin).map(|v| work.settings.snap_length(v));
         }
         drag.released = response.drag_stopped_by(egui::PointerButton::Primary)
             || !ui.input(|i| i.pointer.primary_down());
@@ -135,7 +137,14 @@ pub(super) fn canvas(
     {
         match candidate {
             Ok(candidate) if nator_sketch::distance(drag.delta, [0., 0.]) > 1e-7 => {
-                if let Some(point) = work.selected_vertex.as_mut() {
+                // O vértice arrastado acompanha a seleção; os demais não se moveram.
+                let start = drag.points.first().and_then(|id| source.point(*id).ok());
+                if let Some(start) = start
+                    && let Some(point) = work
+                        .selected_vertices
+                        .iter_mut()
+                        .find(|p| nator_sketch::distance(**p, start) < 1e-6)
+                {
                     *point = nator_sketch::add(*point, drag.delta);
                 }
                 result.commit = Some((candidate, SolveMode::Normal));

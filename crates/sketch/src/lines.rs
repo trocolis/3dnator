@@ -159,8 +159,7 @@ mod tests {
         assert!(tools::trim(&mut sketch, infinite, [1000., 0.]).is_err());
         let offset = tools::offset_entity(&mut sketch, infinite, 4.)?;
         let copies = tools::mirror(&mut sketch, &[offset], [0., 0.], [0., 1.])?;
-        let pattern = tools::pattern_linear(&mut sketch, &copies, [1., 0.], 3, 5.)?;
-        for id in [offset].into_iter().chain(copies).chain(pattern) {
+        for id in [offset].into_iter().chain(copies) {
             assert!(sketch.entity(id)?.infinite);
             assert!(sketch.entity(id)?.construction);
         }

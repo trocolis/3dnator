@@ -14,6 +14,8 @@ pub struct StepBody {
     /// Vazio ou uma entrada por face do B-rep. Ausência mantém a herança da
     /// cor de corpo/ocorrência; presença é uma pintura explícita da superfície.
     pub face_colors: Vec<Option<RgbColor>>,
+    /// Superfícies abertas, sem volume. A leitura as entrega assim; a escrita só aceita sólidos.
+    pub surface: bool,
 }
 pub struct StepPart {
     pub name: String,
@@ -61,6 +63,7 @@ unsafe extern "C" {
         matrix: *mut f64,
         color: *mut i32,
     ) -> bool;
+    fn nator_step_body_surface(scene: *const c_void, part: usize, body: usize) -> bool;
     fn nator_step_add_part(scene: *mut c_void, name: *const c_char) -> bool;
     fn nator_step_add_body(
         scene: *mut c_void,
@@ -237,7 +240,11 @@ impl StepAssembly {
                     nator_step_body(scene.pointer(), part, body, rgb.as_mut_ptr())
                 })?;
                 solid.faces = vec![String::new(); solid.face_count()?];
-                solid.volume()?;
+                // SAFETY: índices dentro das contagens validadas; cena viva.
+                let surface = unsafe { nator_step_body_surface(scene.pointer(), part, body) };
+                if !surface {
+                    solid.volume()?;
+                }
                 let mut face_rgb = vec![[-1; 3]; solid.faces.len()];
                 // SAFETY: três canais por face, buffer exclusivo do tamanho
                 // conferido pela ponte e índices obtidos das contagens da cena.
@@ -255,6 +262,7 @@ impl StepAssembly {
                     .map(color)
                     .collect::<Result<Vec<_>, _>>()?;
                 bodies.push(StepBody {
+                    surface,
                     name: scene.name(part, body, 1)?,
                     solid,
                     color: color(rgb)?,

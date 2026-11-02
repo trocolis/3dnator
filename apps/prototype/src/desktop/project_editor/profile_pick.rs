@@ -259,6 +259,7 @@ impl Editor {
                 .min_by(|a, b| a.1.area.total_cmp(&b.1.area))
                 .map(|(i, _)| i)
         });
+        self.profile_hovered = hovered.is_some();
         let painter = ui
             .painter()
             .with_clip_rect(response.rect.intersect(ui.clip_rect()));
@@ -294,7 +295,7 @@ impl Editor {
                         } else {
                             1.
                         },
-                        theme::ACCENT,
+                        theme::accent(),
                     ),
                 ));
             }

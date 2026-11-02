@@ -18,7 +18,7 @@ Pendências conhecidas, por etapa:
 
 Interface: projeções ortográfica e em perspectiva disponíveis por aba; sombras opcionais com sombreamento direcional e apoio suave no plano de base implementadas. Edição do histórico no padrão dos CADs de mercado (linha do tempo com marcador, supressão, reordenação, exclusão com dependentes e decisão sobre falhas de recálculo) e painéis de comando com prévia ao vivo implementados.
 
-Seleção por janela, lista de sobrepostos, pré-seleção e realce na área 3D implementados. Corte de visualização por plano, ferramenta Reparar rascunho, miniatura no `.3dnator`, casas decimais configuráveis e importação de peças entre abas implementados. Montagem e posicionamento usam painéis de comando (Mover/Copiar com manipulador 3D, Alinhar, padrões e espelhamento de componentes) e menus de contexto na árvore.
+Seleção por janela, lista de sobrepostos, pré-seleção e realce na área 3D implementados. Corte de visualização por plano, ferramenta Reparar rascunho, miniatura no `.3dnator`, casas decimais, unidade de medida e precisão do mouse configuráveis e importação de peças entre abas implementados. Montagem e posicionamento usam painéis de comando (Mover/Copiar com manipulador 3D, Alinhar, padrões e espelhamento de componentes) e menus de contexto na árvore.
 
 ## 1. Base técnica
 
@@ -42,7 +42,7 @@ Seleção por janela, lista de sobrepostos, pré-seleção e realce na área 3D 
 
 - Revolução e operações entre corpos, incluindo divisão.
 - Furos e roscas simplificadas, chanfros, arredondamentos e casca.
-- Padrões e espelhamento na construção e nos rascunhos.
+- Padrões na construção; espelhamento na construção e nos rascunhos.
 
 ## 4. Montagem
 
@@ -56,6 +56,20 @@ Seleção por janela, lista de sobrepostos, pré-seleção e realce na área 3D 
 - Medição completa e cotagem.
 - Folhas associadas ao modelo, vistas e cortes.
 - Exportação PNG e PDF vetorial, com estilos convencional e blueprint.
+
+## Impressão FDM
+
+Objetivo do produto: levar a peça pronta até o fatiador, sem virar um fatiador. Vale para qualquer impressora ou fatiador: só grandezas físicas, formatos abertos (STL e 3MF Core) e abertura pelo aplicativo padrão do sistema ou por comando configurado. As análises são estimativas: avisam, sem bloquear a exportação. Geração de suportes, G-code e controle da impressora ficam fora do escopo.
+
+1. **Perfil e rascunho (implementado, sem release):** perfil de impressão, valores nas expressões, biblioteca pessoal, aba Impressão e avisos de quase-alinhamento em Reparar rascunho.
+2. **Preparar e exportar (implementado, sem release):** face apoiada na mesa sem alterar a modelagem, base em Z = 0, 3MF com um objeto por corpo e abertura no fatiador.
+3. **Verificar para impressão (implementado, sem release):** balanços, paredes finas, frestas e tamanho da mesa, coloridos sobre o modelo.
+4. **Calibração e furos (implementado, sem release):** peça de teste que ajusta o perfil pelo resultado medido e presets de furo (passante, autoatarrachante, inserto a quente, porca cativa, gota) com tabela editável.
+5. **Encaixe de componentes (implementado, sem release):** recorte pela silhueta na direção de inserção, com a folga aplicada em 2D, e verificação de interferências. A técnica foi validada em STEP real: 1.259 de 1.259 cortes, contra 203 de 370 corpos no offset exato do OCCT.
+6. **Fechamento e fixação (implementado, sem release):** ressalto e rebaixo de tampa, torres de parafuso e presilhas com janela.
+7. **Preparar a impressão (implementado, sem release):** imprimir só um trecho e estimativa de massa e custo.
+
+Depois: nervuras nas torres, atualizar o recorte quando o componente se move. Rosca real continua adiada: em FDM, insertos a quente resolvem a maioria dos casos.
 
 ## Direção para o núcleo geométrico
 

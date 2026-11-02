@@ -357,7 +357,7 @@ impl Editor {
                 ui.label(
                     egui::RichText::new(text(T::PaintPickHint))
                         .small()
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
                 let mut remove = None;
                 egui::ScrollArea::vertical()
@@ -432,7 +432,7 @@ impl Editor {
                     }
                 });
                 if parse_hex(&draft.hex).is_none() {
-                    ui.colored_label(theme::WARNING, text(T::PaintInvalidHex));
+                    ui.colored_label(theme::warning(), text(T::PaintInvalidHex));
                 }
             },
         );

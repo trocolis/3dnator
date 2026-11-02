@@ -1,6 +1,54 @@
 //! Composição visual. Alterações do documento são encaminhadas ao editor e aos comandos.
 use super::*;
 
+/// Largura da barra de título da árvore recolhida.
+const COLLAPSED_TREE_WIDTH: f32 = 200.;
+/// Ícone, botão e espaçamentos que dividem o balão com o nome da peça.
+const BALLOON_CONTROLS_WIDTH: f32 = 90.;
+
+/// Barra de título da árvore: mostra o nome do projeto na dica e devolve o clique no botão
+/// de recolher ou mostrar.
+fn tree_title(ui: &mut egui::Ui, project: &str, expanded: bool, corner: u8) -> bool {
+    let mut toggled = false;
+    egui::Frame::new()
+        .fill(theme::subtle())
+        .inner_margin(egui::Margin::symmetric(12, 6))
+        .corner_radius(corner)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(22.), egui::Sense::hover());
+                icons::paint(ui.painter(), rect, icons::Icon::Cube, true);
+                ui.label(
+                    egui::RichText::new(text(T::ProjectNode).to_uppercase())
+                        .strong()
+                        .size(13.)
+                        .color(theme::ink()),
+                )
+                .on_hover_text(project);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    toggled = icons::button(
+                        ui,
+                        if expanded {
+                            icons::Icon::CollapseUp
+                        } else {
+                            icons::Icon::ExpandDown
+                        },
+                        text(if expanded {
+                            T::CollapseTree
+                        } else {
+                            T::ExpandTree
+                        }),
+                        false,
+                        false,
+                    )
+                    .clicked();
+                });
+            });
+        });
+    toggled
+}
+
 impl Editor {
     /// Miniatura de um projeto em disco, decodificada uma vez por caminho.
     fn thumbnail(
@@ -36,18 +84,20 @@ impl Editor {
         self.thumbnails.insert(path.to_path_buf(), texture.clone());
         texture
     }
-    /// Valor com as casas decimais configuradas no documento ativo.
+    pub(super) fn settings(&self) -> nator_document::Settings {
+        self.current().session.document().settings()
+    }
+    /// Número com as casas decimais configuradas, sem conversão de unidade.
+    pub(super) fn number(&self, value: f64) -> String {
+        nator_drawing::format_fixed(value, usize::from(self.settings().display_decimals))
+    }
+    /// Medida em milímetros convertida para a unidade exibida.
     pub(super) fn mm(&self, value: f64) -> String {
-        nator_drawing::format_fixed(
-            value,
-            usize::from(
-                self.current()
-                    .session
-                    .document()
-                    .settings()
-                    .display_decimals,
-            ),
-        )
+        self.settings().format_length(value)
+    }
+    /// Medida com o símbolo da unidade exibida.
+    pub(super) fn length(&self, value: f64) -> String {
+        format!("{} {}", self.mm(value), self.settings().unit.suffix())
     }
     pub(super) fn shortcuts(&mut self, context: &egui::Context) {
         if self.shell.search_open {
@@ -59,19 +109,19 @@ impl Editor {
         if self.busy() || self.pending_close.is_some() || self.status.has_pending() {
             return;
         }
-        if context.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::CTRL,
-                egui::Key::S,
-            ))
-        }) {
+        // Enquanto a aba Atalhos espera uma tecla nova, nenhuma ação dispara.
+        if self.settings_panel.capturing() {
+            return;
+        }
+        let save = shortcuts::effective(&self.preferences.shortcuts, &shortcuts::bindings()[0]);
+        if context.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(save.0, save.1))) {
             self.save(context, self.current().id, false, false);
             return;
         }
         if self.current().plane_pick.is_some()
             && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.activate_selection(context);
+            self.escape_to_selection(context);
             return;
         }
         if self.image_edit.is_some() {
@@ -105,76 +155,46 @@ impl Editor {
             return;
         }
         if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            self.activate_selection(context);
+            self.escape_to_selection(context);
             return;
         }
-        if self.current().sketch_edit.is_some() {
-            use nator_sketch::edit::Action as Edit;
-            use sketch_editor::Tool;
-            if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
-                self.delete_sketch_selection(context);
-                return;
-            }
-            if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::X)) {
-                self.toggle_sketch_stroke(context);
-                return;
-            }
-            for (key, tool) in [
-                (egui::Key::L, Tool::Line),
-                (egui::Key::R, Tool::Rectangle),
-                (egui::Key::C, Tool::Circle),
-                (egui::Key::A, Tool::Arc),
-                (egui::Key::P, Tool::Project),
-                (egui::Key::G, Tool::Trim),
-                (egui::Key::D, Tool::Dimension),
-            ] {
-                if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
-                    self.select_sketch_tool(tool);
-                    return;
-                }
-            }
-            for (key, action) in [
-                (egui::Key::S, Edit::Offset),
-                (egui::Key::O, Edit::Fillet),
-                (egui::Key::H, Edit::Chamfer),
-                (egui::Key::E, Edit::Mirror),
-            ] {
-                if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
-                    self.open_sketch_action(context, action);
-                    return;
-                }
-            }
-        }
-        if context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
-            self.shell.search_open = true;
-            self.shell.search_focus = true;
-            return;
-        }
-        // D ativa a Cota no rascunho, como no SolidCraft; letras digitadas na caixa de
-        // valor não chegam aqui, pois ela tem o teclado.
-        if self.current().sketch_edit.is_some()
-            && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::D))
-        {
-            self.select_sketch_tool(sketch_editor::Tool::Dimension);
+        let scope = if self.current().sketch_edit.is_some() {
+            shortcuts::Scope::Sketch
+        } else if self.current().active_part.is_some() {
+            shortcuts::Scope::Model
+        } else {
+            shortcuts::Scope::Assembly
+        };
+        let chosen = self.preferences.shortcuts.clone();
+        let target = shortcuts::pressed(context, &chosen, scope).or_else(|| {
+            (scope != shortcuts::Scope::Sketch)
+                .then(|| shortcuts::pressed(context, &chosen, shortcuts::Scope::Workspace))
+                .flatten()
+        });
+        if let Some(target) = target {
+            self.run_shortcut(context, target);
             return;
         }
         self.history_shortcuts(context);
     }
     fn history_shortcuts(&mut self, context: &egui::Context) {
+        let all = shortcuts::bindings();
+        let key = |id: &str| {
+            all.iter()
+                .find(|b| b.id == id)
+                .map(|b| shortcuts::effective(&self.preferences.shortcuts, b))
+        };
+        let (undo_key, redo_key) = (key("undo"), key("redo"));
+        // Ctrl+Shift+Z continua como alternativa fixa de Refazer.
         let redo = context.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
                 egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
                 egui::Key::Z,
-            )) || i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::CTRL,
-                egui::Key::Y,
-            ))
+            )) || redo_key
+                .is_some_and(|(m, k)| i.consume_shortcut(&egui::KeyboardShortcut::new(m, k)))
         });
         let undo = context.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::CTRL,
-                egui::Key::Z,
-            ))
+            undo_key.is_some_and(|(m, k)| i.consume_shortcut(&egui::KeyboardShortcut::new(m, k)))
         });
         if redo || undo {
             self.step_history(context, redo);
@@ -184,61 +204,171 @@ impl Editor {
         let menu = self.menu_context();
         let busy = self.busy();
         let mut intents = Vec::new();
+        let mut collapse = false;
         egui::Panel::left("tree")
             .default_size(270.)
             .min_size(190.)
             .max_size(420.)
-            .frame(theme::panel_frame())
+            .frame(theme::panel_frame().inner_margin(0))
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.;
                 let tab = self.current();
                 let document = tab.session.document();
-                // Peça em edição: nome e saída rápida, além do lápis na árvore.
-                if let Some(part) = tab.active_part.and_then(|p| document.part(p)) {
-                    ui.horizontal(|ui| {
-                        let width = (ui.available_width() - 30.).max(40.);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(width, 24.),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::Vec2::splat(18.),
-                                    egui::Sense::hover(),
-                                );
-                                icons::paint(ui.painter(), rect, icons::Icon::Edit, true);
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(&part.name)
-                                            .strong()
-                                            .color(theme::ACCENT),
-                                    )
-                                    .truncate(),
-                                );
-                            },
-                        );
-                        if icons::tree_button(ui, icons::Icon::Close, text(T::LeavePart), false)
-                            .clicked()
-                        {
-                            intents.push(project_tree::Intent::LeavePart);
-                        }
-                    });
-                    ui.separator();
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("project_browser")
-                    .show(ui, |ui| {
-                        let mut tree = project_tree::Tree::new(
-                            document,
-                            tab,
-                            &menu,
-                            busy,
-                            self.section_edit.is_some(),
-                        );
-                        tree.show(ui);
-                        intents.append(&mut tree.intents);
-                    });
+                collapse = tree_title(ui, document.name(), true, 0);
+                ui.add(egui::Separator::default().spacing(0.));
+                egui::Frame::new().inner_margin(12).show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("project_browser")
+                        .show(ui, |ui| {
+                            let mut tree = project_tree::Tree::new(
+                                document,
+                                tab,
+                                &menu,
+                                busy,
+                                self.section_edit.is_some(),
+                            );
+                            tree.show(ui);
+                            intents.append(&mut tree.intents);
+                        });
+                });
             });
+        if collapse {
+            self.shell.browser_visible = false;
+        }
         for intent in intents {
             self.apply_tree_intent(ui, intent);
+        }
+    }
+    /// Árvore recolhida: resta a barra de título, no canto superior da área de edição.
+    pub(super) fn collapsed_tree(&mut self, context: &egui::Context) {
+        if self.shell.browser_visible {
+            return;
+        }
+        let name = self.current().session.document().name().to_owned();
+        let expand = egui::Area::new(egui::Id::new("collapsed_tree"))
+            .order(egui::Order::Middle)
+            .fade_in(false)
+            .constrain(false)
+            .fixed_pos(self.canvas_rect.left_top() + egui::vec2(8., 8.))
+            .show(context, |ui| {
+                theme::floating_frame()
+                    .show(ui, |ui| {
+                        ui.set_width(COLLAPSED_TREE_WIDTH);
+                        tree_title(ui, &name, false, 8)
+                    })
+                    .inner
+            })
+            .inner;
+        if expand {
+            self.shell.browser_visible = true;
+        }
+    }
+    /// Balão da peça em edição, centrado no topo da área de edição. Salvar conclui a edição
+    /// e volta à montagem: o que foi feito já está no documento.
+    /// Situação do rascunho em edição num balão no canto, junto da árvore.
+    pub(super) fn freedom_balloon(&self, context: &egui::Context) {
+        let Some(work) = self.current().sketch_edit.as_ref() else {
+            return;
+        };
+        // O cálculo do trabalhador vale para o rascunho como está, inclusive ao abrir.
+        let Some(status) = work.freedom() else {
+            return;
+        };
+        let (label, color) = match status {
+            nator_sketch::solver::Status::Conflict => {
+                (text(T::SketchConflict).to_owned(), theme::danger())
+            }
+            nator_sketch::solver::Status::FullyConstrained => {
+                (text(T::FullyConstrained).to_owned(), theme::green())
+            }
+            nator_sketch::solver::Status::UnderConstrained { degrees_of_freedom } => (
+                format!("{}: {degrees_of_freedom}", text(T::DegreesOfFreedom)),
+                theme::accent(),
+            ),
+        };
+        // Com a árvore recolhida, a barra dela ocupa o canto: o balão vem logo depois.
+        let left = if self.shell.browser_visible {
+            8.
+        } else {
+            COLLAPSED_TREE_WIDTH + 16.
+        };
+        egui::Area::new(egui::Id::new("freedom_balloon"))
+            .order(egui::Order::Middle)
+            .fade_in(false)
+            .constrain(false)
+            .interactable(false)
+            .fixed_pos(self.canvas_rect.left_top() + egui::vec2(left, 8.))
+            .show(context, |ui| {
+                theme::floating_frame()
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(label).strong().color(color));
+                    });
+            });
+    }
+    pub(super) fn edit_balloon(&mut self, context: &egui::Context) {
+        let tab = self.current();
+        let Some(name) = tab
+            .active_part
+            .and_then(|part| tab.session.document().part(part))
+            .map(|part| part.name.clone())
+        else {
+            return;
+        };
+        let canvas = self.canvas_rect;
+        let busy = self.busy();
+        // O cubo e a árvore recolhida ocupam os cantos: nomes longos ficam abreviados.
+        let side = view_cube::rect(canvas).width().max(COLLAPSED_TREE_WIDTH) + 16.;
+        let name_width = (canvas.width() - 2. * side - BALLOON_CONTROLS_WIDTH).max(80.);
+        let save = egui::Area::new(egui::Id::new("edit_balloon"))
+            .order(egui::Order::Middle)
+            .fade_in(false)
+            .constrain(false)
+            .pivot(egui::Align2::CENTER_TOP)
+            .fixed_pos(canvas.center_top() + egui::vec2(0., 8.))
+            .show(context, |ui| {
+                theme::floating_frame()
+                    .inner_margin(egui::Margin::symmetric(12, 3))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.;
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::Vec2::splat(18.), egui::Sense::hover());
+                            icons::paint(ui.painter(), rect, icons::Icon::Edit, true);
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(name_width, 30.),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&name)
+                                                .strong()
+                                                .color(theme::accent()),
+                                        )
+                                        .truncate(),
+                                    );
+                                },
+                            );
+                            ui.add_enabled_ui(!busy, |ui| {
+                                icons::button(
+                                    ui,
+                                    icons::Icon::Save,
+                                    text(T::StopEditPart),
+                                    false,
+                                    false,
+                                )
+                            })
+                            .inner
+                            .clicked()
+                        })
+                        .inner
+                    })
+                    .inner
+            })
+            .inner;
+        if save {
+            self.apply_menu_action(context, browser::MenuAction::Deactivate);
+            context.request_repaint();
         }
     }
     fn apply_tree_intent(&mut self, ui: &egui::Ui, intent: project_tree::Intent) {
@@ -395,7 +525,7 @@ impl Editor {
     }
     pub(super) fn canvas(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::CANVAS).inner_margin(8))
+            .frame(egui::Frame::new().fill(theme::canvas()).inner_margin(8))
             .show(ui, |ui| {
                 self.animate_camera(ui.ctx());
                 let size = ui.available_size().max(egui::vec2(1., 1.));
@@ -446,6 +576,7 @@ impl Editor {
                     || self.move_gizmo(ui, &response)
                     || self.offset_plane_gizmo(ui, &response);
                 let assembly = !gizmo && self.assembly_pick(&response);
+                self.profile_hovered = false;
                 let profile = !gizmo
                     && (self.revolve_axis_overlay(ui, &response)
                         || self.profile_overlay(ui, &response));
@@ -467,7 +598,7 @@ impl Editor {
                 if response.dragged_by(egui::PointerButton::Middle) && !starts_on_cube {
                     self.current_mut().camera_transition = None;
                     let (delta, shift) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
-                    if shift {
+                    if shift || self.shell.camera_mode == Some(view_modes::CameraMode::Orbit) {
                         self.viewport
                             .camera
                             .orbit([f64::from(delta.x), f64::from(delta.y)]);
@@ -529,17 +660,24 @@ impl Editor {
                     && self.current().plane_pick.is_none()
                 {
                     ui.painter().text(
-                        response.rect.center_bottom() - egui::vec2(0., 24.),
+                        response.rect.center_bottom() - egui::vec2(0., 64.),
                         egui::Align2::CENTER_BOTTOM,
                         text(T::EmptyScene),
                         egui::FontId::proportional(14.),
-                        theme::MUTED,
+                        theme::muted(),
                     );
                 }
                 self.update_hover(ui, &response);
                 self.draw_highlights(ui, response.rect);
                 self.align_overlay(ui, response.rect);
                 self.measure_overlay(ui, response.rect);
+                if let Some(mode) = self.shell.camera_mode
+                    && response.hovered()
+                {
+                    ui.ctx().set_cursor_icon(
+                        mode.cursor(response.dragged_by(egui::PointerButton::Middle)),
+                    );
+                }
                 self.current_mut().camera = self.viewport.camera.clone();
             });
     }

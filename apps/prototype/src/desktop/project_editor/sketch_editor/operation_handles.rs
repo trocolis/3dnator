@@ -21,7 +21,7 @@ fn guide(source: &Sketch, work: &Workspace, action: EditAction) -> Option<(Point
             nator_sketch::modifications::offset_guide(source, &work.selected).ok()?;
         Some((at, direction, 1.))
     } else {
-        let corner = nator_sketch::corners::selected(source, &work.selected)
+        let corner = nator_sketch::corners::chosen(source, &work.selected, &work.operation.corners)
             .ok()?
             .into_iter()
             .next()?;
@@ -135,6 +135,7 @@ pub(super) fn update(
                     axis: axis * sign,
                     pixels_per_unit: scale,
                     initial: value,
+                    step: work.settings.mouse_step_mm,
                 },
                 second: is_second,
             });
@@ -148,13 +149,14 @@ pub(super) fn update(
         if let Some(pointer) = pointer {
             let mut value = drag.motion.value(pointer);
             if action != EditAction::Offset || work.offset_mode != OffsetMode::Normal {
-                value = value.max(1e-6);
+                value = value.max(work.settings.mouse_step_mm);
             }
             if value.is_finite() && value.abs() < 1e7 {
+                let expression = work.settings.unit.expression(value);
                 if drag.second && work.offset_mode == OffsetMode::Double {
-                    work.offset_second_expression = format!("{value} mm");
+                    work.offset_second_expression = expression;
                 } else {
-                    work.dimension_expression = format!("{value} mm");
+                    work.dimension_expression = expression;
                 }
                 work.operation.confirm = false;
                 ui.ctx().request_repaint();

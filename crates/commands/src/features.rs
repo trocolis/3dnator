@@ -154,16 +154,17 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::Com
     let piece = doc
         .part(part)
         .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
-    let operations = piece
-        .features
-        .iter()
-        .cloned()
-        .zip(nator_document::features::states(piece))
-        .collect::<Vec<_>>();
-    for (feature, state) in operations {
+    let states = nator_document::features::states(piece);
+    for (position, state) in states.into_iter().enumerate() {
         if !state.is_active() {
             continue;
         }
+        // Lido a cada etapa: refazer um corpo atualiza as referências das operações seguintes.
+        let feature = doc
+            .part(part)
+            .and_then(|p| p.features.get(position))
+            .ok_or_else(|| DocumentError("Operação inexistente.".into()))?
+            .clone();
         let built = construct(doc, part, feature.output, &feature.operation).map_err(|e| {
             let dependents = doc
                 .part(part)
@@ -181,14 +182,218 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::Com
             }
         })?;
         let body = doc.body_mut(feature.output)?;
+        let bytes = body.brep.replace(built.brep);
+        let names = std::mem::replace(&mut body.face_names, built.faces);
         body.geometry = built.mesh;
-        body.brep = Some(built.brep);
-        body.face_names = built.faces;
         body.intrinsic_colors = built.intrinsic_colors;
+        if let Some(bytes) = bytes {
+            retarget(doc, part, feature.output, &bytes, &names);
+        }
     }
     crate::appearance::rebuild(doc, part)?;
     Ok(())
 }
+
+/// Abaixo disto é o mesmo lugar: geometria refeita varia só no ruído numérico.
+#[cfg(feature = "occt")]
+const SAME_PLACE_MM: f64 = 1e-6;
+
+/// Ponto exato sobre a face, longe da borda: o centro do maior triângulo da malha.
+#[cfg(feature = "occt")]
+fn point_on_face(
+    solid: &mut Solid,
+    index: usize,
+) -> Result<Option<nator_geometry::Point3>, nator_kernel::KernelError> {
+    use nator_geometry::{cross, norm, sub};
+    let (mesh, faces) = solid.tessellate_with_faces(0.05, 0.25)?;
+    let vertices = mesh.vertices();
+    let largest = mesh
+        .triangles()
+        .iter()
+        .zip(&faces)
+        .filter(|(_, face)| **face as usize == index)
+        .map(|(triangle, _)| triangle.map(|v| vertices[v as usize]))
+        .max_by(|p, q| {
+            let area =
+                |t: &[nator_geometry::Point3; 3]| norm(cross(sub(t[1], t[0]), sub(t[2], t[0])));
+            area(p).total_cmp(&area(q))
+        });
+    largest
+        .map(|[a, b, c]| {
+            let center = std::array::from_fn(|i| (a[i] + b[i] + c[i]) / 3.);
+            Ok(solid.face_nearest(index, center)?.1)
+        })
+        .transpose()
+}
+
+/// A mesma face no corpo refeito. Só vale um resultado único: sem ele, a referência fica como
+/// está e a operação falha com erro explícito, em vez de agir sobre outra geometria.
+#[cfg(feature = "occt")]
+fn same_face(
+    old: &mut Solid,
+    index: usize,
+    new: &Solid,
+) -> Result<Option<usize>, nator_kernel::KernelError> {
+    let name = old.face_names().get(index).cloned().unwrap_or_default();
+    let candidates = new
+        .face_names()
+        .iter()
+        .enumerate()
+        .filter(|(_, other)| **other == name)
+        .map(|(i, _)| i)
+        .collect::<Vec<_>>();
+    if let ([only], false) = (candidates.as_slice(), name.is_empty()) {
+        return Ok(Some(*only));
+    }
+    let Some(point) = point_on_face(old, index)? else {
+        return Ok(None);
+    };
+    let mut found = Vec::new();
+    for candidate in candidates {
+        if new.face_nearest(candidate, point)?.0 < SAME_PLACE_MM {
+            found.push(candidate);
+        }
+    }
+    Ok(if let [only] = found.as_slice() {
+        Some(*only)
+    } else {
+        None
+    })
+}
+
+/// A mesma aresta no corpo refeito, pelo ponto no meio dela.
+#[cfg(feature = "occt")]
+fn same_edge(
+    old: &Solid,
+    index: usize,
+    new: &Solid,
+) -> Result<Option<usize>, nator_kernel::KernelError> {
+    let point = old.edge_anchors(index)?.midpoint;
+    let mut found = Vec::new();
+    for candidate in 0..new.edge_count()? {
+        let other = new.edge_anchors(candidate)?.midpoint;
+        if nator_geometry::norm(nator_geometry::sub(other, point)) < SAME_PLACE_MM {
+            found.push(candidate);
+        }
+    }
+    Ok(if let [only] = found.as_slice() {
+        Some(*only)
+    } else {
+        None
+    })
+}
+
+/// Atualiza as referências por índice ao corpo que acabou de ser refeito. A assinatura compara
+/// bytes do B-rep, que mudam com ruído na última casa decimal mesmo com a face no mesmo lugar;
+/// sem isso, qualquer recálculo invalidaria uma referência correta.
+#[cfg(feature = "occt")]
+fn retarget(doc: &mut Document, part: PartId, body: BodyId, bytes: &[u8], names: &[String]) {
+    let Some(fresh) = doc.body(body).and_then(|b| b.brep.clone()) else {
+        return;
+    };
+    let Some(piece) = doc.part(part) else {
+        return;
+    };
+    if fresh.as_slice() == bytes {
+        return;
+    }
+    let (stale, stamp) = (signature(bytes), signature(&fresh));
+    let new_names = doc.body(body).map(|b| b.face_names.clone());
+    let mut features = piece.features.clone();
+    let mut solids = None;
+    let mut changed = false;
+    for feature in &mut features {
+        for (owner, face) in feature.operation.face_refs_mut() {
+            let FaceRef::Index { index, signature } = face else {
+                continue;
+            };
+            if owner != body || *signature != stale {
+                continue;
+            }
+            let found = load_pair(&mut solids, bytes, names, &fresh, new_names.as_deref())
+                .and_then(|(old, new)| same_face(old, *index, new).ok().flatten());
+            if let Some(index) = found {
+                *face = FaceRef::Index {
+                    index,
+                    signature: stamp,
+                };
+                changed = true;
+            }
+        }
+        for (owner, edge) in feature.operation.edge_refs_mut() {
+            let EdgeRef::Index { index, signature } = edge else {
+                continue;
+            };
+            if owner != body || *signature != stale {
+                continue;
+            }
+            let found = load_pair(&mut solids, bytes, names, &fresh, new_names.as_deref())
+                .and_then(|(old, new)| same_edge(old, *index, new).ok().flatten());
+            if let Some(index) = found {
+                *edge = EdgeRef::Index {
+                    index,
+                    signature: stamp,
+                };
+                changed = true;
+            }
+        }
+    }
+    if changed && let Ok(piece) = doc.part_mut(part) {
+        piece.features = features;
+    }
+    // A pintura por índice segue o mesmo critério. Sem isso, qualquer recálculo do corpo
+    // invalidaria a camada e recusaria a edição inteira. O cache volta vazio e é refeito
+    // em `appearance::rebuild`; face que sumiu continua falhando de forma explícita.
+    let Some(appearance) = doc.body_appearance(body).cloned() else {
+        return;
+    };
+    let mut layers = appearance.layers.clone();
+    let mut moved = false;
+    for layer in &mut layers {
+        let FaceRef::Index { index, signature } = &mut layer.face else {
+            continue;
+        };
+        if *signature != stale {
+            continue;
+        }
+        let found = load_pair(&mut solids, bytes, names, &fresh, new_names.as_deref())
+            .and_then(|(old, new)| same_face(old, *index, new).ok().flatten());
+        if let Some(found) = found {
+            *index = found;
+            *signature = stamp;
+            moved = true;
+        }
+    }
+    if moved {
+        let _ = doc.set_surface_appearance(nator_document::appearance::SurfaceAppearance {
+            layers,
+            source_signature: stamp,
+            geometry: None,
+            materials: Arc::new(Vec::new()),
+            ..appearance
+        });
+    }
+}
+
+/// Carrega os dois sólidos só se alguma referência precisar deles.
+#[cfg(feature = "occt")]
+fn load_pair<'a>(
+    solids: &'a mut Option<(Solid, Solid)>,
+    bytes: &[u8],
+    names: &[String],
+    fresh: &[u8],
+    new_names: Option<&Vec<String>>,
+) -> Option<(&'a mut Solid, &'a Solid)> {
+    if solids.is_none() {
+        let old = Solid::from_brep(bytes, (!names.is_empty()).then_some(names)).ok()?;
+        let new = Solid::from_brep(fresh, new_names.map(Vec::as_slice)).ok()?;
+        *solids = Some((old, new));
+    }
+    solids.as_mut().map(|(old, new)| (old, &*new))
+}
+
+#[cfg(not(feature = "occt"))]
+fn retarget(_doc: &mut Document, _part: PartId, _body: BodyId, _bytes: &[u8], _names: &[String]) {}
 
 #[cfg(feature = "occt")]
 fn error(e: impl std::fmt::Display) -> DocumentError {
@@ -228,6 +433,225 @@ pub(super) fn sketch_of(
         .ok_or_else(|| DocumentError("Rascunho inexistente nesta peça.".into()))
 }
 
+/// Arestas exatas de uma face, no plano do rascunho. Curvas livres viram polilinha fina.
+#[cfg(feature = "occt")]
+fn face_segments(
+    solid: &Solid,
+    face: usize,
+    plane: nator_sketch::Plane,
+) -> Result<Vec<nator_sketch::profiles::Segment>, DocumentError> {
+    use nator_kernel::EdgeGeometry;
+    use nator_sketch::profiles::Segment;
+    let local = |p: nator_geometry::Point3| plane.project(p);
+    let mut segments = Vec::new();
+    for edge in solid.face_edges(face).map_err(error)? {
+        match solid.edge_geometry(edge).map_err(error)? {
+            EdgeGeometry::Line(a, b) => segments.push(Segment::Line {
+                a: local(a),
+                b: local(b),
+            }),
+            EdgeGeometry::Circle {
+                center,
+                radius,
+                closed: true,
+                ..
+            } => segments.push(Segment::Circle {
+                center: local(center),
+                radius,
+            }),
+            EdgeGeometry::Circle {
+                center,
+                start,
+                middle,
+                end,
+                ..
+            } => {
+                let (c, a, b, m) = (local(center), local(start), local(end), local(middle));
+                let angle = |p: nator_sketch::Point2| (p[1] - c[1]).atan2(p[0] - c[0]);
+                let turn = |p| (angle(p) - angle(a)).rem_euclid(std::f64::consts::TAU);
+                segments.push(Segment::Arc {
+                    center: c,
+                    a,
+                    b,
+                    clockwise: turn(m) > turn(b),
+                });
+            }
+            EdgeGeometry::Curve(points) => {
+                for pair in points.windows(2) {
+                    let (a, b) = (local(pair[0]), local(pair[1]));
+                    if nator_sketch::distance(a, b) > 1e-9 {
+                        segments.push(Segment::Line { a, b });
+                    }
+                }
+            }
+        }
+    }
+    Ok(segments)
+}
+
+/// Linhas de todas as faces planas que estão no plano do rascunho: só as do corpo
+/// indicado ou, sem ele, as dos corpos exibidos da peça.
+#[cfg(feature = "occt")]
+pub fn face_lines(
+    doc: &Document,
+    part: PartId,
+    plane: nator_sketch::Plane,
+    body: Option<BodyId>,
+) -> Result<Vec<nator_sketch::profiles::Segment>, DocumentError> {
+    let piece = doc
+        .part(part)
+        .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+    let bodies = match body {
+        Some(id) => vec![id],
+        None => piece
+            .shown_bodies()
+            .filter(|b| b.brep.is_some())
+            .map(|b| b.id)
+            .collect(),
+    };
+    let normal = plane.normal();
+    let mut segments = Vec::new();
+    for id in bodies {
+        if doc.body(id).is_none_or(|b| b.brep.is_none()) {
+            continue;
+        }
+        let (solid, _) = source(doc, part, id)?;
+        for face in 0..solid.face_count().map_err(error)? {
+            let nator_kernel::FaceKind::Plane {
+                normal: face_normal,
+                offset,
+            } = solid.face_measure(face).map_err(error)?.kind
+            else {
+                continue;
+            };
+            if nator_geometry::norm(nator_geometry::cross(face_normal, normal)) < 1e-7
+                && (nator_geometry::dot(face_normal, plane.origin) - offset).abs() < 1e-6
+            {
+                segments.extend(face_segments(&solid, face, plane)?);
+            }
+        }
+    }
+    Ok(segments)
+}
+#[cfg(not(feature = "occt"))]
+pub fn face_lines(
+    _: &Document,
+    _: PartId,
+    _: nator_sketch::Plane,
+    _: Option<BodyId>,
+) -> Result<Vec<nator_sketch::profiles::Segment>, DocumentError> {
+    Ok(Vec::new())
+}
+
+/// Rascunho acrescido do contorno exato da face: as linhas do corpo passam a delimitar
+/// áreas como se fizessem parte do desenho, sem alterar o rascunho guardado.
+#[cfg(feature = "occt")]
+fn with_face_outline(
+    sketch: &nator_sketch::Sketch,
+    solid: &Solid,
+    face: usize,
+) -> Result<nator_sketch::Sketch, DocumentError> {
+    use nator_sketch::{Curve, profiles::Segment};
+    let fail = |e: nator_sketch::SketchError| DocumentError(e.to_string());
+    let mut outlined = sketch.clone();
+    for segment in face_segments(solid, face, sketch.plane)? {
+        match segment {
+            Segment::Line { a, b } => {
+                outlined.add_line(a, b, false).map_err(fail)?;
+            }
+            Segment::Circle { center, radius } => {
+                outlined.add_circle(center, radius, false).map_err(fail)?;
+            }
+            Segment::Arc {
+                center,
+                a,
+                b,
+                clockwise,
+            } => {
+                let curve = Curve::Arc {
+                    center: outlined.add_point(center).map_err(fail)?,
+                    start: outlined.add_point(a).map_err(fail)?,
+                    end: outlined.add_point(b).map_err(fail)?,
+                    clockwise,
+                };
+                outlined.add_curve(curve, false).map_err(fail)?;
+            }
+        }
+    }
+    Ok(outlined)
+}
+
+/// Traços do rascunho que delimitam uma região do arranjo com o contorno da face.
+#[cfg(feature = "occt")]
+fn drawn_entities(
+    sketch: &nator_sketch::Sketch,
+    outlined: &nator_sketch::Sketch,
+    region: &nator_sketch::profiles::Region,
+) -> Result<Vec<(u64, bool)>, DocumentError> {
+    let mut ids = nator_sketch::areas::signature(outlined, region)
+        .map_err(error)?
+        .into_iter()
+        .filter(|(id, _)| sketch.entity(*id).is_ok())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
+/// Parte de uma face no arranjo do rascunho com o contorno dela.
+#[cfg(feature = "occt")]
+pub(super) struct FaceCell {
+    pub outlined: nator_sketch::Sketch,
+    pub region: nator_sketch::profiles::Region,
+    /// Traços do rascunho que delimitam a parte, com o lado em que ela fica.
+    pub drawn: Vec<(u64, bool)>,
+}
+
+/// Parte da face que contém `seed`.
+#[cfg(feature = "occt")]
+pub(super) fn face_cell(
+    sketch: &nator_sketch::Sketch,
+    solid: &Solid,
+    face: usize,
+    seed: nator_sketch::Point2,
+) -> Result<FaceCell, DocumentError> {
+    let outlined = with_face_outline(sketch, solid, face)?;
+    let regions = nator_sketch::areas::regions(&outlined).map_err(error)?;
+    let region = regions
+        .into_iter()
+        .filter(|r| r.outer.contains(seed) && !r.holes.iter().any(|h| h.contains(seed)))
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .ok_or_else(|| DocumentError("A área escolhida não existe mais na face.".into()))?;
+    let drawn = drawn_entities(sketch, &outlined, &region)?;
+    Ok(FaceCell {
+        outlined,
+        region,
+        drawn,
+    })
+}
+
+/// Rascunho e região de uma condição de área. Uma parte de face dividida por traços
+/// abertos usa o rascunho com o contorno; se os traços mudaram, falha em vez de trocar
+/// silenciosamente para a parte vizinha.
+#[cfg(feature = "occt")]
+pub(super) fn mask_area(
+    sketch: &nator_sketch::Sketch,
+    reference: &RegionRef,
+    solid: &Solid,
+    face: usize,
+) -> Result<(nator_sketch::Sketch, nator_sketch::profiles::Region), DocumentError> {
+    let RegionRef::Cell { seed, entities } = reference else {
+        return Ok((sketch.clone(), region(sketch, reference)?));
+    };
+    let cell = face_cell(sketch, solid, face, seed.map(|v| v as f64 * 1e-6))?;
+    if cell.drawn != *entities {
+        return Err(DocumentError(
+            "A área escolhida mudou: os traços que a delimitam não são mais os mesmos.".into(),
+        ));
+    }
+    Ok((cell.outlined, cell.region))
+}
+
 #[cfg(feature = "occt")]
 pub(super) fn region(
     sketch: &nator_sketch::Sketch,
@@ -243,7 +667,7 @@ pub(super) fn region(
     let index = match reference {
         RegionRef::Boundary(ids) => profiles::find_region(&regions, ids).map_err(error)?,
         RegionRef::Index(index) => *index,
-        RegionRef::Area(_) | RegionRef::Multiple(_) => {
+        RegionRef::Area(_) | RegionRef::Multiple(_) | RegionRef::Cell { .. } => {
             return Err(DocumentError(
                 "Escolha uma única área para esta consulta.".into(),
             ));
@@ -253,6 +677,69 @@ pub(super) fn region(
         return Err(DocumentError("Região do rascunho inexistente.".into()));
     }
     Ok(regions.swap_remove(index))
+}
+
+/// Junção automática de áreas: cada face nova da extrusão (nome do dono) se une às
+/// vizinhas no mesmo plano, numa só face. Faces antigas vizinhas entre si continuam
+/// separadas, como as divisões feitas de propósito pela extrusão zero.
+#[cfg(feature = "occt")]
+fn merge_new_coplanar(solid: Solid, owner: &str) -> Result<Solid, DocumentError> {
+    let count = solid.face_count().map_err(error)?;
+    let planes = (0..count)
+        .map(|face| {
+            Ok(match solid.face_measure(face).map_err(error)?.kind {
+                nator_kernel::FaceKind::Plane { normal, offset } => Some((normal, offset)),
+                _ => None,
+            })
+        })
+        .collect::<Result<Vec<_>, DocumentError>>()?;
+    let same = |a: usize, b: usize| match (planes[a], planes[b]) {
+        (Some((n, d)), Some((m, e))) => {
+            let cosine = nator_geometry::dot(n, m);
+            cosine.abs() > 1. - 1e-9 && (d - e * cosine.signum()).abs() < 1e-6
+        }
+        _ => false,
+    };
+    let new = |face: usize| solid.face_names()[face].starts_with(owner);
+    // Faces de cada aresta, para achar as vizinhas.
+    let mut by_edge = std::collections::HashMap::<usize, Vec<usize>>::new();
+    for face in 0..count {
+        for edge in solid.face_edges(face).map_err(error)? {
+            by_edge.entry(edge).or_default().push(face);
+        }
+    }
+    let mut parent = (0..count).collect::<Vec<_>>();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for faces in by_edge.values() {
+        if let [a, b] = faces[..]
+            && a != b
+            && (new(a) || new(b))
+            && same(a, b)
+        {
+            let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
+            parent[ra] = rb;
+        }
+    }
+    let mut groups = std::collections::HashMap::<usize, Vec<usize>>::new();
+    for face in 0..count {
+        let r = root(&mut parent, face);
+        groups.entry(r).or_default().push(face);
+    }
+    let chosen = groups
+        .into_values()
+        .filter(|g| g.len() > 1)
+        .flatten()
+        .collect::<Vec<_>>();
+    if chosen.len() < 2 {
+        return Ok(solid);
+    }
+    solid.merge_faces(&chosen, owner).map_err(error)
 }
 
 #[cfg(feature = "occt")]
@@ -303,6 +790,13 @@ fn hole_geometry(
             diameter: length(diameter)?,
             angle: angle(cone)?,
         },
+        HoleHeadSpec::Nut {
+            across_flats,
+            depth,
+        } => HoleHead::Nut {
+            across_flats: length(across_flats)?,
+            depth: length(depth)?,
+        },
     };
     let (depth, tip_angle) = match &spec.depth {
         Some(depth) => (
@@ -316,6 +810,7 @@ fn hole_geometry(
         depth,
         head,
         tip_angle,
+        teardrop: spec.teardrop,
     })
 }
 
@@ -405,12 +900,14 @@ pub(super) fn normalize(
             to,
             combine,
             until,
+            boundaries,
         } => Operation::ExtrudeFace {
             face: stable_face(doc, part, base, face)?,
             base,
             from,
             to,
             combine,
+            boundaries,
             until: until
                 .map(|limit| {
                     Ok::<_, DocumentError>(match limit {
@@ -508,6 +1005,7 @@ pub(super) fn normalize(
                     end,
                     holes,
                     ruled: false,
+                    developable: false,
                 },
             )?
             else {
@@ -524,6 +1022,7 @@ pub(super) fn normalize(
             start,
             end,
             ruled,
+            developable,
             holes,
         } => {
             let profile = |p: nator_document::features::ProfileRef| -> Result<_, DocumentError> {
@@ -560,6 +1059,7 @@ pub(super) fn normalize(
                 start,
                 end,
                 ruled,
+                developable,
                 holes: Some(holes),
             }
         }
@@ -641,6 +1141,18 @@ pub(super) fn normalize(
             exit_face: exit_face
                 .map(|f| stable_face(doc, part, base, f))
                 .transpose()?,
+        },
+        Operation::MergeFaces { base, faces } => Operation::MergeFaces {
+            faces: faces
+                .into_iter()
+                .map(|face| stable_face(doc, part, base, face))
+                .collect::<Result<_, _>>()?,
+            base,
+        },
+        Operation::Lip { base, face, spec } => Operation::Lip {
+            face: stable_face(doc, part, base, face)?,
+            base,
+            spec,
         },
         Operation::Split {
             base,
@@ -740,10 +1252,17 @@ pub(super) fn construct(
                 let extrusion = crate::extrusion::tool(doc, part, operation, &owner, None)?;
                 match combine {
                     // O corpo existente é a base: o corte remove a extrusão dele.
-                    Some(combine) => source(doc, part, combine.target)?
-                        .0
-                        .boolean(&extrusion, boolean_mode(combine.mode), &owner)
-                        .map_err(error)?,
+                    Some(combine) => {
+                        let joined = source(doc, part, combine.target)?
+                            .0
+                            .boolean(&extrusion, boolean_mode(combine.mode), &owner)
+                            .map_err(error)?;
+                        if combine.merge_coplanar && combine.mode == BooleanMode::Join {
+                            merge_new_coplanar(joined, &owner)?
+                        } else {
+                            joined
+                        }
+                    }
                     None => extrusion,
                 }
             }
@@ -812,6 +1331,7 @@ pub(super) fn construct(
             start,
             end,
             ruled,
+            developable,
             holes,
         } => {
             let a = sketch_of(doc, part, start.sketch)?;
@@ -833,7 +1353,7 @@ pub(super) fn construct(
                     &pairs.iter().map(|p| p.end.clone()).collect::<Vec<_>>(),
                 )?;
             }
-            Solid::loft((a, &first), (b, &last), *ruled, &owner).map_err(error)?
+            Solid::loft((a, &first), (b, &last), *ruled, *developable, &owner).map_err(error)?
         }
         Operation::Revolve {
             sketch: primary_id,
@@ -889,6 +1409,89 @@ pub(super) fn construct(
             .0
             .boolean(&source(doc, part, *tool)?.0, boolean_mode(*mode), &owner)
             .map_err(error)?,
+        Operation::ComponentCut {
+            base,
+            outline,
+            clearance,
+            floor,
+            depth,
+        } => crate::fit::cut(
+            doc,
+            part,
+            *base,
+            outline,
+            value(clearance)?,
+            value(floor)?,
+            depth.as_deref().map(value).transpose()?,
+            &owner,
+        )?,
+        Operation::MergeFaces { base, faces } => {
+            let (solid, bytes) = source(doc, part, *base)?;
+            let indices = faces
+                .iter()
+                .map(|face| face_index(&solid, &bytes, face))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut plane = None;
+            for index in &indices {
+                let nator_kernel::FaceKind::Plane { normal, offset } =
+                    solid.face_measure(*index).map_err(error)?.kind
+                else {
+                    return Err(DocumentError("Só áreas planas podem ser unidas.".into()));
+                };
+                let (reference, height) = *plane.get_or_insert((normal, offset));
+                if nator_geometry::norm(nator_geometry::sub(normal, reference)) > 1e-7
+                    || (offset - height).abs() > 1e-6
+                {
+                    return Err(DocumentError(
+                        "As áreas a unir precisam estar no mesmo plano.".into(),
+                    ));
+                }
+            }
+            solid.merge_faces(&indices, &owner).map_err(error)?
+        }
+        Operation::Lip { base, face, spec } => {
+            let (solid, bytes) = source(doc, part, *base)?;
+            let index = face_index(&solid, &bytes, face)?;
+            crate::fastening::lip(&solid, index, spec, &piece.parameters, &owner)?
+        }
+        Operation::ScrewBoss {
+            base,
+            sketch,
+            points,
+            spec,
+        } => crate::fastening::bosses(
+            source(doc, part, *base)?.0,
+            sketch_of(doc, part, *sketch)?,
+            points,
+            spec,
+            &piece.parameters,
+            &owner,
+        )?,
+        Operation::SnapFit {
+            base,
+            sketch,
+            points,
+            spec,
+        } => crate::fastening::snaps(
+            source(doc, part, *base)?.0,
+            sketch_of(doc, part, *sketch)?,
+            points,
+            spec,
+            &piece.parameters,
+            &owner,
+        )?,
+        Operation::RepairContacts {
+            base,
+            contacts,
+            mode,
+            radius,
+        } => crate::solid_check::repair(
+            source(doc, part, *base)?.0,
+            contacts,
+            *mode,
+            value(radius)?,
+            &owner,
+        )?,
         Operation::Fillet {
             base,
             edge,
@@ -954,14 +1557,6 @@ pub(super) fn construct(
                 .shell(&faces, value(thickness)?, *outward, &owner)
                 .map_err(error)?
         }
-        Operation::Transform {
-            base,
-            translation,
-            rotation,
-        } => source(doc, part, *base)?
-            .0
-            .transformed(nator_geometry::Placement::new(*translation, *rotation).map_err(error)?)
-            .map_err(error)?,
         Operation::Hole {
             base,
             sketch,

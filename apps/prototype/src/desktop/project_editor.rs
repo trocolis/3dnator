@@ -1,6 +1,7 @@
 mod activity_timeline;
 mod assembly_tools;
 mod browser;
+mod calibration;
 pub(crate) mod capture;
 mod cell_hover;
 mod command_panel;
@@ -8,29 +9,40 @@ mod distance_arrow;
 mod drawing_editor;
 mod export_editor;
 mod feature_editor;
+mod fit_check;
+mod help;
 mod highlight;
 mod history;
 mod icons;
 mod image_editor;
 mod insert_part;
 mod live_preview;
+mod measure_tool;
 mod mesh_import;
 mod navigation;
 mod notifications;
 mod paint_editor;
 mod parameter_editor;
 mod point_snap;
+mod preferences;
+mod print_check;
+mod print_profile;
 mod profile_pick;
 mod project_tree;
 mod section;
 mod selection_tools;
+mod settings;
 mod shell;
+mod shortcuts;
 mod sketch_editor;
 mod sketch_repair;
 mod sketch_scene;
+mod sketch_text;
+mod slicer;
 mod theme;
 mod timeline;
 mod view_cube;
+mod view_modes;
 mod views;
 mod window_frame;
 mod work_plane;
@@ -50,6 +62,48 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+/// Quantidade de projetos recentes exibida no menu Abrir.
+const RECENT_PROJECTS: usize = 8;
+
+/// Fundo da vista 3D, na cor do canvas do tema ativo.
+fn canvas_color() -> nator_geometry::RgbColor {
+    let [r, g, b, _] = theme::canvas().to_array();
+    nator_geometry::RgbColor::new([r, g, b])
+}
+
+fn recent_projects_path() -> Option<PathBuf> {
+    recovery_directory()
+        .parent()
+        .map(|path| path.join("recent-projects.json"))
+}
+
+fn load_recent_projects() -> Vec<PathBuf> {
+    let Some(path) = recent_projects_path() else {
+        return Vec::new();
+    };
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    serde_json::from_slice::<Vec<PathBuf>>(&bytes)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|path| path.is_file())
+        .take(RECENT_PROJECTS)
+        .collect()
+}
+
+fn store_recent_projects(projects: &[PathBuf]) {
+    let Some(path) = recent_projects_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec(projects) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
 
 pub fn run() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
@@ -84,6 +138,8 @@ pub(super) struct ViewState {
     /// corpos selecionados na peça em construção.
     selected_instances: HashSet<InstanceId>,
     selected_bodies: HashSet<BodyId>,
+    /// Cores de Verificar para impressão, enquanto o painel está aberto.
+    inspection: Option<Arc<nator_document::Inspection>>,
     version: u64,
 }
 impl ViewState {
@@ -197,9 +253,7 @@ struct Tab {
     recovery_source: Option<PathBuf>,
     recovery_state: Option<u64>,
     picked: Option<nator_document::assembly::Pick>,
-    measurements: Vec<Point3>,
     /// Clique de referência para ângulo entre faces e distância entre corpos.
-    reference: Option<nator_document::assembly::Pick>,
     /// Controles visuais da aba: não entram no documento nem no desfazer.
     view: ViewState,
     /// Corte de seção da área 3D, também apenas visual.
@@ -247,8 +301,6 @@ impl Tab {
             recovery_source: recovered,
             recovery_state: None,
             picked: None,
-            measurements: Vec::new(),
-            reference: None,
             view: ViewState::default(),
             section: None,
             drag_start: None,
@@ -417,15 +469,42 @@ enum Outcome {
         state: u64,
     },
     Exported,
-    Measured {
+    /// Exportação concluída com um aviso para o usuário.
+    ExportedWith(String),
+    /// Contorno das letras calculado para o Texto do rascunho.
+    SketchTextOutline {
+        tab: u64,
+        sketch: SketchId,
+        block: Box<nator_sketch::text::SketchText>,
+        anchor: Option<nator_sketch::Point2>,
+    },
+    /// Alvo do Medir sob o clique; `None` quando o clique não atingiu nada.
+    MeasureTarget {
         tab: u64,
         revision: u64,
-        lines: Vec<String>,
+        target: Option<Result<nator_commands::measure::Target, String>>,
     },
     ExportSummary {
         tab: u64,
         revision: u64,
         text: String,
+    },
+    FitChecked {
+        tab: u64,
+        revision: u64,
+        report: Result<nator_commands::fit_check::Report, String>,
+    },
+    PrintChecked {
+        tab: u64,
+        revision: u64,
+        body: BodyId,
+        report: Result<nator_commands::print_check::Report, String>,
+    },
+    SolidChecked {
+        tab: u64,
+        revision: u64,
+        body: BodyId,
+        report: Result<nator_commands::solid_check::Report, String>,
     },
     Cancelled,
 }
@@ -448,14 +527,24 @@ pub struct Editor {
     /// Chave da preparação de cena; liberada ao receber a cena calculada.
     requested: Option<SceneKey>,
     import_scale: f64,
+    /// A importação em curso é só de referência (menu Importar).
+    import_reference: bool,
+    /// Tema, idioma e atalhos do usuário. Sem caminho (ensaios), nada é gravado.
+    preferences: preferences::AppPreferences,
+    preferences_path: Option<PathBuf>,
     pending_close: Option<u64>,
     want_exit: bool,
     allow_exit: bool,
     recoveries: Vec<PathBuf>,
     show_recovery: bool,
     parameters_edit: Option<parameter_editor::Draft>,
+    print_profile_edit: Option<print_profile::Draft>,
+    print_check: Option<print_check::Draft>,
+    fit_check: Option<fit_check::Draft>,
+    calibration: Option<calibration::Draft>,
     feature_edit: Option<feature_editor::Draft>,
     image_edit: Option<image_editor::Draft>,
+    sketch_text: Option<sketch_text::Draft>,
     paint_edit: Option<paint_editor::Draft>,
     paint_palette: paint_editor::Palette,
     label_fonts: feature_editor::label::Fonts,
@@ -463,11 +552,10 @@ pub struct Editor {
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
     pick_mode: navigation::PickMode,
-    alignment: Option<(u64, u64, nator_document::assembly::Pick)>,
-    move_freely: bool,
-    rotate_angle: f64,
+    /// Região de rascunho candidata sob o cursor, no quadro atual.
+    profile_hovered: bool,
     /// Linhas do último relatório de medição, já formatadas para exibição.
-    measure_report: Vec<String>,
+    measure_tool: measure_tool::State,
     /// Disposição da interface; não modifica o documento nem o histórico.
     shell: shell::ShellState,
     timeline: timeline::TimelineState,
@@ -496,12 +584,16 @@ pub struct Editor {
     work_plane_edit: Option<work_plane::Draft>,
     /// Reparo do rascunho em edição.
     sketch_repair: Option<sketch_repair::RepairDraft>,
+    /// Painel de configurações da aplicação.
+    settings_panel: settings::Panel,
     /// Miniaturas de projetos em disco (recuperação), por caminho.
     thumbnails: std::collections::HashMap<PathBuf, Option<egui::TextureHandle>>,
     /// Inserção de peça de outra aba.
     insert_part: Option<insert_part::InsertDraft>,
     /// Confirmação de unidade e escala de um STL lido.
     mesh_import: Option<mesh_import::MeshImportDraft>,
+    /// Projetos abertos recentemente, do mais novo ao mais antigo.
+    recent: Vec<PathBuf>,
 }
 
 /// Origem de uma importação pelo diálogo de arquivos (ou o suporte de referência embutido).
@@ -511,6 +603,7 @@ pub(super) enum ImportSource {
     Any,
     Step,
     Stl,
+    ThreeMf,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -522,18 +615,34 @@ fn prepare_scene(
     prepare_scene_with_removal(document, view, active, None)
 }
 
+/// Volume destacado na prévia de uma extrusão combinada com um corpo.
+enum PreviewVolume {
+    Removed,
+    Added,
+}
+
 fn prepare_scene_with_removal(
     document: &Document,
     view: &ViewState,
     active: Option<PartId>,
-    removal: Option<(PartId, Mesh)>,
+    volume: Option<(PreviewVolume, PartId, Mesh)>,
 ) -> Result<Option<(Mesh, PreparedMesh)>, String> {
     use nator_document::Style;
+    let inspection = view.inspection.as_deref();
     let Some(mut scene) = document
-        .scene_styled_bodies(|occurrence, part, body| {
-            view.style(document, occurrence, part, active)
-                .map(|style| view.highlight(occurrence, body, style))
-        })
+        .scene_inspected(
+            |occurrence, part, body| {
+                view.style(document, occurrence, part, active).map(|style| {
+                    // O tom de seleção esconderia as cores da análise.
+                    if inspection.is_some_and(|i| i.body == body) {
+                        style
+                    } else {
+                        view.highlight(occurrence, body, style)
+                    }
+                })
+            },
+            inspection,
+        )
         .map_err(|e| e.to_string())?
     else {
         return Ok(None);
@@ -548,7 +657,11 @@ fn prepare_scene_with_removal(
             Style::Selected => nator_renderer::STYLE_SELECTED,
         })
         .collect::<Vec<_>>();
-    if let Some((part_id, removed)) = removal {
+    if let Some((kind, part_id, removed)) = volume {
+        let (style, color) = match kind {
+            PreviewVolume::Removed => (nator_renderer::STYLE_REMOVAL, [224, 50, 58]),
+            PreviewVolume::Added => (nator_renderer::STYLE_NORMAL, live_preview::PREVIEW_COLOR),
+        };
         let mut vertices = scene.mesh.vertices().to_vec();
         let mut triangles = scene.mesh.triangles().to_vec();
         let (_, creases) = removed.edge_analysis(Some(std::f64::consts::FRAC_PI_6));
@@ -578,12 +691,9 @@ fn prepare_scene_with_removal(
             );
             triangles.extend(removed.triangles().iter().map(|t| t.map(|i| i + offset)));
             scene.creases.extend_from_slice(&creases);
-            styles.extend(std::iter::repeat_n(
-                nator_renderer::STYLE_REMOVAL,
-                removed.triangles().len(),
-            ));
+            styles.extend(std::iter::repeat_n(style, removed.triangles().len()));
             scene.colors.extend(std::iter::repeat_n(
-                nator_geometry::RgbColor::new([224, 50, 58]),
+                nator_geometry::RgbColor::new(color),
                 removed.triangles().len(),
             ));
         }
@@ -614,6 +724,11 @@ impl Editor {
         if let Some(path) = path {
             editor.paint_palette = paint_editor::Palette::load(path);
         }
+        if let Some(path) = preferences::path() {
+            editor.preferences = preferences::AppPreferences::load(&path);
+            editor.preferences_path = Some(path);
+        }
+        editor.apply_preferences(&context.egui_ctx);
         Ok(editor)
     }
 
@@ -622,6 +737,18 @@ impl Editor {
         context: &egui::Context,
         document: Document,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Os ensaios de janela medem gestos em milímetros inteiros. A precisão padrão
+        // tem teste próprio no documento e os ensaios de precisão escolhem a sua.
+        #[cfg(test)]
+        let document = {
+            let mut document = document;
+            let mut settings = document.settings();
+            if settings == nator_document::Settings::default() {
+                settings.mouse_step_mm = 1.;
+                document.set_settings(settings)?;
+            }
+            document
+        };
         let mut viewport = Viewport::new(&gpu.device, &reference_bracket()?)?;
         viewport.clear(&gpu.device);
         let texture = gpu.renderer.write().register_native_texture(
@@ -630,8 +757,9 @@ impl Editor {
             wgpu::FilterMode::Linear,
         );
         let tab = Tab::new(1, document, None, None)?;
-        theme::apply(context);
-        viewport.set_background(nator_geometry::RgbColor::new([233, 238, 245]));
+        // Os ensaios usam sempre o tema claro; o editor real aplica a preferência em `new`.
+        theme::apply(context, theme::Choice::Light);
+        viewport.set_background(canvas_color());
         let recoveries = recovery_files(&recovery_directory()).unwrap_or_default();
         Ok(Self {
             gpu,
@@ -646,14 +774,26 @@ impl Editor {
             rendered: None,
             requested: None,
             import_scale: 1.,
+            import_reference: false,
+            // Os ensaios usam o tema claro; o editor real lê a preferência gravada.
+            preferences: preferences::AppPreferences {
+                theme: theme::Choice::Light,
+                ..Default::default()
+            },
+            preferences_path: None,
             pending_close: None,
             want_exit: false,
             allow_exit: false,
             show_recovery: !recoveries.is_empty(),
             recoveries,
             parameters_edit: None,
+            print_profile_edit: None,
+            print_check: None,
+            fit_check: None,
+            calibration: None,
             feature_edit: None,
             image_edit: None,
+            sketch_text: None,
             paint_edit: None,
             paint_palette: Default::default(),
             label_fonts: Default::default(),
@@ -661,10 +801,8 @@ impl Editor {
             drawing_edit: None,
             export_edit: None,
             pick_mode: navigation::PickMode::Face,
-            alignment: None,
-            move_freely: false,
-            rotate_angle: 15.,
-            measure_report: Vec::new(),
+            profile_hovered: false,
+            measure_tool: measure_tool::State::default(),
             shell: shell::ShellState::new(),
             timeline: timeline::TimelineState::default(),
             pending_failure: None,
@@ -682,9 +820,11 @@ impl Editor {
             section_edit: None,
             work_plane_edit: None,
             sketch_repair: None,
+            settings_panel: settings::Panel::default(),
             thumbnails: std::collections::HashMap::new(),
             insert_part: None,
             mesh_import: None,
+            recent: load_recent_projects(),
         })
     }
     fn busy(&self) -> bool {
@@ -698,6 +838,12 @@ impl Editor {
     }
     fn find_tab(&mut self, id: u64) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id == id)
+    }
+    fn remember_recent(&mut self, path: PathBuf) {
+        self.recent.retain(|known| known != &path);
+        self.recent.insert(0, path);
+        self.recent.truncate(RECENT_PROJECTS);
+        store_recent_projects(&self.recent);
     }
     fn invalidate_scene(&mut self) {
         // Manter a última cena válida enquanto a revisão nova é preparada evita
@@ -1064,7 +1210,16 @@ impl Editor {
                 name,
                 geometry,
             }) => {
-                match deliver_import(&mut self.tabs, tab, revision, destination, name, geometry) {
+                let reference = std::mem::take(&mut self.import_reference);
+                match deliver_import(
+                    &mut self.tabs,
+                    tab,
+                    revision,
+                    destination,
+                    name,
+                    geometry,
+                    reference,
+                ) {
                     Ok(true) => {
                         self.status.set(text(T::Imported));
                         self.requested = None;
@@ -1080,22 +1235,27 @@ impl Editor {
                 name,
                 mesh,
             }) => {
-                self.mesh_import = Some(mesh_import::MeshImportDraft::new(
+                let mut draft = mesh_import::MeshImportDraft::new(
                     tab,
                     revision,
                     destination,
                     name,
                     mesh,
                     self.import_scale,
-                ));
+                );
+                draft.reference = std::mem::take(&mut self.import_reference);
+                self.mesh_import = Some(draft);
             }
             Ok(Outcome::Opened {
                 document,
                 path,
                 recovery,
             }) => {
+                let recent = path.clone();
                 if let Err(error) = self.add_tab(document, path, recovery) {
                     self.status.error(error);
+                } else if let Some(path) = recent {
+                    self.remember_recent(path);
                 }
             }
             Ok(Outcome::Saved {
@@ -1104,6 +1264,7 @@ impl Editor {
                 path,
                 close_after,
             }) => {
+                self.remember_recent(path.clone());
                 if let Some(target) = self.find_tab(tab) {
                     target.path = Some(path);
                     target.session.mark_saved(state);
@@ -1137,6 +1298,7 @@ impl Editor {
                 self.status.set(text(T::RecoverySaved));
             }
             Ok(Outcome::Exported) => self.status.set(text(T::Exported)),
+            Ok(Outcome::ExportedWith(message)) => self.status.set(message),
             Ok(Outcome::ExportSummary {
                 tab,
                 revision,
@@ -1146,16 +1308,50 @@ impl Editor {
                     draft.set_summary(tab, revision, text);
                 }
             }
-            Ok(Outcome::Measured {
+            Ok(Outcome::FitChecked {
                 tab,
                 revision,
-                lines,
+                report,
             }) => {
-                if self
-                    .find_tab(tab)
-                    .is_some_and(|t| t.session.revision() == revision)
-                {
-                    self.measure_report = lines;
+                self.receive_fit_check(tab, revision, report);
+            }
+            Ok(Outcome::PrintChecked {
+                tab,
+                revision,
+                body,
+                report,
+            }) => {
+                self.receive_print_check(tab, revision, body, report);
+                self.status.set(text(T::Ready));
+            }
+            Ok(Outcome::SolidChecked {
+                tab,
+                revision,
+                body,
+                report,
+            }) => {
+                if let Some(draft) = self.feature_edit.as_mut() {
+                    draft.receive_check(tab, revision, body, report);
+                }
+                self.status.set(text(T::Ready));
+            }
+            Ok(Outcome::SketchTextOutline {
+                tab,
+                sketch,
+                block,
+                anchor,
+            }) => self.receive_sketch_text(context, tab, sketch, *block, anchor),
+            Ok(Outcome::MeasureTarget {
+                tab,
+                revision,
+                target,
+            }) => {
+                if self.current().id == tab && self.current().session.revision() == revision {
+                    match target {
+                        Some(Ok(target)) => self.measure_tool.add(tab, revision, target),
+                        Some(Err(error)) => self.status.error(error),
+                        None => self.measure_tool.clear(),
+                    }
                 }
             }
         }
@@ -1381,10 +1577,20 @@ impl Editor {
         context: &egui::Context,
         source: ImportSource,
         destination: Option<PartId>,
+        reference: bool,
     ) {
+        self.import_reference = reference;
         let tab = self.current().id;
         let revision = self.current().session.revision();
         let document = self.current().session.document().clone();
+        // O seletor começa na pasta do projeto aberto, onde os modelos do usuário
+        // costumam ficar. Projetos ainda não salvos mantêm o diretório do sistema.
+        let directory = self
+            .current()
+            .path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .map(std::path::Path::to_path_buf);
         self.start(context, None, move || {
             let (mesh, name) = if source == ImportSource::Reference {
                 (
@@ -1397,15 +1603,17 @@ impl Editor {
                 let (label, extensions): (_, &[&str]) = match source {
                     ImportSource::Step => (text(T::StepFilter), &["step", "stp", "STEP", "STP"]),
                     ImportSource::Stl => (text(T::StlFilter), &["stl", "STL"]),
+                    ImportSource::ThreeMf => (text(T::ThreeMfFilter), &["3mf", "3MF"]),
                     _ => (
                         text(T::ModelFilter),
-                        &["stl", "step", "stp", "STL", "STEP", "STP"],
+                        &["stl", "step", "stp", "3mf", "STL", "STEP", "STP", "3MF"],
                     ),
                 };
-                let Some(path) = rfd::FileDialog::new()
-                    .add_filter(label, extensions)
-                    .pick_file()
-                else {
+                let mut dialog = rfd::FileDialog::new().add_filter(label, extensions);
+                if let Some(directory) = &directory {
+                    dialog = dialog.set_directory(directory);
+                }
+                let Some(path) = dialog.pick_file() else {
                     return Ok(Outcome::Cancelled);
                 };
                 let name = path
@@ -1417,13 +1625,18 @@ impl Editor {
                 }) {
                     #[cfg(feature = "occt")]
                     {
+                        let import = Command::ImportStep {
+                            path,
+                            destination,
+                            name,
+                        };
                         let command = PreparedCommand::new(
                             document,
                             revision,
-                            Command::ImportStep {
-                                path,
-                                destination,
-                                name,
+                            if reference {
+                                Command::ImportAsReference(Box::new(import))
+                            } else {
+                                import
                             },
                         )
                         .map_err(|e| e.to_string())?;
@@ -1436,13 +1649,22 @@ impl Editor {
                         return Err(text(T::KernelUnavailable).into());
                     }
                 }
-                // Sem escala: o painel de confirmação escolhe a unidade do arquivo.
+                // Sem escala: o painel de confirmação escolhe a unidade do arquivo. O 3MF
+                // declara a unidade; a malha chega em milímetros.
+                let mesh = if path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("3mf"))
+                {
+                    nator_project_io::read_3mf(&path).map_err(|e| e.to_string())?
+                } else {
+                    nator_project_io::read_stl(&path, 1.).map_err(|e| e.to_string())?
+                };
                 return Ok(Outcome::MeshRead {
                     tab,
                     revision,
                     destination,
                     name,
-                    mesh: nator_project_io::read_stl(&path, 1.).map_err(|e| e.to_string())?,
+                    mesh,
                 });
             };
             Ok(Outcome::Imported {
@@ -1455,9 +1677,20 @@ impl Editor {
         });
     }
     fn open(&mut self, context: &egui::Context, recovery: Option<PathBuf>) {
+        self.read_project_path(context, None, recovery);
+    }
+    fn open_recent(&mut self, context: &egui::Context, path: PathBuf) {
+        self.read_project_path(context, Some(path), None);
+    }
+    fn read_project_path(
+        &mut self,
+        context: &egui::Context,
+        selected: Option<PathBuf>,
+        recovery: Option<PathBuf>,
+    ) {
         self.start(context, None, move || {
             let is_recovery = recovery.is_some();
-            let path = if let Some(path) = recovery {
+            let path = if let Some(path) = recovery.or(selected) {
                 path
             } else {
                 let Some(path) = rfd::FileDialog::new()
@@ -1672,6 +1905,9 @@ impl Editor {
 }
 
 impl eframe::App for Editor {
+    fn raw_input_hook(&mut self, context: &egui::Context, input: &mut egui::RawInput) {
+        self.route_camera_input(context, input);
+    }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.draw(ui);
     }
@@ -1681,7 +1917,12 @@ impl eframe::App for Editor {
 }
 impl Editor {
     fn draw(&mut self, ui: &mut egui::Ui) {
+        // O tema do sistema pode mudar com o programa aberto: a vista acompanha.
+        if theme::sync(ui.ctx()) {
+            self.viewport.set_background(canvas_color());
+        }
         self.collect(ui.ctx());
+        command_panel::publish_settings(ui.ctx(), self.current().session.document().settings());
         if ui.ctx().input(|i| i.viewport().close_requested()) && !self.allow_exit {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1709,10 +1950,16 @@ impl Editor {
             self.tree(ui);
         }
         self.canvas(ui);
+        // Depois do canvas: Selecionar e o balão podem encerrar a edição do rascunho.
+        self.collapsed_tree(ui.ctx());
+        self.edit_balloon(ui.ctx());
+        self.freedom_balloon(ui.ctx());
+        self.navigation_bar(ui.ctx());
         self.sketch_tools_window(ui.ctx());
         self.sketch_action_panel(ui.ctx());
         self.reference_image_panel(ui.ctx());
-        self.measure_window(ui.ctx());
+        self.sketch_text_panel(ui.ctx());
+        self.settings_dialog(ui.ctx());
         self.dialogs(ui.ctx());
         self.feature_dialog(ui.ctx());
         self.paint_panel(ui.ctx());
@@ -1725,6 +1972,10 @@ impl Editor {
         self.drawing_dialog(ui.ctx());
         self.export_dialog(ui.ctx());
         self.parameter_dialog(ui.ctx());
+        self.print_profile_dialog(ui.ctx());
+        self.print_check_dialog(ui.ctx());
+        self.fit_check_dialog(ui.ctx());
+        self.calibration_dialog(ui.ctx());
         self.command_palette(ui.ctx());
         self.timeline_dialogs(ui.ctx());
         self.select_other_popup(ui.ctx());
@@ -1746,6 +1997,7 @@ fn deliver_import(
     destination: Option<PartId>,
     name: String,
     geometry: Arc<MeshAsset>,
+    reference: bool,
 ) -> Result<bool, String> {
     let Some(tab) = tabs
         .iter_mut()
@@ -1753,12 +2005,17 @@ fn deliver_import(
     else {
         return Ok(false);
     };
+    let import = Command::ImportMesh {
+        destination,
+        name,
+        geometry,
+    };
     if let Effect::Imported { part, body } = tab
         .session
-        .execute(Command::ImportMesh {
-            destination,
-            name,
-            geometry,
+        .execute(if reference {
+            Command::ImportAsReference(Box::new(import))
+        } else {
+            import
         })
         .map_err(|e| e.to_string())?
     {
@@ -1766,6 +2023,29 @@ fn deliver_import(
     }
     tab.changed();
     Ok(true)
+}
+
+impl Editor {
+    /// Aplica tema e idioma escolhidos (ou os do sistema).
+    fn apply_preferences(&mut self, context: &egui::Context) {
+        theme::apply(context, self.preferences.theme);
+        self.viewport.set_background(canvas_color());
+        crate::i18n::set_language(
+            self.preferences
+                .language
+                .unwrap_or_else(crate::i18n::system_language),
+        );
+        context.request_repaint();
+    }
+    /// Grava as preferências; falhar não desfaz a escolha, só avisa.
+    fn save_preferences(&mut self, context: &egui::Context) {
+        self.apply_preferences(context);
+        if let Some(path) = &self.preferences_path
+            && let Err(error) = self.preferences.save(path)
+        {
+            self.status.warning(error);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1785,7 +2065,8 @@ mod tests {
             0,
             None,
             "Base".into(),
-            Arc::clone(&asset)
+            Arc::clone(&asset),
+            false
         )?);
         assert_eq!(tabs[0].session.document().parts().len(), 1);
         assert!(tabs[1].session.document().parts().is_empty());
@@ -1795,7 +2076,8 @@ mod tests {
             0,
             None,
             "Resultado antigo".into(),
-            asset
+            asset,
+            false
         )?);
         assert_eq!(tabs[0].session.document().parts().len(), 1);
         Ok(())

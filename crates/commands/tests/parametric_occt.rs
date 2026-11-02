@@ -351,3 +351,85 @@ fn clicking_near_the_inner_corner_selects_its_edge() -> Result<()> {
     assert!((solid(&session, rounded)?.volume()? - (profile + fillet)).abs() < 1e-3);
     Ok(())
 }
+
+/// O perfil de impressão alimenta as expressões de todas as peças, recalcula só o que o
+/// cita, volta com o desfazer e acompanha o projeto salvo.
+#[test]
+fn print_profile_values_drive_parts_and_survive_saving() -> Result<()> {
+    use nator_document::print_profile::PrintProfile;
+    let mut s = Session::new(Document::new("Perfil")?)?;
+    let mut plate = Sketch::new("Placa", Plane::xy());
+    plate.add_rectangle([0., 0.], [10., 10.], false)?;
+    let Effect::SketchCreated { part, sketch } = s.execute(Command::AddSketch {
+        destination: None,
+        sketch: plate,
+    })?
+    else {
+        return Err("Rascunho ausente".into());
+    };
+    let Effect::Imported { body, .. } = s.execute(Command::AddFeature {
+        part,
+        name: "Parede".into(),
+        operation: Operation::Extrude {
+            sketch,
+            region: RegionRef::Index(0),
+            from: "0 mm".into(),
+            to: "parede + folga_livre".into(),
+            combine: None,
+            until: None,
+        },
+    })?
+    else {
+        return Err("Corpo ausente".into());
+    };
+    let volume = |s: &Session| -> Result<f64> {
+        let record = s.document().body(body).ok_or("Corpo")?;
+        Ok(nator_kernel::Solid::from_brep(record.brep.as_ref().ok_or("B-rep")?, None)?.volume()?)
+    };
+    assert!((volume(&s)? - 100. * 1.2).abs() < 1e-6);
+    let wide = PrintProfile {
+        name: "Bico 0,6".into(),
+        nozzle_mm: 0.6,
+        ..Default::default()
+    };
+    s.execute(Command::SetPrintProfile {
+        profile: wide.clone(),
+    })?;
+    assert!((volume(&s)? - 100. * 1.6).abs() < 1e-6);
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("perfil.3dnator");
+    nator_project_io::write_project(&path, s.document())?;
+    let loaded = nator_project_io::read_project(&path)?;
+    assert_eq!(*loaded.print_profile(), wide);
+    assert!(
+        loaded
+            .part(part)
+            .ok_or("Peça")?
+            .parameters
+            .inherited
+            .contains_key("parede")
+    );
+    assert!(s.undo());
+    assert!((volume(&s)? - 100. * 1.2).abs() < 1e-6);
+    // Só o nome muda: nada cita a mudança, e a revisão avança sem recalcular a peça.
+    s.execute(Command::SetPrintProfile {
+        profile: PrintProfile {
+            name: "Outro".into(),
+            ..Default::default()
+        },
+    })?;
+    assert!((volume(&s)? - 100. * 1.2).abs() < 1e-6);
+    // Um perfil inválido é recusado inteiro.
+    let revision = s.revision();
+    assert!(
+        s.execute(Command::SetPrintProfile {
+            profile: PrintProfile {
+                nozzle_mm: 0.,
+                ..Default::default()
+            },
+        })
+        .is_err()
+    );
+    assert_eq!(s.revision(), revision);
+    Ok(())
+}

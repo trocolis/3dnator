@@ -34,6 +34,7 @@ fn loft_between_rectangle_and_circle_is_solid_and_recalculates_after_reopening()
             region: RegionRef::Index(0),
         },
         ruled: false,
+        developable: false,
         holes: None,
     };
     let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
@@ -105,11 +106,11 @@ fn circular_loft_keeps_through_hole_and_rejects_missing_hole() -> Result<()> {
             .find(|r| r.holes.len() == 1)
             .ok_or_else(|| "Anel".into())
     };
-    let solid = Solid::loft((&a, &region(&a)?), (&b, &region(&b)?), false, "loft")?;
+    let solid = Solid::loft((&a, &region(&a)?), (&b, &region(&b)?), false, false, "loft")?;
     assert!((solid.volume()? - 230. * std::f64::consts::PI).abs() < 1e-4);
     let mut missing = region(&b)?;
     missing.holes.clear();
-    assert!(Solid::loft((&a, &region(&a)?), (&b, &missing), false, "loft").is_err());
+    assert!(Solid::loft((&a, &region(&a)?), (&b, &missing), false, false, "loft").is_err());
     Ok(())
 }
 
@@ -152,6 +153,7 @@ fn replacing_hole_requires_explicit_correspondence_update() -> Result<()> {
             region: last,
         },
         ruled: false,
+        developable: false,
         holes: None,
     };
     let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
@@ -179,5 +181,86 @@ fn replacing_hole_requires_explicit_correspondence_update() -> Result<()> {
             },
         ],
     })?;
+    Ok(())
+}
+
+#[test]
+fn developable_loft_accepts_a_through_shell_and_survives_recalculation_and_reopening() -> Result<()>
+{
+    let mut a = Sketch::new("Base", Plane::xy());
+    a.add_rectangle([-20., -15.], [20., 15.], false)?;
+    let mut b = Sketch::new(
+        "Topo",
+        Plane {
+            origin: [0., 0., 30.],
+            ..Plane::xy()
+        },
+    );
+    b.add_circle([0., 0.], 10., false)?;
+    let mut doc = Document::new("Duto de transição")?;
+    let (part, start) = doc.add_sketch(None, a)?;
+    let (_, end) = doc.add_sketch(Some(part), b.clone())?;
+    let mut session = Session::new(doc)?;
+    let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+        part,
+        name: "Transição".into(),
+        operation: Operation::Loft {
+            start: ProfileRef {
+                sketch: start,
+                region: RegionRef::Index(0),
+            },
+            end: ProfileRef {
+                sketch: end,
+                region: RegionRef::Index(0),
+            },
+            ruled: true,
+            developable: true,
+            holes: None,
+        },
+    })?
+    else {
+        return Err("Transição".into());
+    };
+    let Effect::Imported { body: duct, .. } = session.execute(Command::AddFeature {
+        part,
+        name: "Duto".into(),
+        operation: Operation::Shell {
+            base: body,
+            face: nator_document::features::FaceRef::Named(format!("b{}:end", body.0)),
+            thickness: "2 mm".into(),
+            additional_faces: vec![],
+            outward: false,
+            through: true,
+            exit_face: None,
+        },
+    })?
+    else {
+        return Err("Duto".into());
+    };
+    let volume = |session: &Session| -> Result<f64> {
+        let b = session.document().body(duct).ok_or("Corpo")?;
+        Ok(Solid::from_brep(b.brep.as_ref().ok_or("B-rep")?, Some(&b.face_names))?.volume()?)
+    };
+    let before = volume(&session)?;
+    assert!(before > 5000. && before < 7000., "{before}");
+    // Mudar o círculo recalcula a transição e a casca que depende dela.
+    b.plane.origin[2] = 40.;
+    session.execute(Command::UpdateSketch { id: end, sketch: b })?;
+    assert!(volume(&session)? > before);
+    let directory =
+        std::env::temp_dir().join(format!("nator-loft-developable-{}", std::process::id()));
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join("duto.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let reopened = nator_project_io::read_project(&path)?;
+    std::fs::remove_dir_all(&directory)?;
+    let piece = reopened.part(part).ok_or("Peça")?;
+    assert!(matches!(
+        piece.features[0].operation,
+        Operation::Loft {
+            developable: true,
+            ..
+        }
+    ));
     Ok(())
 }

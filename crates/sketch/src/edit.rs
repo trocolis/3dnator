@@ -11,8 +11,6 @@ pub enum Action {
     Chamfer,
     Extend,
     Mirror,
-    CircularPattern,
-    RectangularPattern,
     Dimension,
     HorizontalVertical,
     Coincident,
@@ -28,15 +26,8 @@ impl Action {
     pub fn needs_value(self) -> bool {
         matches!(
             self,
-            Self::Offset
-                | Self::Fillet
-                | Self::Chamfer
-                | Self::RectangularPattern
-                | Self::Dimension
+            Self::Offset | Self::Fillet | Self::Chamfer | Self::Dimension
         )
-    }
-    pub fn is_pattern(self) -> bool {
-        matches!(self, Self::CircularPattern | Self::RectangularPattern)
     }
     pub fn selection_count(self) -> usize {
         match self {
@@ -55,8 +46,6 @@ impl Action {
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
     pub value_mm: f64,
-    /// Número total de ocorrências, incluindo a original.
-    pub count: usize,
     pub reference: bool,
 }
 
@@ -108,7 +97,33 @@ fn apply_inner(
     if action.needs_value() && !options.value_mm.is_finite() {
         return Err(SketchError("O valor deve ser finito.".into()));
     }
+    // Excluir uma letra apaga o bloco de texto inteiro; o resto da seleção segue normal.
+    let mut selected = selected.to_vec();
+    if action == Action::Delete {
+        let texts = selected
+            .iter()
+            .filter_map(|id| sketch.text_of(*id).map(|t| t.id))
+            .collect::<HashSet<_>>();
+        if !texts.is_empty() {
+            selected.retain(|id| sketch.text_of(*id).is_none());
+            for text in texts {
+                sketch.remove_text(text)?;
+            }
+            if selected.is_empty() {
+                return Ok(Outcome::default());
+            }
+        }
+    }
+    let selected = selected.as_slice();
     let first = selected[0];
+    // Referências fixas só servem de apoio: Offset e Espelhar copiam sem alterar a origem.
+    match action {
+        Action::Move | Action::Fillet | Action::Chamfer | Action::Construction | Action::Delete => {
+            sketch.refuse_locked(selected)?
+        }
+        Action::Extend => sketch.refuse_locked(&[first])?,
+        _ => {}
+    }
     let mut outcome = Outcome::default();
     match action {
         Action::Move => {
@@ -120,8 +135,13 @@ fn apply_inner(
                 .push(tools::offset_entity(sketch, first, options.value_mm)?)
         }
         Action::Fillet | Action::Chamfer => {
-            outcome.created =
-                corners::refine(sketch, selected, options.value_mm, action == Action::Fillet)?
+            outcome.created = corners::refine(
+                sketch,
+                selected,
+                &[],
+                options.value_mm,
+                action == Action::Fillet,
+            )?
         }
         Action::Extend => {
             let (a, b) = sketch.line(first)?;
@@ -136,20 +156,6 @@ fn apply_inner(
         Action::Mirror => {
             let (a, b) = sketch.line(selected[1])?;
             outcome.created = tools::mirror(sketch, &[first], a, b)?;
-        }
-        Action::RectangularPattern => {
-            let (a, b) = sketch.line(selected[1])?;
-            outcome.created = tools::pattern_linear(
-                sketch,
-                &[first],
-                sub(b, a),
-                options.count,
-                options.value_mm,
-            )?;
-        }
-        Action::CircularPattern => {
-            let center = sketch.radial(selected[1])?.0;
-            outcome.created = tools::pattern_circular(sketch, &[first], center, options.count)?;
         }
         Action::Construction => {
             for entity in &mut sketch.entities {
@@ -330,7 +336,6 @@ mod tests {
     fn options(value_mm: f64) -> Options {
         Options {
             value_mm,
-            count: 4,
             reference: false,
         }
     }
@@ -362,29 +367,12 @@ mod tests {
     }
 
     #[test]
-    fn patterns_mirror_and_offset_keep_the_source_and_use_the_selected_reference() -> Result<()> {
+    fn mirror_and_offset_keep_the_source_and_use_the_selected_reference() -> Result<()> {
         let mut sketch = Sketch::new("Cópias", Plane::xy());
         let source = sketch.add_circle([10., 5.], 2., true)?;
         let axis = sketch.add_line([0., -10.], [0., 10.], true)?;
-        let center = sketch.add_circle([0., 0.], 1., true)?;
         let mirrored = apply(&mut sketch, Action::Mirror, &[source, axis], options(0.))?.created[0];
         assert_eq!(sketch.circle(mirrored)?, ([-10., 5.], 2.));
-        let linear = apply(
-            &mut sketch,
-            Action::RectangularPattern,
-            &[source, axis],
-            options(10.),
-        )?
-        .created;
-        assert_eq!(sketch.circle(linear[2])?, ([10., 35.], 2.));
-        let ring = apply(
-            &mut sketch,
-            Action::CircularPattern,
-            &[source, center],
-            options(0.),
-        )?
-        .created;
-        assert!(distance(sketch.circle(ring[0])?.0, [-5., 10.]) < 1e-10);
         let offset = apply(&mut sketch, Action::Offset, &[source], options(-1.))?.created[0];
         assert_eq!(sketch.circle(offset)?, ([10., 5.], 1.));
         assert_eq!(sketch.circle(source)?, ([10., 5.], 2.));

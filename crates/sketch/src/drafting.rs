@@ -34,6 +34,56 @@ impl Primitive {
     }
 }
 
+/// Precisão do mouse ao desenhar: mm para comprimentos e graus para ângulos.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Steps {
+    pub length_mm: f64,
+    pub angle_deg: f64,
+}
+
+/// Múltiplo de `step` mais próximo de `value`, sem o ruído binário do produto
+/// (3 × 0,1 daria 0,30000000000000004). Um passo inválido mantém o valor.
+pub fn snap_to_step(value: f64, step: f64) -> f64 {
+    if step.is_finite() && step > 0. {
+        ((value / step).round() * step * 1e9).round() / 1e9
+    } else {
+        value
+    }
+}
+
+/// Leva as medidas livres do cursor à precisão do mouse, no formato dos campos travados:
+/// assim cada primitiva anda em passos pelas mesmas regras de uma medida digitada, e o
+/// valor mostrado ao usuário é exatamente o desenhado. Comprimentos ficam em pelo menos
+/// um passo, porque zero não é uma medida válida para `preview`.
+pub fn stepped(
+    primitive: Primitive,
+    anchor_count: usize,
+    measured: [f64; 2],
+    steps: Steps,
+) -> [Option<f64>; 2] {
+    // Na terceira etapa do arco o raio já foi escolhido e só a abertura segue o mouse.
+    let arc_sweep = primitive == Primitive::Arc && anchor_count == 2;
+    let mut values = [None, None];
+    for (field, value) in values.iter_mut().enumerate().take(primitive.field_count()) {
+        *value = if primitive.angular(field) {
+            let degrees = snap_to_step(measured[field].to_degrees(), steps.angle_deg);
+            Some(
+                if arc_sweep {
+                    degrees.clamp(steps.angle_deg, 360. - steps.angle_deg)
+                } else {
+                    degrees
+                }
+                .to_radians(),
+            )
+        } else if arc_sweep {
+            None
+        } else {
+            Some(snap_to_step(measured[field], steps.length_mm).max(steps.length_mm))
+        };
+    }
+    values
+}
+
 #[derive(Debug, Clone)]
 pub struct Preview {
     pub point: Point2,
@@ -445,6 +495,95 @@ pub fn add_rectangle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const STEPS: Steps = Steps {
+        length_mm: 0.01,
+        angle_deg: 1.,
+    };
+
+    /// Prévia com o cursor livre levado à precisão, como a interface faz a cada quadro.
+    fn stepped_preview(
+        primitive: Primitive,
+        anchors: &[Point2],
+        cursor: Point2,
+        steps: Steps,
+    ) -> Result<Preview> {
+        let free = preview(primitive, anchors, cursor, [None, None])?;
+        preview(
+            primitive,
+            anchors,
+            cursor,
+            stepped(primitive, anchors.len(), free.values, steps),
+        )
+    }
+
+    #[test]
+    fn snap_to_step_gives_clean_multiples_and_ignores_invalid_steps() {
+        assert_eq!(snap_to_step(0.29, 0.1), 0.3);
+        assert_eq!(snap_to_step(1.234, 0.01), 1.23);
+        assert_eq!(snap_to_step(-1.236, 0.01), -1.24);
+        assert_eq!(snap_to_step(7.3, 0.), 7.3);
+        assert_eq!(snap_to_step(7.3, f64::NAN), 7.3);
+    }
+
+    #[test]
+    fn line_end_moves_in_steps_of_length_and_angle() -> Result<()> {
+        let line = stepped_preview(Primitive::Line, &[[0., 0.]], [10.004, 0.0504], STEPS)?;
+        assert!((line.values[0] - 10.).abs() < 1e-9);
+        assert_eq!(line.values[1], 0.);
+        assert_eq!(line.point, [10., 0.]);
+        let line = stepped_preview(Primitive::Line, &[[1., 1.]], [1.04, 8.238], STEPS)?;
+        assert!((line.values[1].to_degrees() - 90.).abs() < 1e-9);
+        assert!((line.point[0] - 1.).abs() < 1e-9);
+        assert!((line.point[1] - 8.24).abs() < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn rectangle_and_circle_measures_follow_the_length_step() -> Result<()> {
+        // A âncora fora da grade não importa: a medida é contada a partir dela.
+        let first = [0.333, 0.777];
+        let rectangle = stepped_preview(Primitive::Rectangle, &[first], [-1.2345, 3.4567], STEPS)?;
+        assert!((rectangle.values[0] - 1.57).abs() < 1e-9);
+        assert!((rectangle.values[1] - 2.68).abs() < 1e-9);
+        assert!((rectangle.point[0] - (first[0] - 1.57)).abs() < 1e-9);
+        let circle = stepped_preview(Primitive::Circle, &[[0., 0.]], [3.456, 0.], STEPS)?;
+        assert!((circle.values[0] - 3.46).abs() < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn a_cursor_on_the_anchor_keeps_a_valid_positive_measure() -> Result<()> {
+        for primitive in [Primitive::Line, Primitive::Rectangle, Primitive::Circle] {
+            let result = stepped_preview(primitive, &[[2., 2.]], [2., 2.], STEPS)?;
+            assert!((result.values[0] - 0.01).abs() < 1e-9, "{primitive:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn arc_sweep_steps_without_changing_the_radius_or_reaching_a_full_turn()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let anchors = [[0., 0.], [10.004, 0.]];
+        let sweep = 33.4_f64.to_radians();
+        let free = preview_with_sweep(
+            Primitive::Arc,
+            &anchors,
+            [8., 5.],
+            [None, None],
+            0.,
+            Some(sweep),
+        )?;
+        let values = stepped(Primitive::Arc, 2, free.values, STEPS);
+        assert_eq!(values[0], None);
+        assert!((values[1].ok_or("abertura")?.to_degrees() - 33.).abs() < 1e-9);
+        for (measured, expected) in [(0.1_f64, 1.), (359.9, 359.)] {
+            let values = stepped(Primitive::Arc, 2, [10., measured.to_radians()], STEPS);
+            assert!((values[1].ok_or("abertura")?.to_degrees() - expected).abs() < 1e-9);
+        }
+        Ok(())
+    }
+
     #[test]
     fn arc_follows_initial_motion_and_keeps_its_direction_across_half_turns() -> Result<()> {
         for sign in [-1., 1.] {

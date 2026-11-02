@@ -1,15 +1,23 @@
 //! Transações do documento e coordenação do histórico paramétrico, com desfazer/refazer.
 mod appearance;
 mod assembly;
+pub mod calibration;
 pub mod drawing;
 pub mod export;
 pub mod extrusion;
-mod features;
+#[cfg(feature = "occt")]
+mod fastening;
+pub mod features;
+pub mod fit;
+pub mod fit_check;
 mod history;
 pub mod measure;
 pub mod painting;
 pub mod point_snap;
+pub mod print_check;
 pub mod sketch_projection;
+pub mod sketch_text;
+pub mod solid_check;
 #[cfg(feature = "occt")]
 mod sweep;
 pub mod topology;
@@ -25,14 +33,6 @@ pub enum Command {
     PaintSurfaces {
         targets: Vec<painting::Target>,
         color: nator_geometry::RgbColor,
-    },
-    PaintSurface {
-        body: BodyId,
-        paint: nator_document::SurfacePaint,
-    },
-    ClearSurfacePaint {
-        body: BodyId,
-        face: nator_document::features::FaceRef,
     },
     AddReferenceImage {
         image: nator_document::ReferenceImage,
@@ -123,6 +123,14 @@ pub enum Command {
         label: &'static str,
         commands: Vec<Command>,
     },
+    /// Importa (STEP ou malha) só como referência: as peças criadas ficam em Referências e
+    /// não podem ser editadas.
+    ImportAsReference(Box<Command>),
+    /// Marca ou desmarca uma peça como referência. Desmarcar é o "Criar peça".
+    SetPartReference {
+        part: PartId,
+        reference: bool,
+    },
     /// Instâncias adicionais da mesma definição, em padrão linear ou circular a partir da
     /// posição da instância de origem, reunidas em um grupo.
     PatternInstance {
@@ -190,6 +198,10 @@ pub enum Command {
         id: SketchId,
         sketch: nator_sketch::Sketch,
     },
+    /// Acrescenta a um rascunho existente as linhas das faces que estão no plano dele.
+    AddFaceLines {
+        id: SketchId,
+    },
     ImportMesh {
         destination: Option<PartId>,
         name: String,
@@ -234,6 +246,12 @@ pub enum Command {
     },
     RemoveBody {
         id: BodyId,
+    },
+    /// Passa o corpo para outra peça, na mesma posição do mundo. A peça de destino recebe
+    /// o sólido sem histórico; se a origem depende dele, ele só fica oculto lá.
+    TransferBody {
+        id: BodyId,
+        destination: PartId,
     },
     /// Cópia independente do corpo na mesma peça, sem histórico, na posição local dada.
     CopyBody {
@@ -296,6 +314,14 @@ pub enum Command {
         parent: Option<PartId>,
     },
     /// Configurações do documento (apresentação).
+    SetPrintProfile {
+        profile: nator_document::print_profile::PrintProfile,
+    },
+    /// Face apoiada na mesa; `None` volta à orientação da modelagem.
+    SetPrintFace {
+        body: BodyId,
+        face: Option<nator_document::features::FaceRef>,
+    },
     SetSettings {
         settings: nator_document::Settings,
     },
@@ -354,6 +380,22 @@ impl From<DocumentError> for CommandError {
 }
 
 /// Recálculos pedidos pelos comandos: imediatos, ou reunidos até o fim de um lote.
+/// Reaplica as expressões às cotas de todos os rascunhos da peça.
+fn resolve_part_sketches(part: &mut nator_document::Part) -> Result<(), DocumentError> {
+    for record in &mut part.sketches {
+        nator_document::parameters::resolve_sketch(&mut record.sketch, &part.parameters)?;
+        let report = nator_sketch::solver::solve(&record.sketch)
+            .map_err(|e| DocumentError(e.to_string()))?;
+        if report.status == nator_sketch::solver::Status::Conflict {
+            return Err(DocumentError(
+                "A alteração do parâmetro conflita com as restrições do rascunho.".into(),
+            ));
+        }
+        record.sketch = report.sketch;
+    }
+    Ok(())
+}
+
 struct Rebuilds {
     deferred: Option<Vec<PartId>>,
 }
@@ -386,8 +428,6 @@ impl Command {
     pub fn label(&self) -> &'static str {
         match self {
             Self::PaintSurfaces { .. } => "Pintar superfícies",
-            Self::PaintSurface { .. } => "Pintar superfície",
-            Self::ClearSurfacePaint { .. } => "Restaurar aparência da superfície",
             Self::AddReferenceImage { .. } => "Adicionar imagem de referência",
             Self::UpdateReferenceImage { .. } => "Editar imagem de referência",
             Self::RemoveReferenceImage { .. } => "Excluir imagem de referência",
@@ -408,6 +448,11 @@ impl Command {
             Self::MoveFeature { .. } => "Reordenar histórico",
             Self::SetHistoryMarker { .. } => "Mover marcador do histórico",
             Self::Batch { label, .. } => label,
+            Self::ImportAsReference(_) => "Importar como referência",
+            Self::SetPartReference {
+                reference: false, ..
+            } => "Criar peça a partir da referência",
+            Self::SetPartReference { .. } => "Marcar como referência",
             Self::AddInstance { .. } => "Adicionar instância",
             Self::PatternInstance { .. } => "Padrão de instâncias",
             Self::MirrorInstance { .. } => "Espelhar instância como nova peça",
@@ -422,6 +467,7 @@ impl Command {
             Self::SetParameter { .. } => "Alterar parâmetro da peça",
             Self::AddSketch { .. } => "Criar rascunho",
             Self::UpdateSketch { .. } => "Editar rascunho",
+            Self::AddFaceLines { .. } => "Trazer linhas da face",
             Self::SetSketchVisibility { .. } => "Alterar visibilidade do rascunho",
             Self::ImportMesh { .. } => "Importar corpo de malha",
             Self::RenamePart { .. } => "Renomear peça",
@@ -435,8 +481,11 @@ impl Command {
             Self::MoveInstance { .. } => "Posicionar instância",
             Self::RemoveBody { .. } => "Excluir corpo",
             Self::CopyBody { .. } => "Copiar corpo",
+            Self::TransferBody { .. } => "Mover corpo para outra peça",
             Self::RenameInstance { .. } => "Renomear instância",
             Self::RenameGroup { .. } => "Renomear grupo",
+            Self::SetPrintProfile { .. } => "Alterar perfil de impressão",
+            Self::SetPrintFace { .. } => "Escolher face na mesa",
             Self::SetSettings { .. } => "Alterar configurações do documento",
             Self::AddReferenceSketch { .. } => "Criar rascunho de referência",
             Self::RemoveSketch { .. } => "Excluir rascunho",
@@ -452,6 +501,23 @@ impl Command {
         }
     }
     fn apply(self, doc: &mut Document, rebuilds: &mut Rebuilds) -> Result<Effect, CommandError> {
+        // Referências importadas só se movem, ocultam e renomeiam: nada as altera por dentro.
+        let context = history::context(&self, doc);
+        let target = match context {
+            nator_document::activity::EditContext::Part(part) => Some(part),
+            nator_document::activity::EditContext::Sketch { part, .. } => part,
+            _ => None,
+        };
+        if let Some(part) = target
+            && doc.part(part).is_some_and(|p| p.reference)
+            && !matches!(self, Self::RenamePart { .. } | Self::Batch { .. })
+        {
+            return Err(DocumentError(
+                "Esta peça é uma referência importada e não pode ser editada. Use Criar peça no menu dela."
+                    .into(),
+            )
+            .into());
+        }
         let intent = history::intent(&self, doc);
         let effect = self.apply_inner(doc, rebuilds)?;
         history::record(doc, intent, effect)?;
@@ -464,41 +530,6 @@ impl Command {
     ) -> Result<Effect, CommandError> {
         match self {
             Self::PaintSurfaces { targets, color } => painting::apply(doc, targets, color)?,
-            Self::PaintSurface { body, paint } => {
-                let mut layers = doc
-                    .body_appearance(body)
-                    .map(|a| a.layers.clone())
-                    .unwrap_or_default();
-                if layers.len() >= 255 {
-                    return Err(DocumentError("Limite de pinturas atingido.".into()).into());
-                }
-                layers.push(paint);
-                let appearance = appearance::build(doc, body, layers)?;
-                doc.set_surface_appearance(appearance)?;
-            }
-            Self::ClearSurfacePaint { body, face } => {
-                let layers = doc
-                    .body_appearance(body)
-                    .map(|a| {
-                        a.layers
-                            .iter()
-                            .filter(|l| l.face != face)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                if layers.is_empty() {
-                    if let Some(color) = doc.body_appearance(body).and_then(|a| a.base_color) {
-                        painting::set_body_color(doc, body, color)?;
-                    } else {
-                        doc.remove_surface_appearance(body);
-                    }
-                } else {
-                    let appearance = appearance::build(doc, body, layers)?;
-                    doc.set_surface_appearance(appearance)?;
-                }
-            }
-
             Self::AddReferenceImage { image } => {
                 doc.add_image(image)?;
             }
@@ -702,6 +733,29 @@ impl Command {
                     rebuilds.request(doc, part)?;
                 }
             }
+            Self::ImportAsReference(command) => {
+                if !matches!(*command, Self::ImportStep { .. } | Self::ImportMesh { .. }) {
+                    return Err(DocumentError(
+                        "Só modelos STEP, STL ou 3MF são importados como referência.".into(),
+                    )
+                    .into());
+                }
+                let before = doc.parts().iter().map(|p| p.id).collect::<Vec<_>>();
+                let effect = command.apply_inner(doc, rebuilds)?;
+                let created = doc
+                    .parts()
+                    .iter()
+                    .map(|p| p.id)
+                    .filter(|id| !before.contains(id))
+                    .collect::<Vec<_>>();
+                for part in created {
+                    doc.part_mut(part)?.reference = true;
+                }
+                return Ok(effect);
+            }
+            Self::SetPartReference { part, reference } => {
+                doc.part_mut(part)?.reference = reference;
+            }
             Self::Batch { commands, .. } => {
                 let mut inner = Rebuilds::deferred();
                 let mut effect = Effect::Changed;
@@ -778,23 +832,29 @@ impl Command {
                     part.parameters.entries.remove(&name);
                     part.parameters.validate()?;
                 }
-                for record in &mut part.sketches {
-                    nator_document::parameters::resolve_sketch(
-                        &mut record.sketch,
-                        &part.parameters,
-                    )?;
-                    let report = nator_sketch::solver::solve(&record.sketch)
-                        .map_err(|e| DocumentError(e.to_string()))?;
-                    if report.status == nator_sketch::solver::Status::Conflict {
-                        return Err(DocumentError(
-                            "A alteração do parâmetro conflita com as restrições do rascunho."
-                                .into(),
-                        )
-                        .into());
-                    }
-                    record.sketch = report.sketch;
-                }
+                resolve_part_sketches(part)?;
                 rebuilds.request(doc, part_id)?;
+            }
+            Self::SetPrintFace { body, face } => {
+                let record = doc
+                    .body(body)
+                    .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+                let down = face.map(|f| record.print_direction(&f)).transpose()?;
+                doc.body_mut(body)?.print_down = down;
+            }
+            Self::SetPrintProfile { profile } => {
+                let changed = doc.print_profile().changed_parameters(&profile);
+                doc.set_print_profile(profile)?;
+                let affected = doc
+                    .parts()
+                    .iter()
+                    .filter(|p| changed.iter().any(|name| p.mentions_parameter(name)))
+                    .map(|p| p.id)
+                    .collect::<Vec<_>>();
+                for id in affected {
+                    resolve_part_sketches(doc.part_mut(id)?)?;
+                    rebuilds.request(doc, id)?;
+                }
             }
             Self::AddSketch {
                 destination,
@@ -812,6 +872,29 @@ impl Command {
                 let (part, sketch) = doc.add_sketch(destination, sketch)?;
                 return Ok(Effect::SketchCreated { part, sketch });
             }
+            Self::AddFaceLines { id } => {
+                let part = doc
+                    .sketch_part(id)
+                    .ok_or_else(|| DocumentError("Rascunho de peça inexistente.".into()))?;
+                let mut sketch = doc
+                    .sketch(id)
+                    .ok_or_else(|| DocumentError("Rascunho inexistente.".into()))?
+                    .sketch
+                    .clone();
+                let lines = features::face_lines(doc, part, sketch.plane, None)?;
+                if lines.is_empty() {
+                    return Err(DocumentError(
+                        "Nenhuma face plana da peça está no plano deste rascunho.".into(),
+                    )
+                    .into());
+                }
+                if !nator_sketch::projection::insert_face(&mut sketch, &lines)
+                    .map_err(|e| DocumentError(e.to_string()))?
+                {
+                    return Err(DocumentError("O rascunho já tem as linhas da face.".into()).into());
+                }
+                return Self::UpdateSketch { id, sketch }.apply_inner(doc, rebuilds);
+            }
             Self::UpdateSketch { id, sketch } => {
                 if nator_sketch::solver::max_error(&sketch)
                     .map_err(|e| DocumentError(e.to_string()))?
@@ -823,8 +906,11 @@ impl Command {
                     .into());
                 }
                 doc.update_sketch(id, sketch)?;
-                // Rascunhos de referência não alimentam operações: nada a recalcular.
-                if let Some(part) = doc.sketch_part(id) {
+                // Rascunhos de referência e os que não alimentam histórico nem pintura não
+                // mudam a geometria: nada a recalcular.
+                if let Some(part) = doc.sketch_part(id)
+                    && doc.sketch_drives_geometry(id)
+                {
                     rebuilds.request(doc, part)?;
                 }
             }
@@ -894,6 +980,63 @@ impl Command {
                     .into());
                 }
                 doc.remove_body(id)?;
+            }
+            Self::TransferBody { id, destination } => {
+                let source = doc
+                    .parts()
+                    .iter()
+                    .find(|p| p.bodies.iter().any(|b| b.id == id))
+                    .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+                if nator_document::features::inactive_outputs(source).contains(&id) {
+                    return Err(DocumentError(
+                        "O resultado de uma operação inativa não pode ser movido.".into(),
+                    )
+                    .into());
+                }
+                let (from, in_use) = (
+                    source.id,
+                    source
+                        .features
+                        .iter()
+                        .any(|f| f.output == id || f.operation.references().contains(&id)),
+                );
+                doc.part(destination)
+                    .ok_or_else(|| DocumentError("Peça de destino inexistente.".into()))?;
+                if from == destination {
+                    return Err(DocumentError("O corpo já está nesta peça.".into()).into());
+                }
+                let occurrences = doc.occurrences()?;
+                let pose = |part: PartId| {
+                    occurrences
+                        .iter()
+                        .find(|o| doc.instance(o.instance).is_some_and(|i| i.part == part))
+                        .map(|o| o.placement)
+                        .unwrap_or_default()
+                };
+                let error = |e: nator_geometry::GeometryError| DocumentError(e.to_string());
+                let body = doc
+                    .body(id)
+                    .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+                let (name, placement) = (
+                    body.name.clone(),
+                    pose(destination)
+                        .inverse()
+                        .and_then(|inverse| inverse.compose(pose(from)))
+                        .and_then(|relative| relative.compose(body.placement))
+                        .map_err(error)?,
+                );
+                let body = doc.copy_body_to(id, destination, placement)?;
+                doc.body_mut(body)?.name = name;
+                if in_use {
+                    doc.body_mut(id)?.visible = false;
+                } else {
+                    doc.remove_body(id)?;
+                }
+                crate::appearance::rebuild(doc, destination)?;
+                return Ok(Effect::Imported {
+                    part: destination,
+                    body,
+                });
             }
             Self::CopyBody { id, placement } => {
                 let part = doc
@@ -1060,6 +1203,7 @@ fn add_feature(
         nator_document::Body {
             intrinsic_colors: built.intrinsic_colors,
             id: output,
+            print_down: source.and_then(|b| b.print_down),
             name: body_name,
             geometry: built.mesh,
             brep: Some(built.brep),
@@ -1085,6 +1229,9 @@ fn add_feature(
             additional_profiles,
             ..
         } => profiles.extend(additional_profiles.iter().map(|p| p.sketch)),
+        nator_document::features::Operation::ExtrudeFace { boundaries, .. } => {
+            profiles.extend(boundaries.iter().map(|b| b.mask.sketch))
+        }
         _ => {}
     }
     if let nator_document::features::Operation::Sweep {

@@ -46,6 +46,7 @@ of or is based on facilities provided by the Open CASCADE Technology software.
 | `wgpu` | 30.0 | MIT OR Apache-2.0 | Renderização acelerada por GPU (Vulkan, DX12, Metal) | <https://github.com/gfx-rs/wgpu> |
 | `serde` / `serde_json` | 1.0 | MIT OR Apache-2.0 | Serialização e manifesto de projetos `.3dnator` | <https://github.com/serde-rs/serde> |
 | `uuid` | 1.27 | MIT OR Apache-2.0 | Geração de identificadores únicos para projetos | <https://github.com/uuid-rs/uuid> |
+| `i_overlay` | 9.1 | MIT OR Apache-2.0 | União e deslocamento de polígonos 2D: silhueta de componentes e folga | <https://github.com/iShape-Rust/iOverlay> |
 | `zip` | 2.x | MIT | Leitura e gravação de pacotes comprimidos `.3dnator` | <https://github.com/zip-rs/zip2> |
 | `tempfile` | 3.x | MIT OR Apache-2.0 | Gravação atômica segura de arquivos de projeto | <https://github.com/Stebalien/tempfile> |
 | `rfd` | 0.17 | MIT | Diálogos nativos de seleção e salvamento de arquivos | <https://github.com/PolyMeilex/rfd> |

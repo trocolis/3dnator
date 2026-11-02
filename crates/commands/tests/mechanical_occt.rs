@@ -113,6 +113,7 @@ fn counterbored_holes_follow_sketch_points_and_parameters() -> Result<()> {
                     depth: "4 mm".into(),
                 },
                 tip_angle: None,
+                teardrop: None,
                 reverse: true,
                 thread: None,
             },
@@ -512,6 +513,7 @@ fn exact_measurements_on_solids() -> Result<()> {
                 depth: None,
                 head: HoleHeadSpec::Simple,
                 tip_angle: None,
+                teardrop: None,
                 reverse: true,
                 thread: None,
             },
@@ -613,6 +615,7 @@ fn stl_export_quality_comes_from_the_precise_geometry() -> Result<()> {
                 depth: None,
                 head: HoleHeadSpec::Simple,
                 tip_angle: None,
+                teardrop: None,
                 reverse: true,
                 thread: None,
             },
@@ -674,6 +677,7 @@ fn extrusion_until_a_face_and_direct_combination() -> Result<()> {
             combine: Some(Combine {
                 target: plate_body,
                 mode: BooleanMode::Join,
+                merge_coplanar: false,
             }),
             until: Some(
                 UntilFace {
@@ -734,6 +738,7 @@ fn extrusion_until_a_face_and_direct_combination() -> Result<()> {
             combine: Some(Combine {
                 target: joined,
                 mode: BooleanMode::Cut,
+                merge_coplanar: false,
             }),
             until: None,
         },

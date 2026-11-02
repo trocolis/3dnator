@@ -10,6 +10,8 @@ struct Key {
     origin: Point3,
     direction: Point3,
     paint: bool,
+    /// Escolha de área da extrusão: nada além de células e faces planas da peça.
+    area: bool,
     section: Option<section::Section>,
     /// Dois raios fixos da vista identificam orientação, projeção, zoom e pan,
     /// sem confundir essas mudanças com o deslocamento do ponteiro.
@@ -21,6 +23,7 @@ impl Key {
     fn same_context(&self, other: &Self) -> bool {
         self.scene == other.scene
             && self.paint == other.paint
+            && self.area == other.area
             && self.section == other.section
             && self.view_rays == other.view_rays
             && self.rect == other.rect
@@ -58,6 +61,13 @@ pub(super) struct Cache {
     cached: Option<Cell>,
 }
 
+/// Realce de uma célula em coordenadas locais, colocado no mundo pela pose do corpo.
+pub(super) fn area_overlay(mesh: &Mesh, pose: Placement) -> Option<highlight::Overlay> {
+    let vertices = mesh.vertices().iter().map(|p| pose.apply(*p)).collect();
+    Mesh::new(vertices, mesh.triangles().to_vec())
+        .ok()
+        .map(|mesh| mesh_overlay(&mesh))
+}
 fn mesh_overlay(mesh: &Mesh) -> highlight::Overlay {
     // Fronteiras de incidência única, sem desenhar diagonais da tesselação.
     let mut edges = std::collections::HashMap::<(u32, u32), (usize, Point3)>::new();
@@ -170,7 +180,8 @@ fn compute(
         .pick_all_with(ray, |o| view.pickable(o))
         .ok()
         .and_then(|p| section::first_visible(p, section));
-    let profile = if key.paint {
+    // Na extrusão, `profile_overlay` já cuida das regiões de rascunho.
+    let profile = if key.paint || key.area {
         None
     } else {
         free_profile(document, part, placement, ray, pick.as_ref())
@@ -264,6 +275,18 @@ fn compute(
             cached,
         };
     }
+    // Curvas, malhas e outras peças não são áreas de extrusão.
+    if key.area
+        && (pick.part != part
+            || document.body(pick.body).is_none_or(|b| b.brep.is_none())
+            || nator_commands::measure::sketch_plane(document, &pick).is_err())
+    {
+        return Computed {
+            key,
+            answer: Answer::Empty,
+            cached,
+        };
+    }
     Computed {
         key,
         answer: Answer::Face(pick),
@@ -340,13 +363,22 @@ impl Cache {
 }
 impl Editor {
     pub(super) fn cell_hover_active(&self) -> bool {
+        let area = self
+            .feature_edit
+            .as_ref()
+            .is_some_and(|d| d.tab() == self.current().id && d.choosing_area());
         self.current().active_part.is_some()
-            && self.pick_mode == navigation::PickMode::Face
-            && (self.selection_active() || self.paint_edit.is_some())
+            && (area
+                || (self.pick_mode == navigation::PickMode::Face
+                    && (self.selection_active() || self.paint_edit.is_some())))
             && self.current().sketch_edit.is_none()
     }
     pub(super) fn update_cell_hover(&mut self, ui: &egui::Ui, response: &egui::Response) {
         self.hover = None;
+        // A região do rascunho sob o cursor já está realçada e tem prioridade no clique.
+        if self.profile_hovered {
+            return;
+        }
         if self
             .scene
             .as_ref()
@@ -380,6 +412,7 @@ impl Editor {
             origin: ray.origin,
             direction: ray.direction,
             paint: self.paint_edit.is_some(),
+            area: self.feature_edit.is_some(),
             section: self.current().section,
             view_rays: [[0., 0.], [1., 1.]].map(|point| {
                 let ray =
@@ -437,6 +470,7 @@ mod tests {
             origin: [0., 0., 10.],
             direction: [0., 0., -1.],
             paint: false,
+            area: false,
             section: None,
             view_rays: [
                 ([0., 0., 10.], [0., 0., -1.]),
@@ -550,6 +584,9 @@ mod tests {
         changes.push(changed);
         let mut changed = original.clone();
         changed.paint = true;
+        changes.push(changed);
+        let mut changed = original.clone();
+        changed.area = true;
         changes.push(changed);
         let mut changed = original.clone();
         changed.section = Some(section::Section {

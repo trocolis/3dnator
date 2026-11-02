@@ -5,5 +5,5 @@
 *.tmp
 *.swp
 .DS_Store
-
+AJUSTES.md
 __pycache__/

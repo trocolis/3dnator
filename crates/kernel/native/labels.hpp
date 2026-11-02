@@ -21,7 +21,7 @@ struct LabelFrame {
 };
 LabelFrame label_frame(const Shape *body, std::size_t index,
                        const double *point, const double *uv, bool fixed) {
-  const auto faces = map_of(body->value, TopAbs_FACE);
+  const auto& faces = faces_of(body);
   if (index >= static_cast<std::size_t>(faces.Extent()))
     throw std::runtime_error("Face do rótulo inexistente.");
   const auto face = TopoDS::Face(faces(static_cast<int>(index) + 1));
@@ -166,7 +166,7 @@ Shape *nator_label(const Shape *body, std::size_t index, const Shape *outline,
                    const double *point, const double *uv, bool fixed,
                    double size, double angle, double depth, int mode) noexcept {
   return build([&](Shape &output) {
-    const auto all = map_of(body->value, TopAbs_FACE);
+    const auto& all = faces_of(body);
     const auto f = label_frame(body, index, point, uv, fixed);
     const auto host = TopoDS::Face(all(static_cast<int>(index) + 1));
     const gp_Vec x =

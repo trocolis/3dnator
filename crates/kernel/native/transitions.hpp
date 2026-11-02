@@ -37,6 +37,8 @@ extern "C" Shape* nator_loft_wire(const Shape* first,const Shape* last,std::size
     });
 }
 
+#include "loft_developable.hpp"
+
 #include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepFill_CompatibleWires.hxx>
 #include <Geom_BezierCurve.hxx>

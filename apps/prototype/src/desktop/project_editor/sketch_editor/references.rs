@@ -1,12 +1,16 @@
 //! Arranjos de curvas são calculados no worker e reaproveitados enquanto a geometria
 //! for a mesma, inclusive em prévias conflitantes que não avançam a revisão do documento.
 use super::*;
+use nator_sketch::constraint_state::{self, State};
+use nator_sketch::repair::{self, Fix};
 use nator_sketch::topology::{self, References};
 struct Computed {
     points: References,
     regions: Vec<profiles::Region>,
-    junctions: Vec<nator_sketch::junctions::Junction>,
     indicators: Vec<nator_sketch::indicators::Indicator>,
+    state: State,
+    unlinked: Vec<Fix>,
+    status: Option<nator_sketch::solver::Status>,
 }
 type Answer = Result<Computed, String>;
 
@@ -15,8 +19,14 @@ pub(super) struct Cache {
     key: Vec<u64>,
     pub points: References,
     pub projected_regions: Vec<profiles::Region>,
-    pub junctions: Vec<nator_sketch::junctions::Junction>,
     pub indicators: Vec<nator_sketch::indicators::Indicator>,
+    /// Estado de restrição do rascunho. Fica até o novo chegar, para os elementos não
+    /// piscarem como livres a cada edição.
+    pub state: State,
+    /// Pontas no mesmo lugar sem ligação, com o reparo que as liga.
+    pub unlinked: Vec<Fix>,
+    /// Graus de liberdade do rascunho como está, já ao abrir, antes de qualquer edição.
+    pub status: Option<nator_sketch::solver::Status>,
     running: Option<Receiver<Answer>>,
 }
 
@@ -70,7 +80,6 @@ impl Cache {
             self.key = key;
             self.points = References::default();
             self.projected_regions.clear();
-            self.junctions.clear();
             self.indicators.clear();
             self.running = None;
             let sketch = sketch.clone();
@@ -81,8 +90,17 @@ impl Cache {
                 .spawn(move || {
                     let result = topology::references(&sketch)
                         .and_then(|points| {
-                            let junctions =
-                                nator_sketch::junctions::all(&sketch, &points.vertices)?;
+                            // Geometria degenerada não impede o desenho nem os apoios.
+                            let state = constraint_state::analyze(&sketch).unwrap_or_default();
+                            let unlinked = repair::suggest(&sketch, 0.)
+                                .map(|report| {
+                                    report
+                                        .fixes
+                                        .into_iter()
+                                        .filter(|fix| matches!(fix, Fix::LinkEnds { .. }))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
                             let mut indicators = nator_sketch::indicators::markers(&sketch)?;
                             for center in &points.centers {
                                 let hidden_circle = sketch.entities.iter().any(|e| {
@@ -117,11 +135,16 @@ impl Cache {
                             let regions = profiles::regions(&projected).unwrap_or_else(|_| {
                                 nator_sketch::areas::regions(&projected).unwrap_or_default()
                             });
+                            let status = nator_sketch::solver::solve(&sketch)
+                                .ok()
+                                .map(|report| report.status);
                             Ok(Computed {
                                 points,
                                 regions,
-                                junctions,
                                 indicators,
+                                state,
+                                unlinked,
+                                status,
                             })
                         })
                         .map_err(|e| e.to_string());
@@ -138,8 +161,10 @@ impl Cache {
                     let computed = result?;
                     self.points = computed.points;
                     self.projected_regions = computed.regions;
-                    self.junctions = computed.junctions;
                     self.indicators = computed.indicators;
+                    self.state = computed.state;
+                    self.unlinked = computed.unlinked;
+                    self.status = computed.status;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.running = None;
@@ -155,10 +180,10 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nator_sketch::constraint_state::Level;
 
     #[test]
-    fn changing_only_strength_invalidates_the_vertex_indicators()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn changing_only_constraints_updates_the_marks() -> Result<(), Box<dyn std::error::Error>> {
         let mut sketch = Sketch::new("Indicadores", nator_sketch::Plane::xy());
         sketch.add_line([-10., 0.], [0., 0.], false)?;
         sketch.add_line([0., 0.], [10., 0.], false)?;
@@ -178,16 +203,21 @@ mod tests {
                 Ok(())
             };
         finish(&mut cache, &sketch)?;
-        assert!(cache.junctions.iter().any(|j| !j.strong));
-        nator_sketch::junctions::set_strong(&mut sketch, [0., 0.], true)?;
-        finish(&mut cache, &sketch)?;
-        assert!(cache.junctions.iter().any(|j| j.strong));
-        // Mesmo número de pontos, entidades e restrições; apenas reference muda.
-        nator_sketch::junctions::set_strong(&mut sketch, [0., 0.], false)?;
+        assert_eq!(cache.unlinked.len(), 1);
+        let [a, _] = sketch.entities[0].point_ids()[..] else {
+            return Err("Linha sem pontas".into());
+        };
+        assert_eq!(cache.state.level(a), Level::Free);
+        // Mesmos pontos e entidades; só as restrições mudam.
+        nator_sketch::junctions::link(&mut sketch, [0., 0.])?;
+        let line = sketch.entities[0].id;
+        sketch.add_constraint(nator_sketch::ConstraintKind::Horizontal { line }, false)?;
         cache.prepare(&sketch, &context)?;
-        assert!(cache.junctions.is_empty());
+        // Enquanto o trabalhador calcula, o estado anterior continua à mostra.
+        assert_eq!(cache.state.level(a), Level::Free);
         finish(&mut cache, &sketch)?;
-        assert!(cache.junctions.iter().any(|j| !j.strong));
+        assert_eq!(cache.state.level(a), Level::Partial);
+        assert!(cache.unlinked.is_empty());
         Ok(())
     }
 

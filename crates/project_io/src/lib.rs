@@ -1,7 +1,7 @@
 //! Persistência de projetos e intercâmbio STL, sem dependência da interface.
 //! Malhas abertas são aceitas como referência; não há reparo ou conversão implícita.
 
-use nator_geometry::{Mesh, cross, norm, sub};
+use nator_geometry::{Mesh, Point3, cross, norm, sub};
 use std::{
     error::Error,
     fmt,
@@ -11,11 +11,13 @@ use std::{
 };
 
 mod project;
+mod three_mf;
 mod thumbnail;
 pub use project::{
     FORMAT_VERSION, read_project, read_thumbnail, recovery_directory, recovery_files,
     remove_recovery, write_project, write_recovery,
 };
+pub use three_mf::{ThreeMfObject, decode_3mf_model, encode_3mf, read_3mf, write_3mf};
 
 pub const MAX_STL_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_TRIANGLES: usize = 2_000_000;
@@ -86,8 +88,14 @@ pub fn decode_stl(bytes: &[u8], scale_to_mm: f64) -> Result<Mesh, ImportError> {
             .map_err(|_| ImportError("STL binário truncado ou texto ASCII inválido.".into()))?;
         decode_ascii(text, scale_to_mm)?
     };
+    // Arquivos reais trazem triângulos de área zero, inclusive os que vedam frestas ao
+    // exportar. Eles não têm volume nem superfície, e a malha validada não os aceita.
     let triangles = (0..(vertices.len() / 3) as u32)
         .map(|i| [i * 3, i * 3 + 1, i * 3 + 2])
+        .filter(|t| {
+            let [a, b, c] = t.map(|i| vertices[i as usize]);
+            norm(cross(sub(b, a), sub(c, a))) > 0.
+        })
         .collect();
     // O STL repete cada vértice em cada triângulo; a fusão exata não altera a geometria.
     Ok(Mesh::new(vertices, triangles)
@@ -170,47 +178,98 @@ fn parse_number(word: Option<&str>) -> Result<f64, ImportError> {
     value.ok_or_else(|| ImportError("Número inválido ou não finito no STL.".into()))
 }
 
-pub fn encode_stl(mesh: &Mesh, mut output: impl Write) -> Result<(), ImportError> {
-    if mesh.triangles().len() > MAX_TRIANGLES {
+/// Coordenada para mensagens, no formato decimal da interface.
+fn decimal_point(point: Point3) -> String {
+    let [x, y, z] = point.map(|v| format!("{v:.3}").replace('.', ","));
+    format!("({x}; {y}; {z})")
+}
+
+/// Fatiadores exigem um volume fechado: recusa a malha na precisão do arquivo final.
+fn require_closed(mesh: &Mesh) -> Result<(), ImportError> {
+    if mesh.topology().has_closed_oriented_edges() && mesh.signed_volume() > 0. {
+        return Ok(());
+    }
+    let defects = mesh.defective_edges();
+    Err(ImportError(match defects.first() {
+        Some(edge) => format!(
+            "A exportação exige um sólido fechado, mas {} aresta(s) têm defeito; a primeira fica em {} mm. Use Construção → Verificar sólido. A malha original foi preservada.",
+            defects.len(),
+            decimal_point(edge[0]),
+        ),
+        None => "A exportação exige volume positivo. A malha original foi preservada.".into(),
+    }))
+}
+
+/// Valida um corpo como o STL o gravará, citando o nome: um corpo com defeito interrompe
+/// a exportação antes de qualquer arquivo ser criado.
+pub fn require_printable(name: &str, mesh: &Mesh) -> Result<(), ImportError> {
+    mesh.single_precision()
+        .map_err(|e| ImportError(format!("Precisão STL insuficiente: {e}")))
+        .and_then(|quantized| require_closed(&quantized))
+        .map_err(|e| ImportError(format!("{name}: {e}")))
+}
+
+pub fn encode_stl(mesh: &Mesh, output: impl Write) -> Result<(), ImportError> {
+    encode_stl_group(&[mesh], output)
+}
+
+/// STL com vários corpos, sem união entre eles. Cada corpo é validado sozinho: peças que se
+/// encostam compartilham arestas no arquivo, mas continuam sendo sólidos fechados.
+pub fn encode_stl_group(meshes: &[&Mesh], mut output: impl Write) -> Result<(), ImportError> {
+    if meshes.iter().map(|m| m.triangles().len()).sum::<usize>() > MAX_TRIANGLES {
         return Err(ImportError(
             "Malha excede dois milhões de triângulos.".into(),
         ));
     }
     // A quantização do STL pode colapsar detalhes. Validá-la antes de começar a escrever.
-    let quantized = Mesh::new(
-        mesh.vertices()
-            .iter()
-            .map(|p| p.map(|v| f64::from(v as f32)))
-            .collect(),
-        mesh.triangles().to_vec(),
-    )
-    .map_err(|e| ImportError(format!("Precisão STL insuficiente: {e}")))?;
-    if !quantized.topology().has_closed_oriented_edges() || quantized.signed_volume() <= 0. {
-        return Err(ImportError("A exportação exige arestas fechadas, orientação consistente e volume positivo. A malha original foi preservada.".into()));
-    }
+    let quantized = meshes
+        .iter()
+        .map(|mesh| {
+            let quantized = mesh
+                .single_precision()
+                .map_err(|e| ImportError(format!("Precisão STL insuficiente: {e}")))?;
+            require_closed(&quantized)?;
+            Ok(quantized)
+        })
+        .collect::<Result<Vec<_>, ImportError>>()?;
+    // A contagem é a do arquivo: a quantização tira e acrescenta triângulos.
+    let triangles = quantized.iter().map(|m| m.triangles().len()).sum::<usize>();
     let mut header = [0_u8; 80];
     let label = b"3dnator - coordinates in millimeters";
     header[..label.len()].copy_from_slice(label);
     output.write_all(&header)?;
-    output.write_all(&(quantized.triangles().len() as u32).to_le_bytes())?;
-    for triangle in quantized.triangles() {
-        let [a, b, c] = quantized.triangle_points(*triangle);
-        let normal = cross(sub(b, a), sub(c, a));
-        let normal = normal.map(|n| n / norm(normal));
-        for point in [normal, a, b, c] {
-            for value in point {
-                output.write_all(&(value as f32).to_le_bytes())?;
+    output.write_all(&(triangles as u32).to_le_bytes())?;
+    for mesh in &quantized {
+        for triangle in mesh.triangles() {
+            let [a, b, c] = mesh.triangle_points(*triangle);
+            let normal = cross(sub(b, a), sub(c, a));
+            // Vedações de frestas têm área zero; a normal nula é aceita pelos fatiadores.
+            let length = norm(normal);
+            let normal = if length > 0. {
+                normal.map(|n| n / length)
+            } else {
+                [0.; 3]
+            };
+            for point in [normal, a, b, c] {
+                for value in point {
+                    output.write_all(&(value as f32).to_le_bytes())?;
+                }
             }
+            output.write_all(&0_u16.to_le_bytes())?;
         }
-        output.write_all(&0_u16.to_le_bytes())?;
     }
     Ok(())
 }
 
 pub fn write_stl(path: &Path, mesh: &Mesh) -> Result<(), ImportError> {
+    write_stl_group(path, &[mesh])
+}
+
+pub fn write_stl_group(path: &Path, meshes: &[&Mesh]) -> Result<(), ImportError> {
     // Nunca sobrescrever um arquivo existente sem uma escolha explícita do usuário.
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    let result = encode_stl(mesh, &mut file).and_then(|()| file.sync_all().map_err(Into::into));
+    let result =
+        encode_stl_group(meshes, &mut file).and_then(|()| file.sync_all().map_err(Into::into));
     drop(file);
     if result.is_err() {
         let _ = fs::remove_file(path);
@@ -242,7 +301,7 @@ pub fn write_stl_files(
                     break;
                 }
                 Err(_) if candidate.exists() && counter < 1000 => counter += 1,
-                Err(error) => return Err(error),
+                Err(error) => return Err(ImportError(format!("{name}: {error}"))),
             }
         }
     }
@@ -291,6 +350,48 @@ pub fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), ImportEr
 mod tests {
     use super::*;
     use nator_geometry::reference_bracket;
+
+    #[test]
+    fn a_body_with_a_needle_crack_exports_a_closed_file_with_a_correct_header()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        // Tetraedro sem a agulha 0-1-2, de 0,00001 mm: a malha de um sólido com lasca.
+        let mesh = Mesh::new(
+            vec![
+                [0., 0., 0.],
+                [10., 0., 0.],
+                [10., 1e-5, 0.],
+                [0., 10., 0.],
+                [0., 0., 10.],
+            ],
+            vec![[0, 3, 2], [2, 3, 1], [0, 1, 4], [1, 3, 4], [3, 0, 4]],
+        )?;
+        require_printable("Corpo", &mesh)?;
+        let mut bytes = Vec::new();
+        encode_stl(&mesh, &mut bytes)?;
+        let count = u32::from_le_bytes(bytes[80..84].try_into()?) as usize;
+        assert_eq!(count, 6);
+        assert_eq!(bytes.len(), 84 + 50 * count);
+        for triangle in bytes[84..].as_chunks::<50>().0 {
+            for value in triangle[..48].as_chunks::<4>().0 {
+                assert!(f32::from_le_bytes(*value).is_finite());
+            }
+        }
+        // O próprio programa relê o arquivo, com a vedação de área mínima ou zero.
+        assert!(decode_stl(&bytes, 1.)?.triangles().len() >= 5);
+        Ok(())
+    }
+
+    #[test]
+    fn an_stl_with_a_zero_area_triangle_is_read_without_it() -> Result<(), Box<dyn Error>> {
+        let mesh = reference_bracket()?;
+        let mut bytes = Vec::new();
+        encode_stl(&mesh, &mut bytes)?;
+        let count = mesh.triangles().len();
+        bytes.extend(std::iter::repeat_n(0_u8, 50));
+        bytes[80..84].copy_from_slice(&(count as u32 + 1).to_le_bytes());
+        assert_eq!(decode_stl(&bytes, 1.)?.triangles().len(), count);
+        Ok(())
+    }
 
     #[test]
     fn binary_round_trip_preserves_dimensions_orientation_and_volume() -> Result<(), Box<dyn Error>>
@@ -398,4 +499,8 @@ mod tests {
 }
 
 mod preferences;
-pub use preferences::{read_color_preference, write_color_preference};
+pub use preferences::{
+    PrintExportPreferences, read_color_preference, read_preference, read_print_export,
+    read_print_profiles, write_color_preference, write_preference, write_print_export,
+    write_print_profiles,
+};

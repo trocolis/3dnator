@@ -38,7 +38,7 @@ pub(super) fn controls(ui: &mut egui::Ui) -> WindowButtons {
             );
             let close = icons::button(ui, Icon::Close, text(T::CloseWindow), false, false);
             if close.hovered() {
-                ui.painter().rect_filled(close.rect, 5, theme::DANGER);
+                ui.painter().rect_filled(close.rect, 5, theme::danger());
                 icons::paint_with_ink(
                     ui.painter(),
                     egui::Rect::from_center_size(close.rect.center(), egui::Vec2::splat(18.)),

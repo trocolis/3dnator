@@ -6,23 +6,33 @@ use nator_commands::extrusion::Guide;
 #[derive(Default)]
 pub(super) struct Interaction {
     pub(super) guide: Option<Guide>,
+    /// Realce da célula escolhida, calculado junto com a guia.
+    area: Option<highlight::Overlay>,
     drag: Option<Drag>,
     input: distance_arrow::Input,
     input_start: bool,
+    /// O campo já abriu sozinho para este perfil: fechá-lo não o reabre a cada quadro.
+    offered: bool,
 }
 struct Drag {
     motion: distance_arrow::Drag,
     start: bool,
 }
 impl ExtrudeDraft {
-    fn set_mouse_endpoint(&mut self, value: f64, start: bool, current_from: f64) {
+    fn set_mouse_endpoint(
+        &mut self,
+        value: f64,
+        start: bool,
+        current_from: f64,
+        unit: nator_document::LengthUnit,
+    ) {
         self.to_face = false;
         if let Some((from, _)) = self.custom.take() {
             self.offset = from;
             self.direction = Direction::OneSide;
         }
         if self.direction == Direction::TwoSides {
-            let expression = format!("{} mm", value.abs());
+            let expression = unit.expression(value.abs());
             if start != self.flip {
                 self.distance2 = expression;
             } else {
@@ -37,7 +47,7 @@ impl ExtrudeDraft {
                 value
             };
             self.flip = length < 0.;
-            self.distance = format!("{} mm", length.abs());
+            self.distance = unit.expression(length.abs());
         }
     }
 }
@@ -74,15 +84,20 @@ impl Draft {
     pub(in crate::desktop::project_editor) fn accepts_face_profile(&self) -> bool {
         self.tool == Tool::Extrude
     }
+    pub(in crate::desktop::project_editor) fn area_overlay(&self) -> Option<&highlight::Overlay> {
+        self.interaction.area.as_ref()
+    }
     pub(in crate::desktop::project_editor) fn receive_extrusion(
         &mut self,
         guide: Option<Guide>,
         choice: Option<Combine>,
+        area: Option<highlight::Overlay>,
     ) {
         if self.tool != Tool::Extrude {
             return;
         }
         self.interaction.guide = guide;
+        self.interaction.area = area;
         if self.automatic {
             self.combine = match choice.map(|c| c.mode) {
                 None => 0,
@@ -120,6 +135,7 @@ impl Editor {
         let Some(g) = d.interaction.guide else {
             return false;
         };
+        let settings = self.current().session.document().settings();
         let Some(part) = self.current().session.document().part(d.part) else {
             return false;
         };
@@ -174,6 +190,7 @@ impl Editor {
             .or_else(|| ui.input(|i| i.pointer.hover_pos()));
         let painter = ui.painter().with_clip_rect(response.rect);
         let mut active_handle = None;
+        let mut end_tip = None;
         for (distance, start) in [(to, false), (from, true)] {
             if start && d.extrude.direction != Direction::TwoSides {
                 continue;
@@ -208,6 +225,9 @@ impl Editor {
             ui.ctx().data_mut(|data| {
                 data.insert_temp(egui::Id::new(("extrusion_tip", start)), position)
             });
+            if !start {
+                end_tip = Some(position);
+            }
             let over = pointer.is_some_and(|p| p.distance(position) < 16.);
             hovered |= over;
             let sign = if distance < 0. || (start && distance.abs() < 1e-7) {
@@ -224,9 +244,9 @@ impl Editor {
             painter.text(
                 position + egui::vec2(16., -12.),
                 egui::Align2::LEFT_BOTTOM,
-                format!("{} mm", nator_drawing::format_mm(distance)),
+                settings.length_label(distance),
                 egui::FontId::proportional(13.),
-                theme::INK,
+                theme::ink(),
             );
             if arrow.started(ui, response) {
                 active_handle = Some((distance, start));
@@ -234,6 +254,23 @@ impl Editor {
         }
         if hovered {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        // Assim que a seta aparece, o campo abre com foco: basta digitar e dar Enter;
+        // Esc devolve o valor anterior. Arrastar a seta continua funcionando.
+        if !d.interaction.offered
+            && !d.interaction.input.active()
+            && d.interaction.drag.is_none()
+            && active_handle.is_none()
+            && let Some(tip) = end_tip
+        {
+            d.interaction.offered = true;
+            d.interaction.input_start = false;
+            let measure = if d.extrude.direction == Direction::OneSide {
+                to - from
+            } else {
+                to
+            };
+            d.interaction.input.begin(measure, tip);
         }
         if let Some((initial, start)) = active_handle {
             let measure = if d.extrude.direction == Direction::OneSide {
@@ -251,6 +288,7 @@ impl Editor {
                     axis,
                     pixels_per_unit: scale,
                     initial,
+                    step: settings.mouse_step_mm,
                 },
                 start,
             });
@@ -263,7 +301,8 @@ impl Editor {
             if let Some(pointer) = pointer {
                 let value = drag.motion.value(pointer);
                 if value.is_finite() && value.abs() <= 1e7 {
-                    d.extrude.set_mouse_endpoint(value, drag.start, from);
+                    d.extrude
+                        .set_mouse_endpoint(value, drag.start, from, settings.unit);
                     ui.ctx().request_repaint();
                 }
             }
@@ -298,6 +337,7 @@ impl Editor {
             measure,
             dragging,
             T::DistanceField,
+            panel::Quantity::Length,
             |s| length(s).filter(|v| v.abs() <= 1e7),
         );
         if let Some(value) = edit.value {
@@ -306,8 +346,12 @@ impl Editor {
             } else {
                 value
             };
-            d.extrude
-                .set_mouse_endpoint(endpoint, d.interaction.input_start, current_from);
+            d.extrude.set_mouse_endpoint(
+                endpoint,
+                d.interaction.input_start,
+                current_from,
+                settings.unit,
+            );
         }
         if edit.finished {
             d.interaction.drag = None;
@@ -334,23 +378,23 @@ mod tests {
             offset: "5 mm".into(),
             ..Default::default()
         };
-        d.set_mouse_endpoint(20., false, 5.);
+        d.set_mouse_endpoint(20., false, 5., nator_document::LengthUnit::Millimeter);
         assert_eq!(limits(&d)?, (5., 20.));
-        d.set_mouse_endpoint(3., false, 5.);
+        d.set_mouse_endpoint(3., false, 5., nator_document::LengthUnit::Millimeter);
         assert_eq!(limits(&d)?, (5., 3.));
         d.custom = Some(("2 mm + 3 mm".into(), "16 mm".into()));
-        d.set_mouse_endpoint(15., false, 5.);
+        d.set_mouse_endpoint(15., false, 5., nator_document::LengthUnit::Millimeter);
         assert_eq!(limits(&d)?, (5., 15.));
         d.direction = Direction::TwoSides;
         d.flip = false;
         d.distance = "10 mm".into();
-        d.set_mouse_endpoint(-4., true, -10.);
+        d.set_mouse_endpoint(-4., true, -10., nator_document::LengthUnit::Millimeter);
         assert_eq!(limits(&d)?, (-4., 10.));
         d.flip = true;
-        d.set_mouse_endpoint(15., false, -10.);
+        d.set_mouse_endpoint(15., false, -10., nator_document::LengthUnit::Millimeter);
         assert_eq!(limits(&d)?, (-10., 15.));
         d.direction = Direction::Symmetric;
-        d.set_mouse_endpoint(-7., false, -10.);
+        d.set_mouse_endpoint(-7., false, -10., nator_document::LengthUnit::Millimeter);
         assert_eq!(limits(&d)?, (-7., 7.));
         let mut draft = Draft::new(1, PartId(1), Tool::Extrude);
         draft.field = Some(Field::Target);

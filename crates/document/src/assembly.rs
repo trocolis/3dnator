@@ -133,16 +133,25 @@ impl Document {
     /// compartilhados até uma edição, e os nomes de faces passam ao novo dono, para que
     /// operações futuras sobre a cópia não confundam suas faces com as do original.
     pub fn copy_body(&mut self, id: BodyId, placement: Placement) -> Result<BodyId, DocumentError> {
-        let source = self
-            .body(id)
-            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?
-            .clone();
         let part = self
             .parts
             .iter()
             .find(|p| p.bodies.iter().any(|b| b.id == id))
             .map(|p| p.id)
             .ok_or_else(|| DocumentError("Peça do corpo inexistente.".into()))?;
+        self.copy_body_to(id, part, placement)
+    }
+    /// Cópia sem histórico do corpo na peça `part`, que pode ser outra.
+    pub fn copy_body_to(
+        &mut self,
+        id: BodyId,
+        part: PartId,
+        placement: Placement,
+    ) -> Result<BodyId, DocumentError> {
+        let source = self
+            .body(id)
+            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?
+            .clone();
         let copy = self.allocate_body_id()?;
         let map = HashMap::from([(id, copy)]);
         let face_names = Arc::new(
@@ -296,6 +305,8 @@ impl Document {
                     .ok_or_else(|| DocumentError("Plano limite ausente ao clonar.".into()))?;
             }
         }
+        // A peça vinda de outro projeto passa a seguir o perfil deste.
+        part.parameters.inherited = self.print_profile.parameters();
         self.parts.push(part);
         for image in from
             .images

@@ -89,7 +89,11 @@ impl Input {
                     egui::TextEdit::singleline(&mut self.fields[index])
                         .id(id)
                         .desired_width(150.)
-                        .hint_text(if primitive.angular(index) { "°" } else { "mm" }),
+                        .hint_text(if primitive.angular(index) {
+                            "°"
+                        } else {
+                            panel::settings(ui.ctx()).unit.suffix()
+                        }),
                 );
                 if response.gained_focus() && !response.changed() {
                     select_text(ui.ctx(), id, &self.fields[index]);
@@ -117,25 +121,27 @@ impl Input {
             &[0, 1]
         }
     }
+    /// Campos digitados, com precedência sobre as medidas do mouse em `free`.
     fn values(
         &self,
         parameters: &Parameters,
         primitive: Primitive,
+        free: [Option<f64>; 2],
+        unit: nator_document::LengthUnit,
     ) -> Result<[Option<f64>; 2], String> {
-        let mut values = [None, None];
+        let mut values = free;
         for (index, value) in values.iter_mut().enumerate().take(primitive.field_count()) {
             if self.locked[index] && !(self.infinite && index == 0) {
                 *value = Some(
-                    parameters
-                        .evaluate(
-                            &self.fields[index],
-                            if primitive.angular(index) {
-                                Dimension::Angle
-                            } else {
-                                Dimension::Length
-                            },
+                    if primitive.angular(index) {
+                        parameters.evaluate(&self.fields[index], Dimension::Angle)
+                    } else {
+                        parameters.evaluate(
+                            &unit.normalize_expression(&self.fields[index]),
+                            Dimension::Length,
                         )
-                        .map_err(sketch_error)?,
+                    }
+                    .map_err(sketch_error)?,
                 );
             }
         }
@@ -146,18 +152,21 @@ impl Input {
         primitive: Primitive,
         anchors: &[Point2],
         parameters: &Parameters,
+        free: [Option<f64>; 2],
+        unit: nator_document::LengthUnit,
     ) -> Result<Preview, String> {
         drafting::preview_with_sweep(
             primitive,
             anchors,
             self.cursor.unwrap_or(anchors[0]),
-            self.values(parameters, primitive)?,
+            self.values(parameters, primitive, free, unit)?,
             self.reference_angle,
             (primitive == Primitive::Arc && anchors.len() == 2).then(|| self.arc_sweep.value()),
         )
         .map_err(sketch_error)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn show(
         &mut self,
         context: &egui::Context,
@@ -165,21 +174,49 @@ impl Input {
         primitive: Primitive,
         anchors: &[Point2],
         parameters: &Parameters,
+        steps: Option<drafting::Steps>,
         enabled: bool,
     ) -> Output {
+        let settings = panel::settings(context);
+        // Se a medida perdeu o foco (clique no canvas, por exemplo), a primeira
+        // tecla devolve o foco ao campo e entra na expressão em vez de virar atalho.
+        if enabled
+            && !self.focus
+            && context.memory(|memory| memory.focused().is_none())
+            && context.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::Text(text) if !text.is_empty()))
+            })
+        {
+            self.focus = true;
+        }
         let cursor = self.cursor.unwrap_or(anchors[0]);
         if primitive == Primitive::Arc && anchors.len() == 2 {
             self.arc_sweep.update(anchors[0], anchors[1], cursor);
         }
-        let measured = drafting::preview_with_sweep(
-            primitive,
-            anchors,
-            cursor,
-            [None, None],
-            self.reference_angle,
-            (primitive == Primitive::Arc && anchors.len() == 2).then(|| self.arc_sweep.value()),
-        )
-        .ok();
+        let sweep =
+            (primitive == Primitive::Arc && anchors.len() == 2).then(|| self.arc_sweep.value());
+        let measure = |locked| {
+            drafting::preview_with_sweep(
+                primitive,
+                anchors,
+                cursor,
+                locked,
+                self.reference_angle,
+                sweep,
+            )
+            .ok()
+        };
+        let free_measure = measure([None, None]);
+        // Sem apoio exato, o que segue o mouse anda na precisão configurada.
+        let free = steps
+            .zip(free_measure.as_ref())
+            .map_or([None, None], |(steps, measure)| {
+                drafting::stepped(primitive, anchors.len(), measure.values, steps)
+            });
+        let measured = measure(free).or(free_measure);
         let width_only = primitive == Primitive::InclinedRectangle && anchors.len() == 2;
         let indices = self.indices(primitive, anchors.len());
         if !indices.contains(&self.active) {
@@ -194,7 +231,7 @@ impl Input {
                 self.fields[index] = if primitive.angular(index) {
                     format!("{} deg", nator_drawing::format_mm(value.to_degrees()))
                 } else {
-                    format!("{} mm", nator_drawing::format_mm(value))
+                    settings.length_label(value)
                 };
             }
         }
@@ -237,7 +274,7 @@ impl Input {
             }
         }
         let next = self
-            .preview(primitive, anchors, parameters)
+            .preview(primitive, anchors, parameters, free, settings.unit)
             .ok()
             .or(measured);
         let mouse = frame.screen(cursor).unwrap_or(frame.rect.center());
@@ -374,7 +411,7 @@ impl Input {
                 .iter()
                 .any(|i| m.has_focus(field_id(*i)) || m.has_focus(panel_field_id(*i)))
         });
-        let result = self.preview(primitive, anchors, parameters);
+        let result = self.preview(primitive, anchors, parameters, free, settings.unit);
         let painter = context
             .layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
@@ -392,7 +429,7 @@ impl Input {
                 egui::Align2::LEFT_TOP,
                 error,
                 egui::FontId::proportional(12.),
-                theme::DANGER,
+                theme::danger(),
             );
         }
         Output {
@@ -431,7 +468,7 @@ impl Input {
             ui.painter().circle_filled(
                 response.rect.right_top() + egui::vec2(-4., 4.),
                 2.5,
-                theme::ACCENT,
+                theme::accent(),
             );
         }
         response.on_hover_text(format!(

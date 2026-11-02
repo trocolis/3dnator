@@ -1,12 +1,14 @@
 //! Tipos próprios compartilhados: a malha de apresentação não substitui o sólido CAD.
 
-use std::{collections::HashMap, error::Error, fmt};
+use std::{cmp::Ordering, collections::HashMap, error::Error, fmt};
 
 mod placement;
 mod polygon;
 pub use polygon::{planar_polygon_centers, polygon_center};
 pub mod query;
 pub use placement::Placement;
+pub mod printability;
+pub mod silhouette;
 
 pub type Point3 = [f64; 3];
 
@@ -66,6 +68,59 @@ pub struct Mesh {
     bounds: Bounds,
 }
 
+fn single(value: f64) -> f64 {
+    f64::from(value as f32)
+}
+fn has_area([a, b, c]: [Point3; 3]) -> bool {
+    norm(cross(sub(b, a), sub(c, a))) > 0.
+}
+/// Largura abaixo da qual um laço de borda é fresta numérica, não um furo do modelo: mil
+/// vezes menor que uma camada, e ainda bem acima das lascas que o `f32` não representa.
+const CRACK_WIDTH_MM: f64 = 1e-3;
+
+/// Retira de `next` o laço que passa por `start`, seguindo as bordas orientadas.
+fn next_loop(next: &mut HashMap<u32, Vec<u32>>, start: u32) -> Option<Vec<u32>> {
+    let mut path = vec![start];
+    let mut at = start;
+    loop {
+        let targets = next.get_mut(&at)?;
+        let step = targets.pop()?;
+        if step == start {
+            return Some(path);
+        }
+        // Passar de novo por um vértice fecha um laço menor dentro do caminho.
+        if let Some(index) = path.iter().position(|p| *p == step) {
+            return Some(path.split_off(index));
+        }
+        path.push(step);
+        at = step;
+    }
+}
+
+/// Área do polígono por perímetro dá a largura média; uma fresta tem quase nenhuma.
+fn is_crack(points: &[Point3]) -> bool {
+    let origin = points[0];
+    let mut normal = [0.; 3];
+    let mut perimeter = 0.;
+    for (a, b) in points.iter().zip(points.iter().cycle().skip(1)) {
+        let area = cross(sub(*a, origin), sub(*b, origin));
+        normal = std::array::from_fn(|i| normal[i] + area[i]);
+        perimeter += norm(sub(*b, *a));
+    }
+    norm(normal) / 2. <= CRACK_WIDTH_MM * perimeter
+}
+fn bounds_of(vertices: &[Point3]) -> Bounds {
+    let mut bounds = Bounds {
+        min: [f64::INFINITY; 3],
+        max: [f64::NEG_INFINITY; 3],
+    };
+    for point in vertices {
+        bounds.min = std::array::from_fn(|axis| bounds.min[axis].min(point[axis]));
+        bounds.max = std::array::from_fn(|axis| bounds.max[axis].max(point[axis]));
+    }
+    bounds
+}
+
 impl Mesh {
     pub fn new(vertices: Vec<Point3>, triangles: Vec<[u32; 3]>) -> Result<Self, GeometryError> {
         let first = vertices
@@ -101,9 +156,10 @@ impl Mesh {
             let normal = cross(sub(*b, *a), sub(*c, *a));
             let length = norm(normal);
             if !length.is_finite() || length <= 0.0 {
-                return Err(GeometryError(
-                    "Triângulo degenerado ou fora do intervalo numérico.".into(),
-                ));
+                return Err(GeometryError(format!(
+                    "Triângulo degenerado ou fora do intervalo numérico perto de X {:.3}, Y {:.3}, Z {:.3}.",
+                    a[0], a[1], a[2]
+                )));
             }
         }
         Ok(Self {
@@ -271,6 +327,144 @@ impl Mesh {
         (topology, mask)
     }
 
+    /// Mesma malha nas coordenadas `f32` do STL. O arredondamento pode colapsar frestas
+    /// microscópicas, então a topologia de exportação só é conhecida depois dele.
+    ///
+    /// Longe da origem o `f32` do STL não distingue pontos a alguns milionésimos de milímetro.
+    /// Um triângulo com dois vértices iguais depois de arredondar sai da malha: as duas
+    /// arestas restantes coincidem e os vizinhos continuam fechados. Já três pontos distintos
+    /// sobre uma reta ficam, com área zero, porque retirá-los abriria uma fresta: o triângulo
+    /// vizinho ainda usa a aresta longa. Frestas de largura desprezível são vedadas, porque
+    /// o gerador de malha do OCCT não triangula faces finas demais. Nada disso muda o volume;
+    /// bordas abertas de verdade continuam abertas e são acusadas.
+    pub fn single_precision(&self) -> Result<Mesh, GeometryError> {
+        self.quantized(single)
+    }
+
+    /// Mesma malha com as coordenadas arredondadas por `round`, com as regras acima: é o
+    /// que STL e 3MF gravam. O resultado pode ter triângulos de área zero.
+    pub fn quantized(&self, round: impl Fn(f64) -> f64) -> Result<Mesh, GeometryError> {
+        let vertices = self
+            .vertices
+            .iter()
+            .map(|p| p.map(&round))
+            .collect::<Vec<_>>();
+        let triangles = self
+            .triangles
+            .iter()
+            .filter(|t| {
+                let [a, b, c] = t.map(|i| vertices[i as usize]);
+                a != b && b != c && a != c
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        if triangles.is_empty() {
+            return Err(GeometryError("A malha não tem triângulos.".into()));
+        }
+        let mut result = Mesh {
+            bounds: bounds_of(&vertices),
+            vertices,
+            triangles,
+        };
+        let seals = result.crack_seals();
+        result.triangles.extend(seals);
+        Ok(result)
+    }
+
+    /// Triângulos que vedam os laços de borda de largura desprezível.
+    fn crack_seals(&self) -> Vec<[u32; 3]> {
+        let ids = self.point_ids();
+        // Primeiro índice de cada posição: vértices iguais podem estar repetidos.
+        let mut representative = HashMap::new();
+        for (index, id) in ids.iter().enumerate() {
+            representative.entry(*id).or_insert(index as u32);
+        }
+        let mut directed = HashMap::<(u32, u32), i32>::new();
+        for triangle in &self.triangles {
+            for i in 0..3 {
+                let (a, b) = (
+                    ids[triangle[i] as usize],
+                    ids[triangle[(i + 1) % 3] as usize],
+                );
+                *directed.entry((a, b)).or_default() += 1;
+            }
+        }
+        let mut next = HashMap::<u32, Vec<u32>>::new();
+        for ((a, b), count) in &directed {
+            if *count - directed.get(&(*b, *a)).copied().unwrap_or(0) == 1 {
+                next.entry(*a).or_default().push(*b);
+            }
+        }
+        let mut starts = next.keys().copied().collect::<Vec<_>>();
+        starts.sort_unstable();
+        let mut seals = Vec::new();
+        for start in starts {
+            while let Some(mut loop_points) = next_loop(&mut next, start) {
+                let position = |id: u32| {
+                    representative
+                        .get(&id)
+                        .map(|index| self.vertices[*index as usize])
+                };
+                let points = loop_points
+                    .iter()
+                    .filter_map(|id| position(*id))
+                    .collect::<Vec<_>>();
+                if loop_points.len() < 3 || points.len() != loop_points.len() || !is_crack(&points)
+                {
+                    continue;
+                }
+                let first = loop_points.remove(0);
+                for pair in loop_points.windows(2) {
+                    // A borda a → b do laço precisa da aresta b → a do lado de cá.
+                    seals.push([first, pair[1], pair[0]].map(|id| representative[&id]));
+                }
+            }
+        }
+        seals
+    }
+
+    /// Triângulos que somem no `f32`: detalhes menores que a precisão do STL.
+    pub fn collapsed_in_single_precision(&self) -> Vec<usize> {
+        self.triangles
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !has_area(self.triangle_points(**t).map(|p| p.map(single))))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Arestas que impedem uma malha fechada e orientada: bordas abertas, compartilhadas por
+    /// mais de dois triângulos ou de sentido incoerente. A ordem não depende da triangulação.
+    pub fn defective_edges(&self) -> Vec<[Point3; 2]> {
+        let ids = self.point_ids();
+        let mut edges: HashMap<u64, (u32, i32, [Point3; 2])> =
+            HashMap::with_capacity(self.triangles.len() * 2);
+        for t in &self.triangles {
+            for local in 0..3 {
+                let (a, b) = (t[local] as usize, t[(local + 1) % 3] as usize);
+                let (x, y) = (ids[a], ids[b]);
+                let key = (u64::from(x.min(y)) << 32) | u64::from(x.max(y));
+                let entry =
+                    edges
+                        .entry(key)
+                        .or_insert((0, 0, [self.vertices[a], self.vertices[b]]));
+                entry.0 += 1;
+                entry.1 += if x < y { 1 } else { -1 };
+            }
+        }
+        let mut defects = edges
+            .into_values()
+            .filter(|(count, balance, _)| *count != 2 || *balance != 0)
+            .map(|(.., points)| points)
+            .collect::<Vec<_>>();
+        defects.sort_by(|a, b| {
+            a.as_flattened()
+                .partial_cmp(b.as_flattened())
+                .unwrap_or(Ordering::Equal)
+        });
+        defects
+    }
+
     /// Centroide volumétrico da malha fechada, calculado por tetraedros orientados.
     pub fn mass_center(&self) -> Result<(Point3, f64), GeometryError> {
         let origin = self.bounds.center();
@@ -294,6 +488,15 @@ impl Mesh {
             volume,
         ))
     }
+    pub fn surface_area(&self) -> f64 {
+        self.triangles
+            .iter()
+            .map(|t| {
+                let [a, b, c] = self.triangle_points(*t);
+                norm(cross(sub(b, a), sub(c, a))) / 2.
+            })
+            .sum()
+    }
     pub fn signed_volume(&self) -> f64 {
         // Transladar a referência reduz cancelamento numérico em modelos longe da origem.
         let origin = self.bounds.center();
@@ -307,7 +510,7 @@ impl Mesh {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Topology {
     pub boundary_edges: usize,
     pub non_manifold_edges: usize,
@@ -377,6 +580,27 @@ pub fn reference_bracket() -> Result<Mesh, GeometryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn defective_edges_name_open_and_shared_edges() -> Result<(), Box<dyn std::error::Error>> {
+        let vertices = vec![
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.],
+            [0., -1., 0.],
+        ];
+        let open = Mesh::new(vertices.clone(), vec![[0, 1, 2]])?;
+        assert_eq!(open.defective_edges().len(), 3);
+        // A aresta 0-1 recebe três triângulos: só ela é não manifold nas duas pontas.
+        let fan = Mesh::new(vertices, vec![[0, 1, 2], [1, 0, 3], [0, 1, 4]])?;
+        assert!(fan.topology().non_manifold_edges == 1);
+        assert!(
+            fan.defective_edges()
+                .iter()
+                .any(|edge| edge.contains(&[0., 0., 0.]) && edge.contains(&[1., 0., 0.]))
+        );
+        Ok(())
+    }
 
     #[test]
     fn bracket_is_closed_and_has_analytical_volume() -> Result<(), Box<dyn Error>> {
@@ -472,5 +696,115 @@ mod tests {
         assert!(topology.boundary_edges > 0);
         assert!(mask.iter().map(|m| m.count_ones()).sum::<u32>() > 30);
         Ok(())
+    }
+
+    /// Prisma de base triangular com uma fita de 0,0000001 mm, longe da origem: em `f32` os
+    /// dois lados da fita caem no mesmo número.
+    fn prism_with_a_sliver() -> Result<Mesh, GeometryError> {
+        let (x, sliver) = (65.5, 65.5 + 1e-7);
+        let vertices = vec![
+            [x, 0., 0.],
+            [sliver, 0., 0.],
+            [80., 0., 0.],
+            [x, 10., 0.],
+            [x, 0., 5.],
+            [sliver, 0., 5.],
+            [80., 0., 5.],
+            [x, 10., 5.],
+        ];
+        Mesh::new(
+            vertices,
+            vec![
+                // Fundo e topo.
+                [0, 3, 1],
+                [1, 3, 2],
+                [4, 5, 7],
+                [5, 6, 7],
+                // Parede com a fita 0-1-5-4 e a parede 1-2-6-5.
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                // Paredes restantes.
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+            ],
+        )
+    }
+
+    #[test]
+    fn a_sliver_below_stl_precision_leaves_the_mesh_closed_instead_of_failing()
+    -> Result<(), GeometryError> {
+        let mesh = prism_with_a_sliver()?;
+        assert!(mesh.topology().has_closed_oriented_edges());
+        // A fita e os dois triângulos de fundo e topo que encostam nela têm vértices iguais.
+        let collapsed = mesh.collapsed_in_single_precision();
+        assert_eq!(collapsed, vec![0, 2, 4, 5]);
+        let stl = mesh.single_precision()?;
+        assert_eq!(stl.triangles().len(), mesh.triangles().len() - 4);
+        assert!(stl.topology().has_closed_oriented_edges());
+        assert!((stl.signed_volume() - mesh.signed_volume()).abs() < 1e-3);
+        Ok(())
+    }
+
+    #[test]
+    fn three_distinct_points_on_a_line_stay_because_removing_them_would_open_the_mesh()
+    -> Result<(), GeometryError> {
+        let mesh = Mesh::new(
+            vec![[0., 0., 0.], [1., 1e-50, 0.], [2., 0., 0.]],
+            vec![[0, 1, 2]],
+        )?;
+        assert_eq!(mesh.collapsed_in_single_precision(), vec![0]);
+        assert!(mesh.single_precision()?.triangles().contains(&[0, 1, 2]));
+        Ok(())
+    }
+
+    /// Tetraedro com uma face partida em dois triângulos, para retirar um deles.
+    fn tetrahedron(apex: Point3) -> Result<Mesh, GeometryError> {
+        Mesh::new(
+            vec![
+                [0., 0., 0.],
+                [10., 0., 0.],
+                [10., 1e-5, 0.],
+                [0., 10., 0.],
+                [0., 0., 10.],
+                apex,
+            ],
+            vec![[0, 3, 2], [2, 3, 1], [0, 1, 4], [1, 3, 4], [3, 0, 4]],
+        )
+    }
+
+    #[test]
+    fn a_needle_crack_is_sealed_and_a_real_hole_stays_open() -> Result<(), GeometryError> {
+        // Falta só a agulha 0-1-2, de 0,00001 mm de altura, no fundo do tetraedro.
+        let cracked = tetrahedron([0.; 3])?;
+        assert!(!cracked.topology().has_closed_oriented_edges());
+        let sealed = cracked.single_precision()?;
+        assert!(sealed.topology().has_closed_oriented_edges());
+        assert_eq!(sealed.triangles().len(), cracked.triangles().len() + 1);
+        // Sem uma face inteira, a borda é larga: é defeito de verdade e fica aberta,
+        // mesmo com a agulha ao lado vedada.
+        let mut triangles = cracked.triangles().to_vec();
+        triangles.pop();
+        let open = Mesh::new(cracked.vertices().to_vec(), triangles)?;
+        assert!(
+            !open
+                .single_precision()?
+                .topology()
+                .has_closed_oriented_edges()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_degenerate_triangle_error_says_where_it_is() {
+        let result = Mesh::new(
+            vec![[1., 2., 3.], [1., 2., 3.], [4., 5., 6.]],
+            vec![[0, 1, 2]],
+        );
+        let message = result.map(|_| ()).err().map(|e| e.to_string());
+        assert!(message.is_some_and(|m| m.contains("X 1.000, Y 2.000, Z 3.000")));
     }
 }

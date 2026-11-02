@@ -394,10 +394,6 @@ impl Camera {
     pub fn roll_angle(&self) -> f64 {
         self.roll
     }
-    pub fn reset_roll(&mut self) {
-        self.roll = 0.;
-        self.step_rotation = None;
-    }
 
     /// Passo rígido de 45° ao redor da normal da face principal predominante.
     /// A área projetada das seis faces iguais é proporcional a |normal·direção|.

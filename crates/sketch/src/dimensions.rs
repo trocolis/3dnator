@@ -44,6 +44,8 @@ pub(crate) fn participants(kind: &ConstraintKind) -> (Vec<u64>, Vec<u64>) {
     match *kind {
         Fixed { point, .. } => (vec![point], vec![]),
         Coincident { a, b }
+        | PointsHorizontal { a, b }
+        | PointsVertical { a, b }
         | Distance { a, b, .. }
         | DeltaX { a, b, .. }
         | DeltaY { a, b, .. }
@@ -58,9 +60,15 @@ pub(crate) fn participants(kind: &ConstraintKind) -> (Vec<u64>, Vec<u64>) {
             line, reference, ..
         } => (vec![], vec![line, reference]),
         LineCircleDistance { line, circle, .. } => (vec![], vec![line, circle]),
-        Parallel { a, b } | Perpendicular { a, b } | EqualLength { a, b } | Concentric { a, b } => {
-            (vec![], vec![a, b])
-        }
+        Parallel { a, b }
+        | Perpendicular { a, b }
+        | EqualLength { a, b }
+        | Concentric { a, b }
+        | Collinear { a, b }
+        | EqualRadius { a, b }
+        | CircleTangent { a, b, .. } => (vec![], vec![a, b]),
+        Symmetric { a, b, axis } => (vec![a, b], vec![axis]),
+        OriginOnCurve { curve } => (vec![], vec![curve]),
         Tangent { line, arc, point } => (vec![point], vec![line, arc]),
     }
 }

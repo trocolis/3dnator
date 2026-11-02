@@ -1,6 +1,6 @@
 # 3dnator
 
-Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos. O protótipo 0.18.0 já percorre o fluxo da primeira peça utilizável: rascunho cotado por parâmetros, extrusão, furos, arredondamentos, alteração de cota com recálculo, salvamento, reabertura e exportação STEP/STL, com o núcleo OCCT validado no Linux.
+Aplicativo CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos. O protótipo 0.29.0 já percorre o fluxo da primeira peça utilizável: rascunho cotado por parâmetros, extrusão, furos, arredondamentos, alteração de cota com recálculo, salvamento, reabertura e exportação STEP/STL, com o núcleo OCCT validado no Linux.
 
 O projeto é de código aberto, sob a [licença MIT](LICENSE) para o código próprio. Dependências e recursos de terceiros mantêm suas respectivas licenças. O código está publicado em <https://github.com/trocolis/3dnator>.
 
@@ -17,11 +17,12 @@ Sem a feature `occt` (e o SDK OCCT 7.x instalado), o editor funciona com corpos 
 O protótipo oferece, em resumo:
 
 - projetos em abas, desfazer/refazer, salvamento autocontido e recuperação automática;
-- rascunhos com restrições, cotas ligadas a parâmetros, aparar, estender, offset, espelhamento, padrões e refinamento de cantos;
+- rascunhos com restrições, cotas ligadas a parâmetros, aparar, estender, offset, espelhamento e refinamento de cantos;
 - histórico paramétrico com extrusão, revolução, booleanas, arredondamento, chanfro, casca, furos (rebaixo, escareado, passantes, rosca registrada), padrões, espelhamento e divisão, com referências estáveis a regiões, faces e arestas;
 - seleção de arestas e faces na área 3D, medição exata no B-rep e montagem com subpeças, clones, grupos, padrões e espelhamento de instâncias e conjuntos aninhados;
 - folhas técnicas com vistas HLR e cortes do B-rep, cotas associativas reposicionáveis, múltiplos cortes hachurados e exportação PNG/PDF;
-- exportação STL por corpo, por definição ou da montagem, com qualidade escolhida, e intercâmbio STEP de sólidos e montagens com cores e definições compartilhadas.
+- perfil de impressão genérico, sem marca de impressora ou fatiador, com bico, camada e folgas usáveis nas expressões de todas as peças;
+- exportação 3MF e STL por corpo, por definição ou da montagem, com qualidade escolhida, face apoiada na mesa e abertura no fatiador, e intercâmbio STEP de sólidos e montagens com cores e definições compartilhadas.
 
 O que ainda falta do escopo abaixo está registrado em [ROADMAP.md](ROADMAP.md), na seção Situação atual. A [auditoria do plano](docs/PLAN_AUDIT.md) distingue implementação de aceite completo. Verificações locais e medições estão em [docs/VALIDATION.md](docs/VALIDATION.md).
 
@@ -91,7 +92,7 @@ As seções seguintes descrevem o escopo completo aprovado.
 
 - Ferramenta Medir informa distância entre vértices e componentes X/Y/Z, comprimento de arestas, raio/diâmetro e comprimento de arcos, ângulo e distância entre faces paralelas, menor distância entre corpos/peças, área, volume e centro de massa.
 - Medições não alteram a geometria. Coordenadas seguem a origem da peça na construção e a origem da montagem nesse contexto.
-- Milímetros são a unidade padrão; campos aceitam unidades explícitas como mm, cm e in. Casas decimais de exibição são configuráveis e não definem a precisão interna.
+- Milímetros são a unidade padrão e a interna; Configurações → Desenho escolhe mm ou polegada para exibição e números digitados sem unidade, e campos aceitam unidades explícitas como mm, cm e in. A precisão do mouse define o passo ao desenhar e arrastar, sem limitar medidas digitadas. Casas decimais de exibição são configuráveis e não definem a precisão interna.
 - Sem materiais definidos, o centro de massa assume densidade uniforme; essa hipótese deve ser indicada nas medições.
 - Ferramentas de cotagem desenham medidas lineares, angulares, raios e diâmetros, com linhas auxiliares, setas e texto reposicionável. Distinguir cotas que controlam o rascunho das anotações de medição e documentação.
 - Corte de visualização por plano deslocável, com inversão do lado visível, preserva os corpos. Nas folhas, vistas em corte possuem identificação, como A–A, e hachuras nas regiões seccionadas.
@@ -130,6 +131,7 @@ As seções seguintes descrevem o escopo completo aprovado.
 - Ferramenta de furos com diâmetro e profundidade, opção passante, rebaixo cilíndrico e escareado com diâmetro e ângulo.
 - Posicionamento por pontos de rascunho, incluindo vários furos na mesma operação, com seleção dos corpos afetados da peça ativa.
 - Operações editáveis no histórico, com suporte a parâmetros e expressões nas medidas.
+- Fixação para peças impressas: passante, cabeça embutida, autoatarrachante, inserto a quente e porca cativa, com medidas ligadas ao perfil, além de furo em gota para furos deitados.
 - Roscas inicialmente simplificadas: armazenar diâmetro nominal, passo e profundidade, com indicação no desenho técnico. A representação simplificada não inclui hélice na geometria exportada.
 - Geometria real de rosca fica para uma etapa posterior.
 
@@ -189,7 +191,13 @@ As seções seguintes descrevem o escopo completo aprovado.
 - Oferecer exportação conjunta em um único STL, preservando as posições relativas dos elementos, sem realizar união booleana automática. Corpos unidos por uma operação booleana são exportados como o corpo resultante.
 - Exportar STL binário por padrão, com coordenadas em milímetros, opções de qualidade rascunho/padrão/alta e tolerância personalizada; exibir dimensões, quantidade de arquivos e estimativa de tamanho antes de exportar.
 - Para sólidos CAD, gerar a malha de exportação da geometria precisa, independentemente da malha de exibição. Validar fechamento, orientação de faces e triângulos degenerados.
-- Arquivos separados usam coordenadas locais da peça; exportação conjunta usa posições de montagem.
+- Arquivos separados usam coordenadas locais da peça; exportação conjunta usa posições de montagem. **Preparar para a mesa** substitui essas posições pela face apoiada e pela distribuição na mesa.
+- A exportação para impressão valida cada corpo separadamente: peças encostadas numa montagem não são defeito, e superfícies abertas ficam de fora com aviso.
+- Verificar a impressão antes de exportar: balanços, paredes finas, frestas, apoio, tamanho da mesa, massa e custo estimados, com os problemas pintados sobre o modelo a partir dos limites do perfil.
+- Encaixar componentes: recorte pela silhueta na direção de inserção, com folga, e verificação de interferências na montagem.
+- Fechar peças impressas: ressalto e rebaixo de tampa, torres de parafuso e presilhas com janela.
+- Exportar só um trecho da peça para testar um encaixe.
+- Exportar 3MF Core com um objeto por corpo, em milímetros, sem configurações de fatiador, para abrir em qualquer aplicativo.
 - Exportar cada corpo de uma definição compartilhada uma única vez por padrão, informando a quantidade de ocorrências. Oferecer exportação de todas as instâncias nas posições de montagem.
 - Importar STL como corpo de malha pertencente a uma peça: na montagem, criar uma nova peça; na construção, inserir o corpo na peça ativa. A peça pode conter também corpos sólidos e subpeças.
 - Preservar a malha importada dentro do arquivo `.3dnator`, sem depender do STL de origem. Identificar claramente corpos de malha e corpos sólidos CAD na árvore.

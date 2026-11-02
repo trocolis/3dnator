@@ -1,5 +1,12 @@
 # Validação local do protótipo
 
+## Etapas 0.19.0 a 0.29.0 — 02/11/2026
+
+- Registradas juntas na 0.29.0, formato `.3dnator` 46: cada etapa tem sua versão no `CHANGELOG.md`, mas o código foi desenvolvido sem commits intermediários e entra num só commit.
+- Aprovados 388 testes sem OCCT e 643 com OCCT, incluindo os ensaios de janela (`--include-ignored`); as duas falhas restantes com OCCT exigem um STEP externo (`NATOR_STEP_REGRESSION`/`NATOR_STEP_PATH`). Formatação e Clippy com todos os alvos e avisos negados nas duas configurações. `--validate`, `--validate-part`, `--validate-project`, `--validate-sketch` e `--validate-editor` concluídos.
+- Capturas conferidas: `measure`, `settings-dark`, `extrude-dark`, `extrude-en`, `settings-shortcuts`, `settings-help` e `rascunho-tab`.
+- Projetos reais `gura-case.3dnator` e `gura-case-2.3dnator` recalculados: o segundo passa a exigir rever o "Reparo de contato", porque a fusão de vértices fecha a fresta que ele corrigia.
+
 ## Painéis compactos do rascunho — 30/10/2026
 
 - Etapa 0.18.0, formato `.3dnator` mantido em 37. Traço, modo de linha/retângulo/círculo, modo de deslocamento e filtro de Projetar usam os mesmos botões compactos de 30 × 30 pontos dos painéis de Mover e Extrusão, em linhas rotuladas, com a dica de cada opção no tooltip.

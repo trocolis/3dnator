@@ -2,7 +2,7 @@
 //! a interface manipula somente um retângulo em milímetros e uma textura cacheada.
 use super::*;
 use nator_document::{ImageId, RasterAsset, ReferenceImage};
-use nator_sketch::{Point2, add, sub};
+use nator_sketch::{Point2, add, drafting::snap_to_step, sub};
 
 pub(super) struct Draft {
     tab: u64,
@@ -127,7 +127,7 @@ fn handles(ui: &egui::Ui, frame: &sketch_scene::Frame, image: &ReferenceImage) {
     frame.path(
         &painter,
         points.into_iter().chain([points[0]]),
-        egui::Stroke::new(1.5, theme::GREEN),
+        egui::Stroke::new(1.5, theme::green()),
         false,
     );
     for point in points {
@@ -135,7 +135,7 @@ fn handles(ui: &egui::Ui, frame: &sketch_scene::Frame, image: &ReferenceImage) {
             painter.rect_filled(
                 egui::Rect::from_center_size(at, egui::Vec2::splat(8.)),
                 1.,
-                theme::GREEN,
+                theme::green(),
             );
         }
     }
@@ -200,7 +200,9 @@ impl Draft {
             }
             if let Some(gesture) = &mut self.gesture {
                 if let Some(cursor) = cursor {
+                    let step = command_panel::settings(ui.ctx()).mouse_step_mm;
                     if let Some(index) = gesture.corner {
+                        let cursor = cursor.map(|v| snap_to_step(v, step));
                         let fixed = match index {
                             0 => add(gesture.origin, gesture.size),
                             1 => add(gesture.origin, [0., gesture.size[1]]),
@@ -213,7 +215,10 @@ impl Draft {
                             (fixed[1] - cursor[1]).abs().max(1e-6),
                         ];
                     } else {
-                        self.image.origin = add(gesture.origin, sub(cursor, gesture.pointer));
+                        self.image.origin = add(
+                            gesture.origin,
+                            sub(cursor, gesture.pointer).map(|v| snap_to_step(v, step)),
+                        );
                     }
                     gesture.changed |= nator_sketch::distance(cursor, gesture.pointer) > 1e-6;
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -386,11 +391,20 @@ impl Editor {
         let tab = self.current().id;
         let revision = self.current().session.revision();
         self.status.set(text(T::ImageLoad));
+        // Como nas importações de modelo, o seletor começa na pasta do projeto aberto.
+        let directory = self
+            .current()
+            .path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .map(std::path::Path::to_path_buf);
         self.start(context, None, move || {
-            let Some(path) = rfd::FileDialog::new()
-                .add_filter(text(T::SketchImage), &["png", "jpg", "jpeg"])
-                .pick_file()
-            else {
+            let mut dialog =
+                rfd::FileDialog::new().add_filter(text(T::SketchImage), &["png", "jpg", "jpeg"]);
+            if let Some(directory) = &directory {
+                dialog = dialog.set_directory(directory);
+            }
+            let Some(path) = dialog.pick_file() else {
                 return Ok(Outcome::Cancelled);
             };
             let asset = read_asset(&path)?;
@@ -507,30 +521,28 @@ impl Editor {
                     .zip([text(T::SketchDynamicWidth), text(T::SketchDynamicHeight)])
                 {
                     command_panel::row(ui, label, |ui| {
-                        ui.add(
-                            egui::DragValue::new(value)
-                                .speed(0.1)
-                                .suffix(" mm")
-                                .range(1e-6..=1e9),
-                        );
+                        let context = ui.ctx().clone();
+                        ui.add(command_panel::length_value(&context, value, 1e-6..=1e9));
                     });
                 }
                 command_panel::hint(ui, text(T::ImageLocalPosition));
-                for (value, label) in draft.image.origin.iter_mut().zip(["X (mm)", "Y (mm)"]) {
+                for (value, label) in draft.image.origin.iter_mut().zip(["X", "Y"]) {
                     command_panel::row(ui, label, |ui| {
-                        ui.add(egui::DragValue::new(value).speed(0.1).range(-1e9..=1e9));
+                        let context = ui.ctx().clone();
+                        ui.add(command_panel::length_value(&context, value, -1e9..=1e9));
                     });
                 }
                 if let Some(sketch) = self.current().session.document().sketch(draft.image.sketch) {
+                    let settings = self.current().session.document().settings();
                     let p = sketch.sketch.plane.world(draft.image.origin);
                     command_panel::hint(
                         ui,
                         &format!(
                             "{}: {}, {}, {}",
                             text(T::ImagePosition),
-                            nator_drawing::format_mm(p[0]),
-                            nator_drawing::format_mm(p[1]),
-                            nator_drawing::format_mm(p[2])
+                            settings.format_compact_length(p[0]),
+                            settings.format_compact_length(p[1]),
+                            settings.length_label(p[2])
                         ),
                     );
                 }

@@ -43,35 +43,21 @@ fn reference(solid: &nator_kernel::Solid, bytes: &[u8], index: usize) -> FaceRef
         },
     }
 }
+/// Condições que isolam a célula clicada de uma face plana: uma por rascunho visível
+/// no suporte. Face curva ou sem desenho não tem condições.
 #[cfg(feature = "occt")]
-pub fn pick(
+fn boundaries_at(
     doc: &Document,
+    solid: &nator_kernel::Solid,
+    index: usize,
     pick: &nator_document::assembly::Pick,
-    whole_body: bool,
-) -> Result<Picked, DocumentError> {
+) -> Result<Vec<PaintBoundary>, DocumentError> {
     use nator_document::{PaintMask, features::RegionRef};
-    let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
-    let (solid, bytes) = crate::features::source(doc, pick.part, pick.body)?;
-    let count = solid.face_count().map_err(error)?;
-    let faces = (0..count)
-        .map(|index| Target::Face {
-            body: pick.body,
-            face: reference(&solid, &bytes, index),
-            boundaries: vec![],
-        })
-        .collect::<Vec<_>>();
-    if whole_body {
-        return Ok(Picked {
-            target: Target::Body(pick.body),
-            faces,
-            whole_body,
-        });
-    }
-    let index = doc.face_index_at(pick)?;
-    let face = reference(&solid, &bytes, index);
     let mut boundaries = Vec::new();
-    if let nator_kernel::FaceKind::Plane { normal, offset } =
-        solid.face_measure(index).map_err(error)?.kind
+    if let nator_kernel::FaceKind::Plane { normal, offset } = solid
+        .face_measure(index)
+        .map_err(|e| DocumentError(e.to_string()))?
+        .kind
     {
         let part = doc
             .part(pick.part)
@@ -89,10 +75,38 @@ pub fn pick(
             }
             let regions =
                 nator_sketch::areas::regions(sketch).map_err(|e| DocumentError(e.to_string()))?;
+            let local = sketch.plane.project(point);
+            // Traços abertos dividem a face junto com o contorno dela.
+            let closed = regions
+                .iter()
+                .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+                .flat_map(|wire| wire.entities.iter().copied())
+                .collect::<std::collections::HashSet<_>>();
+            let open = sketch
+                .entities
+                .iter()
+                .filter(|e| !e.construction && !closed.contains(&e.id))
+                .map(|e| e.id)
+                .collect::<Vec<_>>();
+            if !open.is_empty()
+                && let Ok(cell) = crate::features::face_cell(sketch, solid, index, local)
+                && cell.drawn.iter().any(|(id, _)| open.contains(id))
+            {
+                boundaries.push(PaintBoundary {
+                    mask: PaintMask {
+                        sketch: record.id,
+                        region: RegionRef::Cell {
+                            seed: local.map(|v| (v * 1e6).round() as i64),
+                            entities: cell.drawn,
+                        },
+                    },
+                    inside: true,
+                });
+                continue;
+            }
             if regions.is_empty() {
                 continue;
             }
-            let local = sketch.plane.project(point);
             let matched = regions
                 .iter()
                 .filter(|r| r.outer.contains(local) && !r.holes.iter().any(|h| h.contains(local)))
@@ -117,6 +131,34 @@ pub fn pick(
             });
         }
     }
+    Ok(boundaries)
+}
+#[cfg(feature = "occt")]
+pub fn pick(
+    doc: &Document,
+    pick: &nator_document::assembly::Pick,
+    whole_body: bool,
+) -> Result<Picked, DocumentError> {
+    let error = |e: nator_kernel::KernelError| DocumentError(e.to_string());
+    let (solid, bytes) = crate::features::source(doc, pick.part, pick.body)?;
+    let count = solid.face_count().map_err(error)?;
+    let faces = (0..count)
+        .map(|index| Target::Face {
+            body: pick.body,
+            face: reference(&solid, &bytes, index),
+            boundaries: vec![],
+        })
+        .collect::<Vec<_>>();
+    if whole_body {
+        return Ok(Picked {
+            target: Target::Body(pick.body),
+            faces,
+            whole_body,
+        });
+    }
+    let index = doc.face_index_at(pick)?;
+    let face = reference(&solid, &bytes, index);
+    let boundaries = boundaries_at(doc, &solid, index, pick)?;
     Ok(Picked {
         target: Target::Face {
             body: pick.body,
@@ -209,8 +251,67 @@ pub(super) fn set_body_color(
     })
 }
 
-/// Malha mundial somente da célula sob o cursor. Usa a mesma seleção e o mesmo
-/// recorte da confirmação de Pintar, sem publicar comandos nem alterar aparência.
+/// Condições da célula sob o clique, sem listar as faces do corpo como `pick`.
+#[cfg(feature = "occt")]
+pub fn boundaries(
+    doc: &Document,
+    pick: &nator_document::assembly::Pick,
+) -> Result<Vec<PaintBoundary>, DocumentError> {
+    let (solid, _) = crate::features::source(doc, pick.part, pick.body)?;
+    boundaries_at(doc, &solid, doc.face_index_at(pick)?, pick)
+}
+#[cfg(not(feature = "occt"))]
+pub fn boundaries(
+    _: &Document,
+    _: &nator_document::assembly::Pick,
+) -> Result<Vec<PaintBoundary>, DocumentError> {
+    Ok(Vec::new())
+}
+
+/// Malha da célula no referencial local do corpo. Usa o recorte de Pintar, sem
+/// publicar comandos nem alterar a aparência.
+#[cfg(feature = "occt")]
+pub fn cell_mesh(
+    doc: &Document,
+    body: BodyId,
+    face: &FaceRef,
+    boundaries: &[PaintBoundary],
+) -> Result<nator_geometry::Mesh, DocumentError> {
+    let appearance = crate::appearance::build(
+        doc,
+        body,
+        vec![SurfacePaint {
+            face: face.clone(),
+            boundaries: boundaries.to_vec(),
+            mask: None,
+            color: RgbColor::NEUTRAL,
+        }],
+    )?;
+    let geometry = appearance
+        .geometry
+        .ok_or_else(|| DocumentError("Geometria do realce indisponível.".into()))?;
+    let mesh = geometry.mesh();
+    let triangles = mesh
+        .triangles()
+        .iter()
+        .zip(appearance.materials.iter())
+        .filter(|(_, m)| **m == 1)
+        .map(|(t, _)| *t)
+        .collect();
+    nator_geometry::Mesh::new(mesh.vertices().to_vec(), triangles)
+        .map_err(|e| DocumentError(e.to_string()))
+}
+#[cfg(not(feature = "occt"))]
+pub fn cell_mesh(
+    _: &Document,
+    _: BodyId,
+    _: &FaceRef,
+    _: &[PaintBoundary],
+) -> Result<nator_geometry::Mesh, DocumentError> {
+    Err(DocumentError("Recortar áreas exige o núcleo OCCT.".into()))
+}
+
+/// Malha mundial somente da célula sob o cursor, ou `None` sem delimitação na face.
 #[cfg(feature = "occt")]
 pub fn highlight(
     doc: &Document,
@@ -227,19 +328,7 @@ pub fn highlight(
     if boundaries.is_empty() {
         return Ok(None);
     }
-    let appearance = crate::appearance::build(
-        doc,
-        body,
-        vec![SurfacePaint {
-            face,
-            boundaries,
-            mask: None,
-            color: RgbColor::NEUTRAL,
-        }],
-    )?;
-    let geometry = appearance
-        .geometry
-        .ok_or_else(|| DocumentError("Geometria do realce indisponível.".into()))?;
+    let mesh = cell_mesh(doc, body, &face, &boundaries)?;
     let record = doc
         .body(body)
         .ok_or_else(|| DocumentError("Corpo do realce inexistente.".into()))?;
@@ -247,16 +336,8 @@ pub fn highlight(
         .placement
         .compose(record.placement)
         .map_err(|e| DocumentError(e.to_string()))?;
-    let mesh = geometry.mesh();
     let vertices = mesh.vertices().iter().map(|p| pose.apply(*p)).collect();
-    let triangles = mesh
-        .triangles()
-        .iter()
-        .zip(appearance.materials.iter())
-        .filter(|(_, m)| **m == 1)
-        .map(|(t, _)| *t)
-        .collect();
-    nator_geometry::Mesh::new(vertices, triangles)
+    nator_geometry::Mesh::new(vertices, mesh.triangles().to_vec())
         .map(Some)
         .map_err(|e| DocumentError(e.to_string()))
 }
