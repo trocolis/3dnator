@@ -15,8 +15,6 @@ const GROUP_HORIZONTAL_GAP: f32 = 3.;
 const GROUP_MENU_WIDTH: f32 = 22.;
 /// Três botões de 20 pontos da seção Restringir, com o rótulo sob as duas fileiras.
 const RESTRICT_COLUMN_WIDTH: f32 = 64.;
-/// Coluna estreita do Diagnóstico, entre Dimensionar e as restrições.
-const DIAGNOSTICS_WIDTH: f32 = 26.;
 const RESTRICT_CAPTION_HEIGHT: f32 = 12.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -221,6 +219,7 @@ impl Action {
             Self::InstanceMirror => T::MirrorShort,
             Self::ExportStep => T::StepShort,
             Self::SketchFace => T::SketchFaceShort,
+            Self::SketchTool(sketch_editor::Tool::Select) => T::SketchDiagnosticsShort,
             Self::ImportReference => T::ImportMenu,
             _ => self.label(),
         }
@@ -1300,36 +1299,11 @@ impl Editor {
     fn restrict_group(&mut self, ui: &mut egui::Ui) {
         let enabled =
             !self.busy() && self.pending_close.is_none() && self.current().sketch_edit.is_some();
-        let width = icons::RIBBON_BUTTON_SIZE.x
-            + DIAGNOSTICS_WIDTH
-            + 2. * GROUP_HORIZONTAL_GAP
-            + RESTRICT_COLUMN_WIDTH;
+        let width = group_width(2) + GROUP_HORIZONTAL_GAP + RESTRICT_COLUMN_WIDTH;
         self.ribbon_group_layout(ui, width, |editor, ui| {
             editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Dimension), true);
-            // Diagnóstico ao lado de Dimensionar, só com o ícone: um botão inteiro faria a
-            // faixa do rascunho passar da largura de uma tela de 1280 pontos.
-            let diagnostics = Action::SketchTool(sketch_editor::Tool::Select);
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(DIAGNOSTICS_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
-                egui::Sense::hover(),
-            );
-            let mut slot = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
-                egui::Layout::centered_and_justified(egui::Direction::TopDown),
-            ));
-            let clicked = slot
-                .add_enabled_ui(enabled, |ui| {
-                    icons::tree_button(
-                        ui,
-                        diagnostics.icon(),
-                        text(T::SketchDiagnostics),
-                        editor.action_selected(diagnostics),
-                    )
-                })
-                .inner
-                .clicked();
-            if clicked {
-                editor.activate_action(ui.ctx(), diagnostics);
-            }
+            // Diagnóstico ao lado de Dimensionar, do tamanho das demais ferramentas.
+            editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Select), true);
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(RESTRICT_COLUMN_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
                 egui::Sense::hover(),
@@ -1545,8 +1519,9 @@ impl Editor {
                         Action::SketchEdit(SketchEdit::Offset),
                         Action::SketchEdit(SketchEdit::Fillet),
                         Action::SketchEdit(SketchEdit::Chamfer),
-                        Action::SketchEdit(SketchEdit::Mirror),
                     ],
+                    // Espelhar fica só no menu ▾: com o Diagnóstico em tamanho inteiro, a
+                    // faixa precisa caber numa tela de 1280 pontos.
                     &[
                         Action::SketchTool(sketch_editor::Tool::Trim),
                         Action::SketchEdit(SketchEdit::Offset),

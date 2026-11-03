@@ -2,10 +2,14 @@
 
 ## Não lançado
 
+## 0.31.2 — 02/11/2026
+
+- **Diagnóstico**, ao lado de Dimensionar, virou um botão do tamanho das demais ferramentas da aba Rascunho, com legenda. Para a faixa continuar cabendo em 1280 pontos, **Espelhar** passou para o menu ▾ da seção Modificar.
 ## 0.31.1 — 02/11/2026
 
 - Corrigido: o Texto do rascunho enchia o desenho de alertas de pontas não ligadas e o rascunho não concluía. O núcleo entrega um trecho por aresta da fonte, e cada emenda dentro de uma letra virava um par de pontas soltas sobrepostas. Agora os trechos se juntam em contornos fechados ao criar ou editar o texto. O diagnóstico também deixou de sugerir ligar ou aproximar pontas entre duas referências fixas (texto, projeção, linhas da face), o que valia para textos gravados antes desta versão e deixava o rascunho redundante.
 - Corrigido: recolocar um texto com um trecho menor que um nanômetro recriava as linhas com IDs novos, o que podia perder as áreas escolhidas.
+
 ## 0.31.0 — 02/11/2026
 
 - Balões de edição numa fila no canto, junto da árvore (ou da barra dela, recolhida): o da peça em edição, com Salvar; o do rascunho em edição, com o nome e o botão **Concluir**; e o dos graus de liberdade. Todos têm o estilo da árvore recolhida, a mesma altura e não quebram linha; nomes longos ficam abreviados, com o nome inteiro na dica.

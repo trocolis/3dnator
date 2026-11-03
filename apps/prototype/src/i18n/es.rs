@@ -1018,6 +1018,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ExpandTree => "Mostrar el árbol",
         Text::MeasureTool => "Medir",
         Text::SketchDiagnostics => "Diagnóstico del boceto",
+        Text::SketchDiagnosticsShort => "Diagnóstico",
         Text::PanCamera => "Desplazar: mover la cámara con el botón izquierdo",
         Text::OrbitCamera => "Rotar: girar la cámara con el botón izquierdo",
         Text::PartsFolder => "Piezas",

@@ -5049,6 +5049,15 @@ mod tests {
         )?;
         settle(&mut editor, &context)?;
 
+        // Espelhar fica no menu ▾ da seção Modificar.
+        frame(&mut editor, &context, vec![])?;
+        let chevron = *editor
+            .shell
+            .menu_rects
+            .get(1)
+            .ok_or("Menu Modificar ausente")?;
+        click(&mut editor, &context, chevron.center())?;
+        frame(&mut editor, &context, vec![])?;
         let mirror = label_position(&mut editor, &context, text(T::MirrorShort))?;
         click(&mut editor, &context, mirror)?;
         let center = sketch_scene::project(
@@ -7060,9 +7069,22 @@ mod tests {
         assert!((sketch_balloon.top() - freedom.top()).abs() < 1.);
         assert!((sketch_balloon.height() - freedom.height()).abs() < 2.);
         assert!(freedom.left() > sketch_balloon.right() && freedom.height() < 60.);
-        // O Diagnóstico fica logo à direita de Dimensionar e abre o painel.
+        // O Diagnóstico, do tamanho das demais ferramentas, fica logo à direita de
+        // Dimensionar e abre o painel; a faixa inteira cabe em 1280 pontos.
         let dimension = label_position(&mut editor, &context, text(T::SketchDimension))?;
-        let button = dimension + egui::vec2(icons::RIBBON_BUTTON_SIZE.x / 2. + 16., -8.);
+        let button = label_position(&mut editor, &context, text(T::SketchDiagnosticsShort))?;
+        assert!(
+            button.x > dimension.x && button.x - dimension.x < icons::RIBBON_BUTTON_SIZE.x + 8.
+        );
+        let cancel = context
+            .data(|d| {
+                d.get_temp::<egui::Rect>(egui::Id::new((
+                    "ribbon_action_rect",
+                    text(T::CancelSketch),
+                )))
+            })
+            .ok_or("Cancelar ausente")?;
+        assert!(cancel.right() <= 1280., "{cancel:?}");
         click(&mut editor, &context, button)?;
         frame(&mut editor, &context, vec![])?;
         assert!(

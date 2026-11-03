@@ -986,6 +986,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ExpandTree => "Show the tree",
         Text::MeasureTool => "Measure",
         Text::SketchDiagnostics => "Sketch diagnostics",
+        Text::SketchDiagnosticsShort => "Diagnostics",
         Text::PanCamera => "Pan: move the camera with the left button",
         Text::OrbitCamera => "Orbit: rotate the camera with the left button",
         Text::PartsFolder => "Parts",
