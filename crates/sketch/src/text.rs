@@ -36,6 +36,69 @@ pub struct SketchText {
 
 /// Limite de pontos de um contorno de texto, para manter o rascunho leve.
 const MAX_TEXT_POINTS: usize = 3000;
+/// Folga, na fonte de tamanho 1, para considerar a mesma a ponta de dois trechos.
+const JOIN_TOLERANCE: f64 = 1e-6;
+
+/// Junta os trechos do contorno das letras em polilinhas contínuas. O núcleo entrega uma
+/// polilinha por aresta da fonte; sem a junção, cada emenda dentro de uma letra vira um
+/// par de pontas soltas sobrepostas. Uma polilinha que volta ao início termina no mesmo
+/// ponto em que começou, para ser lida como fechada. Pontos repetidos em sequência saem.
+pub fn join_contours(pieces: &[Vec<Point2>]) -> Vec<Vec<Point2>> {
+    let near = |a: Point2, b: Point2| distance(a, b) < JOIN_TOLERANCE;
+    let mut used = vec![false; pieces.len()];
+    let mut result = Vec::new();
+    for first in 0..pieces.len() {
+        if used[first] || pieces[first].is_empty() {
+            continue;
+        }
+        used[first] = true;
+        let mut chain = pieces[first].clone();
+        while let (Some(&start), Some(&end)) = (chain.first(), chain.last()) {
+            if chain.len() > 2 && near(start, end) {
+                break;
+            }
+            let next = (0..pieces.len()).find_map(|i| {
+                let piece = &pieces[i];
+                let (a, b) = (*piece.first()?, *piece.last()?);
+                (!used[i]).then_some(())?;
+                if near(a, end) {
+                    Some((i, false))
+                } else if near(b, end) {
+                    Some((i, true))
+                } else {
+                    None
+                }
+            });
+            let Some((index, reversed)) = next else {
+                break;
+            };
+            used[index] = true;
+            let mut piece = pieces[index].clone();
+            if reversed {
+                piece.reverse();
+            }
+            chain.extend(piece.into_iter().skip(1));
+        }
+        let mut clean: Vec<Point2> = Vec::with_capacity(chain.len());
+        for point in chain {
+            if clean.last().is_none_or(|last| !near(*last, point)) {
+                clean.push(point);
+            }
+        }
+        // Fechada: a última ponta coincide exatamente com a primeira.
+        if clean.len() > 2
+            && let Some(&start) = clean.first()
+            && let Some(end) = clean.last_mut()
+            && near(start, *end)
+        {
+            *end = start;
+        }
+        if clean.len() >= 2 {
+            result.push(clean);
+        }
+    }
+    result
+}
 
 impl SketchText {
     fn position(&self, anchor: Point2, p: Point2) -> Point2 {
@@ -87,6 +150,7 @@ impl Sketch {
     }
     /// Cria um bloco de texto no ponto de inserção `anchor` (um ponto comum do rascunho).
     pub fn add_text(&mut self, mut text: SketchText) -> Result<u64> {
+        text.contours = join_contours(&text.contours);
         text.validate()?;
         self.point(text.anchor)?;
         text.id = self.allocate()?;
@@ -99,6 +163,7 @@ impl Sketch {
     }
     /// Troca conteúdo, fonte, estilo, tamanho ou rotação de um bloco existente.
     pub fn update_text(&mut self, mut text: SketchText) -> Result<()> {
+        text.contours = join_contours(&text.contours);
         text.validate()?;
         let index = self
             .texts
@@ -224,16 +289,25 @@ fn place(sketch: &mut Sketch, id: u64) -> Result<()> {
     let anchor = sketch.point(text.anchor)?;
     let layout = text.layout();
     let points = layout.iter().map(|(n, _)| n).sum::<usize>();
-    let entities = layout
-        .iter()
-        .map(|(n, closed)| if *closed { *n } else { n.saturating_sub(1) })
-        .sum::<usize>();
     let positions = text
         .contours
         .iter()
         .zip(&layout)
         .flat_map(|(c, (n, _))| c[..*n].iter().map(|p| text.position(anchor, *p)))
         .collect::<Vec<_>>();
+    // Mesma regra da criação: trechos menores que um nanômetro não viram linhas.
+    let mut entities = 0;
+    let mut start = 0;
+    for (n, closed) in &layout {
+        let run = &positions[start..start + n];
+        entities += run
+            .windows(2)
+            .map(|w| (w[0], w[1]))
+            .chain(closed.then(|| (run[n - 1], run[0])))
+            .filter(|(a, b)| distance(*a, *b) >= 1e-9)
+            .count();
+        start += n;
+    }
     // Mesmo desenho: só as posições mudam, e os IDs ficam.
     if text.points.len() == points && text.entities.len() == entities {
         for (id, position) in text.points.iter().zip(&positions) {
@@ -312,6 +386,55 @@ mod tests {
             points: Vec::new(),
             entities: Vec::new(),
         }
+    }
+
+    #[test]
+    fn letter_pieces_join_into_closed_contours_without_open_ends() -> Result<()> {
+        // Quadrado em quatro trechos, um deles invertido, como as arestas de uma fonte, e
+        // um traço aberto que continua aberto.
+        let pieces = vec![
+            vec![[-0.5, -0.5], [0., -0.5], [0.5, -0.5]],
+            vec![[0.5, 0.5], [0.5, -0.5]],
+            vec![[0.5, 0.5], [-0.5, 0.5]],
+            vec![[-0.5, 0.5], [-0.5, -0.5 + 1e-8]],
+            vec![[1., -0.5], [1., 0.5]],
+        ];
+        let joined = join_contours(&pieces);
+        assert_eq!(joined.len(), 2);
+        assert_eq!(joined[0].len(), 6);
+        assert_eq!(joined[0].first(), joined[0].last());
+        assert_eq!(joined[1], pieces[4]);
+        let mut sketch = Sketch::new("Texto", Plane::xy());
+        let anchor = sketch.add_point([0., 0.])?;
+        let mut text = block(anchor);
+        text.contours = pieces;
+        sketch.add_text(text)?;
+        assert_eq!(areas::regions(&sketch)?.len(), 1);
+        // Nenhuma emenda sobra como ponta solta para ligar.
+        let report = crate::repair::suggest(&sketch, 0.)?;
+        assert!(report.fixes.is_empty(), "{:?}", report.fixes);
+        Ok(())
+    }
+
+    #[test]
+    fn fixed_text_ends_are_not_offered_for_linking() -> Result<()> {
+        // Projetos gravados antes da junção têm um trecho por aresta: as emendas são
+        // pontas fixas sobrepostas e não viram alerta.
+        let mut sketch = Sketch::new("Texto", Plane::xy());
+        let anchor = sketch.add_point([0., 0.])?;
+        sketch.add_text(block(anchor))?;
+        let text = sketch.texts[0].clone();
+        let mut old = text.clone();
+        old.contours = vec![
+            vec![[-0.5, -0.5], [0.5, -0.5]],
+            vec![[0.5, -0.5], [0.5, 0.5]],
+        ];
+        sketch.texts[0] = old;
+        place(&mut sketch, text.id)?;
+        assert_eq!(sketch.texts[0].entities.len(), 2);
+        let report = crate::repair::suggest(&sketch, 1.)?;
+        assert!(report.fixes.is_empty(), "{:?}", report.fixes);
+        Ok(())
     }
 
     #[test]

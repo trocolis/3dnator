@@ -7398,6 +7398,26 @@ mod tests {
         assert!(nator_sketch::distance(stored.point(block.anchor)?, [10., 5.]) < 1.);
         assert!(block.entities.len() > 8);
         assert!(editor.sketch_text.is_none());
+        // As letras chegam fechadas: nenhuma ponta solta para ligar, e o rascunho conclui.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor
+            .current()
+            .sketch_edit
+            .as_ref()
+            .is_some_and(|w| w.references_pending())
+        {
+            if Instant::now() > deadline {
+                return Err("Referências não calculadas".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let work = editor.current().sketch_edit.as_ref().ok_or("Edição")?;
+        assert!(work.pending.is_none());
+        assert_eq!(work.unlinked_ends(), 0);
+        editor.finish_sketch();
+        settle(&mut editor, &context)?;
+        assert!(editor.current().sketch_edit.is_none());
         Ok(())
     }
 

@@ -183,12 +183,20 @@ pub fn suggest(sketch: &Sketch, tolerance: f64) -> Result<Report> {
         .filter(|(_, p)| degree(*p) == 1)
         .copied()
         .collect::<Vec<_>>();
+    // Pontas de referências fixas (texto, projeção, linhas da face) não se movem nem se
+    // ligam entre si: entre duas delas não há o que reparar.
+    let fixed = |id: u64| {
+        sketch
+            .points
+            .iter()
+            .any(|p| p.id == id && (p.projected || p.face))
+    };
     // Pares mais próximos primeiro; cada ponta participa de um único reparo.
     let mut pairs = Vec::new();
     for (i, (a, p)) in open.iter().enumerate() {
         for (b, q) in &open[i + 1..] {
             let gap = distance(*p, *q);
-            if gap >= SAME && gap <= tolerance {
+            if gap >= SAME && gap <= tolerance && !(fixed(*a) && fixed(*b)) {
                 pairs.push((gap, *a, *b));
             }
         }
@@ -213,6 +221,7 @@ pub fn suggest(sketch: &Sketch, tolerance: f64) -> Result<Report> {
             let gap = distance(*p, *q);
             if a != b
                 && gap < NEAR
+                && !(fixed(*a) && fixed(*b))
                 && !used.contains(a)
                 && !used.contains(b)
                 && !linked(*a, *b)
