@@ -202,6 +202,22 @@ fn chain_tangents(anchor: Point2, chain: &[Point2]) -> Vec<Point2> {
         .collect()
 }
 
+/// Origem de uma linha tangente a um círculo ou arco do rascunho que passa pelo cursor:
+/// dos dois pontos de tangência, o mais próximo de `near` (a origem atual), para que a
+/// linha não salte de lado. `None` com o cursor dentro do círculo ou fora do arco.
+pub fn tangent_origin(
+    sketch: &Sketch,
+    curve: u64,
+    cursor: Point2,
+    near: Point2,
+) -> Result<Option<Point2>> {
+    let segment = profiles::segment(sketch, sketch.entity(curve)?)?;
+    Ok(segment_tangents(cursor, &segment)
+        .into_iter()
+        .filter(|p| distance(*p, cursor) > 1e-9)
+        .min_by(|a, b| distance(*a, near).total_cmp(&distance(*b, near))))
+}
+
 /// Tangente mais próxima do cursor às curvas do rascunho e às arestas projetadas, a
 /// partir do início do traço. Só posiciona: projeções não recebem restrição.
 pub fn tangent(
@@ -572,6 +588,26 @@ mod projected_edges {
             .ok_or("Sem tangente")
             .map_err(|e| SketchError(e.into()))?;
         assert!((top.point[1] - 4.).abs() < 1e-3);
+        Ok(())
+    }
+
+    #[test]
+    fn tangent_origin_slides_on_the_circle_on_the_side_of_the_start() -> Result<()> {
+        let mut sketch = Sketch::new("Tangente", Plane::xy());
+        let circle = sketch.add_circle([0., 0.], 5., false)?;
+        // Cursor à direita: os pontos de tangência ficam acima e abaixo do eixo X.
+        let cursor = [10., 0.];
+        let above = tangent_origin(&sketch, circle, cursor, [0., 5.])?
+            .ok_or(SketchError("acima".into()))?;
+        let below = tangent_origin(&sketch, circle, cursor, [0., -5.])?
+            .ok_or(SketchError("abaixo".into()))?;
+        assert!(above[1] > 0. && below[1] < 0.);
+        for p in [above, below] {
+            assert!((distance(p, [0., 0.]) - 5.).abs() < 1e-9);
+            // Raio perpendicular à linha até o cursor.
+            assert!(dot(p, sub(cursor, p)).abs() < 1e-9);
+        }
+        assert!(tangent_origin(&sketch, circle, [1., 1.], [0., 5.])?.is_none());
         Ok(())
     }
 }

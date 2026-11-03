@@ -638,7 +638,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SketchCircleDiameter => "Two points (diameter)",
         Text::SketchCircleTangent => "Tangent",
         Text::SketchContinuousLineHint => {
-            "Click the next vertices. Esc ends the sequence; closing an area or ending on another element also ends it."
+            "Click the next vertices. Esc ends the sequence; closing an area or ending on another element also ends it. Starting on a circle or arc, hold Shift to slide the start along it with the line tangent."
         }
         Text::SketchSymmetricLineHint => {
             "The first point is the center: each segment creates another of the same size on the opposite side."

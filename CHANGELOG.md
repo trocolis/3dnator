@@ -2,9 +2,13 @@
 
 ## Não lançado
 
+## 0.32.0 — 02/11/2026
+
+- **Linha tangente com Shift:** uma linha que começa num círculo ou arco, com Shift pressionado, desliza a origem sobre a curva e fica tangente a ela, passando pelo cursor. Dos dois pontos de tangência vale o do lado em que a linha começou. Ao confirmar, a origem fica presa à curva e a linha recebe a restrição de tangência, que acompanha mudanças de raio. Soltar o Shift volta ao traço comum a partir do último ponto.
 ## 0.31.2 — 02/11/2026
 
 - **Diagnóstico**, ao lado de Dimensionar, virou um botão do tamanho das demais ferramentas da aba Rascunho, com legenda. Para a faixa continuar cabendo em 1280 pontos, **Espelhar** passou para o menu ▾ da seção Modificar.
+
 ## 0.31.1 — 02/11/2026
 
 - Corrigido: o Texto do rascunho enchia o desenho de alertas de pontas não ligadas e o rascunho não concluía. O núcleo entrega um trecho por aresta da fonte, e cada emenda dentro de uma letra virava um par de pontas soltas sobrepostas. Agora os trechos se juntam em contornos fechados ao criar ou editar o texto. O diagnóstico também deixou de sugerir ligar ou aproximar pontas entre duas referências fixas (texto, projeção, linhas da face), o que valia para textos gravados antes desta versão e deixava o rascunho redundante.

@@ -120,6 +120,11 @@ pub(super) struct Workspace {
     rectangle_mode: RectangleMode,
     circle_mode: CircleMode,
     tangent_lines: Vec<u64>,
+    /// Círculo ou arco onde começou a linha; com Shift, a origem desliza nele e a linha
+    /// sai tangente.
+    tangent_origin: Option<u64>,
+    /// Shift estava pressionado no último quadro: a linha confirmada recebe a tangência.
+    tangent_held: bool,
     /// Ponto inicial e vértices já percorridos da cadeia, para encerrar ao fechar.
     chain_points: Vec<Point2>,
     /// Capturada uma vez no primeiro clique; não muda ao cruzar outra linha.
@@ -371,6 +376,8 @@ impl Workspace {
         self.anchor_kinds.clear();
         self.chain_points.clear();
         self.tangent_lines.clear();
+        self.tangent_origin = None;
+        self.tangent_held = false;
         self.line_reference = None;
         self.perpendicular = None;
         self.drawing.clear(context);
@@ -410,6 +417,8 @@ impl Workspace {
             return;
         }
         self.chain_points.push(end);
+        self.tangent_origin = None;
+        self.tangent_held = false;
         let endpoint = last.and_then(|entity| {
             entity.point_ids().into_iter().find(|id| {
                 sketch
@@ -447,6 +456,8 @@ impl Workspace {
             rectangle_mode: RectangleMode::Normal,
             circle_mode: CircleMode::Normal,
             tangent_lines: Vec::new(),
+            tangent_origin: None,
+            tangent_held: false,
             chain_points: Vec::new(),
             line_reference: None,
             perpendicular: None,
@@ -1444,6 +1455,22 @@ impl Editor {
                 );
             }
         }
+        // Linha que começou num círculo ou arco: com Shift, a origem desliza nele e a
+        // linha fica tangente, passando pelo cursor.
+        work.tangent_held = false;
+        if work.tool == Tool::Line
+            && work.line_mode == LineMode::Normal
+            && work.anchors.len() == 1
+            && let Some(curve) = work.tangent_origin
+            && let Some(point) = raw_cursor
+            && ui.input(|i| i.modifiers.shift)
+            && let Ok(Some(origin)) =
+                snapping::tangent_origin(&sketch, curve, point, work.anchors[0])
+        {
+            work.anchors[0] = origin;
+            work.chain_points = vec![origin];
+            work.tangent_held = true;
+        }
         let mut cursor = raw_cursor;
         let mut confirm = false;
         let mut valid = true;
@@ -1783,6 +1810,16 @@ impl Editor {
                     work.drawing.start(cursor);
                     if work.tool == Tool::Line {
                         work.chain_points = vec![cursor];
+                        work.tangent_origin = snap.as_ref().and_then(|s| match s.kind {
+                            Kind::OnCurve(id)
+                                if sketch.entity(id).is_ok_and(|e| {
+                                    matches!(e.curve, Curve::Circle { .. } | Curve::Arc { .. })
+                                }) =>
+                            {
+                                Some(id)
+                            }
+                            _ => None,
+                        });
                         let preferred = snap.as_ref().and_then(|s| match s.kind {
                             Kind::OnCurve(id) | Kind::Midpoint(id) => Some(id),
                             _ => None,
@@ -1922,6 +1959,26 @@ fn draw_entity(
             if let Curve::Line { start, end } = sketch.entity(id).map_err(sketch_error)?.curve {
                 attach(sketch, start, work.anchor_kinds[0], a)?;
                 attach(sketch, end, work.anchor_kinds[1], b)?;
+                if work.tangent_held
+                    && let Some(curve) = work.tangent_origin
+                    && let Curve::Circle { center, .. } | Curve::Arc { center, .. } =
+                        sketch.entity(curve).map_err(sketch_error)?.curve
+                {
+                    // A origem fica presa à curva e a linha, tangente a ela.
+                    for kind in [
+                        ConstraintKind::PointOnCurve {
+                            point: start,
+                            curve,
+                        },
+                        ConstraintKind::Tangent {
+                            line: id,
+                            arc: curve,
+                            point: center,
+                        },
+                    ] {
+                        sketch.add_constraint(kind, false).map_err(sketch_error)?;
+                    }
+                }
                 let perpendicular = work.perpendicular.filter(|reference| {
                     sketch.line(*reference).is_ok_and(|(c, d)| {
                         let u = nator_sketch::sub(b, a);

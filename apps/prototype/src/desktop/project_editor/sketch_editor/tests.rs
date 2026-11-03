@@ -123,6 +123,44 @@ fn continuous_lines_stop_on_infinite_lines_and_existing_elements() -> Result<(),
 }
 
 #[test]
+fn shift_line_from_a_circle_stays_tangent_after_solving() -> Result<(), String> {
+    let parameters = Parameters::default();
+    let mut sketch = Sketch::new("Tangente", nator_sketch::Plane::xy());
+    let circle = sketch
+        .add_circle([0., 0.], 5., false)
+        .map_err(sketch_error)?;
+    // Origem deslizada pelo Shift até a tangência com o cursor em (20, 0).
+    let cursor = [20., 0.];
+    let origin = nator_sketch::snapping::tangent_origin(&sketch, circle, cursor, [0., 5.])
+        .map_err(sketch_error)?
+        .ok_or("Sem tangência")?;
+    let mut work = workspace(Tool::Line, &[origin, cursor]);
+    work.anchor_kinds = vec![Some(Kind::OnCurve(circle)), None];
+    work.tangent_origin = Some(circle);
+    work.tangent_held = true;
+    draw_entity(&mut sketch, &work, &parameters)?;
+    assert!(sketch.constraints.iter().any(|c| matches!(
+        c.kind,
+        ConstraintKind::Tangent { arc, .. } if arc == circle
+    )));
+    // Aumentar o raio pelo solver mantém a linha tangente e a origem sobre o círculo.
+    let line = sketch.entities.last().ok_or("Linha")?.id;
+    sketch
+        .add_constraint(ConstraintKind::Radius { circle, value: 6. }, false)
+        .map_err(sketch_error)?;
+    let solved = nator_sketch::solver::solve(&sketch).map_err(sketch_error)?;
+    assert_ne!(solved.status, Status::Conflict);
+    let (a, b) = solved.sketch.line(line).map_err(sketch_error)?;
+    let (center, radius) = solved.sketch.radial(circle).map_err(sketch_error)?;
+    let d = nator_sketch::sub(b, a);
+    let gap = nator_sketch::sub(center, a);
+    let distance = (d[0] * gap[1] - d[1] * gap[0]).abs() / nator_sketch::distance(a, b);
+    assert!((distance - radius).abs() < 1e-6, "{distance} {radius}");
+    assert!((nator_sketch::distance(a, center) - radius).abs() < 1e-6);
+    Ok(())
+}
+
+#[test]
 fn rectangle_modes_use_the_preview_corners_and_respect_stroke() -> Result<(), String> {
     for (mode, anchors, expected_area) in [
         (RectangleMode::Normal, vec![[0., 0.], [20., 10.]], 200.),
