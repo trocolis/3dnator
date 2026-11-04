@@ -360,7 +360,6 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Extrude),
     Action::Solid(SolidTool::Revolve),
     Action::Solid(SolidTool::Loft),
-    Action::Solid(SolidTool::Label),
     Action::Solid(SolidTool::Fillet),
     Action::Solid(SolidTool::Chamfer),
     Action::Solid(SolidTool::Shell),
@@ -467,6 +466,7 @@ impl Editor {
             Action::Browser => true,
             Action::Undo => editable && self.current().session.undo_label().is_some(),
             Action::Redo => editable && self.current().session.redo_label().is_some(),
+            Action::Solid(SolidTool::Label) => false,
             Action::Paint | Action::Solid(_) => {
                 editable
                     && self.current().active_part.is_some()
@@ -1429,17 +1429,16 @@ impl Editor {
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
                         Action::Solid(SolidTool::Loft),
-                        Action::Solid(SolidTool::Shell),
+                        Action::Solid(SolidTool::Hole),
                     ],
                 );
                 self.ribbon_group(
                     ui,
                     &[
-                        Action::Solid(SolidTool::Hole),
+                        Action::Solid(SolidTool::Shell),
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
                         Action::Paint,
-                        Action::Solid(SolidTool::Label),
                     ],
                 );
                 self.ribbon_group(

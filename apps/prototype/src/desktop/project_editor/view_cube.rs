@@ -563,13 +563,13 @@ fn paint_faces(painter: &egui::Painter, faces: &[ProjectedFace], hovered: Option
             let galley = painter.layout_no_wrap(
                 text(label).into(),
                 egui::FontId::proportional(font),
-                theme::ink(),
+                egui::Color32::from_rgb(48, 62, 80),
             );
             // O texto acompanha a face e o giro para não esconder a orientação real.
             let pos = center - galley.size() * 0.5;
             let angle = face.label_direction.y.atan2(face.label_direction.x);
             painter.add(
-                egui::epaint::TextShape::new(pos, galley, theme::ink())
+                egui::epaint::TextShape::new(pos, galley, egui::Color32::from_rgb(48, 62, 80))
                     .with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER),
             );
         }

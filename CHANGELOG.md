@@ -4,6 +4,12 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.32.1 — 04/11/2026
+
+- Corrigido o contraste dos nomes das faces do cubo de vista no tema escuro.
+- Removidos os acessos de criação de Rótulo; operações existentes continuam editáveis pelo histórico e fontes continuam disponíveis para Texto.
+- Na Construção, Furo passou para Criação e Casca para Modificação.
+
 ## 0.32.0 — 02/11/2026
 
 - **Linha tangente com Shift:** uma linha que começa num círculo ou arco, com Shift pressionado, desliza a origem sobre a curva e fica tangente a ela, passando pelo cursor. Dos dois pontos de tangência vale o do lado em que a linha começou. Ao confirmar, a origem fica presa à curva e a linha recebe a restrição de tangência, que acompanha mudanças de raio. Soltar o Shift volta ao traço comum a partir do último ponto.

@@ -644,3 +644,9 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Sem resolução DNS pelo terminal: não foi possível obter o SDK OCCT ou atualizar dependências fora do cache.
 - A pasta `.git` está protegida contra escrita e não contém um repositório inicializado. Não foi possível criar commits; nenhum remoto foi publicado.
 - Consulte [PROTOTYPE.md](PROTOTYPE.md) para os requisitos e comandos reproduzíveis.
+
+## Ajustes de apresentação — 0.32.1 (04/11/2026)
+
+- `cargo fmt --all -- --check`, clippy e testes do workspace com `--locked --offline`, sem OCCT e com OCCT: aprovados. OCCT usa o SDK local e `target/claude-occt`. Testes ignorados continuam exigindo execução explícita.
+- Capturas reais `tree-collapsed` e `tree-collapsed-dark`: `target/codex-validation/ajustes-0321-light.png` e `ajustes-0321-dark.png`. Conferidos contraste do cubo, retirada do botão Rótulo e posições de Furo/Casca.
+- Compatibilidade: os testes OCCT de Rótulo passaram; a representação e a edição pelo histórico foram preservadas. Não houve teste interativo em janela.
