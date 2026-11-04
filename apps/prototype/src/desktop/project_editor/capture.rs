@@ -11885,6 +11885,55 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn holes_on_the_bottom_sketch_suggest_an_inward_direction_and_preview_a_cut()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part) = navigation_editor(&context)?;
+        let record = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .sketches[0]
+            .clone();
+        let mut sketch = record.sketch;
+        sketch.add_circle([20., 20.], 3., false)?;
+        editor.execute(Command::UpdateSketch {
+            id: record.id,
+            sketch,
+        });
+        editor.open_feature_tool(feature_editor::Tool::Hole);
+        frame(&mut editor, &context, vec![])?;
+        wait_feature_preview(&mut editor, &context)?;
+        let data = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert!(
+            matches!(editor.feature_edit.as_ref().ok_or("Painel")?.preview_key(data), Command::AddFeature {operation: nator_document::features::Operation::Hole {spec, points, ..}, ..} if spec.reverse && points.len() == 1)
+        );
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .features
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn converting_active_part_to_reference_leaves_editing_and_preserves_geometry()
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();

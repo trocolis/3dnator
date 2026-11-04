@@ -107,3 +107,43 @@ fn multiple_mirror_and_double_offset_are_atomic_sketch_commands() -> Result<()> 
     );
     Ok(())
 }
+
+#[test]
+fn hole_centers_ignore_fixed_references_and_text_anchors() -> Result<()> {
+    let mut sketch = Sketch::new("Centros", Plane::xy());
+    let own = sketch.add_circle([5., 5.], 2., false)?;
+    let projected = sketch.add_circle([20., 5.], 2., false)?;
+    sketch
+        .entities
+        .iter_mut()
+        .find(|e| e.id == projected)
+        .ok_or("Referência")?
+        .projected = true;
+    let own_center = sketch.entity(own)?.point_ids()[0];
+    let isolated = sketch.add_point([9., 9.])?;
+    let fixed = sketch.add_point([0., 0.])?;
+    sketch
+        .points
+        .iter_mut()
+        .find(|p| p.id == fixed)
+        .ok_or("Referência")?
+        .projected = true;
+    let anchor = sketch.add_point([30., 3.])?;
+    sketch.add_text(nator_sketch::text::SketchText {
+        id: 0,
+        anchor,
+        content: "A".into(),
+        font: "sans-serif".into(),
+        bold: false,
+        italic: false,
+        underline: false,
+        size: 10.,
+        rotation: 0.,
+        contours: vec![vec![[0., 0.], [1., 0.], [0., 1.], [0., 0.]]],
+        points: vec![],
+        entities: vec![],
+    })?;
+    let points = nator_commands::features::hole_points(&sketch);
+    assert_eq!(points, vec![own_center, isolated]);
+    Ok(())
+}

@@ -746,3 +746,68 @@ fn extrusion_until_a_face_and_direct_combination() -> Result<()> {
     assert!((volume(&session, cut)? - (expected(10., 30.) - 300.)).abs() < 1e-3);
     Ok(())
 }
+
+#[test]
+fn holes_reject_an_outward_cut_and_follow_the_sketch_center_and_diameter() -> Result<()> {
+    let mut session = Session::new(Document::new("Regressão Furo")?)?;
+    let (part, base) = plate(&mut session)?;
+    let mut positions = Sketch::new("Centro", Plane::xy());
+    let circle = positions.add_circle([15., 20.], 3., false)?;
+    let center = positions.entity(circle)?.point_ids()[0];
+    let (_, sketch) = sketch(&mut session, Some(part), positions)?;
+    let spec = HoleSpec {
+        diameter: "6 mm".into(),
+        depth: None,
+        head: HoleHeadSpec::Simple,
+        tip_angle: None,
+        teardrop: None,
+        reverse: false,
+        thread: None,
+    };
+    let make = |spec| Operation::Hole {
+        base,
+        sketch,
+        points: vec![center],
+        spec,
+    };
+    let revision = session.revision();
+    assert!(feature(&mut session, part, "Sem efeito", make(spec.clone())).is_err());
+    assert_eq!(session.revision(), revision);
+    let mut spec = spec;
+    spec.reverse = true;
+    let body = feature(&mut session, part, "Furo", make(spec.clone()))?;
+    assert!((volume(&session, body)? - (60. * 40. * 8. - PI * 9. * 8.)).abs() < 1e-4);
+    let mut changed = session
+        .document()
+        .sketch(sketch)
+        .ok_or("Centro")?
+        .sketch
+        .clone();
+    changed
+        .points
+        .iter_mut()
+        .find(|p| p.id == center)
+        .ok_or("Ponto")?
+        .position = [25., 20.];
+    session.execute(Command::UpdateSketch {
+        id: sketch,
+        sketch: changed,
+    })?;
+    let record = session.document().body(body).ok_or("Corpo")?;
+    let solid = Solid::from_brep(
+        record.brep.as_ref().ok_or("B-rep")?,
+        Some(&record.face_names),
+    )?;
+    assert!(solid.common_volume(&Solid::cuboid([14.9, 19.9, 1.9], [0.2; 3])?)? > 0.007);
+    assert!(solid.common_volume(&Solid::cuboid([24.9, 19.9, 1.9], [0.2; 3])?)? < 1e-9);
+    spec.diameter = "8 mm".into();
+    session.execute(Command::EditFeature {
+        part,
+        output: body,
+        operation: make(spec),
+    })?;
+    assert!((volume(&session, body)? - (60. * 40. * 8. - PI * 16. * 8.)).abs() < 1e-4);
+    assert!(session.undo());
+    assert!((volume(&session, body)? - (60. * 40. * 8. - PI * 9. * 8.)).abs() < 1e-4);
+    Ok(())
+}

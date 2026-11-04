@@ -4,6 +4,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.35.1 — 04/11/2026
+
+- Furo sugere a direção para o interior do corpo ao escolher o apoio e a base; mantém a direção manual enquanto esses alvos não mudam. Cortes sem interseção são recusados, em vez de criar uma operação sem efeito.
+- Centros coletados automaticamente para furos e fixações excluem referências projetadas, linhas da face e apoios de texto. O diâmetro continua sendo o valor explícito do painel.
+
 ## 0.35.0 — 04/11/2026
 
 - **Tubo** é o nome da ferramenta em português e espanhol; **Pipe** permanece em inglês. As dicas usam Tubo por trajetória / Tubo por trayectoria.

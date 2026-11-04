@@ -236,3 +236,12 @@ A ferramenta passou a se chamar Tubo em português e espanhol (Pipe em inglês).
 foi ampliado para círculo e cadeia fechada com tangência na emenda, mantendo também os
 caminhos abertos. A operação periódica do OCCT usa uma única seção e não cria tampas no
 fechamento. O formato 48 diferencia essa semântica. Evidências em `docs/VALIDATION.md`.
+
+### Furo — 0.35.1
+
+Reproduzido o corte na direção externa em rascunho no plano inferior: a folga de entrada
+podia remover apenas uma camada de 1 mm. A ferramenta agora sugere a direção para dentro,
+e a construção exige interseção do corpo com a parte da ferramenta à frente do apoio.
+Centros projetados/de face e apoios de texto saíram da coleta automática. Regressões cobrem
+posição, diâmetro, recálculo e preservação atômica. Permanecem cotas na origem e os três
+itens de Texto.

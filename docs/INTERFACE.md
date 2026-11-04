@@ -407,3 +407,14 @@ arco e linha e a prévia do tubo; aceita os sufixos de tema e idioma dos demais 
 A ferramenta chama-se **Tubo** em português e espanhol, e **Pipe** em inglês. As dicas
 identificam a operação como Tubo por trajetória / Tubo por trayectoria. O cenário de captura
 `pipe-circle` demonstra a prévia em um círculo; aceita os sufixos de tema e idioma.
+
+### Direção de Furo no rascunho
+
+Ao criar Furo, escolher corpo e rascunho sugere uma direção para o interior do corpo.
+A sugestão não altera a direção de operações antigas nem substitui a escolha manual enquanto
+os alvos continuam os mesmos. A direção concreta é gravada no histórico. A folga acima da
+entrada não conta como material à frente: um furo apontando para fora, ou fora do corpo,
+falha com orientação para conferir ponto, corpo e direção, sem publicar um corte sem efeito.
+A coleta automática usa círculos normais e pontos isolados desenhados pelo usuário; exclui
+referências projetadas, linhas da face e apoios de texto. O diâmetro vem do painel, independentemente
+do raio usado para marcar o centro no rascunho.

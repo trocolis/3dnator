@@ -683,3 +683,11 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Capturas reais `pipe-circle` e `pipe-circle-es`, em 1280 × 820: `target/codex-validation/flatpak-0350-20261104/tubo-pt.png` e `tubo-es.png`. Conferidos o nome Tubo na faixa/painel e o anel fechado na prévia; inglês conserva Pipe.
 - Formato 48 explicita a semântica periódica sem acrescentar índices ou perfis artificiais ao documento. O leitor mantém compatibilidade com as versões anteriores. Os identificadores internos `Pipe` foram preservados.
 - Flatpak 0.35.0 instalado em modo usuário, runtime Freedesktop 26.08. Os ensaios de núcleo, peça e STEP passaram dentro do runtime; `--version` confirmou OCCT habilitado. Captura adicional do pacote instalado em `tubo-installed.png`, Vulkan na Intel UHD Graphics (TGL GT1), com a prévia circular e o nome Tubo no tema escuro. Não houve teste interativo em janela, push, tag ou publicação de release.
+
+## Furo sobre rascunho — 0.35.1 (04/11/2026)
+
+- Fmt, clippy com e sem OCCT e testes do workspace com e sem OCCT aprovados (`--locked --offline`).
+- `holes_reject_an_outward_cut_and_follow_the_sketch_center_and_diameter`: recusa corte externo sem alterar revisão, verifica posições com interseções precisas do B-rep, edição de diâmetro e desfazer.
+- `hole_centers_ignore_fixed_references_and_text_anchors`: coleta apenas centros próprios e pontos isolados; referências e inserção de texto não viram furos.
+- Ensaio gráfico explícito `holes_on_the_bottom_sketch_suggest_an_inward_direction_and_preview_a_cut`, com OCCT e `WGPU_BACKEND=gl`, verifica direção sugerida, prévia e confirmação.
+- Sem mudança de formato ou dependências. O raio dos círculos marcadores continua independente do diâmetro do painel. Não houve interação manual em janela.

@@ -11,6 +11,40 @@ use nator_document::{BodyId, Document, DocumentError, MeshAsset, PartId, feature
 use nator_kernel::Solid;
 use std::sync::Arc;
 
+/// Centros desenhados pelo usuário e pontos isolados, sem apoios de referências ou texto.
+pub fn hole_points(sketch: &nator_sketch::Sketch) -> Vec<u64> {
+    use nator_sketch::Curve;
+    let used = sketch
+        .entities
+        .iter()
+        .flat_map(|e| e.point_ids())
+        .collect::<std::collections::HashSet<_>>();
+    let text_anchors = sketch
+        .texts
+        .iter()
+        .map(|t| t.anchor)
+        .collect::<std::collections::HashSet<_>>();
+    let centers = sketch
+        .entities
+        .iter()
+        .filter(|e| !e.construction && !e.projected && !e.face)
+        .filter_map(|e| match e.curve {
+            Curve::Circle { center, .. } => Some(center),
+            _ => None,
+        });
+    let isolated = sketch
+        .points
+        .iter()
+        .filter(|p| {
+            !p.projected && !p.face && !used.contains(&p.id) && !text_anchors.contains(&p.id)
+        })
+        .map(|p| p.id);
+    let mut points = centers.chain(isolated).collect::<Vec<_>>();
+    points.sort_unstable();
+    points.dedup();
+    points
+}
+
 #[cfg(feature = "occt")]
 fn hole_key(wire: &nator_sketch::profiles::Wire) -> Vec<u64> {
     let mut key = wire.entities.clone();
@@ -1621,6 +1655,14 @@ pub(super) fn construct(
                 let geometry = hole_geometry(spec, &piece.parameters, through)?;
                 let tool = Solid::hole_tool(position, direction, &geometry, &owner, index)
                     .map_err(error)?;
+                // A folga de entrada da ferramenta não conta como profundidade de furação.
+                let forward = tool.split(position, direction, &owner).map_err(error)?;
+                if solid.common_volume(&forward).map_err(error)? <= 1e-9 {
+                    return Err(DocumentError(format!(
+                        "O furo {} não remove material do corpo. Confira o ponto, o corpo e a direção do furo.",
+                        index + 1
+                    )));
+                }
                 solid = solid.boolean(&tool, 1, &owner).map_err(error)?;
             }
             solid

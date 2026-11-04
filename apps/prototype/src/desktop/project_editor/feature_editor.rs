@@ -330,6 +330,7 @@ struct HoleDraft {
     thread_pitch: String,
     /// Pontos gravados na operação em edição; mantidos enquanto o rascunho não mudar.
     kept_points: Option<Vec<u64>>,
+    direction_source: Option<(BodyId, SketchId)>,
 }
 impl Default for HoleDraft {
     fn default() -> Self {
@@ -353,6 +354,7 @@ impl Default for HoleDraft {
             thread_nominal: "6 mm".into(),
             thread_pitch: "1 mm".into(),
             kept_points: None,
+            direction_source: None,
         }
     }
 }
@@ -915,24 +917,7 @@ fn describe_topology(kept: &Kept) -> String {
 
 /// Pontos de um rascunho que posicionam furos: centros de círculos e pontos isolados.
 fn hole_points(sketch: &Sketch) -> Vec<u64> {
-    let used = sketch
-        .entities
-        .iter()
-        .flat_map(|e| e.point_ids())
-        .collect::<std::collections::HashSet<_>>();
-    let centers = sketch.entities.iter().filter_map(|e| match e.curve {
-        Curve::Circle { center, .. } if !e.construction => Some(center),
-        _ => None,
-    });
-    let isolated = sketch
-        .points
-        .iter()
-        .map(|p| p.id)
-        .filter(|id| !used.contains(id));
-    let mut points = centers.chain(isolated).collect::<Vec<_>>();
-    points.sort_unstable();
-    points.dedup();
-    points
+    nator_commands::features::hole_points(sketch)
 }
 
 /// Face plana usada como perfil. Sem condições, a extrusão vale para a face inteira.
@@ -1405,6 +1390,31 @@ impl Draft {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Sugestão de apresentação; a direção concreta continua gravada na operação.
+    fn suggest_hole_direction(&mut self, part: &nator_document::Part) {
+        if self.tool != Tool::Hole || self.output.is_some() {
+            return;
+        }
+        let Some(pair) = self.base.zip(self.sketch) else {
+            return;
+        };
+        if self.hole.direction_source == Some(pair) {
+            return;
+        }
+        let Some(body) = part.bodies.iter().find(|b| b.id == pair.0) else {
+            return;
+        };
+        let Some(record) = part.sketches.iter().find(|s| s.id == pair.1) else {
+            return;
+        };
+        let center = body.placement.apply(body.geometry.mesh().bounds().center());
+        self.hole.reverse = nator_geometry::dot(
+            nator_geometry::sub(center, record.sketch.plane.origin),
+            record.sketch.plane.normal(),
+        ) > 0.;
+        self.hole.direction_source = Some(pair);
     }
 
     fn hole_spec(&self) -> HoleSpec {
@@ -2111,6 +2121,7 @@ impl Editor {
         else {
             return;
         };
+        d.suggest_hole_direction(&part);
         let record = d
             .sketch
             .and_then(|id| part.sketches.iter().find(|s| s.id == id));
@@ -2244,6 +2255,7 @@ impl Editor {
             },
         );
         let tab = d.tab;
+        d.suggest_hole_direction(&part);
         // Os campos podem mudar neste mesmo quadro (inclusive ao clicar em OK).
         // Publicar e pedir prévia sempre usa o estado posterior à edição do formulário.
         let command = d.command(&part);
