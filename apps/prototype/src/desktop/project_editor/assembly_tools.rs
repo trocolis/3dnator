@@ -1223,7 +1223,11 @@ impl Editor {
                 .map(|target| target.pick)
         } else {
             document
-                .pick_all_with(ray, |o| view.pickable(o))
+                .pick_all_clipped_with(
+                    ray,
+                    |o| view.pickable(o),
+                    section::clip(self.current().section),
+                )
                 .ok()
                 .and_then(|picks| section::first_visible(picks, self.current().section))
         };

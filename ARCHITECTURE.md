@@ -175,3 +175,9 @@ sem transportar objetos nativos entre threads. A prévia só entra no desenho se
 propriedades e revisão ainda coincidirem com o painel. A confirmação prepara
 `Command::UpdateSketch` no trabalhador; aba, revisão e token do painel protegem a
 publicação contra resultados atrasados ou cancelados.
+
+### Corte de apresentação e pré-seleção — 0.38.1
+
+A cena conserva faixas de triângulos por corpo/ocorrência ao agregar opacos e translúcidos. `PreparedMesh` mantém uma fonte imutável para preparar tampas no trabalhador: interseção com o plano, validação dos contornos e preenchimento por paridade, preservando furos. A publicação compara o plano solicitado; trocar cena descarta o receptor anterior. Tampas pertencem ao plano e têm contornos próprios; não dependem de faces traseiras hachuradas. Essa geometria serve somente ao viewport, sem substituir B-rep ou exportação.
+
+Com seção ativa, o hover é desenhado no viewport com recorte e profundidade; rótulos continuam em egui. O contexto do hover inclui câmera e seção. A seleção recortada consulta a primeira interseção conservada em cada corpo e a oclusão da tampa de malhas fechadas. A tampa bloqueia faces/pontos atrás do material, mas não ganha uma referência CAD artificial. Os controles de seção continuam por aba, sem persistência ou modificação do histórico.

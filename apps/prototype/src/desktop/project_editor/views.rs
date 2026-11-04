@@ -688,11 +688,6 @@ impl Editor {
                 if view_cube::show(ui, &mut self.viewport.camera, response.rect) {
                     self.fit_view(ui.ctx());
                 }
-                self.viewport.render(&self.gpu.device, &self.gpu.queue);
-                if self.viewport.section_pending() {
-                    ui.ctx()
-                        .request_repaint_after(std::time::Duration::from_millis(16));
-                }
                 let visible_planes = self.work_planes_overlay(ui, response.rect);
                 if !origin_chosen
                     && self.current().plane_pick.is_some()
@@ -729,8 +724,14 @@ impl Editor {
                         theme::muted(),
                     );
                 }
+                self.viewport.section = self.current().section_plane();
                 self.update_hover(ui, &response);
                 self.draw_highlights(ui, response.rect);
+                self.viewport.render(&self.gpu.device, &self.gpu.queue);
+                if self.viewport.section_pending() {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(16));
+                }
                 self.align_overlay(ui, response.rect);
                 self.measure_overlay(ui, response.rect);
                 if let Some(mode) = self.shell.camera_mode

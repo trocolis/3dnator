@@ -621,6 +621,63 @@ const SPACING: (f64, f64) = (5., 100.);
 mod tests {
     use super::*;
     #[test]
+    fn section_picking_finds_kept_surfaces_and_caps_block_material()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use nator_geometry::query::Ray;
+        let mut doc = Document::new("Seleção recortada")?;
+        let asset =
+            std::sync::Arc::new(crate::MeshAsset::new(nator_geometry::reference_bracket()?));
+        let (part, _) = doc.add_mesh(None, "Suporte".into(), asset.clone())?;
+        doc.add_instance(part, None, Placement::new([100., 0., 0.], [0.; 3])?)?;
+        // O raio atravessa material no plano: a tampa bloqueia a face traseira.
+        for x in [20., 120.] {
+            let ray = Ray {
+                origin: [x, 15., 100.],
+                direction: [0., 0., -1.],
+            };
+            assert!(!doc.pick_all_with(ray, |_| true)?.is_empty());
+            let result =
+                doc.pick_clipped_with(ray, |_| true, Some(([0., 0., 3.], [0., 0., 1.])))?;
+            assert!(result.picks.is_empty());
+            assert!(result.cap_distance.is_some_and(|d| (d - 97.).abs() < 1e-8));
+            // Corte abaixo do corpo remove tudo, sem uma tampa imaginária no vazio.
+            let empty =
+                doc.pick_clipped_with(ray, |_| true, Some(([0., 0., -1.], [0., 0., 1.])))?;
+            assert!(empty.picks.is_empty() && empty.cap_distance.is_none());
+        }
+        // Duas superfícies abertas no mesmo corpo: remover a primeira expõe a segunda.
+        let mesh = nator_geometry::Mesh::new(
+            vec![
+                [0., 0., 6.],
+                [10., 0., 6.],
+                [0., 10., 6.],
+                [0., 0., 0.],
+                [10., 0., 0.],
+                [0., 10., 0.],
+            ],
+            vec![[0, 1, 2], [3, 4, 5]],
+        )?;
+        let mut open = Document::new("Malha aberta")?;
+        open.add_mesh(
+            None,
+            "Faces".into(),
+            std::sync::Arc::new(crate::MeshAsset::new(mesh)),
+        )?;
+        let result = open.pick_clipped_with(
+            Ray {
+                origin: [2., 2., 10.],
+                direction: [0., 0., -1.],
+            },
+            |_| true,
+            Some(([0., 0., 3.], [0., 0., 1.])),
+        )?;
+        assert!(result.cap_distance.is_none());
+        assert_eq!(result.picks.len(), 1);
+        assert!(result.picks[0].point[2].abs() < 1e-8);
+        Ok(())
+    }
+
+    #[test]
     fn pick_occurrence_distinguishes_repeated_children_and_rejects_coincident_paths()
     -> Result<(), Box<dyn Error>> {
         let mut doc = Document::new("Ocorrências")?;
@@ -943,6 +1000,11 @@ pub struct Pick {
     pub vertices: [Point3; 3],
     pub placement: Placement,
 }
+/// Alvos CAD conservados pelo corte e distância da tampa que bloqueia o raio.
+pub struct ClippedPicks {
+    pub picks: Vec<Pick>,
+    pub cap_distance: Option<f64>,
+}
 impl Document {
     pub fn pick(&self, ray: nator_geometry::query::Ray) -> Result<Option<Pick>, DocumentError> {
         self.pick_with(ray, |_| true)
@@ -963,6 +1025,36 @@ impl Document {
         ray: nator_geometry::query::Ray,
         allowed: impl Fn(&Occurrence) -> bool,
     ) -> Result<Vec<Pick>, DocumentError> {
+        self.pick_all_clipped_with(ray, allowed, None)
+    }
+
+    /// Seleção na parte conservada pelo corte, incluindo a oclusão de suas tampas.
+    /// Tampas bloqueiam o raio, mas não criam referências artificiais de face CAD.
+    pub fn pick_all_clipped_with(
+        &self,
+        ray: nator_geometry::query::Ray,
+        allowed: impl Fn(&Occurrence) -> bool,
+        clip: Option<(nator_geometry::Point3, nator_geometry::Point3)>,
+    ) -> Result<Vec<Pick>, DocumentError> {
+        Ok(self.pick_clipped_with(ray, allowed, clip)?.picks)
+    }
+
+    pub fn pick_clipped_with(
+        &self,
+        ray: nator_geometry::query::Ray,
+        allowed: impl Fn(&Occurrence) -> bool,
+        clip: Option<(nator_geometry::Point3, nator_geometry::Point3)>,
+    ) -> Result<ClippedPicks, DocumentError> {
+        use nator_geometry::{dot, sub};
+        let mut cap_distance = f64::INFINITY;
+        let cap_at = clip.and_then(|(point, normal)| {
+            let denominator = dot(normal, ray.direction);
+            if denominator >= -1e-12 {
+                return None;
+            }
+            let distance = dot(sub(point, ray.origin), normal) / denominator;
+            (distance >= 0.).then_some(distance)
+        });
         let mut hits = Vec::new();
         for occurrence in self.occurrences()?.into_iter().filter(|o| allowed(o)) {
             let instance = self
@@ -983,7 +1075,30 @@ impl Document {
                     origin,
                     direction: nator_geometry::sub(end, origin),
                 };
-                if let Some(hit) = body.geometry.mesh().ray_hit(local) {
+                if let Some(distance) = cap_at
+                    && body.geometry.topology().has_closed_oriented_edges()
+                {
+                    let cap_origin = std::array::from_fn(|i| {
+                        ray.origin[i] + (distance + 1e-7) * ray.direction[i]
+                    });
+                    let cap_ray = nator_geometry::query::Ray {
+                        origin: pose.inverse_apply(cap_origin),
+                        direction: local.direction,
+                    };
+                    if body
+                        .geometry
+                        .mesh()
+                        .ray_hit(cap_ray)
+                        .is_some_and(|hit| dot(hit.normal, local.direction) > 1e-9)
+                    {
+                        cap_distance = cap_distance.min(distance);
+                    }
+                }
+                if let Some(hit) = body.geometry.mesh().ray_hit_where(local, |point| {
+                    clip.is_none_or(|(origin, normal)| {
+                        dot(sub(pose.apply(point), origin), normal) <= 1e-6
+                    })
+                }) {
                     let zero = pose.apply([0.; 3]);
                     let point = pose.apply(hit.point);
                     // A distância ao longo do raio do mundo ordena os corpos de todas as poses.
@@ -1011,7 +1126,11 @@ impl Document {
                 }
             }
         }
+        hits.retain(|(distance, _)| *distance <= cap_distance + 1e-6);
         hits.sort_by(|a, b| a.0.total_cmp(&b.0));
-        Ok(hits.into_iter().map(|(_, pick)| pick).collect())
+        Ok(ClippedPicks {
+            picks: hits.into_iter().map(|(_, pick)| pick).collect(),
+            cap_distance: cap_distance.is_finite().then_some(cap_distance),
+        })
     }
 }

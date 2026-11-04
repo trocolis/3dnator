@@ -724,3 +724,11 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Regressões numéricas verificam área de uma seção com cavidade, descarte de contorno aberto, fronteiras comuns entre corpos e faixas opacas/translúcidas na cena.
 - fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. O ensaio gráfico `section_caps_render_contact_borders_and_discard_obsolete_planes` passou com OCCT: leitura real de pixels confirma hachura, divisória e descarte de tampa antiga em ortográfica/perspectiva.
 - Capturas reais revisadas: `target/ajustes-section-contact-v2.png` e `target/ajustes-section-perspective-v2.png`, com duas ocorrências e dois corpos por peça. A pasta Imagens passou a usar o caminho da ocorrência para evitar IDs repetidos nesse cenário.
+
+## Hover e seleção na seção — 0.38.1 — 04/11/2026
+
+- Hover da seção desenhado no viewport com profundidade e recorte. Cache inclui câmera/plano; mudança de seção com ponteiro parado remove o contorno antigo. A seleção recortada encontra superfícies conservadas e trata tampas como oclusão, sem face CAD artificial. Capturas de pontos, suporte, pintura e sobrepostos usam a mesma consulta.
+- fmt e Clippy com todos os alvos passaram sem/com OCCT. Workspace: **403 testes sem OCCT e 584 com OCCT**, sem falhas; os testes gráficos ignorados no fluxo padrão foram executados separadamente para esta entrega.
+- **Três ensaios gráficos novos passaram:** tampas/divisória e descarte de planos obsoletos; face/linha/ponto sob tampa invisíveis com leitura de pixels e linha no plano visível, em ortográfica/perspectiva; mudança do plano sem mover o cursor invalida o hover sem modificar a revisão.
+- **Dois ensaios gráficos existentes de precisão passaram**, incluindo desenho/arraste, captura com Alt e valores digitados exatos. Capturas revisadas: `target/ajustes-settings.png`, `target/ajustes-section-contact-v2.png`, `target/ajustes-section-perspective-v2.png` e `target/ajustes-section-hover.png`.
+- Release compilada com OCCT: `3dnator 0.38.1 | OCCT: habilitado`. Formato do projeto permanece 49; não houve nova dependência direta. O pacote Flatpak usa o runtime local 26.08 e inventário atualizado das crates; licenças nativas preservadas do mesmo SDK.

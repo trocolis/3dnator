@@ -65,6 +65,7 @@ pub(crate) fn render_ui_scenario(
         | "assembly-ribbon"
         | "section"
         | "section-contact"
+        | "section-contact-hover"
         | "section-contact-perspective"
         | "offset-plane"
         | "work-plane-pick"
@@ -130,7 +131,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-drawing, settings-shortcuts, settings-help, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-drawing, settings-shortcuts, settings-help, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
         }
@@ -156,7 +157,15 @@ pub(crate) fn render_ui_scenario(
         },
         move |editor, frame| {
             let canvas = editor.canvas_rect;
-            let target = if matches!(pointer.as_str(), "cell-hover" | "paint-hover") {
+            let target = if pointer == "section-contact-hover" {
+                sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    canvas,
+                    [30., 0., 1.],
+                )
+                .unwrap_or(canvas.center())
+            } else if matches!(pointer.as_str(), "cell-hover" | "paint-hover") {
                 first_cell_target(editor)
                     .and_then(|point| {
                         sketch_scene::project(
@@ -248,8 +257,13 @@ pub(crate) fn render_ui_scenario(
                 ];
             }
             match pointer.as_str() {
-                "cell-hover" | "paint-hover" | "hover-face" | "hover-edge"
-                | "sketch-plane-hover" | "work-plane-pick"
+                "cell-hover"
+                | "paint-hover"
+                | "hover-face"
+                | "hover-edge"
+                | "sketch-plane-hover"
+                | "work-plane-pick"
+                | "section-contact-hover"
                     if frame >= 2 =>
                 {
                     return vec![egui::Event::PointerMoved(target)];
@@ -306,7 +320,10 @@ pub(crate) fn render_ui_scenario(
                     .as_ref()
                     .is_some_and(|w| w.operation_ready());
             }
-            if matches!(scenario, "cell-hover" | "paint-hover") {
+            if matches!(
+                scenario,
+                "cell-hover" | "paint-hover" | "section-contact-hover"
+            ) {
                 return editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty());
             }
             if scenario == "sketch-plane-hover" {
@@ -443,7 +460,10 @@ fn pipe_document(closed: bool) -> Result<(Document, PartId, SketchId, u64), Box<
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
-    if matches!(scenario, "section-contact" | "section-contact-perspective") {
+    if matches!(
+        scenario,
+        "section-contact" | "section-contact-perspective" | "section-contact-hover"
+    ) {
         let mut document = Document::new("Corpos em contato")?;
         let mesh = Arc::new(nator_document::MeshAsset::new(
             nator_geometry::reference_bracket()?,
@@ -461,6 +481,9 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
             visible: true,
         });
         editor.shell.tab = shell::RibbonTab::Assembly;
+        if scenario.ends_with("hover") {
+            editor.current_mut().active_part = None;
+        }
         if scenario.ends_with("perspective") {
             editor.viewport.camera.projection = nator_renderer::Projection::Perspective;
         }
@@ -1681,6 +1704,118 @@ mod tests {
         )?;
         Ok(())
     }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn section_hover_updates_with_a_stationary_pointer_after_plane_changes()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Hover da seção")?;
+        document.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(nator_document::MeshAsset::new(
+                nator_geometry::reference_bracket()?,
+            )),
+        )?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        settle(&mut editor, &context)?;
+        editor.viewport.camera.set_direction([0.3, -0.5, 1.]);
+        editor.current_mut().section = Some(section::Section {
+            base: section::Base::Principal(0),
+            offset: 3.,
+            flip: false,
+            visible: true,
+        });
+        frame(&mut editor, &context, Vec::new())?;
+        settle(&mut editor, &context)?;
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [30., 0., 1.],
+        )
+        .ok_or("Cursor")?;
+        frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+        assert!(
+            editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty()),
+            "Corpo visível sem hover"
+        );
+        let revision = editor.current().session.revision();
+        if let Some(section) = &mut editor.current_mut().section {
+            section.offset = -5.;
+        }
+        frame(&mut editor, &context, Vec::new())?;
+        assert!(
+            editor.hover.as_ref().is_none_or(|h| h.overlay.is_empty()),
+            "Contorno antigo permaneceu após o corte"
+        );
+        assert_eq!(revision, editor.current().session.revision());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn section_hover_is_clipped_and_hidden_by_caps_in_both_projections()
+    -> Result<(), Box<dyn Error>> {
+        let gpu = gpu_state()?;
+        let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mesh = nator_geometry::reference_bracket()?;
+        let mut viewport = nator_renderer::Viewport::new(&gpu.device, &mesh)?;
+        viewport.resize(&gpu.device, [800, 600]);
+        viewport.camera.set_direction([0., 0., 1.]);
+        for projection in [
+            nator_renderer::Projection::Orthographic,
+            nator_renderer::Projection::Perspective,
+        ] {
+            viewport.camera.projection = projection;
+            viewport.section = Some(nator_renderer::SectionPlane {
+                point: [0., 0., 3.],
+                normal: [0., 0., 1.],
+            });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while viewport.section_pending() {
+                viewport.render(&gpu.device, &gpu.queue);
+                if Instant::now() > deadline {
+                    return Err("Tampa não terminou".into());
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            viewport.clear_hover();
+            viewport.render(&gpu.device, &gpu.queue);
+            let before =
+                crate::preview::read_texture(&gpu.device, &gpu.queue, viewport.color_texture())?;
+            // Face, linha e ponto sob material; outra linha inteiramente removida pelo corte.
+            viewport.set_hover(
+                &gpu.device,
+                &[[[10., 10., 2.], [45., 10., 2.], [10., 18., 2.]]],
+                &[
+                    [[5., 15., 2.], [55., 15., 2.]],
+                    [[5., 15., 4.], [55., 15., 4.]],
+                ],
+                &[[30., 15., 2.]],
+            );
+            viewport.render(&gpu.device, &gpu.queue);
+            let hidden =
+                crate::preview::read_texture(&gpu.device, &gpu.queue, viewport.color_texture())?;
+            assert!(
+                before.pixels == hidden.pixels,
+                "Hover atravessou a seção em {projection:?}"
+            );
+            viewport.set_hover(&gpu.device, &[], &[[[5., 15., 3.], [55., 15., 3.]]], &[]);
+            viewport.render(&gpu.device, &gpu.queue);
+            let visible =
+                crate::preview::read_texture(&gpu.device, &gpu.queue, viewport.color_texture())?;
+            assert!(before.pixels != visible.pixels, "Linha visível desapareceu");
+        }
+        if let Some(error) = pollster::block_on(scope.pop()) {
+            return Err(error.to_string().into());
+        }
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn section_caps_render_contact_borders_and_discard_obsolete_planes()

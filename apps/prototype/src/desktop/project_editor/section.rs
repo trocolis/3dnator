@@ -71,6 +71,14 @@ pub(super) struct SectionDraft {
     floating: distance_arrow::Input,
 }
 
+/// Plano de seleção no mesmo referencial do renderizador.
+pub(super) fn clip(section: Option<Section>) -> Option<(Point3, Point3)> {
+    section.filter(|s| s.visible).map(|s| {
+        let plane = s.plane();
+        (plane.point, plane.normal)
+    })
+}
+
 /// Primeiro ponto do lado visível do corte, na ordem de distância.
 pub(super) fn first_visible(picks: Vec<Pick>, section: Option<Section>) -> Option<Pick> {
     match section.filter(|s| s.visible) {

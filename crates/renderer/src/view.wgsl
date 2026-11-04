@@ -148,3 +148,8 @@ struct ShadowOutput {
     if (view.options.w > 0.5 && dot(view.clip.xyz, input.local) > view.clip.w + 0.000001) { discard; }
     return vec4<f32>(input.color, 1.0);
 }
+
+@fragment fn hover_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if (view.options.w > 0.5 && dot(view.clip.xyz, input.local) > view.clip.w + 0.0000001) { discard; }
+    return vec4<f32>(input.color, select(0.27, 1.0, (input.edges & 131072u) != 0u));
+}

@@ -349,14 +349,16 @@ impl Editor {
     /// Contexto de pré-seleção: muda quando o painel, o campo ou o modo mudam.
     fn hover_context(&self) -> String {
         format!(
-            "{:?}|{:?}|{:?}|{:?}|{:?}",
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
             self.feature_edit
                 .as_ref()
                 .and_then(|d| d.field().map(|f| (d.part(), d.output(), f))),
             self.pick_mode,
             self.paint_edit.as_ref().map(|d| d.part),
             self.current().active_part,
-            self.current().view.version
+            self.current().view.version,
+            self.current().section,
+            self.viewport.camera,
         )
     }
 
@@ -501,7 +503,11 @@ impl Editor {
         let document = self.picking_document();
         let view = self.current().view.clone();
         let pick = document
-            .pick_all_with(ray, |occurrence| view.pickable(occurrence))
+            .pick_all_clipped_with(
+                ray,
+                |occurrence| view.pickable(occurrence),
+                section::clip(self.current().section),
+            )
             .ok()
             .and_then(|picks| section::first_visible(picks, self.current().section));
         let (overlay, label) = match pick {
@@ -643,6 +649,7 @@ impl Editor {
 
     /// Realces persistentes (referências do painel e face/aresta escolhida) e a pré-seleção.
     pub(super) fn draw_highlights(&mut self, ui: &egui::Ui, rect: egui::Rect) {
+        self.viewport.clear_hover();
         let Some(bounds) = self.current().scene_bounds else {
             return;
         };
@@ -787,7 +794,34 @@ impl Editor {
             .as_ref()
             .filter(|h| h.tab == self.current().id && !h.overlay.is_empty())
         {
-            draw(&painter, &camera, bounds, rect, &hover.overlay, Look::Hover);
+            if self.current().section_plane().is_some() {
+                let mut segments: Vec<_> = hover
+                    .overlay
+                    .segments
+                    .iter()
+                    .filter(|(_, normal)| {
+                        normal.is_none_or(|n| norm(n) == 0. || dot(n, camera.direction()) > 0.)
+                    })
+                    .map(|(segment, _)| *segment)
+                    .collect();
+                for contour in &hover.overlay.contours {
+                    segments.extend(
+                        contour
+                            .iter()
+                            .zip(contour.iter().cycle().skip(1))
+                            .take(contour.len())
+                            .map(|(a, b)| [*a, *b]),
+                    );
+                }
+                self.viewport.set_hover(
+                    &self.gpu.device,
+                    &hover.overlay.triangles,
+                    &segments,
+                    &hover.overlay.points,
+                );
+            } else {
+                draw(&painter, &camera, bounds, rect, &hover.overlay, Look::Hover);
+            }
             if let Some(point) = hover.captured
                 && let Some(p) = sketch_scene::project(&camera, bounds, rect, point)
             {

@@ -286,7 +286,11 @@ impl Editor {
                     let result = (|| {
                         let picks = query
                             .document
-                            .pick_all_with(query.ray, |o| query.view.pickable(o))
+                            .pick_all_clipped_with(
+                                query.ray,
+                                |o| query.view.pickable(o),
+                                section::clip(query.cut),
+                            )
                             .map_err(|e| e.to_string())?;
                         section::first_visible(picks, query.cut)
                             .map(|pick| {

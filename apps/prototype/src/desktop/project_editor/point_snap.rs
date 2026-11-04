@@ -170,7 +170,7 @@ impl Query<'_> {
         } = self;
         let ray = screen_ray(camera, bounds, rect, position);
         let hovered = document
-            .pick_all_with(ray, |o| view.pickable(o))
+            .pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
             .ok()
             .and_then(|hits| section::first_visible(hits, section));
         let mut candidates = Vec::new();
@@ -260,15 +260,18 @@ impl Query<'_> {
         });
         for candidate in candidates {
             let target_ray = screen_ray(camera, bounds, rect, candidate.screen);
-            let hit = document
-                .pick_all_with(target_ray, |o| view.pickable(o))
-                .ok()
-                .and_then(|hits| section::first_visible(hits, section));
+            let query = document
+                .pick_clipped_with(target_ray, |o| view.pickable(o), section::clip(section))
+                .ok()?;
             let tolerance = bounds.size().into_iter().fold(1_f64, f64::max) * 1e-6;
-            if hit.is_some_and(|hit| {
-                dot(sub(hit.point, target_ray.origin), target_ray.direction)
-                    < candidate.depth - tolerance
-            }) {
+            let blocked = query.cap_distance.unwrap_or(f64::INFINITY).min(
+                query
+                    .picks
+                    .first()
+                    .map(|hit| dot(sub(hit.point, target_ray.origin), target_ray.direction))
+                    .unwrap_or(f64::INFINITY),
+            );
+            if blocked < candidate.depth - tolerance {
                 continue;
             }
             return Some(candidate.target);

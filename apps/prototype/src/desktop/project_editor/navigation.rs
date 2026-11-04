@@ -110,7 +110,11 @@ impl Editor {
                 // A parte escondida pelo corte de seção não é selecionável.
                 let pick = section::first_visible(
                     document
-                        .pick_all_with(ray, |occurrence| view.pickable(occurrence))
+                        .pick_all_clipped_with(
+                            ray,
+                            |occurrence| view.pickable(occurrence),
+                            section::clip(cut),
+                        )
                         .map_err(|e| e.to_string())?,
                     cut,
                 );

@@ -3,6 +3,7 @@
 use nator_geometry::{Bounds, Mesh, Point3, RgbColor, cross, dot, norm, sub};
 use wgpu::util::DeviceExt;
 
+mod overlay;
 mod section;
 
 pub use wgpu;
@@ -682,6 +683,8 @@ pub struct Viewport {
     /// Sombra de apoio suave sob o modelo.
     shadow_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    hover_pipeline: wgpu::RenderPipeline,
+    hover_buffers: overlay::HoverBuffers,
     section_state: section::State,
 }
 
@@ -764,7 +767,7 @@ impl Viewport {
             label: Some("Superfície neutra"),
             source: wgpu::ShaderSource::Wgsl(include_str!("view.wgsl").into()),
         });
-        let pipeline = |translucent: bool, lines: bool| {
+        let pipeline = |translucent: bool, lines: bool, hover: bool| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(if translucent { "Superfícies translúcidas" } else { "Superfícies" }),
             layout: Some(&pipeline_layout),
@@ -785,15 +788,15 @@ impl Viewport {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(!translucent && !lines),
+                depth_write_enabled: Some(!translucent && !lines && !hover),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
-                bias: Default::default(),
+                bias: if hover { wgpu::DepthBiasState { constant: -2, slope_scale: -1., clamp: 0. } } else { Default::default() },
             }),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some(if lines { "line_main" } else { "surface_main" }),
+                entry_point: Some(if lines { "line_main" } else if hover { "hover_main" } else { "surface_main" }),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: COLOR_FORMAT,
@@ -805,9 +808,10 @@ impl Viewport {
             cache: None,
         })
         };
-        let surface_pipeline = pipeline(false, false);
-        let translucent_pipeline = pipeline(true, false);
-        let line_pipeline = pipeline(true, true);
+        let surface_pipeline = pipeline(false, false, false);
+        let translucent_pipeline = pipeline(true, false, false);
+        let line_pipeline = pipeline(true, true, false);
+        let hover_pipeline = pipeline(true, false, true);
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Sombra de contato"),
             layout: Some(&pipeline_layout),
@@ -879,6 +883,8 @@ impl Viewport {
             translucent_pipeline,
             shadow_pipeline,
             line_pipeline,
+            hover_pipeline,
+            hover_buffers: overlay::HoverBuffers::default(),
             section_state: section::State::default(),
         };
         viewport.set_mesh(device, mesh)?;
@@ -908,6 +914,7 @@ impl Viewport {
             usage: wgpu::BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
+        self.hover_buffers = overlay::HoverBuffers::default();
         self.section_state = section::State::default();
         self.vertex_count = 0;
         self.opaque_count = 0;
@@ -936,6 +943,7 @@ impl Viewport {
         self.opaque_count = (mesh.opaque_vertices as u32).min(self.vertex_count);
         self.shadow_count = (mesh.ground_shadow.len() / VERTEX_BYTES) as u32;
         self.normalization = (mesh.center, mesh.scale);
+        self.hover_buffers = overlay::HoverBuffers::default();
         self.section_state = section::State::default();
         self.section_state.source = Some(mesh.source.clone());
         self.camera = Camera::default();
@@ -1076,6 +1084,16 @@ impl Viewport {
                 pass.set_pipeline(&self.line_pipeline);
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..self.section_state.line_count, 0..1);
+            }
+            if let Some(buffer) = &self.hover_buffers.triangles {
+                pass.set_pipeline(&self.hover_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..self.hover_buffers.triangle_count, 0..1);
+            }
+            if let Some(buffer) = &self.hover_buffers.lines {
+                pass.set_pipeline(&self.line_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..self.hover_buffers.line_count, 0..1);
             }
         }
         queue.submit([encoder.finish()]);

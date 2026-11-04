@@ -108,11 +108,13 @@ fn free_profile(
     placement: Placement,
     ray: Ray,
     occluder: Option<&Pick>,
+    cap_distance: Option<f64>,
 ) -> Option<(highlight::Overlay, String, f64)> {
     let piece = document.part(part)?;
     let blocked = occluder
         .map(|p| dot(sub(p.point, ray.origin), ray.direction))
-        .unwrap_or(f64::INFINITY);
+        .unwrap_or(f64::INFINITY)
+        .min(cap_distance.unwrap_or(f64::INFINITY));
     let mut best: Option<(highlight::Overlay, String, f64, f64)> = None;
     for record in piece.sketches.iter().filter(|s| piece.shows_sketch(s)) {
         let sketch = &record.sketch;
@@ -176,15 +178,16 @@ fn compute(
         origin: key.origin,
         direction: key.direction,
     };
-    let pick = document
-        .pick_all_with(ray, |o| view.pickable(o))
-        .ok()
-        .and_then(|p| section::first_visible(p, section));
+    let query = document
+        .pick_clipped_with(ray, |o| view.pickable(o), section::clip(section))
+        .ok();
+    let cap_distance = query.as_ref().and_then(|q| q.cap_distance);
+    let pick = query.and_then(|q| section::first_visible(q.picks, section));
     // Na extrusão, `profile_overlay` já cuida das regiões de rascunho.
     let profile = if key.paint || key.area {
         None
     } else {
-        free_profile(document, part, placement, ray, pick.as_ref())
+        free_profile(document, part, placement, ray, pick.as_ref(), cap_distance)
     };
     if let Some((overlay, label, distance)) = &profile
         && pick

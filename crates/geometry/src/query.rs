@@ -14,6 +14,12 @@ pub struct Hit {
 }
 impl Mesh {
     pub fn ray_hit(&self, ray: Ray) -> Option<Hit> {
+        self.ray_hit_where(ray, |_| true)
+    }
+
+    /// Primeiro triângulo cujo ponto de interseção pertence à parte visível.
+    /// Filtrar só a primeira interseção perde as superfícies expostas pelo corte.
+    pub fn ray_hit_where(&self, ray: Ray, keeps: impl Fn(Point3) -> bool) -> Option<Hit> {
         let mut hit = None;
         let mut nearest = f64::INFINITY;
         for (index, t) in self.triangles.iter().enumerate() {
@@ -40,10 +46,14 @@ impl Mesh {
             if d < 0. || d >= nearest {
                 continue;
             }
+            let point = std::array::from_fn(|i| ray.origin[i] + d * ray.direction[i]);
+            if !keeps(point) {
+                continue;
+            }
             nearest = d;
             let n = cross(e1, e2);
             hit = Some(Hit {
-                point: std::array::from_fn(|i| ray.origin[i] + d * ray.direction[i]),
+                point,
                 normal: n.map(|v| v / norm(n)),
                 triangle: index,
                 distance: d,

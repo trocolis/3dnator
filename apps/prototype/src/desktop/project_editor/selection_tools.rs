@@ -380,7 +380,11 @@ impl Editor {
         );
         let document = self.current().session.document();
         let view = self.current().view.clone();
-        let Ok(mut picks) = document.pick_all_with(ray, |o| view.pickable(o)) else {
+        let Ok(mut picks) = document.pick_all_clipped_with(
+            ray,
+            |o| view.pickable(o),
+            section::clip(self.current().section),
+        ) else {
             return;
         };
         if let Some(cut) = self.current().section.filter(|s| s.visible) {

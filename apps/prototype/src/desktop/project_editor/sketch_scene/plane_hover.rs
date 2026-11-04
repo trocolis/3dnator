@@ -29,12 +29,13 @@ pub(super) struct Cache {
 /// malhas obstruem o raio, mas não são suportes exatos para um novo rascunho.
 fn candidate(document: &Document, view: &ViewState, key: Key) -> Option<Arc<Candidate>> {
     let picks = document
-        .pick_all_with(
+        .pick_all_clipped_with(
             Ray {
                 origin: key.origin,
                 direction: key.direction,
             },
             |o| view.pickable(o),
+            section::clip(key.section),
         )
         .ok()?;
     let pick = section::first_visible(picks, key.section)?;

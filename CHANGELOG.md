@@ -6,6 +6,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.1 — 04/11/2026
+
+- Pré-seleção na seção passa pelo recorte e teste de profundidade do viewport: contornos não atravessam material opaco nem mostram a parte removida. Rótulos e mira permanecem na interface; seleção persistente e manipuladores conservam seus contratos.
+- Câmera e plano invalidam o cache de hover. Clique, sobrepostos, captura de pontos e suporte de rascunho consultam superfícies conservadas pelo corte; tampas bloqueiam alvos atrás do material sem criar faces CAD artificiais.
+
 ## 0.38.0 — 04/11/2026
 
 - Corte de seção prepara tampas no plano e contornos por corpo/ocorrência em trabalhador, preservando cavidades e a divisória entre corpos encostados. Faces traseiras deixam de simular a tampa e não disputam profundidade nas interfaces internas.

@@ -206,3 +206,12 @@ Não há necessidade prevista de alterar o formato 49: a precisão já é persis
 e cubo/seção/hover são controles visuais. Atualizar `CHANGELOG.md`, `docs/INTERFACE.md`
 e `docs/VALIDATION.md` em cada entrega. Definir a versão do aplicativo conforme o
 escopo entregue e só marcar caixas de `AJUSTES.md` com evidências de aceite.
+
+## Execução — 04/11/2026
+
+- **0.37.1:** precisão linear única, padrão 0,1 mm e unidade sem remapear o valor físico.
+- **0.37.2:** clique nas faces do cubo conserva o alto predominante, em quartos de volta.
+- **0.38.0:** tampas no plano e divisórias por corpo/ocorrência, com geração assíncrona e preservação de cavidades.
+- **0.38.1:** hover recortado com profundidade e seleção coerente com as tampas. Evidências e resultados finais em `VALIDATION.md`.
+
+A implementação usa a malha de apresentação para as tampas; não foi necessária dependência nova nem alteração do formato 49. Tampas não se tornam referências CAD selecionáveis.

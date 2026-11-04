@@ -513,7 +513,7 @@ impl Editor {
         let section = self.current().section;
         self.start(context, None, move || {
             let picks = document
-                .pick_all_with(ray, |o| view.pickable(o))
+                .pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
                 .map_err(|e| e.to_string())?;
             let pick = section::first_visible(picks, section);
             if purpose == PlanePurpose::OffsetBase {
