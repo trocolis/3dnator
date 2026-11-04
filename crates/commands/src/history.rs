@@ -21,6 +21,7 @@ fn sketch_context(doc: &Document, sketch: SketchId) -> C {
 }
 pub(super) fn context(command: &Command, doc: &Document) -> C {
     match command {
+        Command::SetPartReference { .. } => C::Assembly,
         Command::UpdateSketch { id, .. }
         | Command::AddFaceLines { id }
         | Command::RemoveSketch { id }

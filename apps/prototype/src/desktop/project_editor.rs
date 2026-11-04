@@ -357,10 +357,12 @@ impl Tab {
         if !self.session.is_dirty() {
             let _ = nator_project_io::remove_recovery(&self.recovery_path);
         }
-        if self
-            .active_part
-            .is_some_and(|p| self.session.document().part(p).is_none())
-        {
+        if self.active_part.is_some_and(|p| {
+            self.session
+                .document()
+                .part(p)
+                .is_none_or(|part| part.reference)
+        }) {
             self.active_part = None;
         }
         self.refresh_selection();
@@ -1360,6 +1362,7 @@ impl Editor {
         let mut assembly_effect = None;
         let mut created = None;
         let mut consumed = false;
+        let mut left_reference = false;
         let active_tab = self.current().id;
         if let Some(target) = self.find_tab(tab) {
             let imported_roots = if matches!(command.effect(), Effect::Imported { .. }) {
@@ -1441,7 +1444,9 @@ impl Editor {
                     ) {
                         assembly_effect = Some(effect);
                     }
+                    let active = target.active_part;
                     target.changed();
+                    left_reference = active.is_some() && target.active_part.is_none();
                     self.requested = None;
                     self.resolve_pending_failure(tab);
                 }
@@ -1449,6 +1454,9 @@ impl Editor {
             }
         }
         if tab == active_tab {
+            if left_reference {
+                self.shell.tab = shell::RibbonTab::Assembly;
+            }
             if let Some((part, sketch)) = created {
                 self.begin_sketch(part, sketch);
             }

@@ -210,3 +210,14 @@ Ampliar cenários de `--render-ui-scenario` para temas, navegação e Texto; usa
 Registrar o que as capturas não cobrem e o aceite manual pendente. Atualizar `CHANGELOG.md`
 em cada entrega e só marcar a caixa correspondente em `AJUSTES.md` com evidências de aceite.
 Não é necessário introduzir uma dependência nova para o plano proposto.
+
+## Execução iniciada — 04/11/2026
+
+- **0.32.1:** etapa 1 concluída (cubo, retirada dos acessos de criação de Rótulo e grupos Furo/Casca).
+- **0.32.2:** etapa 2 concluída (navegação preserva a ferramenta e o comando de pintura).
+- **0.33.0:** etapa 6 antecipada e concluída (converter peça em referência), com testes de persistência, instâncias compartilhadas e saída da edição na interface.
+- Permanecem seis caixas pendentes: Furo, cotas na origem, os três ajustes de Texto e Pipe.
+  A reprodução de Furo aguarda a descrição da alteração que não atualizou o resultado.
+
+Evidências por versão em `docs/VALIDATION.md`. `AJUSTES.md` é ignorado pelo Git neste
+repositório; suas caixas foram atualizadas localmente, sem forçar sua inclusão nos commits.

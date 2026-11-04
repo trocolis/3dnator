@@ -881,6 +881,8 @@ pub enum Text {
     ReferencesFolder,
     ReferenceModelHint,
     CreatePartFromReference,
+    ConvertToReference,
+    ConvertToReferenceHint,
     ReferenceNotEditable,
     MergeCoplanarAreas,
     ImportMenu,
@@ -1880,6 +1882,10 @@ fn pt(key: Text) -> &'static str {
             "Modelo importado como referência: pode ser movido, ocultado e medido, mas não editado."
         }
         Text::CreatePartFromReference => "Criar peça",
+        Text::ConvertToReference => "Converter para objeto de referência",
+        Text::ConvertToReferenceHint => {
+            "Vale para todas as instâncias desta peça. Confirme ou cancele a ferramenta aberta antes de converter."
+        }
         Text::ReferenceNotEditable => {
             "Referências não podem ser editadas. Use Criar peça no menu dela, na árvore."
         }

@@ -11693,6 +11693,92 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn converting_active_part_to_reference_leaves_editing_and_preserves_geometry()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part) = navigation_editor(&context)?;
+        let instance = editor
+            .current()
+            .session
+            .document()
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância")?
+            .id;
+        let before = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .bodies[0]
+            .brep
+            .clone();
+        // Um painel não confirmado impede a conversão, inclusive pelo encaminhamento da ação.
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        editor.apply_menu_action(&context, browser::MenuAction::MakeReference(instance));
+        assert!(
+            !editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .reference
+        );
+        assert!(editor.feature_edit.is_some());
+        editor.activate_selection(&context);
+        editor.apply_menu_action(&context, browser::MenuAction::MakeReference(instance));
+        settle(&mut editor, &context)?;
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .reference
+        );
+        assert_eq!(editor.current().active_part, None);
+        assert_eq!(editor.shell.tab, shell::RibbonTab::Assembly);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .bodies[0]
+                .brep,
+            before
+        );
+        editor.step_history(&context, false);
+        assert!(
+            !editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .reference
+        );
+        editor.step_history(&context, true);
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .reference
+        );
+        assert_eq!(editor.current().active_part, None);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn navigation_bar_is_centered_and_camera_modes_suspend_the_open_tool()
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();

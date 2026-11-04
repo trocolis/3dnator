@@ -363,3 +363,100 @@ fn reference_imports_move_but_cannot_be_edited_until_they_become_parts() -> Resu
     assert!(session.document().part(part).ok_or("Peça")?.reference);
     Ok(())
 }
+
+/// A marca afeta a definição compartilhada, sem converter ou substituir sua geometria.
+#[test]
+fn converting_a_part_to_reference_preserves_shared_instances_and_round_trips() -> Result<()> {
+    use nator_document::activity::EditContext;
+    let (mut session, selected, _) = hierarchy()?;
+    let part = session
+        .document()
+        .instance(selected)
+        .ok_or("Instância")?
+        .part;
+    session.execute(Command::AddInstance {
+        part,
+        parent: None,
+        placement: Placement::default(),
+    })?;
+    let other = session
+        .document()
+        .instances()
+        .iter()
+        .find(|i| i.part == part && i.id != selected)
+        .ok_or("Segunda instância")?
+        .id;
+    let before = subtree_vertices(session.document(), selected, true)?;
+    let body_ids = session
+        .document()
+        .part(part)
+        .ok_or("Peça")?
+        .bodies
+        .iter()
+        .map(|b| b.id)
+        .collect::<Vec<_>>();
+    session.execute(Command::SetPartReference {
+        part,
+        reference: true,
+    })?;
+    assert!(session.document().part(part).ok_or("Peça")?.reference);
+    assert_eq!(
+        subtree_vertices(session.document(), selected, true)?,
+        before
+    );
+    assert_eq!(
+        session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .bodies
+            .iter()
+            .map(|b| b.id)
+            .collect::<Vec<_>>(),
+        body_ids
+    );
+    assert_eq!(
+        session
+            .document()
+            .instance(other)
+            .ok_or("Outra instância")?
+            .part,
+        part
+    );
+    assert_eq!(session.undo_context(), Some(EditContext::Assembly));
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("reference.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let reopened = nator_project_io::read_project(&path)?;
+    assert!(reopened.part(part).ok_or("Peça reaberta")?.reference);
+    let restored = subtree_vertices(&reopened, selected, true)?;
+    assert_eq!(restored.len(), before.len());
+    assert!(
+        restored
+            .iter()
+            .zip(&before)
+            .all(|(a, b)| norm(sub(*a, *b)) < 1e-8)
+    );
+    assert!(
+        session
+            .execute(Command::AddSketch {
+                destination: Some(part),
+                sketch: nator_sketch::Sketch::new("Recusado", nator_sketch::Plane::xy())
+            })
+            .is_err()
+    );
+    assert!(session.undo());
+    assert!(!session.document().part(part).ok_or("Peça")?.reference);
+    assert!(session.redo());
+    assert!(session.document().part(part).ok_or("Peça")?.reference);
+    session.execute(Command::SetPartReference {
+        part,
+        reference: false,
+    })?;
+    assert!(!session.document().part(part).ok_or("Peça")?.reference);
+    assert_eq!(
+        subtree_vertices(session.document(), selected, true)?,
+        before
+    );
+    Ok(())
+}

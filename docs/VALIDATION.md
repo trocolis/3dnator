@@ -656,3 +656,10 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Fmt e clippy do workspace com e sem OCCT aprovados, com `--locked --offline`. Testes do workspace sem OCCT aprovados.
 - Executado explicitamente com OCCT e `WGPU_BACKEND=gl` o ensaio ignorado `navigation_bar_is_centered_and_camera_modes_suspend_the_open_tool`: aprovado. O ensaio simula cliques e arrastes reais de egui, volta por Selecionar e confere que os alvos e a cor do comando Pintar são conservados.
 - Selecionar encerra a navegação da câmera; Esc e Cancelar continuam encerrando ferramentas. Texto também participa da detecção de ferramenta ativa.
+
+## Conversão de peça em referência — 0.33.0 (04/11/2026)
+
+- Fmt e clippy do workspace com e sem OCCT aprovados (`--locked --offline`). Testes do workspace sem OCCT aprovados.
+- `converting_a_part_to_reference_preserves_shared_instances_and_round_trips`: confere definição compartilhada, posições, corpos, bloqueio de edição, reabertura e desfazer/refazer. A suíte `assembly` também foi executada com OCCT.
+- Ensaio gráfico explícito `converting_active_part_to_reference_leaves_editing_and_preserves_geometry`, com OCCT e `WGPU_BACKEND=gl`: aprovado. Confere recusa enquanto há painel aberto, preservação dos bytes B-rep, saída da edição ativa e desfazer/refazer.
+- A marca já é persistida no formato 46. Não foi necessário alterar o formato ou dependências. Não houve interação manual em janela.

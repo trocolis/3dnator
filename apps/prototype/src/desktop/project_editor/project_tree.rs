@@ -512,6 +512,10 @@ impl<'a> Tree<'a> {
         if depth > 64 {
             return;
         }
+        if part.reference {
+            self.reference_part(ui, instance, parent_shown);
+            return;
+        }
         let shown = parent_shown && instance.visible;
         let active = self.tab.active_part == Some(part.id);
         let id = self.id(("part", &path));

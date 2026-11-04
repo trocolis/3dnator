@@ -938,6 +938,10 @@ pub fn text(key: Text) -> &'static str {
         Text::ReferenceModelHint => {
             "Model imported as a reference: it can be moved, hidden and measured, but not edited."
         }
+        Text::ConvertToReference => "Convert to reference object",
+        Text::ConvertToReferenceHint => {
+            "Applies to every instance of this part. Confirm or cancel the open tool before converting."
+        }
         Text::CreatePartFromReference => "Create part",
         Text::ReferenceNotEditable => {
             "References cannot be edited. Use Create part in its menu, in the tree."

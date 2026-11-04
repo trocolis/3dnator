@@ -4,6 +4,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.33.0 — 04/11/2026
+
+- **Converter para objeto de referência** no menu da peça, com geometria, histórico e ocorrências preservados. A conversão vale para todas as instâncias da definição e fica indisponível enquanto houver rascunho ou ferramenta aberta. **Criar peça** reverte a marca.
+- Referências aninhadas agora usam a mesma apresentação protegida das referências da raiz na árvore. Converter a peça ativa encerra sua edição e volta à Montagem.
+
 ## 0.32.2 — 04/11/2026
 
 - Selecionar na barra de navegação retoma a ferramenta aberta após Arrastar/Rotacionar, conservando painéis, valores, alvos e prévias. Esc e a troca de ferramenta mantêm o cancelamento explícito.

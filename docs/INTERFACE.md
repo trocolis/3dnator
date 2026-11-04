@@ -192,6 +192,12 @@ Quando uma edição (cota de rascunho, parâmetro, operação, reordenação ou 
 
 Nenhuma referência perdida é substituída por outra face ou aresta: a decisão é sempre do usuário.
 
+O menu da peça oferece **Converter para objeto de referência**. A marca vale para todas as
+instâncias da definição e preserva geometria, cores, posições e histórico. A conversão fica
+indisponível durante rascunho ou ferramenta não confirmada. Converter a peça ativa volta à
+Montagem; **Criar peça**, no menu da referência, libera a edição novamente. Referências
+aninhadas também aparecem sem ferramentas internas de edição na árvore.
+
 ## Barra de navegação
 
 Centrada na base da área de edição, a barra tem seis botões, separados em três grupos:

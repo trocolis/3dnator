@@ -27,6 +27,7 @@ pub(super) struct RenameDraft {
 /// Intenção escolhida num menu de contexto da árvore.
 pub(super) enum MenuAction {
     Activate(PartId),
+    MakeReference(InstanceId),
     Deactivate,
     Select(Vec<Selection>),
     Move(Vec<Selection>),
@@ -47,6 +48,7 @@ pub(super) enum MenuAction {
 /// Estado da aba usado pelos menus.
 pub(super) struct MenuContext {
     pub active: Option<PartId>,
+    pub can_convert_reference: bool,
     pub isolated: bool,
     pub transparent: HashSet<InstanceId>,
     pub locked: HashSet<InstanceId>,
@@ -79,6 +81,15 @@ pub(super) fn instance_menu(
         }
     } else if item(ui, Icon::Cube, T::EditPart) {
         action = Some(MenuAction::Activate(instance.part));
+    }
+    let convert = ui.add_enabled_ui(context.can_convert_reference, |ui| {
+        item(ui, Icon::Import, T::ConvertToReference)
+    });
+    convert
+        .response
+        .on_hover_text(text(T::ConvertToReferenceHint));
+    if convert.inner {
+        action = Some(MenuAction::MakeReference(instance.id));
     }
     ui.separator();
     if item(ui, Icon::Export, T::ExportStep) {
@@ -314,10 +325,17 @@ pub(super) fn group_menu(
 }
 
 impl Editor {
+    fn can_convert_reference(&self) -> bool {
+        !self.busy()
+            && self.current().sketch_edit.is_none()
+            && self.selection_active()
+            && self.pending_failure.is_none()
+    }
     pub(super) fn menu_context(&self) -> MenuContext {
         let tab = self.current();
         MenuContext {
             active: tab.active_part,
+            can_convert_reference: self.can_convert_reference(),
             isolated: tab.view.isolated.is_some(),
             transparent: tab.view.transparent.clone(),
             locked: tab.view.locked.clone(),
@@ -349,6 +367,30 @@ impl Editor {
                     .is_some_and(|p| p.reference) =>
             {
                 self.status.warning(text(T::ReferenceNotEditable));
+            }
+            MenuAction::MakeReference(instance) => {
+                if !self.can_convert_reference() {
+                    return;
+                }
+                let Some(part) = self
+                    .current()
+                    .session
+                    .document()
+                    .instance(instance)
+                    .map(|i| i.part)
+                else {
+                    return;
+                };
+                self.current_mut()
+                    .select(Some(Selection::Instance(instance)));
+                self.prepare_command(
+                    context,
+                    tab,
+                    Command::SetPartReference {
+                        part,
+                        reference: true,
+                    },
+                );
             }
             MenuAction::Activate(part) => {
                 self.current_mut().active_part = Some(part);
