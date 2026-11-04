@@ -699,3 +699,11 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - `origin_can_be_chosen_with_a_point_circle_or_line_and_projected_on_axes`: seleção da origem, centro e linha, montagem da cota e layout.
 - Ensaio gráfico explícito `dimension_tool_uses_the_origin_without_adding_geometry`, com OCCT e `WGPU_BACKEND=gl`, aprovado: seleciona origem/canto, digita o valor e confirma sem acrescentar pontos.
 - Formato 49 inclui as novas restrições e o alvo Origin. Sem dependências novas; testes OCCT completos serão repetidos na integração com Texto.
+
+## Texto com prévia e confirmação — 04/11/2026
+
+- Versão 0.37.0, formato 49. Workspace validado sem e com OCCT: fmt, Clippy com avisos negados e testes, sempre com `--locked`. Passaram 399 testes sem OCCT e 580 com OCCT; os ensaios gráficos abaixo foram executados explicitamente, além das suítes padrão.
+- Três ensaios gráficos de Texto aprovados: criação e reabertura por duplo clique; prévia por campos numéricos, cancelamento e descarte de confirmação antiga; captura de ponto médio, ângulo flutuante travado e desfazer/refazer. Enter no campo não publica o bloco.
+- Regressões do domínio conferem conflitos atômicos, preservação de IDs, histórico e persistência. Os três ensaios gráficos de Dimensionar, incluindo a origem, também passaram.
+- Capturas de Texto nos temas claro/escuro e de Dimensionar na origem ficam em `target/codex-validation/ajustes-0370-20261104/`. Ensaios automatizados usam egui/wgpu; não substituem uma sessão manual com mouse.
+- Flatpak 0.37.0 instalado para o usuário com runtime Freedesktop 26.08. Ensaios de núcleo, peça e STEP aprovados dentro do runtime; `--version` confirma OCCT habilitado. Captura `sketch-text-installed.png` conferida na instalação, usando Vulkan na Intel UHD Graphics. Sem push, tags ou publicação de release.

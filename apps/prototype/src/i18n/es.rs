@@ -963,6 +963,9 @@ pub fn text(key: Text) -> &'static str {
         Text::SettingsAppearanceHint => {
             "Valen para todos los proyectos en este equipo. Sistema sigue el tema y el idioma del sistema operativo; fuera de portugués, español e inglés, se usa el portugués."
         }
+        Text::SketchTextX => "Posición X",
+        Text::SketchTextY => "Posición Y",
+        Text::SketchTextAdjustHint => "Ajusta las propiedades y confirma para aplicar el texto.",
         Text::SketchTextTool => "Texto",
         Text::SketchTextHint => "Haga clic en el punto de inserción del texto, en su centro.",
         Text::SketchTextDirectionHint => {

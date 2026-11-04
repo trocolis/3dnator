@@ -251,3 +251,12 @@ itens de Texto.
 Etapa concluída com referência imutável no solver e na persistência, sem apoios artificiais.
 Ponto, centro de círculo/arco e linha aceitam a origem em qualquer ordem; valores, expressões,
 edição e posição do texto usam o fluxo existente. Formato 49. Permanecem os três itens de Texto.
+
+### Texto — 0.37.0; plano concluído
+
+Os três itens de Texto foram concluídos: confirmação explícita com painel persistente,
+capturas e ângulo flutuante na orientação, posição X/Y e prévia das propriedades.
+Contornos e solver rodam no trabalhador, com cache e descarte de respostas obsoletas.
+Ensaios exercitam criação, reabertura, alteração numérica, cancelamento, captura de
+ponto médio, ângulo travado, desfazer/refazer e persistência. Todos os itens de
+`AJUSTES.md` estão atendidos; evidências em `docs/VALIDATION.md`.

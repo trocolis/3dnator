@@ -473,12 +473,19 @@ enum Outcome {
     Exported,
     /// Exportação concluída com um aviso para o usuário.
     ExportedWith(String),
-    /// Contorno das letras calculado para o Texto do rascunho.
-    SketchTextOutline {
+    /// Texto confirmado na mesma revisão e no mesmo painel que preparou a candidata.
+    SketchTextPrepared {
         tab: u64,
-        sketch: SketchId,
-        block: Box<nator_sketch::text::SketchText>,
-        anchor: Option<nator_sketch::Point2>,
+        revision: u64,
+        token: u64,
+        command: PreparedCommand,
+    },
+    SketchTextRejected {
+        tab: u64,
+        revision: u64,
+        token: u64,
+        command: Command,
+        error: nator_commands::CommandError,
     },
     /// Alvo do Medir sob o clique; `None` quando o clique não atingiu nada.
     MeasureTarget {
@@ -1334,12 +1341,23 @@ impl Editor {
                 }
                 self.status.set(text(T::Ready));
             }
-            Ok(Outcome::SketchTextOutline {
+            Ok(Outcome::SketchTextPrepared {
                 tab,
-                sketch,
-                block,
-                anchor,
-            }) => self.receive_sketch_text(context, tab, sketch, *block, anchor),
+                revision,
+                token,
+                command,
+            }) => {
+                self.receive_sketch_text_prepared(context, tab, revision, token, command);
+            }
+            Ok(Outcome::SketchTextRejected {
+                tab,
+                revision,
+                token,
+                command,
+                error,
+            }) => {
+                self.reject_sketch_text(tab, revision, token, command, error);
+            }
             Ok(Outcome::MeasureTarget {
                 tab,
                 revision,

@@ -548,6 +548,7 @@ impl Editor {
             Action::CancelSketch => editable && self.current().sketch_edit.is_some(),
             Action::FinishSketch => {
                 editable
+                    && self.sketch_text.is_none()
                     && self
                         .current()
                         .sketch_edit

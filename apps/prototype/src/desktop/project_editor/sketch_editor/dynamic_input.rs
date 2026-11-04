@@ -6,29 +6,29 @@ use nator_document::parameters::{Dimension, Parameters};
 use nator_sketch::drafting::{self, Preview, Primitive};
 
 #[derive(Default)]
-pub(super) struct Input {
-    pub(super) fields: [String; 2],
-    pub(super) locked: [bool; 2],
-    pub(super) reference_angle: f64,
-    pub(super) relative: bool,
-    pub(super) infinite: bool,
+pub(in crate::desktop::project_editor) struct Input {
+    pub(in crate::desktop::project_editor) fields: [String; 2],
+    pub(in crate::desktop::project_editor) locked: [bool; 2],
+    pub(in crate::desktop::project_editor) reference_angle: f64,
+    pub(in crate::desktop::project_editor) relative: bool,
+    pub(in crate::desktop::project_editor) infinite: bool,
     active: usize,
     focus: bool,
     /// O egui pode mover foco por Tab antes de reconstruir as Areas. Conservar
     /// a propriedade anterior evita entregar essa tecla à faixa de ferramentas.
     had_focus: bool,
-    pub(super) cursor: Option<Point2>,
-    pub(super) arc_angle: Option<String>,
-    pub(super) arc_sweep: drafting::ArcSweep,
+    pub(in crate::desktop::project_editor) cursor: Option<Point2>,
+    pub(in crate::desktop::project_editor) arc_angle: Option<String>,
+    pub(in crate::desktop::project_editor) arc_sweep: drafting::ArcSweep,
     /// Lado do retângulo inclinado já confirmado; largura usa um novo campo.
-    pub(super) side_fields: Option<([String; 2], [bool; 2])>,
+    pub(in crate::desktop::project_editor) side_fields: Option<([String; 2], [bool; 2])>,
 }
-pub(super) struct Output {
+pub(in crate::desktop::project_editor) struct Output {
     pub preview: Option<Preview>,
     pub confirm: bool,
     pub cancel: bool,
 }
-pub(super) fn primitive(tool: Tool) -> Option<Primitive> {
+pub(in crate::desktop::project_editor) fn primitive(tool: Tool) -> Option<Primitive> {
     match tool {
         Tool::Line => Some(Primitive::Line),
         Tool::Rectangle => Some(Primitive::Rectangle),
@@ -39,7 +39,7 @@ pub(super) fn primitive(tool: Tool) -> Option<Primitive> {
 }
 
 impl Input {
-    pub(super) fn start(&mut self, cursor: Point2) {
+    pub(in crate::desktop::project_editor) fn start(&mut self, cursor: Point2) {
         // Medidas podem ser informadas no painel antes de escolher a origem.
         // O primeiro clique conserva esses valores; clear() encerra a operação.
         let fields = std::mem::take(&mut self.fields);
@@ -52,20 +52,20 @@ impl Input {
             ..Default::default()
         };
     }
-    pub(super) fn start_width(&mut self, cursor: Point2) {
+    pub(in crate::desktop::project_editor) fn start_width(&mut self, cursor: Point2) {
         let side_fields = self.side_fields.take();
         *self = Self::default();
         self.start(cursor);
         self.side_fields = side_fields;
     }
-    pub(super) fn arc_next(&mut self) {
+    pub(in crate::desktop::project_editor) fn arc_next(&mut self) {
         self.arc_sweep = drafting::ArcSweep::default();
         self.arc_angle = self.locked[1].then(|| self.fields[1].clone());
         self.locked[1] = false;
         self.active = 1;
         self.focus = true;
     }
-    pub(super) fn clear(&mut self, context: &egui::Context) {
+    pub(in crate::desktop::project_editor) fn clear(&mut self, context: &egui::Context) {
         for index in 0..2 {
             context.memory_mut(|m| {
                 m.surrender_focus(field_id(index));
@@ -77,7 +77,12 @@ impl Input {
     }
     /// Painel e canvas editam a mesma expressão. Campos livres acompanham o
     /// mouse; digitar trava a medida e apagar devolve seu controle ao cursor.
-    pub(super) fn panel(&mut self, ui: &mut egui::Ui, primitive: Primitive, anchor_count: usize) {
+    pub(in crate::desktop::project_editor) fn panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        primitive: Primitive,
+        anchor_count: usize,
+    ) {
         for &index in self.indices(primitive, anchor_count) {
             let label = text(field_label(primitive, anchor_count, index));
             panel::row(ui, label, |ui| {
@@ -167,7 +172,7 @@ impl Input {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn show(
+    pub(in crate::desktop::project_editor) fn show(
         &mut self,
         context: &egui::Context,
         frame: &sketch_scene::Frame,

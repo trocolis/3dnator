@@ -164,3 +164,14 @@ analíticos temporários, mantendo apenas a entidade original no histórico. A p
 usa uma única seção em guia fechada para gerar a superfície periódica sem tampas.
 Transições entre dois perfis continuam exigindo uma guia aberta. O formato 48 distingue
 essa semântica dos projetos anteriores; os identificadores internos continuam `Pipe`.
+
+## Prévia de Texto no rascunho
+
+`commands::sketch_text::candidate` prepara uma cópia do rascunho, resolve parâmetros e
+restrições mantendo a inserção solicitada e preserva IDs nas transformações. O editor
+guarda contornos unitários por conteúdo, fonte e estilos; mudanças de posição, rotação
+e tamanho reutilizam esse cache. Contornos e solver são calculados no trabalhador,
+sem transportar objetos nativos entre threads. A prévia só entra no desenho se suas
+propriedades e revisão ainda coincidirem com o painel. A confirmação prepara
+`Command::UpdateSketch` no trabalhador; aba, revisão e token do painel protegem a
+publicação contra resultados atrasados ou cancelados.

@@ -68,6 +68,8 @@ pub(crate) fn render_ui_scenario(
         | "work-plane-pick"
         | "offset-plane-edit"
         | "sketch-dimension"
+        | "sketch-text"
+        | "sketch-origin-dimension"
         | "sketch-mirror"
         | "sketch-offset"
         | "sketch-fillet"
@@ -288,6 +290,10 @@ pub(crate) fn render_ui_scenario(
             }
         },
         |editor| {
+            if scenario == "sketch-text" {
+                return editor.current().camera_transition.is_none()
+                    && editor.text_preview_sketch().is_some();
+            }
             if matches!(
                 scenario,
                 "sketch-mirror" | "sketch-offset" | "sketch-fillet" | "sketch-chamfer"
@@ -435,6 +441,43 @@ fn pipe_document(closed: bool) -> Result<(Document, PartId, SketchId, u64), Box<
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    if matches!(scenario, "sketch-text" | "sketch-origin-dimension") {
+        let mut sketch = nator_sketch::Sketch::new("Rascunho", nator_sketch::Plane::xy());
+        if scenario == "sketch-text" {
+            sketch.add_rectangle([0., 0.], [40., 20.], false)?;
+        } else {
+            let line = sketch.add_line([12., 8.], [28., 8.], false)?;
+            sketch.add_line([0., 0.], [0., 18.], true)?;
+            let point = sketch.entity(line)?.point_ids()[0];
+            let id = sketch.add_constraint(
+                nator_sketch::ConstraintKind::OriginDistance {
+                    point,
+                    axis: Some(0),
+                    negative: false,
+                    value: 12.,
+                },
+                false,
+            )?;
+            sketch.dimension_targets.insert(
+                id,
+                [
+                    nator_sketch::dimensions::Target::Origin,
+                    nator_sketch::dimensions::Target::Point(point),
+                ],
+            );
+            sketch.dimension_labels.insert(id, [0., 3.]);
+        }
+        let mut document = Document::new("Ajustes de rascunho")?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        editor.add_tab(document, None, None)?;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        if scenario == "sketch-text" {
+            editor.preset_sketch_text_for_capture();
+        }
+        return Ok(());
+    }
+
     if matches!(scenario, "pipe" | "pipe-circle") {
         let (document, part, sketch, line) = pipe_document(scenario == "pipe-circle")?;
         editor.add_tab(document, None, None)?;
@@ -7567,6 +7610,8 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
         let (mut editor, part, id) = plain_sketch_editor(&context)?;
+        let recovery = tempfile::tempdir()?;
+        editor.current_mut().recovery_path = recovery.path().join("text.3dnator");
         editor.begin_sketch(part, id);
         settle(&mut editor, &context)?;
         let tool = label_position(&mut editor, &context, text(T::SketchTextTool))?;
@@ -7596,6 +7641,11 @@ mod tests {
         // Segundo clique para cima: o texto fica a 90°.
         let up = position(&editor, [10., 8.])?;
         click(&mut editor, &context, up)?;
+        assert!(editor.sketch_text.is_some());
+        assert!(sketch_of(&editor, id)?.texts.is_empty());
+        wait_text_preview(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
         settle(&mut editor, &context)?;
         let stored = editor
             .current()
@@ -7612,6 +7662,31 @@ mod tests {
         assert!(nator_sketch::distance(stored.point(block.anchor)?, [10., 5.]) < 1.);
         assert!(block.entities.len() > 8);
         assert!(editor.sketch_text.is_none());
+        // O duplo clique é uma nova ação, depois do clique em OK.
+        for _ in 0..25 {
+            frame(&mut editor, &context, vec![])?;
+        }
+        let (a, b) = stored.line(block.entities[0])?;
+        let mid = nator_sketch::scale(nator_sketch::add(a, b), 0.5);
+        let at = position(&editor, mid)?;
+        click(&mut editor, &context, at)?;
+        click(&mut editor, &context, at)?;
+        editor
+            .sketch_text
+            .as_mut()
+            .ok_or("Edição do texto não reabriu por duplo clique")?
+            .configure_for_capture([12., 7.], 90., block.size, &block.content);
+        let preview = wait_text_preview(&mut editor, &context)?;
+        assert_eq!(preview.texts[0].entities, block.entities);
+        assert!(nator_sketch::distance(preview.point(block.anchor)?, [12., 7.]) < 1e-6);
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        assert!(
+            nator_sketch::distance(
+                sketch_of(&editor, id)?.point(block.anchor)?,
+                stored.point(block.anchor)?
+            ) < 1e-6
+        );
         // As letras chegam fechadas: nenhuma ponta solta para ligar, e o rascunho conclui.
         let deadline = Instant::now() + Duration::from_secs(10);
         while editor
@@ -7632,6 +7707,182 @@ mod tests {
         editor.finish_sketch();
         settle(&mut editor, &context)?;
         assert!(editor.current().sketch_edit.is_none());
+        Ok(())
+    }
+
+    fn wait_text_preview(
+        editor: &mut Editor,
+        context: &egui::Context,
+    ) -> Result<Sketch, Box<dyn Error>> {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            frame(editor, context, vec![])?;
+            if let Some(sketch) = editor.text_preview_sketch() {
+                return Ok(sketch);
+            }
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "Prévia de texto não ficou pronta: {} / {:?}",
+                    editor.status,
+                    editor
+                        .sketch_text
+                        .as_ref()
+                        .map(|d| d.diagnostic_for_capture(editor.current().session.revision()))
+                )
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    fn replace_text_number(
+        editor: &mut Editor,
+        context: &egui::Context,
+        rect: egui::Rect,
+        value: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        click(editor, context, rect.center())?;
+        frame(
+            editor,
+            context,
+            vec![egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                },
+            }],
+        )?;
+        frame(editor, context, vec![egui::Event::Text(value.into())])?;
+        frame(editor, context, vec![arrow_key(egui::Key::Enter)])?;
+        Ok(())
+    }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_text_properties_preview_live_cancel_and_reject_stale_confirmations()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part, id) = plain_sketch_editor(&context)?;
+        let recovery = tempfile::tempdir()?;
+        editor.current_mut().recovery_path = recovery.path().join("text.3dnator");
+        editor.begin_sketch(part, id);
+        settle(&mut editor, &context)?;
+        editor.open_sketch_text(&context);
+        editor
+            .sketch_text
+            .as_mut()
+            .ok_or("Painel")?
+            .configure_for_capture([10., 5.], 0., 10., "A");
+        let first = wait_text_preview(&mut editor, &context)?;
+        let entities = first.texts[0].entities.clone();
+        let revision = editor.current().session.revision();
+        let x = context
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("text_position_rect", 0usize))))
+            .ok_or("Campo X")?;
+        replace_text_number(&mut editor, &context, x, "14")?;
+        let moved = wait_text_preview(&mut editor, &context)?;
+        assert!((moved.point(moved.texts[0].anchor)?[0] - 14.).abs() < 1e-6);
+        let size = context
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("text_size_rect")))
+            .ok_or("Tamanho")?;
+        replace_text_number(&mut editor, &context, size, "18")?;
+        let changed = wait_text_preview(&mut editor, &context)?;
+        assert!((changed.texts[0].size - 18.).abs() < 1e-6);
+        assert_eq!(changed.texts[0].entities, entities);
+        assert!(sketch_of(&editor, id)?.texts.is_empty());
+        assert_eq!(editor.current().session.revision(), revision);
+        let token = editor
+            .sketch_text
+            .as_ref()
+            .ok_or("Painel")?
+            .token_for_capture();
+        let prepared = PreparedCommand::new(
+            editor.current().session.document().clone(),
+            revision,
+            Command::UpdateSketch {
+                id,
+                sketch: changed,
+            },
+        )?;
+        let cancel = label_position(&mut editor, &context, text(T::Cancel))?;
+        click(&mut editor, &context, cancel)?;
+        assert!(editor.sketch_text.is_none());
+        editor.open_sketch_text(&context);
+        editor.receive_sketch_text_prepared(
+            &context,
+            editor.current().id,
+            revision,
+            token,
+            prepared,
+        );
+        assert!(editor.sketch_text.is_some());
+        assert!(sketch_of(&editor, id)?.texts.is_empty());
+        assert_eq!(editor.current().session.revision(), revision);
+        Ok(())
+    }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn sketch_text_snaps_to_a_midpoint_and_locks_the_floating_angle() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let (mut editor, part, id) = plain_sketch_editor(&context)?;
+        let recovery = tempfile::tempdir()?;
+        editor.current_mut().recovery_path = recovery.path().join("text.3dnator");
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        editor.open_sketch_text(&context);
+        let at = |editor: &Editor, p: [f64; 3]| {
+            sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                p,
+            )
+            .ok_or("Ponto fora da vista")
+        };
+        let midpoint = at(&editor, [10., 0., 0.])?;
+        click(&mut editor, &context, midpoint)?;
+        let direction = at(&editor, [16., 7., 0.])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(direction)],
+        )?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("45 deg".into())],
+        )?;
+        let elsewhere = at(&editor, [4., 6., 0.])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(elsewhere)],
+        )?;
+        frame(&mut editor, &context, vec![arrow_key(egui::Key::Enter)])?;
+        let preview = wait_text_preview(&mut editor, &context)?;
+        assert!((preview.texts[0].rotation - std::f64::consts::FRAC_PI_4).abs() < 1e-6);
+        assert!(
+            preview
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, nator_sketch::ConstraintKind::Midpoint { .. }))
+        );
+        assert!(editor.sketch_text.is_some());
+        assert!(sketch_of(&editor, id)?.texts.is_empty());
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let stored = sketch_of(&editor, id)?;
+        assert!((stored.texts[0].rotation - std::f64::consts::FRAC_PI_4).abs() < 1e-6);
+        assert!(editor.current_mut().session.undo());
+        assert!(sketch_of(&editor, id)?.texts.is_empty());
+        assert!(editor.current_mut().session.redo());
+        assert_eq!(sketch_of(&editor, id)?.texts.len(), 1);
         Ok(())
     }
 

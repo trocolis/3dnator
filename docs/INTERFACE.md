@@ -235,7 +235,7 @@ O STL não informa a unidade. Depois da leitura, o painel **Inserir malha STL** 
 
 A criação de Rótulo foi retirada da faixa e da busca; operações Rótulo já gravadas continuam editáveis pelo histórico.
 
-**Texto** (aba Rascunho, depois de Projetar) acrescenta um texto de uma linha, com as opções do Rótulo sem cor: fonte do sistema, negrito, itálico, sublinhado, tamanho e rotação. O primeiro clique marca o ponto de inserção, no centro do texto, e o segundo a direção; OK confirma com a rotação do painel. As letras viram linhas fixas na cor do traço, que delimitam áreas e servem de captura, mas não se editam uma a uma; o ponto de inserção aceita restrições e cotas, e as letras o acompanham. Duplo clique numa letra reabre o bloco para trocar texto, fonte, tamanho ou rotação; Excluir numa letra apaga o bloco inteiro. Exige o núcleo OCCT, que fornece o contorno das fontes.
+**Texto** (aba Rascunho, depois de Projetar) acrescenta um texto de uma linha: fonte do sistema, negrito, itálico, sublinhado, tamanho, rotação e posição X/Y. O primeiro clique marca a inserção, no centro do texto; o segundo define a direção. Essa linha captura vértices, centros, pontos médios e referências da cena. Seu campo angular flutuante aceita digitação e mantém o ângulo travado ao mover o cursor; Enter termina a orientação. O painel permanece aberto, e as mudanças aparecem na prévia enquanto são calculadas em segundo plano. Somente **OK** publica o bloco, em uma ação de desfazer; **Cancelar** descarta a prévia. A navegação preserva o painel, e Concluir rascunho aguarda seu fechamento. As letras viram linhas fixas na cor do traço, que delimitam áreas e servem de captura, mas não se editam uma a uma; a inserção aceita restrições e cotas, e as letras a acompanham. Duplo clique numa letra reabre o bloco; Excluir numa letra apaga o bloco inteiro. Exige o núcleo OCCT para gerar os contornos das fontes.
 
 **Importar como referência** (Montagem → Importar, sem menu: o seletor abre direto) traz STEP, STL ou 3MF para a pasta **Referências** da árvore. A referência se move, oculta e mede, e serve de captura e projeção, mas nada nela se edita: entrar na construção e comandos de corpo, rascunho ou cor são recusados com aviso. No menu dela, **Criar peça** a transforma numa peça comum, no mesmo lugar e sem histórico; Excluir a remove. O 3MF chega como uma malha só, em milímetros, com os objetos nas posições da mesa, sem cores nem montagem.
 
@@ -427,3 +427,5 @@ transformados. Entre origem e ponto/centro, posicione o texto para escolher dist
 horizontal ou vertical, como nas outras cotas. A cota pode receber expressão e ser reaberta
 por duplo clique. Cotas por eixo conservam o lado original do ponto. A operação não acrescenta
 geometria auxiliar ao rascunho.
+
+Os cenários `sketch-text` e `sketch-text-dark` capturam o painel e a prévia de Texto; `sketch-origin-dimension` captura uma cota até a origem local.

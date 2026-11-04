@@ -9,7 +9,7 @@ use nator_sketch::{
 mod actions;
 mod dimension_tool;
 mod direct_drag;
-mod dynamic_input;
+pub(super) mod dynamic_input;
 mod indicators;
 mod junction_tool;
 mod line_tools;
@@ -170,6 +170,31 @@ pub(super) struct Workspace {
     dimension_draft: dimension_tool::Draft,
     dimension_existing: dimension_tool::Existing,
 }
+impl Workspace {
+    pub(super) fn text_snap(
+        &self,
+        sketch: &Sketch,
+        point: Point2,
+        tolerance: f64,
+        tracker: &Tracker,
+    ) -> Option<snapping::Snap> {
+        snapping::find_with_edges(
+            sketch,
+            point,
+            tolerance,
+            tracker,
+            &self.projection.points,
+            snapping::ProjectedEdges {
+                curves: &self.projection.curves,
+                chains: &self.projection.chains,
+            },
+            &self.references.points,
+        )
+        .ok()
+        .flatten()
+    }
+}
+
 impl Workspace {
     pub(super) fn select_image(&mut self) {
         self.select_tool(Tool::Select);
@@ -1027,6 +1052,7 @@ impl Editor {
         let image_blocked =
             self.reference_images_overlay(ui, response, &frame, &sketch, !busy && !animating)
                 || (!busy && !animating && self.sketch_text_overlay(ui, response, &frame, &sketch));
+        let mut text_preview = self.text_preview_sketch();
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
         };
@@ -1103,8 +1129,9 @@ impl Editor {
         }
         // Áreas projetadas servem apenas de referência: os contornos e vértices já
         // são desenhados como entidades lilás. Nenhum preenchimento cobre o rascunho.
-        for entity in &sketch.entities {
-            if let Ok(segment) = profiles::segment(&sketch, entity) {
+        let display_sketch = text_preview.as_ref().unwrap_or(&sketch);
+        for entity in &display_sketch.entities {
+            if let Ok(segment) = profiles::segment(display_sketch, entity) {
                 let color = if work.selected.contains(&entity.id) {
                     if work.active_action.is_some_and(operation_preview::supported) {
                         egui::Color32::from_rgba_unmultiplied(80, 100, 160, 100)
@@ -1113,7 +1140,7 @@ impl Editor {
                     }
                 } else if entity.face {
                     theme::face_line()
-                } else if sketch.text_of(entity.id).is_some() {
+                } else if display_sketch.text_of(entity.id).is_some() {
                     theme::ink()
                 } else if entity.projected {
                     theme::projected()
@@ -1136,7 +1163,7 @@ impl Editor {
                 }
             }
         }
-        restrictions::paint_vertices(&frame, &painter, &sketch, work);
+        restrictions::paint_vertices(&frame, &painter, display_sketch, work);
         // Cotas como cotas: extensões, linha com setas e valor (R/Ø, graus, parênteses).
         if work.primitive().is_some() {
             let points = work.references.points.centers.iter().copied().chain(
@@ -1179,7 +1206,7 @@ impl Editor {
             response,
             &frame,
             &painter,
-            &mut sketch,
+            text_preview.as_mut().unwrap_or(&mut sketch),
             &mut work.dimension_existing,
             edit_existing,
             &parameters,

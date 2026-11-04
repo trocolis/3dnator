@@ -112,7 +112,9 @@ impl Editor {
 
     pub(super) fn activate_selection(&mut self, context: &egui::Context) {
         self.image_edit = None;
-        self.sketch_text = None;
+        if let Some(mut draft) = self.sketch_text.take() {
+            draft.cancel(context);
+        }
         self.cancel_plane_pick();
         self.close_offset_plane();
         self.cancel_feature_tool();

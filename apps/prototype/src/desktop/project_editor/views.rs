@@ -401,7 +401,7 @@ impl Editor {
                 name_width,
                 icons::Icon::Check,
                 text(T::FinishSketch),
-                !busy && settled,
+                !busy && settled && self.sketch_text.is_none(),
             )
         });
         left = rect.right() + 8.;

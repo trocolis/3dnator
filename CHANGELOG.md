@@ -4,6 +4,13 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.37.0 — 04/11/2026
+
+- **Texto** mantém o painel aberto após os dois cliques de posicionamento e orientação. Só a confirmação publica o bloco, em uma única alteração de desfazer; cancelar descarta a candidata.
+- A orientação captura vértices, centros, pontos médios, curvas e referências da cena, com o mesmo campo angular flutuante das ferramentas de desenho. Um ângulo digitado permanece travado durante o movimento do mouse.
+- O painel oferece posição X/Y e prévia ao vivo de conteúdo, fonte, estilo, tamanho e rotação. Fontes e solver rodam no trabalhador; transformações reutilizam os contornos unitários. Edições simples preservam IDs, restrições e referências de regiões.
+- Resultados de outra revisão, aba ou painel cancelado não podem publicar um texto antigo.
+
 ## 0.36.0 — 04/11/2026
 
 - **Dimensionar** aceita a origem local como referência fixa para pontos, centros de círculos/arcos e linhas. A posição do texto escolhe distância alinhada, horizontal ou vertical; o valor aceita expressões e pode ser editado como nas outras cotas.

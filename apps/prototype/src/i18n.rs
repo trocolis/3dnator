@@ -880,6 +880,9 @@ pub enum Text {
     SettingsLanguage,
     SettingsAppearanceHint,
     SketchTextTool,
+    SketchTextX,
+    SketchTextY,
+    SketchTextAdjustHint,
     SketchTextHint,
     SketchTextDirectionHint,
     ReferencesFolder,
@@ -1882,6 +1885,9 @@ fn pt(key: Text) -> &'static str {
         Text::SettingsAppearanceHint => {
             "Valem para todos os projetos, neste computador. Sistema segue o tema e o idioma do sistema operacional; fora de português, espanhol e inglês, vale o português."
         }
+        Text::SketchTextX => "Posição X",
+        Text::SketchTextY => "Posição Y",
+        Text::SketchTextAdjustHint => "Ajuste as propriedades e confirme para aplicar o texto.",
         Text::SketchTextTool => "Texto",
         Text::SketchTextHint => "Clique no ponto de inserção do texto, no centro dele.",
         Text::SketchTextDirectionHint => {

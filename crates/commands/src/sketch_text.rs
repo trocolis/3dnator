@@ -53,3 +53,47 @@ pub fn contours(
         "Texto no rascunho exige o núcleo OCCT.".into(),
     ))
 }
+
+/// Prepara o bloco completo sem publicar no documento; posição solicitada não pode recuar.
+pub fn candidate(
+    source: &nator_sketch::Sketch,
+    mut block: nator_sketch::text::SketchText,
+    position: [f64; 2],
+    attachment: Option<nator_sketch::snapping::Kind>,
+    parameters: &nator_document::parameters::Parameters,
+) -> Result<nator_sketch::Sketch, DocumentError> {
+    let error = |e: nator_sketch::SketchError| DocumentError(e.to_string());
+    let mut sketch = source.clone();
+    let anchor = if block.id != 0 {
+        let anchor = sketch
+            .texts
+            .iter()
+            .find(|t| t.id == block.id)
+            .ok_or_else(|| DocumentError("O texto em edição não existe mais.".into()))?
+            .anchor;
+        sketch
+            .points
+            .iter_mut()
+            .find(|p| p.id == anchor)
+            .ok_or_else(|| DocumentError("O ponto de inserção do texto não existe mais.".into()))?
+            .position = position;
+        block.anchor = anchor;
+        sketch.update_text(block).map_err(error)?;
+        anchor
+    } else {
+        let anchor = sketch.add_point(position).map_err(error)?;
+        block.anchor = anchor;
+        sketch.add_text(block).map_err(error)?;
+        nator_sketch::junctions::attach(&mut sketch, anchor, attachment, position)
+            .map_err(error)?;
+        anchor
+    };
+    nator_document::parameters::resolve_sketch(&mut sketch, parameters)?;
+    let report = nator_sketch::solver::solve_required(&sketch, &[anchor], &[]).map_err(error)?;
+    if report.status == nator_sketch::solver::Status::Conflict {
+        return Err(DocumentError(
+            "A posição do texto conflita com as restrições do rascunho.".into(),
+        ));
+    }
+    Ok(report.sketch)
+}
