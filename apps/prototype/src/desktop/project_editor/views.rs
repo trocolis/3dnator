@@ -689,6 +689,10 @@ impl Editor {
                     self.fit_view(ui.ctx());
                 }
                 self.viewport.render(&self.gpu.device, &self.gpu.queue);
+                if self.viewport.section_pending() {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(16));
+                }
                 let visible_planes = self.work_planes_overlay(ui, response.rect);
                 if !origin_chosen
                     && self.current().plane_pick.is_some()

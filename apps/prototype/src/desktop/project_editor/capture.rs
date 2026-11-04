@@ -64,6 +64,8 @@ pub(crate) fn render_ui_scenario(
         | "align"
         | "assembly-ribbon"
         | "section"
+        | "section-contact"
+        | "section-contact-perspective"
         | "offset-plane"
         | "work-plane-pick"
         | "offset-plane-edit"
@@ -441,6 +443,30 @@ fn pipe_document(closed: bool) -> Result<(Document, PartId, SketchId, u64), Box<
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    if matches!(scenario, "section-contact" | "section-contact-perspective") {
+        let mut document = Document::new("Corpos em contato")?;
+        let mesh = Arc::new(nator_document::MeshAsset::new(
+            nator_geometry::reference_bracket()?,
+        ));
+        let (part, _) = document.add_mesh(None, "Suportes".into(), mesh.clone())?;
+        let (_, second) = document.add_mesh(Some(part), "Suporte vizinho".into(), mesh)?;
+        document.body_mut(second)?.placement = Placement::new([60., 0., 0.], [0.; 3])?;
+        document.add_instance(part, None, Placement::new([0., 50., 0.], [0.; 3])?)?;
+        editor.add_tab(document, None, None)?;
+        editor.current_mut().active_part = Some(part);
+        editor.current_mut().section = Some(section::Section {
+            base: section::Base::Principal(0),
+            offset: 3.,
+            flip: false,
+            visible: true,
+        });
+        editor.shell.tab = shell::RibbonTab::Assembly;
+        if scenario.ends_with("perspective") {
+            editor.viewport.camera.projection = nator_renderer::Projection::Perspective;
+        }
+        return Ok(());
+    }
+
     if matches!(scenario, "sketch-text" | "sketch-origin-dimension") {
         let mut sketch = nator_sketch::Sketch::new("Rascunho", nator_sketch::Plane::xy());
         if scenario == "sketch-text" {
@@ -1426,6 +1452,7 @@ fn render_with(
     }
     // Preparar a cena após escolher o contexto mantém o esmaecimento e a revisão
     // iguais aos da janela, sem iniciar uma reconstrução assíncrona durante a captura.
+    let projection = editor.viewport.camera.projection;
     let scene = prepare_scene(
         editor.current().session.document(),
         &editor.current().view,
@@ -1444,6 +1471,10 @@ fn render_with(
             editor.current().session.document(),
             &editor.current().view,
         ));
+    }
+    editor.viewport.camera.projection = projection;
+    if editor.current().session.document().name() == "Corpos em contato" {
+        editor.viewport.camera.set_direction([0.3, -0.5, 1.]);
     }
     editor.current_mut().camera_transition = None;
     if let Some(work) = editor.current_mut().sketch_edit.as_mut() {
@@ -1523,7 +1554,7 @@ fn render_with(
         output.textures_delta.clear();
         drop(renderer);
         frame += 1;
-        if frame >= 3 && ready(&editor) && !editor.busy() {
+        if frame >= 3 && ready(&editor) && !editor.busy() && !editor.viewport.section_pending() {
             settled += 1;
         } else {
             settled = 0;
@@ -1650,6 +1681,87 @@ mod tests {
         )?;
         Ok(())
     }
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn section_caps_render_contact_borders_and_discard_obsolete_planes()
+    -> Result<(), Box<dyn Error>> {
+        let gpu = gpu_state()?;
+        let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut document = Document::new("Contato")?;
+        let asset = Arc::new(nator_document::MeshAsset::new(
+            nator_geometry::reference_bracket()?,
+        ));
+        let (part, _) = document.add_mesh(None, "Primeiro".into(), asset.clone())?;
+        let (_, second) = document.add_mesh(Some(part), "Segundo".into(), asset)?;
+        document.body_mut(second)?.placement = Placement::new([60., 0., 0.], [0.; 3])?;
+        let scene = document
+            .scene_styled(|_, _| Some(nator_document::Style::Normal))?
+            .ok_or("Cena")?;
+        let mut prepared = PreparedMesh::with_creases(&scene.mesh, &scene.creases)?;
+        prepared.set_section_groups(scene.body_ranges);
+        let mut viewport = nator_renderer::Viewport::new(&gpu.device, &scene.mesh)?;
+        viewport.set_prepared_mesh(&gpu.device, &prepared)?;
+        viewport.resize(&gpu.device, [800, 600]);
+        viewport.camera.set_direction([0., 0., 1.]);
+        let bounds = scene.mesh.bounds();
+        let red_pixels = |image: &crate::preview::Capture| {
+            image
+                .pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|p| p[0] > 100 && u16::from(p[0]) > u16::from(p[1]) * 2)
+                .count()
+        };
+        for projection in [
+            nator_renderer::Projection::Orthographic,
+            nator_renderer::Projection::Perspective,
+        ] {
+            viewport.camera.projection = projection;
+            viewport.section = Some(nator_renderer::SectionPlane {
+                point: [0., 0., 3.],
+                normal: [0., 0., 1.],
+            });
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while viewport.section_pending() {
+                viewport.render(&gpu.device, &gpu.queue);
+                if Instant::now() > deadline {
+                    return Err("Tampa não terminou".into());
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            viewport.render(&gpu.device, &gpu.queue);
+            let image =
+                crate::preview::read_texture(&gpu.device, &gpu.queue, viewport.color_texture())?;
+            assert!(red_pixels(&image) > 1000);
+            let at = viewport
+                .camera
+                .project_world([60., 15., 3.], bounds, 800. / 600.)
+                .ok_or("Divisória fora da câmera")?;
+            let x = ((at[0] + 1.) * 400.).round() as usize;
+            let y = ((1. - at[1]) * 300.).round() as usize;
+            assert!(
+                (x.saturating_sub(1)..=x + 1).any(|x| image.pixels[(y * 800 + x) * 4] < 100),
+                "Divisória ausente"
+            );
+            // Uma tampa pronta nunca é reapresentada sob outro plano durante o cálculo.
+            viewport.section = Some(nator_renderer::SectionPlane {
+                point: [0., 0., -5.],
+                normal: [0., 0., 1.],
+            });
+            viewport.render(&gpu.device, &gpu.queue);
+            let image =
+                crate::preview::read_texture(&gpu.device, &gpu.queue, viewport.color_texture())?;
+            assert_eq!(red_pixels(&image), 0);
+            viewport.section = None;
+            viewport.render(&gpu.device, &gpu.queue);
+        }
+        if let Some(error) = pollster::block_on(scope.pop()) {
+            return Err(error.to_string().into());
+        }
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn sketch_mouse_precision_places_new_geometry_and_alt_keeps_the_free_cursor()
@@ -12759,6 +12871,7 @@ mod tests {
         // Arranjos/indicadores têm seu próprio worker. A cena pode estar pronta
         // antes deles; o próximo clique do ensaio precisa dos apoios exibidos.
         while editor.busy()
+            || editor.viewport.section_pending()
             || editor.rendered != Some(editor.scene_key())
             || editor
                 .current()

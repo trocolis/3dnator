@@ -705,13 +705,14 @@ fn prepare_scene_with_removal(
         }
         scene.mesh = Mesh::new(vertices, triangles).map_err(|e| e.to_string())?;
     }
-    let prepared = PreparedMesh::with_appearance(
+    let mut prepared = PreparedMesh::with_appearance(
         &scene.mesh,
         &scene.creases,
         &styles,
         scene.opaque_triangles,
         &scene.colors,
     )?;
+    prepared.set_section_groups(scene.body_ranges);
     Ok(Some((scene.mesh, prepared)))
 }
 

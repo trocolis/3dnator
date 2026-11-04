@@ -36,6 +36,9 @@ struct VertexOutput {
 @vertex fn vertex_main(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
     var output: VertexOutput;
     output.position = view.transform * vec4<f32>(input.position, 1.0);
+    if ((input.edges & 262144u) != 0u) {
+        output.position.z -= 0.000002 * output.position.w;
+    }
     output.normal = input.normal;
     // A malha é uma lista de triângulos sem índices: vertex_index % 3 é o canto.
     let corner = index % 3u;
@@ -58,7 +61,7 @@ struct VertexOutput {
     // do WGSL.
     let width = fwidth(input.barycentric);
     let clipping = view.options.w > 0.5;
-    if (clipping && dot(view.clip.xyz, input.local) > view.clip.w) {
+    if (clipping && (input.edges & 65536u) == 0u && dot(view.clip.xyz, input.local) > view.clip.w) {
         discard;
     }
     let light = normalize(vec3<f32>(0.4, -0.6, 1.0));
@@ -88,13 +91,16 @@ struct VertexOutput {
     let crease_near = near * flags;
     let crease = max(max(crease_near.x, crease_near.y), crease_near.z) * view.options.y;
     let style = (input.edges >> 8u) & 255u;
-    // Com o corte, o interior de um sólido fechado aparece pelas faces de costas: elas são
-    // pintadas como tampa, com hachura a 45° em coordenadas de tela.
-    if (clipping && !front) {
-        let stripe = fract((input.position.x + input.position.y) / 7.0) < 0.22;
+    let section_cap = (input.edges & 65536u) != 0u;
+    if (section_cap) {
+        let coordinate = select(input.position.x + input.position.y, input.position.x - input.position.y, (input.edges & 524288u) != 0u);
+        let stripe = fract(coordinate / 7.0) < 0.22;
         let cap = select(vec3<f32>(0.80, 0.36, 0.30), vec3<f32>(0.45, 0.13, 0.11), stripe);
         return vec4<f32>(cap, select(1.0, 0.4, style == 1u || style == 2u));
     }
+    // As tampas pertencem ao plano de corte; faces de costas não as simulam.
+    // O descarte também elimina a disputa entre faces internas de corpos colados.
+    if (clipping && !front) { discard; }
     // Seleção: superfície tingida de azul e arestas vivas azuis, com a profundidade normal.
     let selected = select(0.0, 1.0, style == 3u);
     let tinted = mix(surface, vec3<f32>(0.24, 0.56, 0.94) * intensity + vec3<f32>(0.10), 0.32 * selected);
@@ -136,4 +142,9 @@ struct ShadowOutput {
     let falloff = 1.0 - smoothstep(0.0, 1.0, dist);
     let alpha = falloff * falloff * 0.55 * view.options.z;
     return vec4<f32>(0.02, 0.025, 0.035, alpha);
+}
+
+@fragment fn line_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if (view.options.w > 0.5 && dot(view.clip.xyz, input.local) > view.clip.w + 0.000001) { discard; }
+    return vec4<f32>(input.color, 1.0);
 }

@@ -55,7 +55,7 @@ pub(super) struct Tree<'a> {
 }
 
 impl<'a> Tree<'a> {
-    fn images(&mut self, ui: &mut egui::Ui, owner: Option<PartId>) {
+    fn images(&mut self, ui: &mut egui::Ui, owner: Option<PartId>, path: &[u64]) {
         let images = self
             .document
             .images()
@@ -64,7 +64,7 @@ impl<'a> Tree<'a> {
             .collect::<Vec<_>>();
         self.node(
             ui,
-            self.id(("images", owner.map(|p| p.0))),
+            self.id(("images", owner.map(|p| p.0), path)),
             true,
             |tree, ui| {
                 let response = icons::entry(
@@ -411,7 +411,7 @@ impl<'a> Tree<'a> {
             .iter()
             .any(|i| self.document.is_reference_sketch(i.sketch))
         {
-            self.images(ui, None);
+            self.images(ui, None, &[]);
         }
     }
 
@@ -682,7 +682,7 @@ impl<'a> Tree<'a> {
                     );
                 }
                 tree.origin(ui, Folder::PartOrigin(part.id), shown);
-                tree.images(ui, Some(part.id));
+                tree.images(ui, Some(part.id), &path);
             },
         );
     }

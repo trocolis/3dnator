@@ -6,6 +6,12 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.0 — 04/11/2026
+
+- Corte de seção prepara tampas no plano e contornos por corpo/ocorrência em trabalhador, preservando cavidades e a divisória entre corpos encostados. Faces traseiras deixam de simular a tampa e não disputam profundidade nas interfaces internas.
+- Corrigida a identidade da pasta Imagens em ocorrências repetidas, detectada no cenário de seção com duas instâncias.
+- Mudanças de plano descartam tampas antigas; malhas com contorno aberto não recebem fechamentos inventados. A seção continua sendo apenas apresentação, sem mudar B-rep ou formato do projeto.
+
 ## 0.37.2 — 04/11/2026
 
 - Clicar numa face principal do cubo alinha a vista em quartos de volta e conserva o alto predominante da orientação anterior, inclusive nos polos. Home e os cliques em cantos/arestas mantêm suas vistas canônicas.

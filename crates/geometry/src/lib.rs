@@ -6,6 +6,7 @@ mod placement;
 mod polygon;
 pub use polygon::{planar_polygon_centers, polygon_center};
 pub mod query;
+pub mod section;
 pub use placement::Placement;
 pub mod printability;
 pub mod silhouette;

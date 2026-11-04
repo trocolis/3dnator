@@ -717,3 +717,10 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - As seis faces escolhem a base ortogonal mais próxima da vista anterior. Regressão percorre 32 orientações por face em ortográfica/perspectiva, valida a melhor direção vertical, idempotência e preservação do alvo/escala/projeção.
 - fmt, Clippy do workspace com todos os alvos e testes do workspace aprovados, com `--locked`. Capturas gráficas serão verificadas com as etapas de seção.
+
+## Tampas de seção e corpos encostados — 0.38.0 — 04/11/2026
+
+- Tampas de apresentação no plano de corte, calculadas em trabalhador por corpo/ocorrência; preenchimento por paridade conserva cavidades. Contornos abertos não são fechados artificialmente. Hachuras alternadas e contornos com profundidade distinguem vizinhos.
+- Regressões numéricas verificam área de uma seção com cavidade, descarte de contorno aberto, fronteiras comuns entre corpos e faixas opacas/translúcidas na cena.
+- fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. O ensaio gráfico `section_caps_render_contact_borders_and_discard_obsolete_planes` passou com OCCT: leitura real de pixels confirma hachura, divisória e descarte de tampa antiga em ortográfica/perspectiva.
+- Capturas reais revisadas: `target/ajustes-section-contact-v2.png` e `target/ajustes-section-perspective-v2.png`, com duas ocorrências e dois corpos por peça. A pasta Imagens passou a usar o caminho da ocorrência para evitar IDs repetidos nesse cenário.

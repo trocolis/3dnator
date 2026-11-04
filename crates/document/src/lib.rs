@@ -323,6 +323,7 @@ struct SceneGroup {
     creases: Vec<u8>,
     styles: Vec<Style>,
     colors: Vec<RgbColor>,
+    ranges: Vec<std::ops::Range<usize>>,
 }
 
 /// Cores de análise por triângulo da malha exibida de `body`. Só apresentação: não entra no
@@ -342,6 +343,8 @@ pub struct Scene {
     pub styles: Vec<Style>,
     pub colors: Vec<RgbColor>,
     pub opaque_triangles: usize,
+    /// Faixas de triângulos por corpo/ocorrência, antes da agregação visual.
+    pub body_ranges: Vec<std::ops::Range<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1450,6 +1453,9 @@ impl Document {
                         .map(|point| occurrence.placement.apply(body.placement.apply(*point))),
                 );
                 group
+                    .ranges
+                    .push(group.triangles.len()..group.triangles.len() + mesh.triangles().len());
+                group
                     .triangles
                     .extend(mesh.triangles().iter().map(|t| t.map(|i| i + base)));
                 group.creases.extend_from_slice(geometry.creases());
@@ -1515,6 +1521,12 @@ impl Document {
         if scene.triangles.is_empty() {
             return Ok(None);
         }
+        scene.ranges.extend(
+            translucent
+                .ranges
+                .into_iter()
+                .map(|r| r.start + opaque_triangles..r.end + opaque_triangles),
+        );
         scene.creases.extend(translucent.creases);
         scene.styles.extend(translucent.styles);
         scene.colors.extend(translucent.colors);
@@ -1526,6 +1538,7 @@ impl Document {
             styles: scene.styles,
             colors: scene.colors,
             opaque_triangles,
+            body_ranges: scene.ranges,
         }))
     }
 }
@@ -1663,6 +1676,7 @@ mod tests {
             .ok_or("Cena ausente")?;
         assert_eq!(scene.mesh.triangles().len(), 40);
         assert_eq!(scene.opaque_triangles, 20);
+        assert_eq!(scene.body_ranges, vec![0..20, 20..40]);
         assert_eq!(scene.styles[0], Style::Normal);
         assert_eq!(scene.styles[39], Style::Transparent);
         // A instância isolada fora da cena não entra na caixa envolvente.

@@ -3,6 +3,8 @@
 use nator_geometry::{Bounds, Mesh, Point3, RgbColor, cross, dot, norm, sub};
 use wgpu::util::DeviceExt;
 
+mod section;
+
 pub use wgpu;
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -22,6 +24,7 @@ pub struct PreparedMesh {
     /// planos do mundo ao espaço da GPU.
     center: Point3,
     scale: f64,
+    source: std::sync::Arc<section::Source>,
 }
 
 /// Plano de corte de visualização em coordenadas do mundo: a parte para onde `normal`
@@ -150,7 +153,21 @@ impl PreparedMesh {
             ground_shadow,
             center,
             scale,
+            source: std::sync::Arc::new(section::Source {
+                mesh: mesh.clone(),
+                ranges: std::iter::once(0..count).collect(),
+                styles: styles.to_vec(),
+                center,
+                scale,
+            }),
         })
+    }
+    /// Mantém separadas as seções de corpos/ocorrências que compartilham superfícies.
+    pub fn set_section_groups(&mut self, groups: Vec<std::ops::Range<usize>>) {
+        let count = self.source.mesh.triangles().len();
+        if groups.iter().all(|r| r.start <= r.end && r.end <= count) {
+            std::sync::Arc::make_mut(&mut self.source).ranges = groups;
+        }
     }
     /// Bytes que serão enviados à GPU.
     pub fn gpu_bytes(&self) -> usize {
@@ -664,6 +681,8 @@ pub struct Viewport {
     translucent_pipeline: wgpu::RenderPipeline,
     /// Sombra de apoio suave sob o modelo.
     shadow_pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
+    section_state: section::State,
 }
 
 /// Uniforme do shader: matriz 4×4, quatro opções, cor do fundo e plano de corte no espaço
@@ -745,7 +764,7 @@ impl Viewport {
             label: Some("Superfície neutra"),
             source: wgpu::ShaderSource::Wgsl(include_str!("view.wgsl").into()),
         });
-        let pipeline = |translucent: bool| {
+        let pipeline = |translucent: bool, lines: bool| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(if translucent { "Superfícies translúcidas" } else { "Superfícies" }),
             layout: Some(&pipeline_layout),
@@ -760,13 +779,13 @@ impl Viewport {
                 })],
             },
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
+                topology: if lines { wgpu::PrimitiveTopology::LineList } else { wgpu::PrimitiveTopology::TriangleList },
                 cull_mode: None,
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(!translucent),
+                depth_write_enabled: Some(!translucent && !lines),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -774,7 +793,7 @@ impl Viewport {
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("surface_main"),
+                entry_point: Some(if lines { "line_main" } else { "surface_main" }),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: COLOR_FORMAT,
@@ -786,8 +805,9 @@ impl Viewport {
             cache: None,
         })
         };
-        let surface_pipeline = pipeline(false);
-        let translucent_pipeline = pipeline(true);
+        let surface_pipeline = pipeline(false, false);
+        let translucent_pipeline = pipeline(true, false);
+        let line_pipeline = pipeline(true, true);
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Sombra de contato"),
             layout: Some(&pipeline_layout),
@@ -858,6 +878,8 @@ impl Viewport {
             surface_pipeline,
             translucent_pipeline,
             shadow_pipeline,
+            line_pipeline,
+            section_state: section::State::default(),
         };
         viewport.set_mesh(device, mesh)?;
         Ok(viewport)
@@ -886,6 +908,7 @@ impl Viewport {
             usage: wgpu::BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
+        self.section_state = section::State::default();
         self.vertex_count = 0;
         self.opaque_count = 0;
         self.shadow_count = 0;
@@ -913,6 +936,8 @@ impl Viewport {
         self.opaque_count = (mesh.opaque_vertices as u32).min(self.vertex_count);
         self.shadow_count = (mesh.ground_shadow.len() / VERTEX_BYTES) as u32;
         self.normalization = (mesh.center, mesh.scale);
+        self.section_state = section::State::default();
+        self.section_state.source = Some(mesh.source.clone());
         self.camera = Camera::default();
         self.camera
             .fit(f64::from(self.size[0]) / f64::from(self.size[1]));
@@ -962,7 +987,12 @@ impl Viewport {
         [n[0] as f32, n[1] as f32, n[2] as f32, d as f32]
     }
 
-    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn section_pending(&self) -> bool {
+        self.section_state.pending(self.section)
+    }
+
+    pub fn render(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        self.section_state.update(device, self.section);
         let matrix = self
             .camera
             .matrix(f64::from(self.size[0]) / f64::from(self.size[1]));
@@ -1021,9 +1051,31 @@ impl Viewport {
             pass.set_pipeline(&self.surface_pipeline);
             pass.set_vertex_buffer(0, self.triangles.slice(..));
             pass.draw(0..self.opaque_count, 0..1);
+            if let Some(buffer) = &self.section_state.triangles {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(
+                    0..self.section_state.opaque.min(self.section_state.count),
+                    0..1,
+                );
+            }
             if self.opaque_count < self.vertex_count {
                 pass.set_pipeline(&self.translucent_pipeline);
+                pass.set_vertex_buffer(0, self.triangles.slice(..));
                 pass.draw(self.opaque_count..self.vertex_count, 0..1);
+            }
+            if let Some(buffer) = &self.section_state.triangles {
+                pass.set_pipeline(&self.translucent_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(
+                    self.section_state.opaque.min(self.section_state.count)
+                        ..self.section_state.count,
+                    0..1,
+                );
+            }
+            if let Some(buffer) = &self.section_state.lines {
+                pass.set_pipeline(&self.line_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..self.section_state.line_count, 0..1);
             }
         }
         queue.submit([encoder.finish()]);
