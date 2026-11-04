@@ -147,3 +147,99 @@ fn hole_centers_ignore_fixed_references_and_text_anchors() -> Result<()> {
     assert_eq!(points, vec![own_center, isolated]);
     Ok(())
 }
+
+#[test]
+fn dimensions_to_the_local_origin_drive_points_and_lines_without_auxiliary_points() -> Result<()> {
+    for axis in [None, Some(0), Some(1)] {
+        let mut sketch = Sketch::new(
+            "Origem",
+            Plane {
+                origin: [40., 20., 10.],
+                ..Plane::yz()
+            },
+        );
+        let point = sketch.add_point([-6., 8.])?;
+        let dimension = sketch.add_constraint(
+            ConstraintKind::OriginDistance {
+                point,
+                axis,
+                negative: axis == Some(0),
+                value: 20.,
+            },
+            false,
+        )?;
+        sketch
+            .dimension_targets
+            .insert(dimension, [Target::Point(point), Target::Origin]);
+        let report = dimensions::solve(&sketch, dimension)?;
+        assert_ne!(report.status, nator_sketch::solver::Status::Conflict);
+        assert_eq!(report.sketch.points.len(), 1);
+        assert!(
+            (report
+                .sketch
+                .measure(&report.sketch.constraints[0].kind)?
+                .ok_or("Cota")?
+                - 20.)
+                .abs()
+                < 1e-6
+        );
+        let mut document = Document::new("Origem fixa")?;
+        let (part, id) = document.add_sketch(None, report.sketch)?;
+        let mut session = Session::new(document)?;
+        session.execute(Command::SetParameter {
+            part,
+            name: "distancia".into(),
+            expression: Some("30 mm".into()),
+            dimension: nator_document::parameters::Dimension::Length,
+        })?;
+        let mut next = session
+            .document()
+            .sketch(id)
+            .ok_or("Rascunho")?
+            .sketch
+            .clone();
+        next.dimension_expressions
+            .insert(dimension, "distancia".into());
+        nator_document::parameters::resolve_sketch(
+            &mut next,
+            &session.document().part(part).ok_or("Peça")?.parameters,
+        )?;
+        let solved = dimensions::solve(&next, dimension)?;
+        session.execute(Command::UpdateSketch {
+            id,
+            sketch: solved.sketch,
+        })?;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("origin.3dnator");
+        nator_project_io::write_project(&path, session.document())?;
+        let reopened = nator_project_io::read_project(&path)?;
+        let saved = &reopened.sketch(id).ok_or("Rascunho")?.sketch;
+        assert_eq!(saved.points.len(), 1);
+        assert_eq!(
+            saved.dimension_targets[&dimension],
+            [Target::Point(point), Target::Origin]
+        );
+        assert!((saved.measure(&saved.constraints[0].kind)?.ok_or("Cota")? - 30.).abs() < 1e-6);
+        assert!(session.undo());
+        assert!(session.redo());
+    }
+    let mut sketch = Sketch::new("Linha", Plane::xy());
+    let line = sketch.add_line([5., -3.], [5., 3.], false)?;
+    let id = sketch.add_constraint(
+        ConstraintKind::OriginLineDistance { line, value: 12. },
+        false,
+    )?;
+    let report = dimensions::solve(&sketch, id)?;
+    assert_ne!(report.status, nator_sketch::solver::Status::Conflict);
+    assert_eq!(report.sketch.points.len(), 2);
+    assert!(
+        (report
+            .sketch
+            .measure(&report.sketch.constraints[0].kind)?
+            .ok_or("Cota")?
+            - 12.)
+            .abs()
+            < 1e-6
+    );
+    Ok(())
+}

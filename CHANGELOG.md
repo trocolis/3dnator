@@ -4,6 +4,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.36.0 — 04/11/2026
+
+- **Dimensionar** aceita a origem local como referência fixa para pontos, centros de círculos/arcos e linhas. A posição do texto escolhe distância alinhada, horizontal ou vertical; o valor aceita expressões e pode ser editado como nas outras cotas.
+- Formato 49 persiste as cotas na origem e a ordem dos alvos sem criar pontos auxiliares no desenho. A origem não se move nem entra na coleta de furos.
+
 ## 0.35.1 — 04/11/2026
 
 - Furo sugere a direção para o interior do corpo ao escolher o apoio e a base; mantém a direção manual enquanto esses alvos não mudam. Cortes sem interseção são recusados, em vez de criar uma operação sem efeito.

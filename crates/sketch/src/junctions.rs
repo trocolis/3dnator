@@ -126,6 +126,7 @@ fn uses_point(kind: &ConstraintKind, target: u64) -> bool {
         | ConstraintKind::Midpoint { point, .. }
         | ConstraintKind::Fixed { point, .. }
         | ConstraintKind::Tangent { point, .. }
+        | ConstraintKind::OriginDistance { point, .. }
         | ConstraintKind::PointLineDistance { point, .. } => point == target,
         _ => false,
     }

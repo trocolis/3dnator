@@ -250,6 +250,19 @@ pub enum ConstraintKind {
         b: u64,
         value: f64,
     },
+    /// Distância de um ponto à origem local: alinhada ou projetada num eixo.
+    OriginDistance {
+        point: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<usize>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        negative: bool,
+        value: f64,
+    },
+    OriginLineDistance {
+        line: u64,
+        value: f64,
+    },
     DeltaX {
         a: u64,
         b: u64,
@@ -379,6 +392,8 @@ impl ConstraintKind {
     pub fn dimension_value(&self) -> Option<f64> {
         match *self {
             Self::Distance { value, .. }
+            | Self::OriginDistance { value, .. }
+            | Self::OriginLineDistance { value, .. }
             | Self::DeltaX { value, .. }
             | Self::DeltaY { value, .. }
             | Self::Radius { value, .. }
@@ -393,6 +408,8 @@ impl ConstraintKind {
     pub fn dimension_value_mut(&mut self) -> Option<&mut f64> {
         match self {
             Self::Distance { value, .. }
+            | Self::OriginDistance { value, .. }
+            | Self::OriginLineDistance { value, .. }
             | Self::DeltaX { value, .. }
             | Self::DeltaY { value, .. }
             | Self::Radius { value, .. }
@@ -560,6 +577,20 @@ impl Sketch {
         };
         Ok(Some(match *kind {
             ConstraintKind::Distance { a, b, .. } => distance(self.point(a)?, self.point(b)?),
+            ConstraintKind::OriginDistance {
+                point,
+                axis,
+                negative,
+                ..
+            } => {
+                let p = self.point(point)?;
+                match axis {
+                    None => distance(p, [0.; 2]),
+                    Some(axis) if axis < 2 => p[axis] * if negative { -1. } else { 1. },
+                    _ => return Err(SketchError("Eixo da cota na origem inválido.".into())),
+                }
+            }
+            ConstraintKind::OriginLineDistance { line, .. } => to_line([0.; 2], line)?,
             ConstraintKind::DeltaX { a, b, .. } => self.point(b)?[0] - self.point(a)?[0],
             ConstraintKind::DeltaY { a, b, .. } => self.point(b)?[1] - self.point(a)?[1],
             ConstraintKind::Radius { circle, .. } => self.radial(circle)?.1,

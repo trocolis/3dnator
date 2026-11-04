@@ -691,3 +691,11 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - `hole_centers_ignore_fixed_references_and_text_anchors`: coleta apenas centros próprios e pontos isolados; referências e inserção de texto não viram furos.
 - Ensaio gráfico explícito `holes_on_the_bottom_sketch_suggest_an_inward_direction_and_preview_a_cut`, com OCCT e `WGPU_BACKEND=gl`, verifica direção sugerida, prévia e confirmação.
 - Sem mudança de formato ou dependências. O raio dos círculos marcadores continua independente do diâmetro do painel. Não houve interação manual em janela.
+
+## Cotas na origem — 0.36.0 (04/11/2026)
+
+- Fmt e clippy do workspace com e sem OCCT aprovados. Testes do workspace sem OCCT aprovados (`--locked --offline`).
+- `dimensions_to_the_local_origin_drive_points_and_lines_without_auxiliary_points`: solução alinhada/X/Y, lado negativo, plano local transformado, expressões, salvar/reabrir e desfazer/refazer, preservando a quantidade de pontos.
+- `origin_can_be_chosen_with_a_point_circle_or_line_and_projected_on_axes`: seleção da origem, centro e linha, montagem da cota e layout.
+- Ensaio gráfico explícito `dimension_tool_uses_the_origin_without_adding_geometry`, com OCCT e `WGPU_BACKEND=gl`, aprovado: seleciona origem/canto, digita o valor e confirma sem acrescentar pontos.
+- Formato 49 inclui as novas restrições e o alvo Origin. Sem dependências novas; testes OCCT completos serão repetidos na integração com Texto.

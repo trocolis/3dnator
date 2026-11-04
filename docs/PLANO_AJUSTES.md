@@ -245,3 +245,9 @@ e a construção exige interseção do corpo com a parte da ferramenta à frente
 Centros projetados/de face e apoios de texto saíram da coleta automática. Regressões cobrem
 posição, diâmetro, recálculo e preservação atômica. Permanecem cotas na origem e os três
 itens de Texto.
+
+### Cotas na origem — 0.36.0
+
+Etapa concluída com referência imutável no solver e na persistência, sem apoios artificiais.
+Ponto, centro de círculo/arco e linha aceitam a origem em qualquer ordem; valores, expressões,
+edição e posição do texto usam o fluxo existente. Formato 49. Permanecem os três itens de Texto.

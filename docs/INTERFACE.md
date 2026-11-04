@@ -418,3 +418,12 @@ falha com orientação para conferir ponto, corpo e direção, sem publicar um c
 A coleta automática usa círculos normais e pontos isolados desenhados pelo usuário; exclui
 referências projetadas, linhas da face e apoios de texto. O diâmetro vem do painel, independentemente
 do raio usado para marcar o centro no rascunho.
+
+### Dimensionar até a origem
+
+Clique na origem do rascunho e num ponto, centro de círculo/arco ou linha (em qualquer
+ordem). A origem é uma referência fixa no plano local, inclusive em rascunhos apoiados ou
+transformados. Entre origem e ponto/centro, posicione o texto para escolher distância alinhada,
+horizontal ou vertical, como nas outras cotas. A cota pode receber expressão e ser reaberta
+por duplo clique. Cotas por eixo conservam o lado original do ponto. A operação não acrescenta
+geometria auxiliar ao rascunho.

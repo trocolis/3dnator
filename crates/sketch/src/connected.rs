@@ -76,6 +76,7 @@ pub fn center_is_linked(sketch: &Sketch, circle: u64) -> Result<bool> {
             ConstraintKind::Midpoint { point, .. }
             | ConstraintKind::PointOnLine { point, .. }
             | ConstraintKind::PointOnCurve { point, .. }
+            | ConstraintKind::OriginDistance { point, .. }
             | ConstraintKind::PointLineDistance { point, .. } => point == center,
             ConstraintKind::Concentric { a, b } | ConstraintKind::CircleTangent { a, b, .. } => {
                 a == circle || b == circle

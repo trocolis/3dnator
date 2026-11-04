@@ -7651,6 +7651,51 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn dimension_tool_uses_the_origin_without_adding_geometry() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part, id) = plain_sketch_editor(&context)?;
+        editor.begin_sketch(part, id);
+        settle(&mut editor, &context)?;
+        let count = sketch_of(&editor, id)?.points.len();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.current().camera_transition.is_some() {
+            if Instant::now() > deadline {
+                return Err("Câmera não parou".into());
+            }
+            frame(&mut editor, &context, vec![])?;
+        }
+        editor.select_sketch_tool(sketch_editor::Tool::Dimension);
+        frame(&mut editor, &context, vec![])?;
+        for p in [[0., 0., 0.], [20., 10., 0.]] {
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                p,
+            )
+            .ok_or("Ponto")?;
+            click(&mut editor, &context, at)?;
+        }
+        frame(&mut editor, &context, vec![])?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::Text("30".into()), arrow_key(egui::Key::Enter)],
+        )?;
+        settle(&mut editor, &context)?;
+        let sketch = sketch_of(&editor, id)?;
+        assert_eq!(sketch.points.len(), count);
+        let dimension = sketch
+            .constraints
+            .iter()
+            .find(|c| matches!(c.kind, nator_sketch::ConstraintKind::OriginDistance { .. }))
+            .ok_or("Cota na origem ausente")?;
+        assert!((sketch.measure(&dimension.kind)?.ok_or("Medida")? - 30.).abs() < 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn hidden_sketch_only_appears_after_an_edit_is_confirmed() -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
         let (mut editor, part, id) = plain_sketch_editor(&context)?;

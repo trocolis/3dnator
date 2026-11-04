@@ -4,6 +4,7 @@ use crate::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Target {
+    Origin,
     Point(u64),
     Entity(u64),
 }
@@ -11,6 +12,7 @@ pub enum Target {
 impl Target {
     pub fn points(self, sketch: &Sketch) -> Result<Vec<u64>> {
         match self {
+            Self::Origin => Ok(vec![]),
             Self::Point(id) => {
                 sketch.point(id)?;
                 Ok(vec![id])
@@ -20,6 +22,7 @@ impl Target {
     }
     fn entities(self, sketch: &Sketch) -> Result<HashSet<u64>> {
         Ok(match self {
+            Self::Origin => HashSet::new(),
             Self::Entity(id) => {
                 sketch.entity(id)?;
                 [id].into_iter().collect()
@@ -42,7 +45,8 @@ impl Target {
 pub(crate) fn participants(kind: &ConstraintKind) -> (Vec<u64>, Vec<u64>) {
     use ConstraintKind::*;
     match *kind {
-        Fixed { point, .. } => (vec![point], vec![]),
+        Fixed { point, .. } | OriginDistance { point, .. } => (vec![point], vec![]),
+        OriginLineDistance { line, .. } => (vec![], vec![line]),
         Coincident { a, b }
         | PointsHorizontal { a, b }
         | PointsVertical { a, b }
@@ -74,6 +78,9 @@ pub(crate) fn participants(kind: &ConstraintKind) -> (Vec<u64>, Vec<u64>) {
 }
 
 pub fn connections(sketch: &Sketch, target: Target, excluded: u64) -> Result<usize> {
+    if target == Target::Origin {
+        return Ok(usize::MAX);
+    }
     let points = target.points(sketch)?;
     let owned = target.entities(sketch)?;
     let mut neighbors = HashSet::new();
@@ -140,6 +147,8 @@ pub fn targets(sketch: &Sketch, id: u64) -> Option<[Target; 2]> {
     let kind = &sketch.constraints.iter().find(|c| c.id == id)?.kind;
     use Target::*;
     Some(match *kind {
+        ConstraintKind::OriginDistance { point, .. } => [Point(point), Origin],
+        ConstraintKind::OriginLineDistance { line, .. } => [Entity(line), Origin],
         ConstraintKind::Distance { a, b, .. }
         | ConstraintKind::DeltaX { a, b, .. }
         | ConstraintKind::DeltaY { a, b, .. } => {

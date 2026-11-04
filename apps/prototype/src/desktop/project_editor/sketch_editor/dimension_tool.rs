@@ -30,6 +30,7 @@ const PARALLEL: f64 = 0.0087;
 /// Elemento escolhido: um ponto, uma linha ou um círculo/arco.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Pick {
+    Origin,
     Point(u64),
     Line(u64),
     Radial(u64),
@@ -37,6 +38,7 @@ pub(super) enum Pick {
 impl Pick {
     fn target(self) -> nator_sketch::dimensions::Target {
         match self {
+            Self::Origin => nator_sketch::dimensions::Target::Origin,
             Self::Point(id) => nator_sketch::dimensions::Target::Point(id),
             Self::Line(id) | Self::Radial(id) => nator_sketch::dimensions::Target::Entity(id),
         }
@@ -47,6 +49,8 @@ impl Pick {
 /// vertical) e, nos ângulos, o setor entre as linhas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Measure {
+    OriginPoint(u64),
+    OriginLine(u64),
     /// Dois pontos: os extremos de uma linha ou dois pontos escolhidos.
     Points(u64, u64),
     Radial {
@@ -151,6 +155,9 @@ pub(super) struct Update {
 /// Pontos primeiro: perto de um extremo ou centro, o clique escolhe o ponto, como no
 /// SolidCraft; longe deles, a curva sob o cursor.
 pub(super) fn pick(sketch: &Sketch, cursor: Point2, tolerance: f64) -> Option<Pick> {
+    if distance(cursor, [0.; 2]) <= tolerance {
+        return Some(Pick::Origin);
+    }
     let point = sketch
         .visible_points()
         .map(|p| (p.id, distance(p.position, cursor)))
@@ -208,7 +215,16 @@ pub(super) fn settle(sketch: &Sketch, picks: &[Pick]) -> Result<Option<Measure>,
     };
     let own = |line: u64, point: u64| entity(line).is_some_and(|e| e.point_ids().contains(&point));
     Ok(match *picks {
-        [] | [Point(_)] => None,
+        [] | [Point(_)] | [Origin] => None,
+        [Origin, Point(point)] | [Point(point), Origin] => Some(Measure::OriginPoint(point)),
+        [Origin, Line(line)] | [Line(line), Origin] => Some(Measure::OriginLine(line)),
+        [Origin, Radial(circle)] | [Radial(circle), Origin] => {
+            let center = match entity(circle).map(|e| &e.curve) {
+                Some(Curve::Circle { center, .. } | Curve::Arc { center, .. }) => *center,
+                _ => return Err(()),
+            };
+            Some(Measure::OriginPoint(center))
+        }
         // Reta infinita não tem comprimento: espera o segundo ponto ou linha.
         [Line(line)] => endpoints(line).map(|(a, b)| Measure::Points(a, b)),
         [Radial(circle)] => Some(Measure::Radial {
@@ -254,6 +270,46 @@ pub(super) fn build(
 ) -> Result<Built, String> {
     let missing = || text(T::DimensionUnsupported).to_owned();
     let (kind, anchor) = match measure {
+        Measure::OriginPoint(point) => {
+            let p = sketch.point(point).map_err(sketch_error)?;
+            let mid = scale(p, 0.5);
+            let length = distance(p, [0.; 2]);
+            let axis = label.and_then(|t| {
+                if p[0].abs() < 1e-9 || p[1].abs() < 1e-9 {
+                    return None;
+                }
+                let along = dot(sub(t, mid), scale(p, 1. / length));
+                let within =
+                    |i: usize| t[i] >= 0_f64.min(p[i]) - 1e-9 && t[i] <= 0_f64.max(p[i]) + 1e-9;
+                if along.abs() <= length * 0.5 {
+                    None
+                } else if within(0) {
+                    Some(0)
+                } else if within(1) {
+                    Some(1)
+                } else {
+                    None
+                }
+            });
+            (
+                ConstraintKind::OriginDistance {
+                    point,
+                    axis,
+                    negative: axis.is_some_and(|i| p[i] < 0.),
+                    value: 0.,
+                },
+                mid,
+            )
+        }
+        Measure::OriginLine(line) => {
+            let (a, _) = sketch.line(line).map_err(sketch_error)?;
+            let d = line_direction(sketch, line).ok_or_else(missing)?;
+            let f = sub(a, scale(d, dot(a, d)));
+            (
+                ConstraintKind::OriginLineDistance { line, value: 0. },
+                scale(f, 0.5),
+            )
+        }
         Measure::Points(a, b) => {
             let (pa, pb) = (
                 sketch.point(a).map_err(sketch_error)?,
@@ -631,6 +687,37 @@ fn layout(
 ) -> Option<Layout> {
     let place = |anchor: Point2| offset.map(|o| add(anchor, o));
     Some(match *kind {
+        ConstraintKind::OriginDistance { point, axis, .. } => {
+            let p = sketch.point(point).ok()?;
+            let direction = match axis {
+                Some(0) => [1., 0.],
+                Some(1) => [0., 1.],
+                _ => unit(p).unwrap_or([1., 0.]),
+            };
+            let anchor = scale(p, 0.5);
+            linear(
+                [0.; 2],
+                p,
+                direction,
+                place(anchor)
+                    .unwrap_or_else(|| add(anchor, scale([-direction[1], direction[0]], gap))),
+            )
+        }
+        ConstraintKind::OriginLineDistance { line, .. } => {
+            let (a, _) = sketch.line(line).ok()?;
+            let d = line_direction(sketch, line)?;
+            let f = sub(a, scale(d, dot(a, d)));
+            let direction = unit(f).unwrap_or([-d[1], d[0]]);
+            let anchor = scale(f, 0.5);
+            let text = place(anchor)
+                .unwrap_or_else(|| add(anchor, scale([-direction[1], direction[0]], gap)));
+            linear(
+                [0.; 2],
+                extension_support(sketch, line, text)?,
+                direction,
+                text,
+            )
+        }
         ConstraintKind::Distance { a, b, .. }
         | ConstraintKind::DeltaX { a, b, .. }
         | ConstraintKind::DeltaY { a, b, .. } => {
@@ -839,6 +926,11 @@ fn highlight(
     color: egui::Color32,
 ) {
     match pick {
+        Pick::Origin => {
+            if let Some(p) = frame.screen([0.; 2]) {
+                painter.circle_stroke(p, 7., egui::Stroke::new(2., color));
+            }
+        }
         Pick::Point(id) => {
             if let Some(p) = sketch.point(id).ok().and_then(|p| frame.screen(p)) {
                 painter.circle_stroke(p, 6., egui::Stroke::new(2., color));
@@ -1148,6 +1240,38 @@ mod tests {
     use super::*;
     use nator_sketch::Plane;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[test]
+    fn origin_can_be_chosen_with_a_point_circle_or_line_and_projected_on_axes() -> TestResult {
+        let mut sketch = Sketch::new("Origem", Plane::xy());
+        let circle = sketch.add_circle([-10., 6.], 2., false)?;
+        let point = sketch.entity(circle)?.point_ids()[0];
+        let line = sketch.add_line([5., -4.], [5., 4.], false)?;
+        assert_eq!(pick(&sketch, [0., 0.], 0.5), Some(Pick::Origin));
+        assert_eq!(
+            settle(&sketch, &[Pick::Origin, Pick::Radial(circle)]),
+            Ok(Some(Measure::OriginPoint(point)))
+        );
+        assert_eq!(
+            settle(&sketch, &[Pick::Line(line), Pick::Origin]),
+            Ok(Some(Measure::OriginLine(line)))
+        );
+        let aligned = build(&sketch, Measure::OriginPoint(point), None)?;
+        assert!((aligned.measured - 136_f64.sqrt()).abs() < 1e-8);
+        let horizontal = build(&sketch, Measure::OriginPoint(point), Some([-5., 20.]))?;
+        assert!(matches!(
+            horizontal.kind,
+            ConstraintKind::OriginDistance {
+                axis: Some(0),
+                negative: true,
+                ..
+            }
+        ));
+        assert!((horizontal.measured - 10.).abs() < 1e-8);
+        assert!(layout(&sketch, &horizontal.kind, None, 2.).is_some());
+        assert_eq!(sketch.points.len(), 3);
+        Ok(())
+    }
+
     #[test]
     fn parallel_dimension_extensions_start_at_the_nearest_vertices() -> TestResult {
         let mut sketch = Sketch::new("Extensões curtas", Plane::xy());

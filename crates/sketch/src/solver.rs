@@ -88,6 +88,17 @@ pub(crate) fn constraint_residuals(s: &Sketch, c: &ConstraintKind) -> Result<Vec
             }
             vec![distance(s.point(a)?, s.point(b)?) - value]
         }
+        ConstraintKind::OriginDistance { value, .. }
+        | ConstraintKind::OriginLineDistance { value, .. } => {
+            if checked(value)? < 0. {
+                return Err(SketchError("Distância negativa.".into()));
+            }
+            vec![
+                s.measure(c)?
+                    .ok_or_else(|| SketchError("Cota na origem inválida.".into()))?
+                    - value,
+            ]
+        }
         ConstraintKind::DeltaX { a, b, value } => {
             vec![s.point(b)?[0] - s.point(a)?[0] - checked(value)?]
         }

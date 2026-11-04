@@ -214,6 +214,7 @@ fn uses(kind: &ConstraintKind, point: u64) -> bool {
         | ConstraintKind::PointOnLine { point: p, .. }
         | ConstraintKind::PointOnCurve { point: p, .. }
         | ConstraintKind::Midpoint { point: p, .. }
+        | ConstraintKind::OriginDistance { point: p, .. }
         | ConstraintKind::PointLineDistance { point: p, .. }
         | ConstraintKind::Tangent { point: p, .. } => p == point,
         _ => false,
@@ -228,6 +229,7 @@ fn cites(kind: &ConstraintKind, id: u64) -> bool {
         | ConstraintKind::Vertical { line }
         | ConstraintKind::Midpoint { line, .. }
         | ConstraintKind::PointOnLine { line, .. }
+        | ConstraintKind::OriginLineDistance { line, .. }
         | ConstraintKind::PointLineDistance { line, .. } => line == id,
         ConstraintKind::Radius { circle, .. } | ConstraintKind::Diameter { circle, .. } => {
             circle == id
