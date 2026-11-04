@@ -364,6 +364,12 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::CoplanarProfilesRequired => "Seleccione áreas y eje en el mismo plano.",
         Text::Loft => "Transición entre perfiles",
+        Text::Pipe => "Pipe",
+        Text::PipeDiameter => "Diámetro exterior",
+        Text::PipeHollow => "Tubo hueco",
+        Text::PipeHint => {
+            "Haz clic en una línea o arco del boceto para seleccionar la cadena. Usa una trayectoria abierta con arcos tangentes en las curvas. Desactiva Tubo hueco para una sección maciza."
+        }
         Text::Sweep => "Transición guiada",
         Text::SweepHint => {
             "Guía automática, arco alrededor de un eje en el plano inicial o cadena abierta de líneas/arcos de un boceto. Los planos de los perfiles deben ser perpendiculares a la guía en los extremos."

@@ -144,3 +144,15 @@ Planos de trabalho (`document::work_planes`) pertencem à peça e guardam um pla
 
 
 Rótulos são operações `Label` sobre um corpo/face. A camada de comandos compila os contornos unitários de fontes do sistema em um worker, via OCCT, e os persiste junto à especificação textual. Mudanças de posição/tamanho/cor usam esses contornos sem depender da fonte original. O núcleo projeta o texto na face recortada e produz subdivisões, relevo ou gravação. Cores intrínsecas acompanham as faces do B-rep e ficam abaixo da pintura explícita; caches de aparência guardam também as faces originais por triângulo. STEP exporta a mesma geometria e cor por face, sem sólidos separados para texto superficial. Nenhum objeto de fonte, gerenciador nativo ou superfície atravessa threads.
+
+
+## Pipe circular
+
+`document::features::Operation::Pipe` guarda o rascunho e os IDs da cadeia, o diâmetro e
+uma espessura opcional por expressão. `commands::pipe` constrói duas seções circulares
+auxiliares, normais às tangentes terminais, e usa a transição guiada exata do núcleo OCCT;
+as seções não são adicionadas ao documento. A ordenação das linhas/arcos e as tangentes
+são compartilhadas com `commands::sweep`. Pipe exige cadeia aberta e tangente, raio de curva
+maior que o raio externo e espessura positiva inferior ao raio. Falhas nativas continuam
+atômicas. O corpo usa histórico, prévia no trabalhador e nomes de faces existentes.
+O formato 47 persiste a trajetória sem índices de tesselação; clonar remapeia o rascunho.

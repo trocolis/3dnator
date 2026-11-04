@@ -276,6 +276,14 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holes: Option<Vec<HolePair>>,
     },
+    /// Seção circular constante ao longo de uma cadeia aberta de linhas e arcos.
+    Pipe {
+        sketch: SketchId,
+        entities: Vec<u64>,
+        diameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thickness: Option<String>,
+    },
     Label {
         base: BodyId,
         face: FaceRef,
@@ -789,6 +797,7 @@ impl Operation {
             Self::Loft { start, .. } | Self::Sweep { start, .. } => Some(start.sketch),
             Self::Extrude { sketch, .. }
             | Self::Revolve { sketch, .. }
+            | Self::Pipe { sketch, .. }
             | Self::Hole { sketch, .. }
             | Self::ScrewBoss { sketch, .. }
             | Self::SnapFit { sketch, .. } => Some(*sketch),
@@ -875,6 +884,7 @@ impl Feature {
                     limit.remap(bodies, sketches)?;
                 }
             }
+            Operation::Pipe { sketch: id, .. } => sketch(id)?,
             Operation::Loft { start, end, .. } | Operation::Sweep { start, end, .. } => {
                 sketch(&mut start.sketch)?;
                 sketch(&mut end.sketch)?;
@@ -1125,6 +1135,58 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                                 "Extrusão deve ter comprimento não nulo.".into(),
                             ));
                         }
+                    }
+                }
+            }
+            Operation::Pipe {
+                sketch,
+                entities,
+                diameter,
+                thickness,
+            } => {
+                let source = part
+                    .sketches
+                    .iter()
+                    .find(|s| s.id == *sketch)
+                    .ok_or_else(|| {
+                        DocumentError("Rascunho da trajetória do Pipe inexistente.".into())
+                    })?;
+                let mut unique = HashSet::new();
+                if entities.is_empty()
+                    || entities.len() > 1024
+                    || entities
+                        .iter()
+                        .any(|id| !unique.insert(*id) || source.sketch.entity(*id).is_err())
+                {
+                    return Err(DocumentError(
+                        "Trajetória do Pipe inexistente, repetida ou excessiva.".into(),
+                    ));
+                }
+                for id in entities {
+                    let entity = source
+                        .sketch
+                        .entity(*id)
+                        .map_err(|e| DocumentError(e.to_string()))?;
+                    if entity.infinite || matches!(entity.curve, nator_sketch::Curve::Circle { .. })
+                    {
+                        return Err(DocumentError(
+                            "Pipe exige uma cadeia aberta de linhas e arcos finitos.".into(),
+                        ));
+                    }
+                }
+                let d = part.parameters.evaluate(diameter, Length)?;
+                if d <= 0. {
+                    return Err(DocumentError(
+                        "O diâmetro do Pipe deve ser positivo.".into(),
+                    ));
+                }
+                if let Some(thickness) = thickness {
+                    let t = part.parameters.evaluate(thickness, Length)?;
+                    if t <= 0. || 2. * t >= d {
+                        return Err(DocumentError(
+                            "A espessura do Pipe deve ser positiva e menor que metade do diâmetro."
+                                .into(),
+                        ));
                     }
                 }
             }

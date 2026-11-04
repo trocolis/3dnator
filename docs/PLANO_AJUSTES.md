@@ -221,3 +221,11 @@ Não é necessário introduzir uma dependência nova para o plano proposto.
 
 Evidências por versão em `docs/VALIDATION.md`. `AJUSTES.md` é ignorado pelo Git neste
 repositório; suas caixas foram atualizadas localmente, sem forçar sua inclusão nos commits.
+
+### Pipe — 0.34.0
+
+Etapa 7 implementada com a seção circular constante proposta: Criação e busca, painel,
+trajetória escolhida no viewport, prévia, novo corpo, edição pelo histórico, recálculo,
+desfazer/refazer, clonagem, persistência no formato 47 e exportação STEP/STL. A primeira
+entrega exige cadeia aberta com trechos tangentes e raio de curva maior que o raio externo.
+Permanecem cinco caixas pendentes: Furo, cotas na origem e os três ajustes de Texto.

@@ -976,6 +976,25 @@ pub(super) fn normalize(
             spec.uv = Some(frame.uv);
             Operation::Label { base, face, spec }
         }
+        Operation::Pipe {
+            sketch,
+            entities,
+            diameter,
+            thickness,
+        } => {
+            let entities = if entities.len() == 1 {
+                nator_sketch::connected::chain(sketch_of(doc, part, sketch)?, entities[0])
+                    .map_err(error)?
+            } else {
+                entities
+            };
+            Operation::Pipe {
+                sketch,
+                entities,
+                diameter,
+                thickness,
+            }
+        }
         Operation::Sweep {
             start,
             end,
@@ -1299,6 +1318,18 @@ pub(super) fn construct(
             label_colors = Some((faces, spec.color));
             result
         }
+        Operation::Pipe {
+            sketch,
+            entities,
+            diameter,
+            thickness,
+        } => crate::pipe::build(
+            sketch_of(doc, part, *sketch)?,
+            entities,
+            value(diameter)?,
+            thickness.as_ref().map(|t| value(t)).transpose()?,
+            &owner,
+        )?,
         Operation::Sweep {
             start,
             end,

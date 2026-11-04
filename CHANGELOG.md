@@ -4,6 +4,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.34.0 — 04/11/2026
+
+- **Pipe**, em Construção → Criação e na busca: seção circular maciça ou oca, com diâmetro externo e espessura por expressão, ao longo de uma cadeia aberta de linhas e arcos tangentes de rascunho. A escolha de um trecho captura a cadeia; a prévia roda no trabalhador e a confirmação cria um corpo com histórico editável, recálculo e desfazer/refazer.
+- Referências da trajetória são remapeadas ao clonar a peça e preservadas no formato `.3dnator` 47. Espessuras inválidas, trajetórias desconectadas, fechadas ou com quinas sem arco são recusadas sem alterar o documento.
+
 ## 0.33.0 — 04/11/2026
 
 - **Converter para objeto de referência** no menu da peça, com geometria, histórico e ocorrências preservados. A conversão vale para todas as instâncias da definição e fica indisponível enquanto houver rascunho ou ferramenta aberta. **Criar peça** reverte a marca.

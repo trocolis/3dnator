@@ -356,6 +356,10 @@ pub enum Text {
     CoplanarProfilesRequired,
     Loft,
     Sweep,
+    Pipe,
+    PipeDiameter,
+    PipeHollow,
+    PipeHint,
     SweepHint,
     RouteField,
     AutomaticRoute,
@@ -1188,6 +1192,12 @@ fn pt(key: Text) -> &'static str {
         Text::PrintMaxStrain => "Deformação máxima",
         Text::PrintEstimateHint => "Estimativa antes de fatiar, sem suportes.",
         Text::PrintBedLimit => "Limitar ao tamanho da mesa",
+        Text::Pipe => "Pipe",
+        Text::PipeDiameter => "Diâmetro externo",
+        Text::PipeHollow => "Tubo oco",
+        Text::PipeHint => {
+            "Clique numa linha ou arco do rascunho para escolher a cadeia. Use uma trajetória aberta, com arcos tangentes nas curvas. Sem Tubo oco, cria uma seção maciça."
+        }
         Text::Sweep => "Transição guiada",
         Text::RouteField => "Trajetória",
         Text::AutomaticRoute => "Automática",

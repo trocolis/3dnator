@@ -45,12 +45,18 @@ fn checked_endpoints(
     }
     Ok(())
 }
-fn path(
+pub(super) struct Path {
+    pub curves: Vec<GuideCurve>,
+    pub start: Plane,
+    pub end: Plane,
+    pub smooth: bool,
+}
+
+pub(super) fn path(
     sketch: &Sketch,
     ids: &[u64],
-    first: Plane,
-    last: Plane,
-) -> Result<Vec<GuideCurve>, DocumentError> {
+    planes: Option<(Plane, Plane)>,
+) -> Result<Path, DocumentError> {
     if ids.is_empty() || ids.len() > 1024 {
         return Err(error("Escolha uma cadeia aberta de até 1024 curvas."));
     }
@@ -94,11 +100,14 @@ fn path(
         ));
     }
     let world = |p| sketch.plane.world(p);
-    let direct =
-        plane_distance(first, world(terminals[0])) + plane_distance(last, world(terminals[1]));
-    let reverse =
-        plane_distance(first, world(terminals[1])) + plane_distance(last, world(terminals[0]));
-    let mut point = terminals[usize::from(reverse < direct)];
+    let reverse = planes.is_some_and(|(first, last)| {
+        let direct =
+            plane_distance(first, world(terminals[0])) + plane_distance(last, world(terminals[1]));
+        let reverse =
+            plane_distance(first, world(terminals[1])) + plane_distance(last, world(terminals[0]));
+        reverse < direct
+    });
+    let mut point = terminals[usize::from(reverse)];
     let start = point;
     let mut ordered = vec![];
     while !segments.is_empty() {
@@ -142,15 +151,26 @@ fn path(
     };
     let a = ordered.first().ok_or_else(|| error("Trajetória vazia."))?;
     let b = ordered.last().ok_or_else(|| error("Trajetória vazia."))?;
-    checked_endpoints(
-        first,
-        last,
-        world(start),
-        world(point),
-        direction(a, false),
-        direction(b, true),
-    )?;
-    ordered
+    if let Some((first, last)) = planes {
+        checked_endpoints(
+            first,
+            last,
+            world(start),
+            world(point),
+            direction(a, false),
+            direction(b, true),
+        )?;
+    }
+    let start = Plane::from_normal(world(start), direction(a, false)).map_err(error)?;
+    let end = Plane::from_normal(world(point), direction(b, true)).map_err(error)?;
+    let mut smooth = true;
+    for pair in ordered.windows(2) {
+        smooth &= dot(
+            unit(direction(&pair[0], true))?,
+            unit(direction(&pair[1], false))?,
+        ) > 1. - 1e-8;
+    }
+    let curves = ordered
         .iter()
         .map(|s| {
             Ok(match *s {
@@ -171,7 +191,13 @@ fn path(
                 }
             })
         })
-        .collect()
+        .collect::<Result<_, DocumentError>>()?;
+    Ok(Path {
+        curves,
+        start,
+        end,
+        smooth,
+    })
 }
 pub(super) fn curves(
     doc: &Document,
@@ -186,9 +212,9 @@ pub(super) fn curves(
         SweepRoute::Sketch { sketch, entities } => path(
             crate::features::sketch_of(doc, part, *sketch)?,
             entities,
-            first.0.plane,
-            last.0.plane,
-        ),
+            Some((first.0.plane, last.0.plane)),
+        )
+        .map(|path| path.curves),
         SweepRoute::Automatic => {
             let chord = sub(b, a);
             let length = norm(chord);

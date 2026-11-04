@@ -249,6 +249,7 @@ impl Action {
                 SolidTool::Revolve => Icon::Revolve,
                 SolidTool::Loft => Icon::Loft,
                 SolidTool::Sweep => Icon::Sweep,
+                SolidTool::Pipe => Icon::Pipe,
                 SolidTool::Label => Icon::Label,
                 SolidTool::Hole => Icon::Hole,
                 SolidTool::Fillet => Icon::Fillet,
@@ -360,6 +361,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Extrude),
     Action::Solid(SolidTool::Revolve),
     Action::Solid(SolidTool::Loft),
+    Action::Solid(SolidTool::Pipe),
     Action::Solid(SolidTool::Fillet),
     Action::Solid(SolidTool::Chamfer),
     Action::Solid(SolidTool::Shell),
@@ -1430,6 +1432,7 @@ impl Editor {
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
                         Action::Solid(SolidTool::Loft),
+                        Action::Solid(SolidTool::Pipe),
                         Action::Solid(SolidTool::Hole),
                     ],
                 );

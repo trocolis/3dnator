@@ -34,6 +34,7 @@ pub(super) enum Tool {
     Revolve,
     Loft,
     Sweep,
+    Pipe,
     Label,
     Join,
     Cut,
@@ -61,6 +62,7 @@ impl Tool {
             Self::Revolve => T::Revolve,
             Self::Loft => T::Loft,
             Self::Sweep => T::Sweep,
+            Self::Pipe => T::Pipe,
             Self::Label => T::Label,
             Self::Join | Self::Cut | Self::Intersect => T::CombineTool,
             Self::Fillet => T::Fillet,
@@ -86,6 +88,7 @@ impl Tool {
             Self::Revolve => Icon::Revolve,
             Self::Loft => Icon::Loft,
             Self::Sweep => Icon::Sweep,
+            Self::Pipe => Icon::Pipe,
             Self::Label => Icon::Label,
             Self::Hole => Icon::Hole,
             Self::Fillet => Icon::Fillet,
@@ -115,6 +118,7 @@ impl Tool {
     fn first_field(self) -> Field {
         match self {
             Self::Extrude | Self::Revolve | Self::Loft | Self::Sweep => Field::Profile,
+            Self::Pipe => Field::SweepPath,
             Self::Fillet | Self::Chamfer => Field::Edges,
             Self::Shell | Self::MergeFaces | Self::Label | Self::BedFace | Self::Lip => {
                 Field::Faces
@@ -455,6 +459,7 @@ pub(super) struct Draft {
     ruled: bool,
     developable: bool,
     sweep_route: SweepRoute,
+    pipe_thickness: Option<String>,
     hole_pairs: Option<Vec<nator_document::features::HolePair>>,
     /// Eixo fixo gravado em uma revolução antiga, mantido até outra escolha.
     kept_axis: Option<([f64; 3], [f64; 3])>,
@@ -521,7 +526,15 @@ impl Draft {
             end_profile: None,
             ruled: true,
             developable: true,
-            sweep_route: SweepRoute::Automatic,
+            sweep_route: if tool == Tool::Pipe {
+                SweepRoute::Sketch {
+                    sketch: SketchId(0),
+                    entities: vec![],
+                }
+            } else {
+                SweepRoute::Automatic
+            },
+            pipe_thickness: Some("1 mm".into()),
             hole_pairs: None,
             kept_axis: None,
             index: 0,
@@ -539,6 +552,7 @@ impl Draft {
             extrude: ExtrudeDraft::default(),
             size: match tool {
                 Tool::CheckSolid => "0.05 mm".into(),
+                Tool::Pipe => "10 mm".into(),
                 _ => "2 mm".into(),
             },
             angle: "360 deg".into(),
@@ -624,6 +638,18 @@ impl Draft {
                 }
                 d.extrude.to_face = until.is_some();
                 d.until = until;
+            }
+            Operation::Pipe {
+                sketch,
+                entities,
+                diameter,
+                thickness,
+            } => {
+                d.tool = Tool::Pipe;
+                d.sweep_route = SweepRoute::Sketch { sketch, entities };
+                d.size = diameter;
+                d.pipe_thickness = thickness;
+                d.field = None;
             }
             Operation::Sweep {
                 start,
@@ -1445,6 +1471,9 @@ impl Draft {
                     && (!self.extrude.to_face || self.until.is_some())
                     && (self.automatic || self.combine == 0 || self.combine_target.is_some())
             }
+            Tool::Pipe => {
+                matches!(&self.sweep_route, SweepRoute::Sketch {sketch, entities} if sketch.0 != 0 && !entities.is_empty())
+            }
             Tool::Sweep => {
                 self.sketch.is_some()
                     && self.kept_region.is_some()
@@ -1583,6 +1612,18 @@ impl Draft {
                 face,
                 spec: self.label.clone(),
             },
+            Tool::Pipe => {
+                let (sketch, entities) = match &self.sweep_route {
+                    SweepRoute::Sketch { sketch, entities } => (*sketch, entities.clone()),
+                    _ => (SketchId(0), vec![]),
+                };
+                Operation::Pipe {
+                    sketch,
+                    entities,
+                    diameter: self.size.clone(),
+                    thickness: self.pipe_thickness.clone(),
+                }
+            }
             Tool::Sweep => Operation::Sweep {
                 start: ProfileRef { sketch, region },
                 end: self.end_profile.clone().unwrap_or(ProfileRef {
@@ -1904,6 +1945,7 @@ impl Editor {
                 .map(|b| b.id),
         };
         match tool {
+            Tool::Pipe => {}
             Tool::Extrude | Tool::Revolve | Tool::Loft | Tool::Sweep => {
                 d.combine_target = suggestion;
                 d.auto_preferred = suggestion;
@@ -2181,6 +2223,7 @@ impl Editor {
                         }
                     }
                     Tool::Revolve => revolve_panel(ui, &mut d, &part, &regions, record),
+                    Tool::Pipe => pipe_panel(ui, &mut d, &part),
                     Tool::Loft | Tool::Sweep => loft_panel(ui, &mut d, &part, &regions),
                     Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
                     Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::MergeFaces => {
@@ -2544,6 +2587,52 @@ fn loft_panel(
         }))
         .small()
         .color(theme::muted()),
+    );
+}
+
+fn pipe_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
+    let (sketch, count) = match &d.sweep_route {
+        SweepRoute::Sketch { sketch, entities } => (*sketch, entities.len()),
+        _ => (SketchId(0), 0),
+    };
+    let name = part
+        .sketches
+        .iter()
+        .find(|s| s.id == sketch)
+        .map(|s| s.sketch.name.as_str());
+    let selection = panel::selection(
+        ui,
+        text(T::RouteField),
+        count,
+        name,
+        d.field == Some(Field::SweepPath),
+    );
+    if selection.activate {
+        d.field = Some(Field::SweepPath);
+    }
+    if selection.clear {
+        d.sweep_route = SweepRoute::Sketch {
+            sketch: SketchId(0),
+            entities: vec![],
+        };
+        d.field = Some(Field::SweepPath);
+    }
+    panel::row(ui, text(T::PipeDiameter), |ui| {
+        panel::length_expression(ui, &mut d.size)
+    });
+    let mut hollow = d.pipe_thickness.is_some();
+    if ui.checkbox(&mut hollow, text(T::PipeHollow)).changed() {
+        d.pipe_thickness = hollow.then(|| "1 mm".into());
+    }
+    if let Some(thickness) = &mut d.pipe_thickness {
+        panel::row(ui, text(T::ThicknessField), |ui| {
+            panel::length_expression(ui, thickness)
+        });
+    }
+    ui.label(
+        egui::RichText::new(text(T::PipeHint))
+            .small()
+            .color(theme::muted()),
     );
 }
 

@@ -61,7 +61,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// `Symmetric`, `OriginOnCurve`, `EqualRadius` e `CircleTangent`).
 /// Versão 44: operações `ComponentCut`, `Lip`, `ScrewBoss` e `SnapFit`, e preço, preenchimento,
 /// voltas de parede e deformação máxima no perfil de impressão.
-pub const FORMAT_VERSION: u32 = 46;
+/// Versão 47: Pipe circular por trajetória associativa, com diâmetro e espessura por expressão.
+pub const FORMAT_VERSION: u32 = 47;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

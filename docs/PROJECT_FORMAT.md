@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 46
+# Formato de projeto — versão interna 47
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 46; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 47; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -17,6 +17,15 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 47, `Pipe { sketch, entities, diameter, thickness }` guarda o rascunho da
+trajetória e os IDs estáveis de sua cadeia aberta de linhas/arcos. `diameter` e `thickness`
+são expressões de comprimento; espessura ausente significa seção maciça. Na criação, clicar
+em um trecho expande a cadeia sem atravessar ramificações; a lista resultante é persistida.
+Recálculo não escolhe outra entidade quando uma referência some. O B-rep e os nomes das faces
+são armazenados como nos demais corpos, e o arquivo continua legível sem OCCT. Os perfis
+circulares auxiliares são construídos no trabalhador e não criam rascunhos no documento.
+
 
 Desde a versão 45, `ExtrudeFace` admite `boundaries`, lista opcional de até 64 `{ "mask": { "sketch": id, "region": RegionRef }, "inside": bool }`, a mesma estrutura das camadas de pintura. As condições são combinadas por interseção e reduzem o prisma da face à célula escolhida, inclusive o lado de fora de um contorno. Sem o campo, vale a face inteira, como nos arquivos anteriores. Os rascunhos citados são dependências da operação e devem continuar paralelos à face; célula vazia falha, sem recorrer à face inteira. Com limites iguais e `combine`, a célula divide a face sem alterar o volume.
 

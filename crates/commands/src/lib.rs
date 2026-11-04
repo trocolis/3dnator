@@ -13,6 +13,8 @@ pub mod fit_check;
 mod history;
 pub mod measure;
 pub mod painting;
+#[cfg(feature = "occt")]
+mod pipe;
 pub mod point_snap;
 pub mod print_check;
 pub mod sketch_projection;

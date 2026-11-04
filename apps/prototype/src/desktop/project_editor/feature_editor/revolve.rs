@@ -29,7 +29,7 @@ impl Editor {
         };
         let plane = draft.profile_plane(part);
         let path = draft.field == Some(Field::SweepPath);
-        let selected = if draft.tool == Tool::Sweep {
+        let selected = if matches!(draft.tool, Tool::Sweep | Tool::Pipe) {
             match &draft.sweep_route {
                 SweepRoute::Axis { sketch, .. } | SweepRoute::Sketch { sketch, .. } => {
                     Some(*sketch)

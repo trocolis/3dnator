@@ -663,3 +663,14 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - `converting_a_part_to_reference_preserves_shared_instances_and_round_trips`: confere definição compartilhada, posições, corpos, bloqueio de edição, reabertura e desfazer/refazer. A suíte `assembly` também foi executada com OCCT.
 - Ensaio gráfico explícito `converting_active_part_to_reference_leaves_editing_and_preserves_geometry`, com OCCT e `WGPU_BACKEND=gl`: aprovado. Confere recusa enquanto há painel aberto, preservação dos bytes B-rep, saída da edição ativa e desfazer/refazer.
 - A marca já é persistida no formato 46. Não foi necessário alterar o formato ou dependências. Não houve interação manual em janela.
+
+## Pipe — 0.34.0 (04/11/2026)
+
+- `cargo fmt --all -- --check`, clippy com `-D warnings` e testes do workspace com e sem OCCT aprovados, usando `--locked --offline` e target separado para OCCT. Os testes de Varredura continuam aprovados após compartilhar a ordenação da guia.
+- `crates/commands/tests/pipe_occt.rs`: quatro regressões aprovadas, com volumes analíticos de seção maciça/oca, parâmetros e alteração da trajetória, cadeia linha–arco–linha, clone com remapeamento, salvar/reabrir/recalcular, exportação STEP e malha STL de alta qualidade. Referências perdidas, dimensões inválidas, quinas, trajetórias desconectadas e curvas apertadas preservam a transação e o refazer.
+- Ensaio gráfico explícito `pipe_is_visible_in_creation_picks_a_chain_and_confirms_a_preview`, com OCCT e `WGPU_BACKEND=gl`: aprovado. Clica no botão da faixa, seleciona a trajetória pelo viewport, aguarda a prévia, confirma, reabre a edição e verifica desfazer/refazer. Tela de 1280 × 820.
+- Capturas reais da versão release: `target/codex-validation/flatpak-0340-20261104/pipe-light.png` e `pipe-dark.png`, cenário `pipe`, em 1280 × 820. Botão Pipe visível entre Transição e Furo; painel mostra trajetória, diâmetro, modo oco e espessura, com prévia válida nos dois temas.
+- Formato 47 guarda a referência associativa da trajetória; leitor mantém compatibilidade com 1–46. Sem dependências novas. A primeira entrega cria um novo corpo circular de seção constante; não aceita trajetórias fechadas ou quinas sem ligação tangente. Não houve teste interativo em janela.
+
+- Flatpak 0.34.0 empacotado com runtime Freedesktop 26.08 e instalado em modo usuário. Os ensaios `--validate`, `--validate-part` e `--validate-step` passaram dentro do runtime. `flatpak run io.github.trocolis.ThreeDnator --version` confirmou `3dnator 0.34.0 | OCCT: habilitado`. Artefato local em `target/codex-validation/flatpak-0340-20261104/3dnator-0.34.0-linux-x86_64.flatpak`. Nenhuma tag ou release foi publicada.
+- Captura adicional pelo próprio Flatpak instalado: `pipe-installed.png`, versão 0.34.0, Vulkan na Intel UHD Graphics (TGL GT1). Confirma a faixa e o painel de Pipe no pacote instalado; não substitui interação manual.

@@ -646,6 +646,14 @@ fn draw(p: &Pen, icon: Icon) {
             p.bezier([8., 15.5], [11., 17.5], [17., 14.], [20., 7.], p.accent);
             p.head([20.5, 5.6], [0.55, -0.85], p.accent);
         }
+        Icon::Pipe => {
+            p.arc(14., 14., 9., -PI, -FRAC_PI_2, p.ink);
+            p.arc(14., 14., 3., -PI, -FRAC_PI_2, p.accent);
+            p.line(&[[5., 14.], [5., 20.]], p.ink, MAIN);
+            p.line(&[[11., 14.], [11., 20.]], p.ink, MAIN);
+            p.ellipse(8., 20., 3., 1.5, p.ink, DETAIL);
+            p.ellipse(15., 8., 1.5, 3., p.accent, DETAIL);
+        }
         Icon::Label => {
             p.polygon(
                 &[[3., 4.], [14., 4.], [21., 12.], [14., 20.], [3., 20.]],
