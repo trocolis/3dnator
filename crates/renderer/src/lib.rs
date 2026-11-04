@@ -475,6 +475,30 @@ impl Camera {
             self.roll = 0.;
         }
     }
+    /// Alinha uma face do cubo sem perder o alto predominante da vista anterior.
+    /// As quatro orientações possíveis diferem por quartos de volta; empates usam
+    /// o eixo horizontal anterior e, por último, a ordem canônica da face.
+    pub fn align_cube_face(&mut self, direction: Point3) {
+        let (old_right, old_up, _) = self.basis();
+        let mut target = self.clone();
+        target.set_direction(direction);
+        let (right, up, normal) = target.basis();
+        let candidates = [right, up, right.map(|v| -v), up.map(|v| -v)];
+        let mut best = candidates[0];
+        let mut score = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for right in candidates {
+            let up = cross(normal, right);
+            let candidate = (dot(up, old_up), dot(right, old_right));
+            if candidate.0 > score.0 + 1e-10
+                || ((candidate.0 - score.0).abs() <= 1e-10 && candidate.1 > score.1 + 1e-10)
+            {
+                best = right;
+                score = candidate;
+            }
+        }
+        self.set_orientation(normal, best);
+    }
+
     /// Coordenadas normalizadas da tela (Y para cima); pontos recortados em profundidade
     /// não geram anotações. A divisão por W deve coincidir com a matriz enviada à GPU.
     pub fn project_world(&self, point: Point3, bounds: Bounds, aspect: f64) -> Option<[f64; 2]> {
@@ -1009,6 +1033,40 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cube_faces_preserve_the_nearest_screen_up_and_are_idempotent() {
+        for axis in 0..3 {
+            for sign in [-1., 1.] {
+                let mut normal = [0.; 3];
+                normal[axis] = sign;
+                for projection in PROJECTIONS {
+                    for step in 0..32 {
+                        let mut camera = Camera {
+                            projection,
+                            ..Camera::default()
+                        };
+                        camera.orbit([f64::from(step) * 19., f64::from(step) * 13.]);
+                        let (_, old_up, _) = camera.basis();
+                        let span = camera.span;
+                        let target = camera.target;
+                        camera.align_cube_face(normal);
+                        let (right, up, direction) = camera.basis();
+                        assert!(norm(sub(direction, normal)) < 1e-12);
+                        assert_eq!(camera.span, span);
+                        assert_eq!(camera.target, target);
+                        assert_eq!(camera.projection, projection);
+                        for alternative in [right, up, right.map(|v| -v), up.map(|v| -v)] {
+                            assert!(dot(up, old_up) >= dot(alternative, old_up) - 1e-10);
+                        }
+                        camera.align_cube_face(normal);
+                        assert!(norm(sub(camera.basis().0, right)) < 1e-12);
+                        assert!(norm(sub(camera.basis().1, up)) < 1e-12);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn aligning_a_work_plane_preserves_projection_and_scale() -> Result<(), String> {

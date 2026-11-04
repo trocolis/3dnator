@@ -429,3 +429,5 @@ por duplo clique. Cotas por eixo conservam o lado original do ponto. A operaçã
 geometria auxiliar ao rascunho.
 
 Os cenários `sketch-text` e `sketch-text-dark` capturam o painel e a prévia de Texto; `sketch-origin-dimension` captura uma cota até a origem local.
+
+Clicar em uma das seis faces principais do cubo conserva o alto predominante da vista anterior e alinha a tela em passos de 90°. Home restaura a orientação canônica.

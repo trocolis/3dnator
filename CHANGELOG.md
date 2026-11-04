@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.37.2 — 04/11/2026
+
+- Clicar numa face principal do cubo alinha a vista em quartos de volta e conserva o alto predominante da orientação anterior, inclusive nos polos. Home e os cliques em cantos/arestas mantêm suas vistas canônicas.
+
 ## 0.37.1 — 04/11/2026
 
 - Precisão linear em campo numérico único, com padrão 0,1 mm. Trocar a unidade conserva o passo físico; projetos existentes preservam a precisão gravada e pontos anteriores não são alterados.

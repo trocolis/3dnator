@@ -712,3 +712,8 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - Campo linear permanente, padrão 0,1 mm e troca de unidade conservando a medida física. Compatibilidade verifica o padrão de arquivos sem o campo e a preservação explícita de 0,4 mm.
 - `cargo fmt --all -- --check`, Clippy do workspace com `--all-targets --locked -- -D warnings` e `cargo test --workspace --locked` aprovados. Ensaios gráficos serão executados junto das etapas de viewport.
+
+## Cubo conserva o alto — 0.37.2 — 04/11/2026
+
+- As seis faces escolhem a base ortogonal mais próxima da vista anterior. Regressão percorre 32 orientações por face em ortográfica/perspectiva, valida a melhor direção vertical, idempotência e preservação do alvo/escala/projeção.
+- fmt, Clippy do workspace com todos os alvos e testes do workspace aprovados, com `--locked`. Capturas gráficas serão verificadas com as etapas de seção.

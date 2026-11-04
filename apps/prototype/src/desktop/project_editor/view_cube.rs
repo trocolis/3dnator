@@ -142,7 +142,12 @@ fn show_inner(ui: &mut egui::Ui, camera: &mut Camera, area: egui::Rect, aspect: 
     } else if response.clicked()
         && let Some(face) = hit
     {
-        camera.set_direction(before[face].normal);
+        let normal = before[face].normal;
+        if before[face].label.is_some() {
+            camera.align_cube_face(normal);
+        } else {
+            camera.set_direction(normal);
+        }
     } else if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
