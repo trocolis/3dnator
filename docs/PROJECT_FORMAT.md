@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 47
+# Formato de projeto — versão interna 48
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 47; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 48; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -19,9 +19,12 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ## Manifesto
 
 Desde a versão 47, `Pipe { sketch, entities, diameter, thickness }` guarda o rascunho da
-trajetória e os IDs estáveis de sua cadeia aberta de linhas/arcos. `diameter` e `thickness`
+trajetória e os IDs estáveis de sua cadeia de linhas/arcos. `diameter` e `thickness`
 são expressões de comprimento; espessura ausente significa seção maciça. Na criação, clicar
 em um trecho expande a cadeia sem atravessar ramificações; a lista resultante é persistida.
+Desde a versão 48, essa operação também aceita um círculo isolado ou uma cadeia fechada.
+O fechamento é derivado da geometria referenciada, sem flag ou ponto de corte artificial;
+a varredura periódica não gera tampas na emenda. A versão 47 admitia somente guias abertas.
 Recálculo não escolhe outra entidade quando uma referência some. O B-rep e os nomes das faces
 são armazenados como nos demais corpos, e o arquivo continua legível sem OCCT. Os perfis
 circulares auxiliares são construídos no trabalhador e não criam rascunhos no documento.

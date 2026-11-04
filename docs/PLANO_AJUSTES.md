@@ -229,3 +229,10 @@ trajetória escolhida no viewport, prévia, novo corpo, edição pelo histórico
 desfazer/refazer, clonagem, persistência no formato 47 e exportação STEP/STL. A primeira
 entrega exige cadeia aberta com trechos tangentes e raio de curva maior que o raio externo.
 Permanecem cinco caixas pendentes: Furo, cotas na origem e os três ajustes de Texto.
+
+### Tubo: trajetórias fechadas e traduções — 0.35.0
+
+A ferramenta passou a se chamar Tubo em português e espanhol (Pipe em inglês). O suporte
+foi ampliado para círculo e cadeia fechada com tangência na emenda, mantendo também os
+caminhos abertos. A operação periódica do OCCT usa uma única seção e não cria tampas no
+fechamento. O formato 48 diferencia essa semântica. Evidências em `docs/VALIDATION.md`.

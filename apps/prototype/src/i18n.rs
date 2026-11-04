@@ -1192,11 +1192,11 @@ fn pt(key: Text) -> &'static str {
         Text::PrintMaxStrain => "Deformação máxima",
         Text::PrintEstimateHint => "Estimativa antes de fatiar, sem suportes.",
         Text::PrintBedLimit => "Limitar ao tamanho da mesa",
-        Text::Pipe => "Pipe",
+        Text::Pipe => "Tubo",
         Text::PipeDiameter => "Diâmetro externo",
         Text::PipeHollow => "Tubo oco",
         Text::PipeHint => {
-            "Clique numa linha ou arco do rascunho para escolher a cadeia. Use uma trajetória aberta, com arcos tangentes nas curvas. Sem Tubo oco, cria uma seção maciça."
+            "Tubo por trajetória: clique num círculo, linha ou arco do rascunho. Aceita caminhos abertos ou fechados com curvas tangentes. Sem Tubo oco, cria uma seção maciça."
         }
         Text::Sweep => "Transição guiada",
         Text::RouteField => "Trajetória",

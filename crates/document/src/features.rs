@@ -276,7 +276,7 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holes: Option<Vec<HolePair>>,
     },
-    /// Seção circular constante ao longo de uma cadeia aberta de linhas e arcos.
+    /// Seção circular constante ao longo de um círculo ou cadeia de linhas e arcos.
     Pipe {
         sketch: SketchId,
         entities: Vec<u64>,
@@ -1149,7 +1149,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                     .iter()
                     .find(|s| s.id == *sketch)
                     .ok_or_else(|| {
-                        DocumentError("Rascunho da trajetória do Pipe inexistente.".into())
+                        DocumentError("Rascunho da trajetória do tubo inexistente.".into())
                     })?;
                 let mut unique = HashSet::new();
                 if entities.is_empty()
@@ -1159,7 +1159,7 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                         .any(|id| !unique.insert(*id) || source.sketch.entity(*id).is_err())
                 {
                     return Err(DocumentError(
-                        "Trajetória do Pipe inexistente, repetida ou excessiva.".into(),
+                        "Trajetória do tubo inexistente, repetida ou excessiva.".into(),
                     ));
                 }
                 for id in entities {
@@ -1167,24 +1167,23 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                         .sketch
                         .entity(*id)
                         .map_err(|e| DocumentError(e.to_string()))?;
-                    if entity.infinite || matches!(entity.curve, nator_sketch::Curve::Circle { .. })
-                    {
+                    if entity.infinite {
                         return Err(DocumentError(
-                            "Pipe exige uma cadeia aberta de linhas e arcos finitos.".into(),
+                            "Tubo exige um círculo ou uma cadeia de linhas e arcos finitos.".into(),
                         ));
                     }
                 }
                 let d = part.parameters.evaluate(diameter, Length)?;
                 if d <= 0. {
                     return Err(DocumentError(
-                        "O diâmetro do Pipe deve ser positivo.".into(),
+                        "O diâmetro do tubo deve ser positivo.".into(),
                     ));
                 }
                 if let Some(thickness) = thickness {
                     let t = part.parameters.evaluate(thickness, Length)?;
                     if t <= 0. || 2. * t >= d {
                         return Err(DocumentError(
-                            "A espessura do Pipe deve ser positiva e menor que metade do diâmetro."
+                            "A espessura do tubo deve ser positiva e menor que metade do diâmetro."
                                 .into(),
                         ));
                     }

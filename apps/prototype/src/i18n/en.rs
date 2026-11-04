@@ -354,7 +354,7 @@ pub fn text(key: Text) -> &'static str {
         Text::PipeDiameter => "Outer diameter",
         Text::PipeHollow => "Hollow tube",
         Text::PipeHint => {
-            "Click a sketch line or arc to select its chain. Use an open path with tangent arcs at bends. Turn off Hollow tube for a solid section."
+            "Click a sketch circle, line or arc. Open and closed paths with tangent bends are supported. Turn off Hollow tube for a solid section."
         }
         Text::Sweep => "Guided transition",
         Text::SweepHint => {

@@ -674,3 +674,12 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - Flatpak 0.34.0 empacotado com runtime Freedesktop 26.08 e instalado em modo usuário. Os ensaios `--validate`, `--validate-part` e `--validate-step` passaram dentro do runtime. `flatpak run io.github.trocolis.ThreeDnator --version` confirmou `3dnator 0.34.0 | OCCT: habilitado`. Artefato local em `target/codex-validation/flatpak-0340-20261104/3dnator-0.34.0-linux-x86_64.flatpak`. Nenhuma tag ou release foi publicada.
 - Captura adicional pelo próprio Flatpak instalado: `pipe-installed.png`, versão 0.34.0, Vulkan na Intel UHD Graphics (TGL GT1). Confirma a faixa e o painel de Pipe no pacote instalado; não substitui interação manual.
+
+## Tubo em trajetórias fechadas e traduções — 0.35.0 (04/11/2026)
+
+- Fmt, clippy do workspace com `-D warnings` e testes do workspace com e sem OCCT aprovados (`--locked --offline`, target separado para OCCT).
+- Sete testes de `pipe_occt` aprovados: os quatro cenários anteriores mais círculo maciço/oco em plano YZ deslocado, alteração do raio, reabertura/reconstrução e STEP; cadeia fechada linha–arco com volume analítico e ausência de tampas planas; quina apenas na emenda recusada atomicamente. Transições guiadas abertas permanecem aprovadas.
+- Ensaio gráfico explícito `pipe_selects_a_circle_and_confirms_a_closed_hollow_ring`, com `WGPU_BACKEND=gl`: aprovado. Clica em Tubo, seleciona o círculo pelo viewport, aguarda a prévia, confirma e verifica o volume preciso do corpo.
+- Capturas reais `pipe-circle` e `pipe-circle-es`, em 1280 × 820: `target/codex-validation/flatpak-0350-20261104/tubo-pt.png` e `tubo-es.png`. Conferidos o nome Tubo na faixa/painel e o anel fechado na prévia; inglês conserva Pipe.
+- Formato 48 explicita a semântica periódica sem acrescentar índices ou perfis artificiais ao documento. O leitor mantém compatibilidade com as versões anteriores. Os identificadores internos `Pipe` foram preservados.
+- Flatpak 0.35.0 instalado em modo usuário, runtime Freedesktop 26.08. Os ensaios de núcleo, peça e STEP passaram dentro do runtime; `--version` confirmou OCCT habilitado. Captura adicional do pacote instalado em `tubo-installed.png`, Vulkan na Intel UHD Graphics (TGL GT1), com a prévia circular e o nome Tubo no tema escuro. Não houve teste interativo em janela, push, tag ou publicação de release.

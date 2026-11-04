@@ -114,6 +114,7 @@ pub(crate) fn render_ui_scenario(
         | "print-check"
         | "calibrate"
         | "pipe"
+        | "pipe-circle"
         | "hole-preset"
         | "print-export"
         | "status-dialog"
@@ -125,7 +126,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-drawing, settings-shortcuts, settings-help, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-drawing, settings-shortcuts, settings-help, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
         }
@@ -406,8 +407,14 @@ fn open_first_sketch(editor: &mut Editor) -> Result<(), Box<dyn Error>> {
 }
 
 /// Trajetória de demonstração: linha, quarto de círculo e linha, com tangência exata.
-fn pipe_document() -> Result<(Document, PartId, SketchId, u64), Box<dyn Error>> {
+fn pipe_document(closed: bool) -> Result<(Document, PartId, SketchId, u64), Box<dyn Error>> {
     let mut path = nator_sketch::Sketch::new("Trajetória", nator_sketch::Plane::xy());
+    if closed {
+        let circle = path.add_circle([0., 0.], 20., false)?;
+        let mut document = Document::new(text(T::Pipe))?;
+        let (part, sketch) = document.add_sketch(None, path)?;
+        return Ok((document, part, sketch, circle));
+    }
     let line = path.add_line([20., -10.], [20., 0.], false)?;
     let center = path.add_point([0., 0.])?;
     let start = path.add_point([20., 0.])?;
@@ -422,14 +429,14 @@ fn pipe_document() -> Result<(Document, PartId, SketchId, u64), Box<dyn Error>> 
         false,
     )?;
     path.add_line([0., 20.], [-10., 20.], false)?;
-    let mut document = Document::new("Pipe")?;
+    let mut document = Document::new(text(T::Pipe))?;
     let (part, sketch) = document.add_sketch(None, path)?;
     Ok((document, part, sketch, line))
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
-    if scenario == "pipe" {
-        let (document, part, sketch, line) = pipe_document()?;
+    if matches!(scenario, "pipe" | "pipe-circle") {
+        let (document, part, sketch, line) = pipe_document(scenario == "pipe-circle")?;
         editor.add_tab(document, None, None)?;
         editor.current_mut().active_part = Some(part);
         editor.shell.tab = shell::RibbonTab::Model;
@@ -2694,7 +2701,7 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         use nator_document::features::Operation;
         let context = egui::Context::default();
-        let (document, part, sketch, line) = pipe_document()?;
+        let (document, part, sketch, line) = pipe_document(false)?;
         let mut editor =
             Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
         editor.recoveries.clear();
@@ -2774,6 +2781,67 @@ mod tests {
                 .len(),
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn pipe_selects_a_circle_and_confirms_a_closed_hollow_ring() -> Result<(), Box<dyn Error>> {
+        use nator_document::features::Operation;
+        let context = egui::Context::default();
+        let (document, part, sketch, circle) = pipe_document(true)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        frame(&mut editor, &context, vec![])?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::Pipe)?.center(),
+        )?;
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [-20., 0., 0.],
+        )
+        .ok_or("Círculo fora da tela")?;
+        click(&mut editor, &context, at)?;
+        wait_feature_preview(&mut editor, &context)?;
+        let data = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert!(
+            matches!(editor.feature_edit.as_ref().ok_or("Painel")?.preview_key(data), Command::AddFeature {operation: Operation::Pipe {sketch: id, entities, ..}, ..} if id==sketch && entities==vec![circle])
+        );
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let data = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        let feature = data.features.first().ok_or("Tubo ausente")?;
+        let body = editor
+            .current()
+            .session
+            .document()
+            .body(feature.output)
+            .ok_or("Corpo")?;
+        let solid = nator_kernel::Solid::from_brep(
+            body.brep.as_ref().ok_or("B-rep")?,
+            Some(&body.face_names),
+        )?;
+        assert!((solid.volume()? - 360. * std::f64::consts::PI.powi(2)).abs() < 1e-3);
         Ok(())
     }
 

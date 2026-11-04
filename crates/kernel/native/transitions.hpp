@@ -44,7 +44,7 @@ extern "C" Shape* nator_loft_wire(const Shape* first,const Shape* last,std::size
 #include <Geom_BezierCurve.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <TopTools_SequenceOfShape.hxx>
-extern "C" Shape* nator_guide_wire(const double* records,std::size_t count) noexcept {
+extern "C" Shape* nator_guide_wire(const double* records,std::size_t count,bool closed) noexcept {
     return build([&](Shape& output) {
         if (!count || count>1024) throw std::runtime_error("Trajetória vazia ou excessiva.");
         BRepBuilderAPI_MakeWire wire;
@@ -61,7 +61,9 @@ extern "C" Shape* nator_guide_wire(const double* records,std::size_t count) noex
             if (!wire.IsDone()) throw std::runtime_error("A trajetória precisa ser uma cadeia conectada, sem ramificações.");
         }
         output.value=wire.Wire();
-        if (output.value.Closed()) throw std::runtime_error("Escolha uma trajetória aberta entre os dois perfis.");
+        if (output.value.Closed()!=closed) throw std::runtime_error(closed
+            ? "A trajetória do tubo precisa fechar sem lacunas."
+            : "Escolha uma trajetória aberta entre os dois perfis.");
     });
 }
 extern "C" Shape* nator_pipe_wire(const Shape* first,const Shape* last,const Shape* guide,std::size_t wire) noexcept {
@@ -97,6 +99,27 @@ extern "C" Shape* nator_pipe_wire(const Shape* first,const Shape* last,const Sha
             if (std::abs(plane.Axis().Direction().Dot(a.Axis().Direction()))>1.-1e-8 && a.Distance(plane.Location())<1e-6) names.mark(face,StartCap,0,0);
             else if (std::abs(plane.Axis().Direction().Dot(b.Axis().Direction()))>1.-1e-8 && b.Distance(plane.Location())<1e-6) names.mark(face,EndCap,0,0);
         }
+        output.origins=names.take();
+    });
+}
+
+// Uma única seção percorre a guia periódica inteira; não há tampas na emenda.
+extern "C" Shape* nator_closed_pipe_wire(const Shape* profile,const Shape* guide,std::size_t wire) noexcept {
+    return build([&](Shape& output) {
+        const auto spine=TopoDS::Wire(guide->value);
+        if (!spine.Closed()) throw std::runtime_error("A trajetória do tubo não está fechada.");
+        BRepOffsetAPI_MakePipeShell pipe(spine);
+        pipe.SetMode(false);
+        pipe.SetTransitionMode(BRepBuilderAPI_Transformed);
+        pipe.SetTolerance(1e-6,1e-6,1e-4);
+        pipe.Add(transition_wire(profile,wire),false,false);
+        pipe.Build();
+        if (!pipe.IsDone() || !pipe.MakeSolid()) throw std::runtime_error("A trajetória fechada não formou um tubo sólido válido.");
+        output.value=pipe.Shape();
+        BOPAlgo_ArgumentAnalyzer check;check.SetShape1(output.value);
+        check.SelfInterMode()=true;check.StopOnFirstFaulty()=true;check.Perform();
+        if (check.HasFaulty()) throw std::runtime_error("O tubo fechado se autointersecta; reduza o diâmetro ou amplie a trajetória.");
+        OriginTable names(output.value);
         output.origins=names.take();
     });
 }

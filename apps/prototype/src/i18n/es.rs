@@ -364,11 +364,11 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::CoplanarProfilesRequired => "Seleccione áreas y eje en el mismo plano.",
         Text::Loft => "Transición entre perfiles",
-        Text::Pipe => "Pipe",
+        Text::Pipe => "Tubo",
         Text::PipeDiameter => "Diámetro exterior",
         Text::PipeHollow => "Tubo hueco",
         Text::PipeHint => {
-            "Haz clic en una línea o arco del boceto para seleccionar la cadena. Usa una trayectoria abierta con arcos tangentes en las curvas. Desactiva Tubo hueco para una sección maciza."
+            "Tubo por trayectoria: haz clic en un círculo, línea o arco del boceto. Admite caminos abiertos o cerrados con curvas tangentes. Desactiva Tubo hueco para una sección maciza."
         }
         Text::Sweep => "Transición guiada",
         Text::SweepHint => {

@@ -91,10 +91,16 @@ impl Editor {
                             vec![a, b]
                         }
                     }
-                    Curve::Arc { .. } if path => match profiles::segment(&record.sketch, entity) {
-                        Ok(segment) => segment.sample(64),
-                        Err(_) => continue,
-                    },
+                    Curve::Arc { .. } | Curve::Circle { .. }
+                        if path
+                            && (draft.tool == Tool::Pipe
+                                || matches!(entity.curve, Curve::Arc { .. })) =>
+                    {
+                        match profiles::segment(&record.sketch, entity) {
+                            Ok(segment) => segment.sample(64),
+                            Err(_) => continue,
+                        }
+                    }
                     _ => continue,
                 };
                 let Some(points) = points

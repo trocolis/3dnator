@@ -4,6 +4,12 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.35.0 — 04/11/2026
+
+- **Tubo** é o nome da ferramenta em português e espanhol; **Pipe** permanece em inglês. As dicas usam Tubo por trajetória / Tubo por trayectoria.
+- Tubo agora aceita círculos e cadeias fechadas de linhas e arcos tangentes, com seção maciça ou oca e sem tampas na emenda. A tangência também é verificada entre o último e o primeiro trecho; quinas, ramificações e autointerseções continuam recusadas atomicamente.
+- Formato `.3dnator` 48 registra a semântica de trajetórias periódicas; leitura das versões anteriores permanece disponível.
+
 ## 0.34.0 — 04/11/2026
 
 - **Pipe**, em Construção → Criação e na busca: seção circular maciça ou oca, com diâmetro externo e espessura por expressão, ao longo de uma cadeia aberta de linhas e arcos tangentes de rascunho. A escolha de um trecho captura a cadeia; a prévia roda no trabalhador e a confirmação cria um corpo com histórico editável, recálculo e desfazer/refazer.

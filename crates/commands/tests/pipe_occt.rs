@@ -198,7 +198,7 @@ fn invalid_dimensions_paths_and_lost_references_preserve_document_and_redo() -> 
     let mut invalid = vec![
         operation(sketch, vec![corner_start, corner], true),
         operation(sketch, vec![line, corner], true),
-        operation(sketch, vec![circle], true),
+        operation(sketch, vec![circle, line], true),
         operation(sketch, vec![infinite], true),
         operation(sketch, vec![line, line], true),
         operation(sketch, vec![u64::MAX], true),
@@ -289,6 +289,153 @@ fn a_bend_too_tight_for_the_section_is_rejected_atomically() -> Result<()> {
     let mut session = Session::new(document)?;
     let revision = session.revision();
     assert!(add(&mut session, part, operation(sketch, vec![arc], true)).is_err());
+    assert_eq!(session.revision(), revision);
+    assert!(
+        session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .features
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn circular_paths_create_exact_solid_and_hollow_rings_and_recalculate() -> Result<()> {
+    let mut path = Sketch::new(
+        "Círculo",
+        Plane {
+            origin: [5., 7., 11.],
+            ..Plane::yz()
+        },
+    );
+    let circle = path.add_circle([0., 0.], 10., false)?;
+    let mut document = Document::new("Tubo circular")?;
+    let (part, sketch) = document.add_sketch(None, path)?;
+    let mut session = Session::new(document)?;
+    let body = add(&mut session, part, operation(sketch, vec![circle], false))?;
+    assert!((solid(&session, body)?.volume()? - 80. * PI * PI).abs() < 1e-3);
+    session.execute(Command::EditFeature {
+        part,
+        output: body,
+        operation: operation(sketch, vec![circle], true),
+    })?;
+    assert!((solid(&session, body)?.volume()? - 35. * PI * PI).abs() < 1e-3);
+    let mut changed = session
+        .document()
+        .sketch(sketch)
+        .ok_or("Guia")?
+        .sketch
+        .clone();
+    if let Curve::Circle { radius, .. } = &mut changed
+        .entities
+        .iter_mut()
+        .find(|e| e.id == circle)
+        .ok_or("Círculo")?
+        .curve
+    {
+        *radius = 12.;
+    }
+    session.execute(Command::UpdateSketch {
+        id: sketch,
+        sketch: changed,
+    })?;
+    assert!((solid(&session, body)?.volume()? - 42. * PI * PI).abs() < 1e-3);
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("circular.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let mut reopened = Session::new(nator_project_io::read_project(&path)?)?;
+    reopened.execute(Command::EditFeature {
+        part,
+        output: body,
+        operation: operation(sketch, vec![circle], true),
+    })?;
+    assert!((solid(&reopened, body)?.volume()? - 42. * PI * PI).abs() < 1e-3);
+    let step = temp.path().join("ring.step");
+    solid(&reopened, body)?.write_step(&step)?;
+    assert!((Solid::read_step(&step)?.volume()? - 42. * PI * PI).abs() < 1e-3);
+    assert!(session.undo());
+    assert!((solid(&session, body)?.volume()? - 35. * PI * PI).abs() < 1e-3);
+    assert!(session.redo());
+    assert!((solid(&session, body)?.volume()? - 42. * PI * PI).abs() < 1e-3);
+    Ok(())
+}
+
+#[test]
+fn a_closed_line_arc_chain_has_no_caps_and_matches_its_analytic_volume() -> Result<()> {
+    let mut path = Sketch::new("Oblongo", Plane::xy());
+    let bottom = path.add_line([0., -10.], [30., -10.], false)?;
+    for (center, a, b) in [
+        ([30., 0.], [30., -10.], [30., 10.]),
+        ([0., 0.], [0., 10.], [0., -10.]),
+    ] {
+        let center = path.add_point(center)?;
+        let start = path.add_point(a)?;
+        let end = path.add_point(b)?;
+        path.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: false,
+            },
+            false,
+        )?;
+    }
+    path.add_line([30., 10.], [0., 10.], false)?;
+    let mut document = Document::new("Tubo oblongo")?;
+    let (part, sketch) = document.add_sketch(None, path)?;
+    let mut session = Session::new(document)?;
+    let body = add(&mut session, part, operation(sketch, vec![bottom], true))?;
+    assert!((solid(&session, body)?.volume()? - 1.75 * PI * (60. + 20. * PI)).abs() < 1e-3);
+    let swept = solid(&session, body)?;
+    for face in 0..swept.face_count()? {
+        assert!(!matches!(
+            swept.face_measure(face)?.kind,
+            nator_kernel::FaceKind::Plane { .. }
+        ));
+    }
+    assert!(
+        matches!(&session.document().part(part).ok_or("Peça")?.features[0].operation, Operation::Pipe {entities,..} if entities.len() == 4)
+    );
+    assert!(
+        session
+            .document()
+            .body(body)
+            .ok_or("Corpo")?
+            .face_names
+            .iter()
+            .all(|name| !name.ends_with(":start") && !name.ends_with(":end"))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_corner_at_the_closed_chain_seam_is_rejected_without_changes() -> Result<()> {
+    let mut path = Sketch::new("Quina na emenda", Plane::xy());
+    let line = path.add_line([0., 0.], [10., 0.], false)?;
+    let center = path.add_point([10., 10.])?;
+    let start = path.add_point([10., 0.])?;
+    let end = path.add_point([0., 10.])?;
+    path.add_curve(
+        Curve::Arc {
+            center,
+            start,
+            end,
+            clockwise: false,
+        },
+        false,
+    )?;
+    path.add_line([0., 10.], [0., 0.], false)?;
+    let mut document = Document::new("Emenda inválida")?;
+    let (part, sketch) = document.add_sketch(None, path)?;
+    let mut session = Session::new(document)?;
+    let revision = session.revision();
+    let error = add(&mut session, part, operation(sketch, vec![line], true))
+        .err()
+        .ok_or("Quina aceita")?;
+    assert!(error.to_string().contains("quina"));
     assert_eq!(session.revision(), revision);
     assert!(
         session

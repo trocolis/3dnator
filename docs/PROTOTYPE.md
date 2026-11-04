@@ -1,4 +1,4 @@
-# Protótipo 0.34.0 — CAD paramétrico
+# Protótipo 0.35.0 — CAD paramétrico
 
 A grade do rascunho mostra múltiplos da precisão do mouse (Configurações → Desenho) e acompanha o zoom. O cursor anda nessa precisão, a geometria existente mantém prioridade e Alt libera o cursor. O passo posiciona o ponto sem criar fixações ou vínculos permanentes.
 

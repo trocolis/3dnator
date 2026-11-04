@@ -3,7 +3,12 @@
 use super::*;
 use crate::GuideCurve;
 unsafe extern "C" {
-    fn nator_guide_wire(records: *const f64, count: usize) -> *mut c_void;
+    fn nator_guide_wire(records: *const f64, count: usize, closed: bool) -> *mut c_void;
+    fn nator_closed_pipe_wire(
+        profile: *const c_void,
+        guide: *const c_void,
+        wire: usize,
+    ) -> *mut c_void;
     fn nator_pipe_wire(
         first: *const c_void,
         last: *const c_void,
@@ -101,10 +106,28 @@ impl Solid {
         curves: &[GuideCurve],
         owner: &str,
     ) -> Result<Self, KernelError> {
+        Self::swept_sections(first, Some(last), curves, owner)
+    }
+
+    /// Varredura periódica de seção constante, sem tampas na emenda da trajetória.
+    pub fn closed_pipe(
+        profile: (&Sketch, &Region),
+        curves: &[GuideCurve],
+        owner: &str,
+    ) -> Result<Self, KernelError> {
+        Self::swept_sections(profile, None, curves, owner)
+    }
+
+    fn swept_sections(
+        first: (&Sketch, &Region),
+        last: Option<(&Sketch, &Region)>,
+        curves: &[GuideCurve],
+        owner: &str,
+    ) -> Result<Self, KernelError> {
         owner_name(owner)?;
         if curves.is_empty()
             || curves.len() > 1024
-            || first.1.holes.len() != last.1.holes.len()
+            || last.is_some_and(|last| first.1.holes.len() != last.1.holes.len())
             || first.1.holes.len() > 64
         {
             return Err(KernelError(
@@ -126,19 +149,29 @@ impl Solid {
         }
         // SAFETY: registros de treze doubles vivos e contagem limitada; forma
         // exclusiva e curvas nativas permanecem nesta thread.
-        let guide =
-            Self::from_pointer(unsafe { nator_guide_wire(records.as_ptr(), curves.len()) })?;
+        let guide = Self::from_pointer(unsafe {
+            nator_guide_wire(records.as_ptr(), curves.len(), last.is_none())
+        })?;
         let a = Self::profile(first.0, first.1, [0.; 3])?;
-        let b = Self::profile(last.0, last.1, [0.; 3])?;
+        let b = last
+            .map(|last| Self::profile(last.0, last.1, [0.; 3]))
+            .transpose()?;
         let build = |wire| -> Result<Self, KernelError> {
             // SAFETY: perfis, guia e índice de contorno válidos durante a chamada.
             let mut solid = Self::from_pointer(unsafe {
-                nator_pipe_wire(
-                    a.face.pointer.as_ptr(),
-                    b.face.pointer.as_ptr(),
-                    guide.pointer.as_ptr(),
-                    wire,
-                )
+                match &b {
+                    Some(b) => nator_pipe_wire(
+                        a.face.pointer.as_ptr(),
+                        b.face.pointer.as_ptr(),
+                        guide.pointer.as_ptr(),
+                        wire,
+                    ),
+                    None => nator_closed_pipe_wire(
+                        a.face.pointer.as_ptr(),
+                        guide.pointer.as_ptr(),
+                        wire,
+                    ),
+                }
             })?;
             solid.faces = naming::sweep_names(owner, &solid.origins()?, &[]);
             solid.volume()?;

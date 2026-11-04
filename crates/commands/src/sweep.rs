@@ -50,6 +50,7 @@ pub(super) struct Path {
     pub start: Plane,
     pub end: Plane,
     pub smooth: bool,
+    pub closed: bool,
 }
 
 pub(super) fn path(
@@ -70,6 +71,27 @@ pub(super) fn path(
             nator_sketch::profiles::segment(sketch, entity).map_err(error)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if let [Segment::Circle { center, radius }] = segments.as_slice()
+        && planes.is_none()
+    {
+        let center = *center;
+        let a = [center[0] + radius, center[1]];
+        let b = [center[0] - radius, center[1]];
+        segments = vec![
+            Segment::Arc {
+                center,
+                a,
+                b,
+                clockwise: false,
+            },
+            Segment::Arc {
+                center,
+                a: b,
+                b: a,
+                clockwise: false,
+            },
+        ];
+    }
     let ends = |s: &Segment| -> Result<([f64; 2], [f64; 2]), DocumentError> {
         match *s {
             Segment::Line { a, b } | Segment::Arc { a, b, .. } => Ok((a, b)),
@@ -94,7 +116,8 @@ pub(super) fn path(
             ));
         }
     }
-    if terminals.len() != 2 {
+    let closed = terminals.is_empty() && planes.is_none();
+    if terminals.len() != 2 && !closed {
         return Err(error(
             "A trajetória precisa ter duas extremidades, sem ciclos ou trechos soltos.",
         ));
@@ -107,7 +130,11 @@ pub(super) fn path(
             plane_distance(first, world(terminals[1])) + plane_distance(last, world(terminals[0]));
         reverse < direct
     });
-    let mut point = terminals[usize::from(reverse)];
+    let mut point = if closed {
+        all.first().ok_or_else(|| error("Trajetória vazia."))?.0
+    } else {
+        terminals[usize::from(reverse)]
+    };
     let start = point;
     let mut ordered = vec![];
     while !segments.is_empty() {
@@ -170,6 +197,9 @@ pub(super) fn path(
             unit(direction(&pair[1], false))?,
         ) > 1. - 1e-8;
     }
+    if closed {
+        smooth &= dot(unit(direction(b, true))?, unit(direction(a, false))?) > 1. - 1e-8;
+    }
     let curves = ordered
         .iter()
         .map(|s| {
@@ -197,6 +227,7 @@ pub(super) fn path(
         start,
         end,
         smooth,
+        closed,
     })
 }
 pub(super) fn curves(

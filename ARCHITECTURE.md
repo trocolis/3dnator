@@ -152,7 +152,15 @@ Rótulos são operações `Label` sobre um corpo/face. A camada de comandos comp
 uma espessura opcional por expressão. `commands::pipe` constrói duas seções circulares
 auxiliares, normais às tangentes terminais, e usa a transição guiada exata do núcleo OCCT;
 as seções não são adicionadas ao documento. A ordenação das linhas/arcos e as tangentes
-são compartilhadas com `commands::sweep`. Pipe exige cadeia aberta e tangente, raio de curva
+são compartilhadas com `commands::sweep`. Tubo exige trajetória tangente, raio de curva
 maior que o raio externo e espessura positiva inferior ao raio. Falhas nativas continuam
 atômicas. O corpo usa histórico, prévia no trabalhador e nomes de faces existentes.
 O formato 47 persiste a trajetória sem índices de tesselação; clonar remapeia o rascunho.
+
+
+Desde 0.35.0, Tubo também aceita círculos e cadeias fechadas. `commands::sweep::Path`
+deriva o fechamento e confere a tangência inclusive na emenda; círculos viram dois arcos
+analíticos temporários, mantendo apenas a entidade original no histórico. A ponte OCCT
+usa uma única seção em guia fechada para gerar a superfície periódica sem tampas.
+Transições entre dois perfis continuam exigindo uma guia aberta. O formato 48 distingue
+essa semântica dos projetos anteriores; os identificadores internos continuam `Pipe`.
