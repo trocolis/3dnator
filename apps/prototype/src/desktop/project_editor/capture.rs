@@ -11775,7 +11775,7 @@ mod tests {
         assert_eq!(editor.shell.camera_mode, None);
         assert!(editor.selection_active());
 
-        // Selecionar cancela a ferramenta de uma vez.
+        // Selecionar retoma a ferramenta, inclusive com a câmera já liberada.
         editor.open_feature_tool(feature_editor::Tool::Extrude);
         frame(&mut editor, &context, vec![])?;
         click(
@@ -11783,7 +11783,46 @@ mod tests {
             &context,
             action_rect(&context, T::Select)?.center(),
         )?;
-        assert!(editor.feature_edit.is_none());
+        assert!(editor.feature_edit.is_some());
+        assert_eq!(editor.shell.camera_mode, None);
+        let pan = action_rect(&context, T::PanCamera)?.center();
+        click(&mut editor, &context, pan)?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::Select)?.center(),
+        )?;
+        assert!(editor.feature_edit.is_some());
+        assert_eq!(editor.shell.camera_mode, None);
+        editor.activate_selection(&context);
+
+        // A pintura conserva o mesmo rascunho durante os três modos de navegação.
+        editor.open_paint();
+        let body = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .and_then(|p| p.listed_bodies().next())
+            .ok_or("Corpo ausente")?
+            .id;
+        editor.seed_paint_body(body);
+        let before = format!("{:?}", editor.paint_edit.as_ref().and_then(|d| d.command()));
+        frame(&mut editor, &context, vec![])?;
+        for label in [T::PanCamera, T::OrbitCamera, T::Select] {
+            click(
+                &mut editor,
+                &context,
+                action_rect(&context, label)?.center(),
+            )?;
+            assert!(editor.paint_edit.is_some());
+            assert_eq!(
+                format!("{:?}", editor.paint_edit.as_ref().and_then(|d| d.command())),
+                before
+            );
+        }
+        assert_eq!(editor.shell.camera_mode, None);
+        editor.activate_selection(&context);
 
         // Home e Enquadrar devolvem o modelo à vista sem mudar o modo.
         click(

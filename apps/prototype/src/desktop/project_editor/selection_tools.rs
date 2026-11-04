@@ -86,6 +86,7 @@ impl Editor {
     /// escolhidos nem as alterações já confirmadas no documento.
     pub(super) fn selection_active(&self) -> bool {
         self.image_edit.is_none()
+            && self.sketch_text.is_none()
             && self.paint_edit.is_none()
             && self.feature_edit.is_none()
             && self.assembly_panel.is_none()

@@ -4,6 +4,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.32.2 — 04/11/2026
+
+- Selecionar na barra de navegação retoma a ferramenta aberta após Arrastar/Rotacionar, conservando painéis, valores, alvos e prévias. Esc e a troca de ferramenta mantêm o cancelamento explícito.
+- Corrigida a detecção de ferramenta ativa para incluir Texto do rascunho.
+
 ## 0.32.1 — 04/11/2026
 
 - Corrigido o contraste dos nomes das faces do cubo de vista no tema escuro.

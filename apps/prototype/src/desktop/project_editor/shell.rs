@@ -561,11 +561,7 @@ impl Editor {
             Action::SketchImage => self.image_edit.is_some(),
             Action::SketchText => self.sketch_text.is_some(),
             Action::Paint => self.paint_edit.is_some(),
-            Action::Select => {
-                self.selection_active()
-                    && self.image_edit.is_none()
-                    && self.shell.camera_mode.is_none()
-            }
+            Action::Select => self.shell.camera_mode.is_none() && !self.shell.measure_open,
             Action::Measure => self.shell.measure_open && self.shell.camera_mode.is_none(),
             Action::PanCamera => self.shell.camera_mode == Some(CameraMode::Pan),
             Action::OrbitCamera => self.shell.camera_mode == Some(CameraMode::Orbit),
@@ -708,7 +704,12 @@ impl Editor {
             self.current_mut().camera_transition = None;
         }
         match action {
-            Action::Select => self.activate_selection(context),
+            Action::Select => {
+                self.shell.camera_mode = None;
+                self.shell.measure_open = false;
+                self.measure_tool.clear();
+                context.request_repaint();
+            }
             Action::New => {
                 if let Err(error) = Document::new(text(T::Untitled))
                     .map_err(|e| e.to_string())
