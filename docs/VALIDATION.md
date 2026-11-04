@@ -707,3 +707,8 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Regressões do domínio conferem conflitos atômicos, preservação de IDs, histórico e persistência. Os três ensaios gráficos de Dimensionar, incluindo a origem, também passaram.
 - Capturas de Texto nos temas claro/escuro e de Dimensionar na origem ficam em `target/codex-validation/ajustes-0370-20261104/`. Ensaios automatizados usam egui/wgpu; não substituem uma sessão manual com mouse.
 - Flatpak 0.37.0 instalado para o usuário com runtime Freedesktop 26.08. Ensaios de núcleo, peça e STEP aprovados dentro do runtime; `--version` confirma OCCT habilitado. Captura `sketch-text-installed.png` conferida na instalação, usando Vulkan na Intel UHD Graphics. Sem push, tags ou publicação de release.
+
+## Precisão única — 0.37.1 — 04/11/2026
+
+- Campo linear permanente, padrão 0,1 mm e troca de unidade conservando a medida física. Compatibilidade verifica o padrão de arquivos sem o campo e a preservação explícita de 0,4 mm.
+- `cargo fmt --all -- --check`, Clippy do workspace com `--all-targets --locked -- -D warnings` e `cargo test --workspace --locked` aprovados. Ensaios gráficos serão executados junto das etapas de viewport.

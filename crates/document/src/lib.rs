@@ -80,14 +80,6 @@ impl LengthUnit {
             Self::Inch => "in³",
         }
     }
-    /// Atalhos de precisão do mouse, em milímetros. Em polegada, frações usuais:
-    /// 0,4 mm daria um passo sem sentido (0,015748 in).
-    pub fn mouse_step_presets_mm(self) -> &'static [f64] {
-        match self {
-            Self::Millimeter => &MOUSE_STEP_PRESETS_MM,
-            Self::Inch => &INCH_MOUSE_STEP_PRESETS_MM,
-        }
-    }
     pub fn from_mm(self, value: f64) -> f64 {
         value / self.factor()
     }
@@ -229,12 +221,8 @@ fn step_decimals(step: f64) -> usize {
 /// Limite de casas decimais exibidas.
 pub const MAX_DISPLAY_DECIMALS: u8 = 6;
 /// Limites da precisão do mouse, em milímetros e graus.
-/// Largura usual de extrusão em FDM: a medida natural de uma peça para impressão.
-pub const DEFAULT_MOUSE_STEP_MM: f64 = 0.4;
-/// Precisões oferecidas diretamente nas configurações, em milímetros.
-pub const MOUSE_STEP_PRESETS_MM: [f64; 4] = [0.2, 0.4, 0.6, 0.8];
-/// Atalhos de precisão em polegada: 1/64, 1/32 e 1/16 in, em milímetros.
-pub const INCH_MOUSE_STEP_PRESETS_MM: [f64; 3] = [25.4 / 64., 25.4 / 32., 25.4 / 16.];
+/// Passo linear inicial; projetos com valor explícito conservam sua configuração.
+pub const DEFAULT_MOUSE_STEP_MM: f64 = 0.1;
 pub const MIN_MOUSE_STEP_MM: f64 = 0.001;
 pub const MAX_MOUSE_STEP_MM: f64 = 1000.;
 pub const MIN_MOUSE_ANGLE_STEP_DEG: f64 = 0.01;
@@ -1574,7 +1562,6 @@ mod tests {
         assert!((unit.from_mm2(645.16) - 1.).abs() < 1e-12);
         assert_eq!(unit.expression(12.7), "0.5 in");
         assert_eq!(LengthUnit::Millimeter.expression(0.1 + 0.2), "0.3 mm");
-        assert_eq!(unit.mouse_step_presets_mm()[0], 25.4 / 64.);
     }
 
     #[test]
@@ -1611,7 +1598,7 @@ mod tests {
             mouse_step_mm: 25.4 / 64.,
             ..Settings::default()
         };
-        assert_eq!(Settings::default().mouse_step_mm, 0.4);
+        assert_eq!(Settings::default().mouse_step_mm, 0.1);
         // 1/64 in = 0,015625: as casas da precisão, limitadas a três além das exibidas.
         assert_eq!(settings.length_decimals(), 5);
         settings.display_decimals = 3;

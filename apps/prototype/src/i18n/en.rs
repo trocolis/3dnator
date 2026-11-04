@@ -338,7 +338,6 @@ pub fn text(key: Text) -> &'static str {
             "Measurements and numbers typed without a unit use this scale; the geometry stays in millimeters."
         }
         Text::SettingsMouseStep => "Mouse precision",
-        Text::SettingsMouseStepCustom => "Custom",
         Text::SettingsMouseAngleStep => "Angle precision",
         Text::SettingsMouseStepHint => {
             "When drawing, moving, rotating or extruding, the mouse moves in multiples of the precision. Type a value to use any number; in the sketch, Alt frees the cursor."

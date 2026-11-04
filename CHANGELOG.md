@@ -2,7 +2,13 @@
 
 ## Não lançado
 
+- Analisadas as quatro pendências atuais de `AJUSTES.md` em `docs/PLANO_AJUSTES_VIEWPORT.md`, com viabilidade, evidências no código, ordem de implementação e critérios de aceite para precisão, cubo e corte de seção. Sem alteração funcional.
+
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
+
+## 0.37.1 — 04/11/2026
+
+- Precisão linear em campo numérico único, com padrão 0,1 mm. Trocar a unidade conserva o passo físico; projetos existentes preservam a precisão gravada e pontos anteriores não são alterados.
 
 ## 0.37.0 — 04/11/2026
 

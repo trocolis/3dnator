@@ -347,7 +347,6 @@ pub enum Text {
     SettingsUnitInch,
     SettingsUnitHint,
     SettingsMouseStep,
-    SettingsMouseStepCustom,
     SettingsMouseAngleStep,
     SettingsMouseStepHint,
     ThroughShell,
@@ -1262,7 +1261,6 @@ fn pt(key: Text) -> &'static str {
             "Medidas e números digitados sem unidade usam esta escala; a geometria continua em milímetros."
         }
         Text::SettingsMouseStep => "Precisão do mouse",
-        Text::SettingsMouseStepCustom => "Personalizado",
         Text::SettingsMouseAngleStep => "Precisão de ângulos",
         Text::SettingsMouseStepHint => {
             "Ao desenhar, mover, girar ou extrudar, o mouse anda em múltiplos da precisão. Digite uma medida para usar qualquer valor; no rascunho, Alt solta o cursor."

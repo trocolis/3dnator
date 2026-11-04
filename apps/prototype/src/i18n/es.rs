@@ -352,7 +352,6 @@ pub fn text(key: Text) -> &'static str {
             "Las medidas y los números escritos sin unidad usan esta escala; la geometría sigue en milímetros."
         }
         Text::SettingsMouseStep => "Precisión del ratón",
-        Text::SettingsMouseStepCustom => "Personalizado",
         Text::SettingsMouseAngleStep => "Precisión de ángulos",
         Text::SettingsMouseStepHint => {
             "Al dibujar, mover, girar o extruir, el ratón avanza en múltiplos de la precisión. Escriba una medida para usar cualquier valor; en el boceto, Alt libera el cursor."

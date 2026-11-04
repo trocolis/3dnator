@@ -214,23 +214,7 @@ impl Editor {
                     (LengthUnit::Millimeter, T::SettingsUnitMillimeter),
                     (LengthUnit::Inch, T::SettingsUnitInch),
                 ] {
-                    if ui
-                        .selectable_value(&mut next.unit, unit, text(label))
-                        .clicked()
-                        && unit != current.unit
-                    {
-                        // Os atalhos de precisão mudam com a unidade: o passo segue o
-                        // atalho equivalente (0,4 mm → 1/64 in), ou o primeiro deles.
-                        let index = current
-                            .unit
-                            .mouse_step_presets_mm()
-                            .iter()
-                            .position(|v| (v - current.mouse_step_mm).abs() < 1e-9);
-                        let presets = unit.mouse_step_presets_mm();
-                        if let Some(index) = index {
-                            next.mouse_step_mm = presets[index.min(presets.len() - 1)];
-                        }
-                    }
+                    ui.selectable_value(&mut next.unit, unit, text(label));
                 }
             });
             hint(ui, text(T::SettingsUnitHint));
@@ -239,45 +223,17 @@ impl Editor {
             // confirmar a digitação e não respondem a arraste, que criaria dezenas delas.
             ui.horizontal(|ui| {
                 ui.label(text(T::SettingsMouseStep));
-                let custom_id = ui.id().with("custom_mouse_step");
-                let presets = next.unit.mouse_step_presets_mm();
-                let preset = presets
-                    .iter()
-                    .any(|value| (value - next.mouse_step_mm).abs() < 1e-9);
-                let mut custom =
-                    !preset || ui.ctx().data(|data| data.get_temp::<bool>(custom_id)) == Some(true);
-                for &value in presets {
-                    let label = match next.unit {
-                        LengthUnit::Millimeter => format!("{value:.1}").replace('.', ","),
-                        LengthUnit::Inch => format!("1/{}", (25.4 / value).round()),
-                    };
-                    let selected = !custom && (value - next.mouse_step_mm).abs() < 1e-9;
-                    if ui.selectable_label(selected, label).clicked() {
-                        next.mouse_step_mm = value;
-                        custom = false;
-                    }
-                }
-                if ui
-                    .selectable_label(custom, text(T::SettingsMouseStepCustom))
-                    .clicked()
-                {
-                    custom = true;
-                }
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(custom_id, custom));
-                if custom {
-                    let context = ui.ctx().clone();
-                    ui.add(
-                        command_panel::length_value(
-                            &context,
-                            &mut next.mouse_step_mm,
-                            nator_document::MIN_MOUSE_STEP_MM..=nator_document::MAX_MOUSE_STEP_MM,
-                        )
-                        .speed(0.)
-                        .max_decimals(usize::from(nator_document::MAX_DISPLAY_DECIMALS))
-                        .update_while_editing(false),
-                    );
-                }
+                let context = ui.ctx().clone();
+                ui.add(
+                    command_panel::length_value(
+                        &context,
+                        &mut next.mouse_step_mm,
+                        nator_document::MIN_MOUSE_STEP_MM..=nator_document::MAX_MOUSE_STEP_MM,
+                    )
+                    .speed(0.)
+                    .max_decimals(usize::from(nator_document::MAX_DISPLAY_DECIMALS))
+                    .update_while_editing(false),
+                );
             });
             ui.horizontal(|ui| {
                 ui.label(text(T::SettingsMouseAngleStep));

@@ -1,5 +1,8 @@
 # Plano dos ajustes pendentes
 
+> Histórico do ciclo anterior. O plano das quatro pendências atuais de precisão,
+> cubo e seção está em [PLANO_AJUSTES_VIEWPORT.md](PLANO_AJUSTES_VIEWPORT.md).
+
 Análise de 04/11/2026 dos **11 itens desmarcados** de [AJUSTES.md](../AJUSTES.md).
 Este documento planeja a implementação; nenhum item foi marcado como concluído.
 

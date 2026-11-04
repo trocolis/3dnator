@@ -1660,6 +1660,9 @@ mod tests {
                 ..nator_document::Settings::default()
             }
         );
+        assert_eq!(settings.mouse_step_mm, 0.1);
+        let explicit: nator_document::Settings = serde_json::from_str(r#"{"mouse_step_mm":0.4}"#)?;
+        assert_eq!(explicit.mouse_step_mm, 0.4);
         Ok(())
     }
 
