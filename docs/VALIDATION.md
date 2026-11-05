@@ -747,3 +747,9 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - Um caminho comum desenha o ícone ativo ao lado do ponteiro sobre o canvas, incluindo Construção, montagem, navegação, Medir, Texto e modificações do rascunho. Selecionar não tem distintivo; modos de câmera têm prioridade e o cubo fica excluído. Capturas do rascunho conservam seu indicador adicional.
 - fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. Cinco capturas reais revisadas (`target/ajustes2-cursor-{extrude,hole,measure,pan,select}.png`) confirmam os ícones distintos e a ausência em Selecionar. Comparação visual em `target/ajustes2-cursor-details.png`.
+
+## Cursor do Medir e encerramento dos ajustes — 0.38.5 — 05/11/2026
+
+- Medir usa mira somente sobre o canvas, mantendo os cursores do cubo/painéis e dos modos Arrastar/Rotacionar. O ensaio gráfico consulta o cursor efetivamente publicado pelo egui ao entrar/sair do canvas, suspender/retomar Medir e voltar a Selecionar.
+- Validação final: fmt e Clippy com todos os alvos sem/com OCCT aprovados; **403 testes sem OCCT e 584 com OCCT**, sem falhas. Os testes gráficos ignorados no fluxo padrão foram executados separadamente: **cinco ensaios aprovados**, cobrindo candidato e clique de Medir, cursor, navegação com ferramenta suspensa e perfil persistente de Extrusão.
+- As cinco capturas dos distintivos da etapa 0.38.4 foram revisadas. Os quatro itens atuais de `AJUSTES.md` estão atendidos. Formato 49 e dependências permanecem inalterados.

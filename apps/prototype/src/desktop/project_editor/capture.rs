@@ -12909,6 +12909,50 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn measure_cursor_changes_on_canvas_and_respects_camera_cube_and_panels()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, _) = navigation_editor(&context)?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::MeasureTool)?.center(),
+        )?;
+        let position = editor.canvas_rect.center() + egui::vec2(-40., 60.);
+        let cursor = |editor: &mut Editor, position| {
+            let mut input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 820.),
+                )),
+                time: Some(context.input(|i| i.time) + 1. / 60.),
+                events: vec![egui::Event::PointerMoved(position)],
+                ..Default::default()
+            };
+            editor.route_camera_input(&context, &mut input);
+            context
+                .run_ui(input, |ui| editor.draw(ui))
+                .platform_output
+                .cursor_icon
+        };
+        assert_eq!(cursor(&mut editor, position), egui::CursorIcon::Crosshair);
+        let cube = view_cube::rect(editor.canvas_rect).center();
+        assert_ne!(cursor(&mut editor, cube), egui::CursorIcon::Crosshair);
+        let navigation = action_rect(&context, T::MeasureTool)?.center();
+        assert_ne!(cursor(&mut editor, navigation), egui::CursorIcon::Crosshair);
+        editor.shell.camera_mode = Some(view_modes::CameraMode::Pan);
+        assert_eq!(cursor(&mut editor, position), egui::CursorIcon::Grab);
+        editor.shell.camera_mode = Some(view_modes::CameraMode::Orbit);
+        assert_eq!(cursor(&mut editor, position), egui::CursorIcon::AllScroll);
+        editor.shell.camera_mode = None;
+        assert_eq!(cursor(&mut editor, position), egui::CursorIcon::Crosshair);
+        editor.activate_selection(&context);
+        assert_ne!(cursor(&mut editor, position), egui::CursorIcon::Crosshair);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn tree_title_collapses_upward_and_balloon_saves_out_of_the_part() -> Result<(), Box<dyn Error>>
     {
         let context = egui::Context::default();

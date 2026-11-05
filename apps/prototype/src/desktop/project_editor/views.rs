@@ -741,6 +741,15 @@ impl Editor {
                         mode.cursor(response.dragged_by(egui::PointerButton::Middle)),
                     );
                 }
+                if self.shell.measure_open
+                    && self.shell.camera_mode.is_none()
+                    && response.hovered()
+                    && response
+                        .hover_pos()
+                        .is_some_and(|p| !view_cube::rect(response.rect).contains(p))
+                {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                }
                 self.tool_cursor(ui, &response);
                 self.current_mut().camera = self.viewport.camera.clone();
             });
