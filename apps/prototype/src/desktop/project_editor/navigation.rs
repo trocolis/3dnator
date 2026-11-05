@@ -43,6 +43,30 @@ pub(super) fn snap_pick(p: &mut Pick, mode: PickMode) {
     }
 }
 impl Editor {
+    /// Oito pontos de tela em mm, compartilhados pelo candidato e pelo clique.
+    pub(super) fn pick_reach(
+        &self,
+        position: egui::Pos2,
+        rect: egui::Rect,
+        bounds: nator_geometry::Bounds,
+    ) -> f64 {
+        let cursor = [
+            f64::from((position.x - rect.center().x) / rect.width() * 2.),
+            f64::from((rect.center().y - position.y) / rect.height() * 2.),
+        ];
+        let aspect = f64::from(rect.aspect_ratio());
+        let a = self
+            .viewport
+            .camera
+            .world_on_target_plane(cursor, bounds, aspect);
+        let b = self.viewport.camera.world_on_target_plane(
+            [cursor[0] + f64::from(8. / rect.width() * 2.), cursor[1]],
+            bounds,
+            aspect,
+        );
+        norm(sub(b, a))
+    }
+
     pub(super) fn viewport_actions(&mut self, ui: &egui::Ui, response: &egui::Response) {
         let cube_rect = view_cube::rect(response.rect);
         let starts_on_cube = ui
@@ -90,20 +114,7 @@ impl Editor {
                 .as_ref()
                 .is_some_and(|d| d.choosing_area());
             // Oito pontos de tela em mm: a mesma margem da captura de vértices do rascunho.
-            let vertex_reach = {
-                let aspect = f64::from(response.rect.aspect_ratio());
-                let step = f64::from(8. / response.rect.width() * 2.);
-                let a = self
-                    .viewport
-                    .camera
-                    .world_on_target_plane(cursor, bounds, aspect);
-                let b = self.viewport.camera.world_on_target_plane(
-                    [cursor[0] + step, cursor[1]],
-                    bounds,
-                    aspect,
-                );
-                nator_geometry::norm(sub(b, a))
-            };
+            let vertex_reach = self.pick_reach(position, response.rect, bounds);
             let view = self.current().view.clone();
             let cut = self.current().section;
             self.start(ui.ctx(), None, move || {

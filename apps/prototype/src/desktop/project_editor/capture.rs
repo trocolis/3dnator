@@ -12782,6 +12782,87 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn measure_hover_matches_only_the_candidate_in_part_and_assembly() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let (mut editor, part) = navigation_editor(&context)?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::MeasureTool)?.center(),
+        )?;
+        for active in [Some(part), None] {
+            editor.current_mut().active_part = active;
+            frame(&mut editor, &context, vec![])?;
+            settle(&mut editor, &context)?;
+            editor.viewport.camera.set_direction([0., 0., 1.]);
+            for (point, kind) in [
+                ([20., 20., 10.], 0),
+                ([20., 0.3, 10.], 1),
+                ([0.3, 0.3, 10.], 2),
+            ] {
+                let position = sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    editor.canvas_rect,
+                    point,
+                )
+                .ok_or("Ponto")?;
+                let deadline = Instant::now() + Duration::from_secs(10);
+                loop {
+                    frame(
+                        &mut editor,
+                        &context,
+                        vec![egui::Event::PointerMoved(position)],
+                    )?;
+                    if let Some(hover) = &editor.hover {
+                        let o = &hover.overlay;
+                        let matched = match kind {
+                            0 => {
+                                !o.triangles.is_empty()
+                                    && o.segments.is_empty()
+                                    && o.points.is_empty()
+                            }
+                            1 => {
+                                o.triangles.is_empty()
+                                    && !o.segments.is_empty()
+                                    && o.points.is_empty()
+                            }
+                            _ => {
+                                o.triangles.is_empty()
+                                    && o.segments.is_empty()
+                                    && o.points.len() == 1
+                            }
+                        };
+                        if matched {
+                            break;
+                        }
+                    }
+                    if Instant::now() > deadline {
+                        return Err(format!(
+                            "Candidato {kind} incorreto: {:?}",
+                            editor.hover.as_ref().map(|h| &h.overlay)
+                        )
+                        .into());
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+        // Mudar o corte com o ponteiro parado não conserva um candidato invisível.
+        editor.current_mut().section = Some(section::Section {
+            base: section::Base::Principal(0),
+            offset: -1.,
+            flip: false,
+            visible: true,
+        });
+        frame(&mut editor, &context, vec![])?;
+        assert!(editor.hover.as_ref().is_none_or(|h| h.overlay.is_empty()));
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn tree_title_collapses_upward_and_balloon_saves_out_of_the_part() -> Result<(), Box<dyn Error>>
     {
         let context = egui::Context::default();

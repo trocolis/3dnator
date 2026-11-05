@@ -381,6 +381,10 @@ impl Editor {
             self.hover = None;
             return;
         }
+        if self.shell.measure_open {
+            self.update_measure_hover(ui, response);
+            return;
+        }
         if self.current().plane_pick.is_some() {
             self.update_plane_hover(ui, response);
             return;

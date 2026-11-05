@@ -732,3 +732,8 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - **Três ensaios gráficos novos passaram:** tampas/divisória e descarte de planos obsoletos; face/linha/ponto sob tampa invisíveis com leitura de pixels e linha no plano visível, em ortográfica/perspectiva; mudança do plano sem mover o cursor invalida o hover sem modificar a revisão.
 - **Dois ensaios gráficos existentes de precisão passaram**, incluindo desenho/arraste, captura com Alt e valores digitados exatos. Capturas revisadas: `target/ajustes-settings.png`, `target/ajustes-section-contact-v2.png`, `target/ajustes-section-perspective-v2.png` e `target/ajustes-section-hover.png`.
 - Release compilada com OCCT: `3dnator 0.38.1 | OCCT: habilitado`. Formato do projeto permanece 49; não houve nova dependência direta. O pacote Flatpak usa o runtime local 26.08 e inventário atualizado das crates; licenças nativas preservadas do mesmo SDK.
+
+## Candidato do Medir — 0.38.2 — 05/11/2026
+
+- Medir classifica o candidato em trabalhador com `measure::target_at`, compartilhando com o clique o alcance de oito pontos de tela. O realce é somente um vértice, a polilinha da aresta ou a face; não se expande ao componente nem às células de pintura.
+- fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. Dois ensaios gráficos com OCCT passaram: classificação do hover na peça e na montagem (face/aresta/vértice e mudança da seção) e clique/medição com Esc em dois níveis.
