@@ -30,8 +30,6 @@ struct Computed {
     key: String,
     guide: Option<nator_commands::extrusion::Guide>,
     choice: Option<nator_document::features::Combine>,
-    /// Malha local da célula de face escolhida como perfil, com a pose do corpo.
-    area: Option<(Mesh, BodyId)>,
     result: Result<Option<(PreparedCommand, Scene)>, CommandError>,
 }
 
@@ -282,21 +280,6 @@ impl Editor {
                 let guide = extrusion.as_ref().and_then(|(part, operation)| {
                     nator_commands::extrusion::guide(&document, *part, operation).ok()
                 });
-                let area = extrusion
-                    .as_ref()
-                    .and_then(|(_, operation)| match operation {
-                        nator_document::features::Operation::ExtrudeFace {
-                            base,
-                            face,
-                            boundaries,
-                            ..
-                        } if !boundaries.is_empty() => {
-                            nator_commands::painting::cell_mesh(&document, *base, face, boundaries)
-                                .ok()
-                                .map(|mesh| (mesh, *base))
-                        }
-                        _ => None,
-                    });
                 let original = document.clone();
                 let mut choice = None;
                 let result =
@@ -389,7 +372,6 @@ impl Editor {
                     key,
                     guide,
                     choice,
-                    area,
                     result,
                 });
                 context.request_repaint();
@@ -413,16 +395,7 @@ impl Editor {
             .as_mut()
             .filter(|d| d.tab() == computed.tab)
         {
-            let tab = self.tabs.iter().find(|t| t.id == computed.tab);
-            let area = tab
-                .zip(computed.area.as_ref())
-                .and_then(|(tab, (mesh, body))| {
-                    let placement = sketch_scene::part_placement(tab, draft.part()).ok()?;
-                    let body = tab.session.document().body(*body)?;
-                    let pose = placement.compose(body.placement).unwrap_or(placement);
-                    cell_hover::area_overlay(mesh, pose)
-                });
-            draft.receive_extrusion(computed.guide, computed.choice, area);
+            draft.receive_extrusion(computed.guide, computed.choice);
         }
         match computed.result {
             Ok(None) => {

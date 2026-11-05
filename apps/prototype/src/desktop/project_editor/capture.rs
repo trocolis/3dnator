@@ -8525,6 +8525,28 @@ mod tests {
                 .map(|area| area.boundaries.iter().map(|b| b.inside).collect::<Vec<_>>())
         };
         assert_eq!(chosen(&editor), Some(vec![false]));
+        // Mesmo sem distância válida, mover o cursor ao miolo conserva o aro escolhido.
+        for distance in ["0 mm", "parametro_inexistente"] {
+            editor
+                .feature_edit
+                .as_mut()
+                .ok_or("Painel")?
+                .set_size_for_capture(distance);
+            wait_hover(&mut editor, &context, inside, |e| {
+                e.profile_hovered
+                    && e.feature_edit
+                        .as_ref()
+                        .and_then(|d| d.area_overlay())
+                        .is_some_and(|o| covers(o, 5., 5.) && !covers(o, 20., 15.))
+            })?;
+            assert_eq!(chosen(&editor), Some(vec![false]));
+        }
+        editor
+            .feature_edit
+            .as_mut()
+            .ok_or("Painel")?
+            .set_size_for_capture("0 mm");
+
         wait_feature_preview(&mut editor, &context)?;
         click(&mut editor, &context, outside)?;
         settle(&mut editor, &context)?;

@@ -6,8 +6,11 @@ use nator_commands::extrusion::Guide;
 #[derive(Default)]
 pub(super) struct Interaction {
     pub(super) guide: Option<Guide>,
-    /// Realce da célula escolhida, calculado junto com a guia.
+    /// Realce persistente da célula escolhida, independente da prévia e do hover.
     area: Option<highlight::Overlay>,
+    area_key: Option<(u64, Placement)>,
+    area_running: Option<Receiver<Option<highlight::Overlay>>>,
+    area_finished: bool,
     drag: Option<Drag>,
     input: distance_arrow::Input,
     input_start: bool,
@@ -87,17 +90,81 @@ impl Draft {
     pub(in crate::desktop::project_editor) fn area_overlay(&self) -> Option<&highlight::Overlay> {
         self.interaction.area.as_ref()
     }
+    /// O perfil escolhido tem vida própria: independe da validade/distância da prévia.
+    fn ensure_area_overlay(
+        &mut self,
+        document: Document,
+        revision: u64,
+        placement: Placement,
+        context: &egui::Context,
+    ) {
+        let Some(area) = self
+            .face_profile
+            .clone()
+            .filter(|a| !a.boundaries.is_empty())
+        else {
+            return;
+        };
+        let key = (revision, placement);
+        if self.interaction.area_key != Some(key) {
+            self.interaction.area = None;
+            self.interaction.area_running = None;
+            self.interaction.area_finished = false;
+            self.interaction.area_key = Some(key);
+        }
+        if let Some(receiver) = &self.interaction.area_running {
+            match receiver.try_recv() {
+                Ok(overlay) => {
+                    self.interaction.area = overlay;
+                    self.interaction.area_finished = true;
+                    self.interaction.area_running = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.interaction.area_finished = true;
+                    self.interaction.area_running = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if !self.interaction.area_finished && self.interaction.area_running.is_none() {
+            let context = context.clone();
+            let (sender, receiver) = mpsc::channel();
+            if std::thread::Builder::new()
+                .name("selected-extrusion-area".into())
+                .spawn(move || {
+                    let overlay = document.body(area.body).and_then(|body| {
+                        let pose = placement.compose(body.placement).ok()?;
+                        let mesh = nator_commands::painting::cell_mesh(
+                            &document,
+                            area.body,
+                            &area.face,
+                            &area.boundaries,
+                        )
+                        .ok()?;
+                        cell_hover::area_overlay(&mesh, pose)
+                    });
+                    let _ = sender.send(overlay);
+                    context.request_repaint();
+                })
+                .is_ok()
+            {
+                self.interaction.area_running = Some(receiver);
+            }
+        }
+        if self.interaction.area_running.is_some() {
+            context.request_repaint_after(Duration::from_millis(16));
+        }
+    }
+
     pub(in crate::desktop::project_editor) fn receive_extrusion(
         &mut self,
         guide: Option<Guide>,
         choice: Option<Combine>,
-        area: Option<highlight::Overlay>,
     ) {
         if self.tool != Tool::Extrude {
             return;
         }
         self.interaction.guide = guide;
-        self.interaction.area = area;
         if self.automatic {
             self.combine = match choice.map(|c| c.mode) {
                 None => 0,
@@ -111,6 +178,25 @@ impl Draft {
 }
 
 impl Editor {
+    pub(in crate::desktop::project_editor) fn update_selected_area(
+        &mut self,
+        context: &egui::Context,
+    ) {
+        let Some(draft) = self.feature_edit.as_ref().filter(|d| {
+            d.tab() == self.current().id && d.face_area().is_some_and(|a| !a.boundaries.is_empty())
+        }) else {
+            return;
+        };
+        let Ok(placement) = sketch_scene::part_placement(self.current(), draft.part()) else {
+            return;
+        };
+        let document = self.picking_document();
+        let revision = self.current().session.revision();
+        if let Some(draft) = self.feature_edit.as_mut() {
+            draft.ensure_area_overlay(document, revision, placement, context);
+        }
+    }
+
     pub(in crate::desktop::project_editor) fn extrusion_gizmo(
         &mut self,
         ui: &egui::Ui,

@@ -737,3 +737,8 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - Medir classifica o candidato em trabalhador com `measure::target_at`, compartilhando com o clique o alcance de oito pontos de tela. O realce é somente um vértice, a polilinha da aresta ou a face; não se expande ao componente nem às células de pintura.
 - fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. Dois ensaios gráficos com OCCT passaram: classificação do hover na peça e na montagem (face/aresta/vértice e mudança da seção) e clique/medição com Esc em dois níveis.
+
+## Perfil persistente da Extrusão — 0.38.3 — 05/11/2026
+
+- O realce da célula escolhida usa trabalhador e cache do próprio painel, independentes da prévia do sólido. O perfil não depende mais do hover nem de uma distância válida; troca de seleção, revisão ou posição invalida o resultado.
+- fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. O ensaio gráfico `extrusion_highlights_and_chooses_only_areas_including_outside_a_contour` passou com nova regressão: selecionar o aro, apontar o miolo e conservar o aro realçado com distância zero e parâmetro inexistente, sem alterar a escolha. A confirmação, o cancelamento por segundo clique e o histórico continuam cobertos.

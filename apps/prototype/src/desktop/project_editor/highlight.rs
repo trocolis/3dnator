@@ -653,6 +653,7 @@ impl Editor {
 
     /// Realces persistentes (referências do painel e face/aresta escolhida) e a pré-seleção.
     pub(super) fn draw_highlights(&mut self, ui: &egui::Ui, rect: egui::Rect) {
+        self.update_selected_area(ui.ctx());
         self.viewport.clear_hover();
         let Some(bounds) = self.current().scene_bounds else {
             return;

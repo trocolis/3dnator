@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.3 — 05/11/2026
+
+- A célula escolhida como perfil da Extrusão conserva seu realce ao passar o mouse sobre outra área, inclusive com distância zero ou entrada inválida. O cálculo do realce tem trabalhador e cache próprios, independentes da prévia do sólido; troca de perfil, revisão, posição ou cancelamento descarta respostas antigas.
+
 ## 0.38.2 — 05/11/2026
 
 - Medir realça apenas o vértice, a aresta ou a face candidata ao clique, inclusive na montagem. A classificação usa o mesmo alcance e consulta exata do clique, em trabalhador; respostas de outra posição, seção, aba ou revisão são descartadas.
