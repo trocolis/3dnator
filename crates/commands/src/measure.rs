@@ -4,6 +4,9 @@
 //! resultado marcado como aproximado. Coordenadas são as da peça (origem local), como na
 //! construção; quem mede em contexto de montagem compõe a posição da instância.
 //! Sem materiais definidos, o centro de massa supõe densidade uniforme.
+mod sketch;
+pub use sketch::sketch_entity;
+
 use nator_document::{BodyId, Document, DocumentError, assembly::Pick};
 use nator_geometry::{Point3, cross, dot, norm, sub};
 

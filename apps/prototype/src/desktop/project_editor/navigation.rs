@@ -117,7 +117,26 @@ impl Editor {
             let vertex_reach = self.pick_reach(position, response.rect, bounds);
             let view = self.current().view.clone();
             let cut = self.current().section;
+            let measurement = measure_tool::query::Query {
+                camera: self.viewport.camera.clone(),
+                bounds,
+                rect: response.rect,
+                position,
+                reach: vertex_reach,
+                section: cut,
+            };
             self.start(ui.ctx(), None, move || {
+                if measuring {
+                    let target = match measurement.run(&document, &view) {
+                        Ok(candidate) => candidate.map(|candidate| Ok(candidate.target)),
+                        Err(error) => Some(Err(error)),
+                    };
+                    return Ok(Outcome::MeasureTarget {
+                        tab,
+                        revision,
+                        target,
+                    });
+                }
                 // A parte escondida pelo corte de seção não é selecionável.
                 let pick = section::first_visible(
                     document
@@ -129,17 +148,6 @@ impl Editor {
                         .map_err(|e| e.to_string())?,
                     cut,
                 );
-                if measuring {
-                    let target = pick.as_ref().map(|p| {
-                        nator_commands::measure::target_at(&document, p, vertex_reach)
-                            .map_err(|e| e.to_string())
-                    });
-                    return Ok(Outcome::MeasureTarget {
-                        tab,
-                        revision,
-                        target,
-                    });
-                }
                 // Com o diálogo de operações esperando, o clique vira referência por nomes.
                 let topology = awaiting.zip(pick.as_ref()).map(|(kind, p)| {
                     match kind {

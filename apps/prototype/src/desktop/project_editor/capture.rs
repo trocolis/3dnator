@@ -12940,6 +12940,106 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn measure_sketches_and_reference_sketches_in_positioned_occurrences()
+    -> Result<(), Box<dyn Error>> {
+        use nator_commands::measure::Reading;
+        let context = egui::Context::default();
+        let mut document = Document::new("Medir rascunhos")?;
+        let mut sketch = Sketch::new(
+            "Traços",
+            Plane {
+                origin: [0., 0., 10.],
+                ..Plane::xy()
+            },
+        );
+        sketch.add_line([0., 0.], [20., 0.], false)?;
+        sketch.add_circle([40., 20.], 5., false)?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        document.add_instance(
+            part,
+            None,
+            Placement::new([100., 0., 0.], [0., 0., std::f64::consts::FRAC_PI_2])?,
+        )?;
+        let mut reference = Sketch::new(
+            "Referência",
+            Plane {
+                origin: [0., 0., 30.],
+                ..Plane::xy()
+            },
+        );
+        reference.add_line([0., 40.], [20., 40.], false)?;
+        document.add_reference_sketch(reference)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        settle(&mut editor, &context)?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::MeasureTool)?.center(),
+        )?;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        for (point, expected) in [
+            ([10., 0., 10.], 20.),
+            ([45., 20., 10.], 10. * std::f64::consts::PI),
+            ([10., 40., 30.], 20.),
+            ([100., 10., 10.], 20.),
+        ] {
+            editor.measure_tool.clear();
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Traço fora da tela")?;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+                if editor
+                    .hover
+                    .as_ref()
+                    .is_some_and(|h| !h.overlay.segments.is_empty())
+                {
+                    break;
+                }
+                if Instant::now() > deadline {
+                    return Err("Rascunho sem candidato".into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            click(&mut editor, &context, at)?;
+            settle(&mut editor, &context)?;
+            assert!(
+                editor
+                    .measure_tool
+                    .readings()
+                    .iter()
+                    .any(|r| matches!(r,Reading::Length {mm,..} if (*mm-expected).abs()<1e-8)),
+                "Medida incorreta: {:?}",
+                editor.measure_tool.readings()
+            );
+        }
+        editor
+            .current_mut()
+            .session
+            .execute(Command::SetSketchVisibility { id, visible: false })?;
+        settle(&mut editor, &context)?;
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [10., 0., 10.],
+        )
+        .ok_or("Traço")?;
+        frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+        assert!(editor.hover.as_ref().is_none_or(|h| h.overlay.is_empty()));
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn tree_title_collapses_upward_and_balloon_saves_out_of_the_part() -> Result<(), Box<dyn Error>>
     {
         let context = egui::Context::default();

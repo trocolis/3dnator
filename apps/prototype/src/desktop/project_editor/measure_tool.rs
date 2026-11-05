@@ -4,6 +4,7 @@
 //! decompõe a distância nos eixos X, Y e Z. Esc limpa os alvos e, sem alvos, sai do Medir.
 use super::*;
 mod hover;
+pub(super) mod query;
 use nator_commands::measure::{Reading, Target, readings};
 use nator_geometry::{Point3, norm, sub};
 
