@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.6 — 05/11/2026
+
+- Medir, Arrastar e Rotacionar usam somente o cursor do sistema, sem ícone adicional. A suspensão de uma ferramenta de construção também esconde seu distintivo até a navegação terminar.
+
 ## 0.38.5 — 05/11/2026
 
 - Medir usa cursor em mira sobre o canvas. Arrastar/Rotacionar e o cubo conservam seus cursores; sair do Medir ou apontar para os painéis restaura o comportamento normal.

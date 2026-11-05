@@ -4,15 +4,10 @@ use icons::Icon;
 
 impl Editor {
     fn active_tool_icon(&self) -> Option<Icon> {
-        // A navegação suspende a ferramenta, conservando o painel e seus valores.
-        if let Some(mode) = self.shell.camera_mode {
-            return Some(match mode {
-                view_modes::CameraMode::Pan => Icon::PanCamera,
-                view_modes::CameraMode::Orbit => Icon::OrbitCamera,
-            });
-        }
-        if self.shell.measure_open {
-            return Some(Icon::Measure);
+        // A navegação usa somente o cursor do sistema, inclusive quando suspende
+        // uma ferramenta: não mostrar também o distintivo do painel que ficou aberto.
+        if self.shell.camera_mode.is_some() || self.shell.measure_open {
+            return None;
         }
         if let Some(draft) = self
             .feature_edit

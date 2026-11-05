@@ -753,3 +753,7 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Medir usa mira somente sobre o canvas, mantendo os cursores do cubo/painéis e dos modos Arrastar/Rotacionar. O ensaio gráfico consulta o cursor efetivamente publicado pelo egui ao entrar/sair do canvas, suspender/retomar Medir e voltar a Selecionar.
 - Validação final: fmt e Clippy com todos os alvos sem/com OCCT aprovados; **403 testes sem OCCT e 584 com OCCT**, sem falhas. Os testes gráficos ignorados no fluxo padrão foram executados separadamente: **cinco ensaios aprovados**, cobrindo candidato e clique de Medir, cursor, navegação com ferramenta suspensa e perfil persistente de Extrusão.
 - As cinco capturas dos distintivos da etapa 0.38.4 foram revisadas. Os quatro itens atuais de `AJUSTES.md` estão atendidos. Formato 49 e dependências permanecem inalterados.
+
+## Navegação sem distintivo — 0.38.6 — 05/11/2026
+
+- Medir/Arrastar/Rotacionar não desenham ícone adicional e escondem o da ferramenta suspensa. fmt, Clippy do workspace e testes sem OCCT passaram. Capturas reais de Medir, Arrastar e Extrusão revisadas em `target/ajustes3-navigation-details.png`: navegação sem distintivo e construção com o ícone preservado.

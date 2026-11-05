@@ -432,6 +432,6 @@ Os cenários `sketch-text` e `sketch-text-dark` capturam o painel e a prévia de
 
 Clicar em uma das seis faces principais do cubo conserva o alto predominante da vista anterior e alinha a tela em passos de 90°. Home restaura a orientação canônica.
 
-As ferramentas ativas mostram o mesmo ícone da faixa ao lado do ponteiro sobre o canvas, inclusive Construção, montagem e Medir. Selecionar mantém o ponteiro sem distintivo. Arrastar/Rotacionar mostram o ícone de navegação enquanto suspendem outra ferramenta; ao voltar, o ícone da ferramenta reaparece. O distintivo não cobre o cubo nem os painéis. Cenários de captura: `cursor-extrude`, `cursor-hole`, `cursor-measure`, `cursor-pan` e `cursor-select`.
+As ferramentas de construção, montagem e rascunho mostram o ícone ativo ao lado do ponteiro sobre o canvas. Selecionar, Medir, Arrastar e Rotacionar usam somente o cursor do sistema. A navegação suspensa esconde também o distintivo da ferramenta aberta; ao retornar, ele reaparece. O distintivo não cobre o cubo nem os painéis. Cenários de captura: `cursor-extrude`, `cursor-hole`, `cursor-measure`, `cursor-pan` e `cursor-select`.
 
 Na Extrusão, o perfil escolhido mantém seu realce ao apontar para outra área, inclusive com distância zero ou expressão inválida. Passar o mouse não troca a seleção; clicar novamente na área escolhida a retira.
