@@ -297,6 +297,12 @@ impl Workspace {
             .unit
             .normalize_expression(&self.drawing.fields[index])
     }
+    pub(super) fn cursor_icon(&self) -> Option<icons::Icon> {
+        self.active_action
+            .map(edit_icon)
+            .or_else(|| (self.tool != Tool::Select).then(|| line_tools::cursor_icon(self)))
+    }
+
     pub(super) fn active_action(&self) -> Option<EditAction> {
         self.active_action
     }
@@ -975,6 +981,7 @@ impl Editor {
         }
     }
     pub(super) fn sketch_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) {
+        let camera_active = self.shell.camera_mode.is_some();
         let Some(mut sketch) = self.working_sketch() else {
             return;
         };
@@ -1902,21 +1909,15 @@ impl Editor {
                 }
             }
         }
-        // O distintivo usa o mesmo ícone da faixa e só existe sobre o canvas,
-        // sem substituir o ponteiro nem cobrir a ponta usada para capturar apoios.
+        // O distintivo principal é compartilhado com as demais ferramentas.
+        // O indicador adicional de captura continua junto ao apoio do rascunho.
         if work.tool != Tool::Select
             && work.active_action.is_none()
+            && !camera_active
             && let Some(position) = response
                 .hover_pos()
                 .filter(|p| !view_cube::rect(response.rect).contains(*p))
         {
-            let icon = line_tools::cursor_icon(work);
-            icons::paint(
-                &painter,
-                egui::Rect::from_min_size(position + egui::vec2(16., -28.), egui::Vec2::splat(22.)),
-                icon,
-                true,
-            );
             // O tipo de captura acompanha o cursor; nada fica marcado no desenho.
             if let Some(found) = &snap
                 && work.primitive().is_some()

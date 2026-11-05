@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.4 — 05/11/2026
+
+- Distintivo junto ao cursor compartilhado pelas ferramentas de Construção, montagem, Medir, navegação e rascunho, incluindo Texto e modificações. Selecionar conserva o cursor sem distintivo. A navegação suspensa mostra seu próprio ícone e retoma o da ferramenta ao voltar; painéis e cubo não recebem o distintivo do canvas.
+
 ## 0.38.3 — 05/11/2026
 
 - A célula escolhida como perfil da Extrusão conserva seu realce ao passar o mouse sobre outra área, inclusive com distância zero ou entrada inválida. O cálculo do realce tem trabalhador e cache próprios, independentes da prévia do sólido; troca de perfil, revisão, posição ou cancelamento descarta respostas antigas.

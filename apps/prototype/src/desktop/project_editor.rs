@@ -41,6 +41,7 @@ mod sketch_text;
 mod slicer;
 mod theme;
 mod timeline;
+mod tool_cursor;
 mod view_cube;
 mod view_modes;
 mod views;

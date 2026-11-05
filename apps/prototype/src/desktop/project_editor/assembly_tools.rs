@@ -55,6 +55,20 @@ impl Movement {
     }
 }
 impl Panel {
+    pub(super) fn cursor_icon(&self) -> Icon {
+        match self {
+            Self::Move(d) if matches!(d.mode, MoveMode::Copy) => Icon::Copy,
+            Self::Move(_) => Icon::Move,
+            Self::Align(d) => match d.kind {
+                navigation::PickMode::Face => Icon::FaceToFace,
+                navigation::PickMode::Edge => Icon::EdgeToEdge,
+                navigation::PickMode::Vertex => Icon::PointToPoint,
+            },
+            Self::Pattern(_) => Icon::Pattern,
+            Self::Mirror(_) => Icon::Mirror,
+        }
+    }
+
     fn movement(&self) -> Option<Movement> {
         match self {
             Self::Move(_) => Some(Movement::Free),

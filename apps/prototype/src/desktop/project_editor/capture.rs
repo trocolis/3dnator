@@ -47,7 +47,12 @@ pub(crate) fn render_ui_scenario(
         None => (scenario, false),
     };
     match scenario {
-        "timeline"
+        "cursor-extrude"
+        | "cursor-hole"
+        | "cursor-measure"
+        | "cursor-pan"
+        | "cursor-select"
+        | "timeline"
         | "timeline-menu"
         | "extrude"
         | "edit-last"
@@ -130,7 +135,7 @@ pub(crate) fn render_ui_scenario(
         | "extrude-cut" => {}
         _ => {
             return Err(
-                "Cenários: timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
+                "Cenários: cursor-extrude, cursor-hole, cursor-measure, cursor-pan, cursor-select, timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
                  hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-drawing, settings-shortcuts, settings-help, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
@@ -179,6 +184,11 @@ pub(crate) fn render_ui_scenario(
             } else {
                 canvas.center() + egui::vec2(-60., 40.)
             };
+            if pointer.starts_with("cursor-") && frame >= 2 {
+                return vec![egui::Event::PointerMoved(
+                    canvas.center() + egui::vec2(-40., 60.),
+                )];
+            }
             if pointer.starts_with("sketch-") && pointer.ends_with("-input") {
                 let start = canvas.center() + egui::vec2(-180., 100.);
                 let end = start + egui::vec2(140., -75.);
@@ -306,6 +316,9 @@ pub(crate) fn render_ui_scenario(
             }
         },
         |editor| {
+            if scenario.starts_with("cursor-") {
+                return editor.preview_idle();
+            }
             if scenario == "sketch-text" {
                 return editor.current().camera_transition.is_none()
                     && editor.text_preview_sketch().is_some();
@@ -460,6 +473,17 @@ fn pipe_document(closed: bool) -> Result<(Document, PartId, SketchId, u64), Box<
 }
 
 fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Error>> {
+    if scenario.starts_with("cursor-") {
+        editor.activate_selection(&egui::Context::default());
+        match scenario {
+            "cursor-extrude" => editor.open_feature_tool(feature_editor::Tool::Extrude),
+            "cursor-hole" => editor.open_feature_tool(feature_editor::Tool::Hole),
+            "cursor-measure" => editor.shell.measure_open = true,
+            "cursor-pan" => editor.shell.camera_mode = Some(view_modes::CameraMode::Pan),
+            _ => {}
+        }
+        return Ok(());
+    }
     if matches!(
         scenario,
         "section-contact" | "section-contact-perspective" | "section-contact-hover"

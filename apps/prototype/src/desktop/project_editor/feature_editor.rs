@@ -971,6 +971,10 @@ impl Draft {
     pub(super) fn planar_pick(&self) -> bool {
         self.accepts_face_profile() || self.choosing_cutting_plane()
     }
+    pub(super) fn cursor_icon(&self) -> Icon {
+        self.tool.icon()
+    }
+
     /// Extrusão esperando uma área: só regiões, células e faces planas respondem.
     pub(super) fn choosing_area(&self) -> bool {
         self.tool == Tool::Extrude && matches!(self.field, None | Some(Field::Profile))

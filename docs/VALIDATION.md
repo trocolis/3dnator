@@ -742,3 +742,8 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - O realce da célula escolhida usa trabalhador e cache do próprio painel, independentes da prévia do sólido. O perfil não depende mais do hover nem de uma distância válida; troca de seleção, revisão ou posição invalida o resultado.
 - fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. O ensaio gráfico `extrusion_highlights_and_chooses_only_areas_including_outside_a_contour` passou com nova regressão: selecionar o aro, apontar o miolo e conservar o aro realçado com distância zero e parâmetro inexistente, sem alterar a escolha. A confirmação, o cancelamento por segundo clique e o histórico continuam cobertos.
+
+## Distintivos das ferramentas — 0.38.4 — 05/11/2026
+
+- Um caminho comum desenha o ícone ativo ao lado do ponteiro sobre o canvas, incluindo Construção, montagem, navegação, Medir, Texto e modificações do rascunho. Selecionar não tem distintivo; modos de câmera têm prioridade e o cubo fica excluído. Capturas do rascunho conservam seu indicador adicional.
+- fmt, Clippy do workspace sem/com OCCT e testes do workspace sem OCCT aprovados. Cinco capturas reais revisadas (`target/ajustes2-cursor-{extrude,hole,measure,pan,select}.png`) confirmam os ícones distintos e a ausência em Selecionar. Comparação visual em `target/ajustes2-cursor-details.png`.

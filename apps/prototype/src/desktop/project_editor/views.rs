@@ -741,6 +741,7 @@ impl Editor {
                         mode.cursor(response.dragged_by(egui::PointerButton::Middle)),
                     );
                 }
+                self.tool_cursor(ui, &response);
                 self.current_mut().camera = self.viewport.camera.clone();
             });
     }

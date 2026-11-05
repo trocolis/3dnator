@@ -431,3 +431,5 @@ geometria auxiliar ao rascunho.
 Os cenários `sketch-text` e `sketch-text-dark` capturam o painel e a prévia de Texto; `sketch-origin-dimension` captura uma cota até a origem local.
 
 Clicar em uma das seis faces principais do cubo conserva o alto predominante da vista anterior e alinha a tela em passos de 90°. Home restaura a orientação canônica.
+
+As ferramentas ativas mostram o mesmo ícone da faixa ao lado do ponteiro sobre o canvas, inclusive Construção, montagem e Medir. Selecionar mantém o ponteiro sem distintivo. Arrastar/Rotacionar mostram o ícone de navegação enquanto suspendem outra ferramenta; ao voltar, o ícone da ferramenta reaparece. O distintivo não cobre o cubo nem os painéis. Cenários de captura: `cursor-extrude`, `cursor-hole`, `cursor-measure`, `cursor-pan` e `cursor-select`.
