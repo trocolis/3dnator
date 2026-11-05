@@ -757,3 +757,7 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 ## Navegação sem distintivo — 0.38.6 — 05/11/2026
 
 - Medir/Arrastar/Rotacionar não desenham ícone adicional e escondem o da ferramenta suspensa. fmt, Clippy do workspace e testes sem OCCT passaram. Capturas reais de Medir, Arrastar e Extrusão revisadas em `target/ajustes3-navigation-details.png`: navegação sem distintivo e construção com o ícone preservado.
+
+## Medir sem cintilação — 0.38.7 — 05/11/2026
+
+- O cache de Medir entrega o último candidato enquanto consulta o raio seguinte, sem reutilizar respostas de outra câmera, seção, visibilidade, aba ou revisão. fmt, Clippy sem/com OCCT e testes do workspace sem OCCT passaram. O ensaio gráfico do candidato foi ampliado com vinte movimentos seguidos em cada face/aresta/vértice, na peça e montagem: nenhum quadro perde o realce; trocar o corte remove imediatamente o resultado antigo.

@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.7 — 05/11/2026
+
+- O realce do Medir permanece durante o movimento contínuo do cursor enquanto a próxima consulta termina. Mudanças na câmera, seção, aba, revisão ou visibilidade invalidam o resultado antigo; o trabalhador continua atualizando o candidato sem quadros vazios.
+
 ## 0.38.6 — 05/11/2026
 
 - Medir, Arrastar e Rotacionar usam somente o cursor do sistema, sem ícone adicional. A suspensão de uma ferramenta de construção também esconde seu distintivo até a navegação terminar.

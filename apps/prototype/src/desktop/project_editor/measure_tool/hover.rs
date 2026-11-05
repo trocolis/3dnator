@@ -10,6 +10,17 @@ struct Key {
     direction: Point3,
     reach: f64,
     section: Option<section::Section>,
+    view_rays: [(Point3, Point3); 2],
+    rect: egui::Rect,
+}
+impl Key {
+    fn same_context(&self, other: &Self) -> bool {
+        self.scene == other.scene
+            && self.section == other.section
+            && self.view_rays == other.view_rays
+            && self.rect == other.rect
+            && (self.reach - other.reach).abs() <= self.reach.max(1.) * 1e-9
+    }
 }
 #[derive(Default)]
 pub(super) struct Cache {
@@ -51,14 +62,21 @@ impl Cache {
         view: ViewState,
         context: &egui::Context,
     ) -> Option<highlight::Overlay> {
-        if self.ready.as_ref().is_some_and(|(ready, _)| *ready != key) {
+        if self
+            .ready
+            .as_ref()
+            .is_some_and(|(ready, _)| !ready.same_context(&key))
+        {
             self.ready = None;
         }
         if let Some((requested, receiver)) = &self.running {
             match receiver.try_recv() {
                 Ok(overlay) => {
-                    if *requested == key {
-                        self.ready = Some((key.clone(), overlay));
+                    if requested.same_context(&key)
+                        && (*requested == key
+                            || self.ready.as_ref().is_none_or(|(ready, _)| *ready != key))
+                    {
+                        self.ready = Some((requested.clone(), overlay));
                     }
                     self.running = None;
                 }
@@ -66,7 +84,9 @@ impl Cache {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        if let Some((_, overlay)) = &self.ready {
+        if let Some((ready, overlay)) = &self.ready
+            && *ready == key
+        {
             return Some(overlay.clone());
         }
         if self.running.is_none() {
@@ -103,7 +123,7 @@ impl Cache {
             }
         }
         context.request_repaint_after(Duration::from_millis(16));
-        None
+        self.ready.as_ref().map(|(_, overlay)| overlay.clone())
     }
 }
 impl Editor {
@@ -136,6 +156,14 @@ impl Editor {
             direction: ray.direction,
             reach: self.pick_reach(position, rect, bounds),
             section: self.current().section,
+            view_rays: [[0., 0.], [1., 1.]].map(|p| {
+                let ray = self
+                    .viewport
+                    .camera
+                    .world_ray(p, bounds, f64::from(rect.aspect_ratio()));
+                (ray.origin, ray.direction)
+            }),
+            rect,
         };
         let document = self.picking_document();
         let view = self.current().view.clone();

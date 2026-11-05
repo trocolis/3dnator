@@ -12893,6 +12893,22 @@ mod tests {
                     }
                     std::thread::sleep(Duration::from_millis(5));
                 }
+                // Não há quadro vazio enquanto o cursor continua no mesmo elemento.
+                for step in 1..=20 {
+                    let next = [point[0] + f64::from(step) * 0.01, point[1], point[2]];
+                    let at = sketch_scene::project(
+                        &editor.viewport.camera,
+                        editor.display_bounds(),
+                        editor.canvas_rect,
+                        next,
+                    )
+                    .ok_or("Cursor")?;
+                    frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+                    assert!(
+                        editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty()),
+                        "Candidato piscou durante movimento"
+                    );
+                }
             }
         }
         // Mudar o corte com o ponteiro parado não conserva um candidato invisível.
