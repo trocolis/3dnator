@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.38.8 — 05/11/2026
+
+- Ferramentas secundárias das seções passam a botões visíveis; a faixa quebra os grupos em novas linhas para mantê-los dentro da janela. Imagem, Estender, Espelhar, Excluir, Parâmetros e Corte de seção não dependem mais de menus de grupo. Restrições, Varredura e padrões de corpos também ficam expostos.
+
 ## 0.38.7 — 05/11/2026
 
 - O realce do Medir permanece durante o movimento contínuo do cursor enquanto a próxima consulta termina. Mudanças na câmera, seção, aba, revisão ou visibilidade invalidam o resultado antigo; o trabalhador continua atualizando o candidato sem quadros vazios.

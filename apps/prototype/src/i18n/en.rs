@@ -155,7 +155,6 @@ pub fn text(key: Text) -> &'static str {
         Text::ArcShort => "Arc",
         Text::Visibility => "Show / hide",
         Text::ModelTab => "Construction",
-        Text::MoreTools => "More tools",
         Text::PrintTab => "Printing",
         Text::Calibrate => "Calibrate",
         Text::CalibrateStepPrint => {

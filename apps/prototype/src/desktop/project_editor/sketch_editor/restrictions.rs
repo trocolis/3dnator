@@ -237,13 +237,23 @@ pub(in crate::desktop::project_editor) enum Choice {
 }
 
 /// Ferramentas sempre à vista na seção Restringir, em duas fileiras de três.
-pub(in crate::desktop::project_editor) const GALLERY: [Restriction; 6] = [
+pub(in crate::desktop::project_editor) const GALLERY: [Restriction; 16] = [
     Restriction::HorizontalVertical,
     Restriction::Coincident,
     Restriction::Tangent,
     Restriction::Equal,
     Restriction::Parallel,
     Restriction::Perpendicular,
+    Restriction::Fix,
+    Restriction::Release,
+    Restriction::Midpoint,
+    Restriction::Concentric,
+    Restriction::Collinear,
+    Restriction::Symmetry,
+    Restriction::Polygon,
+    Restriction::Link,
+    Restriction::Detach,
+    Restriction::Dissolve,
 ];
 
 pub(in crate::desktop::project_editor) fn presentation(

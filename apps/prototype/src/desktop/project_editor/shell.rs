@@ -11,10 +11,8 @@ use view_modes::{CameraMode, PrimaryRoute};
 
 /// Todas as abas compartilham a mesma faixa, sem rodapé com o nome do grupo.
 const GROUP_HORIZONTAL_GAP: f32 = 3.;
-/// Coluna compacta do menu de ferramentas secundárias do grupo.
-const GROUP_MENU_WIDTH: f32 = 22.;
-/// Três botões de 20 pontos da seção Restringir, com o rótulo sob as duas fileiras.
-const RESTRICT_COLUMN_WIDTH: f32 = 64.;
+/// Oito botões de 20 pontos por fileira, com todas as restrições expostas.
+const RESTRICT_COLUMN_WIDTH: f32 = 176.;
 const RESTRICT_CAPTION_HEIGHT: f32 = 12.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1214,88 +1212,22 @@ impl Editor {
         }
     }
     fn ribbon_scroller(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::horizontal()
-            .id_salt("ribbon_scroll")
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = GROUP_HORIZONTAL_GAP;
-                    self.ribbon_groups(ui);
-                });
-            });
+        // Grupos passam à linha seguinte quando necessário; nenhuma ferramenta
+        // depende de abrir um menu ou deslocar a faixa para fora da tela.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(GROUP_HORIZONTAL_GAP, 6.);
+            self.ribbon_groups(ui);
+        });
     }
 
-    /// Botão compacto no fim do grupo reúne as ferramentas secundárias.
-    /// Sem o antigo rodapé, o menu continua acessível sem exibir o nome do grupo.
-    fn sketch_group_menu(&mut self, ui: &mut egui::Ui, actions: &[Action]) {
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(GROUP_MENU_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
-            egui::Sense::click(),
-        );
-        self.shell.menu_rects.push(rect);
-        let label = text(T::MoreTools);
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
-        });
-        if response.hovered() && ui.is_enabled() {
-            ui.painter().rect_filled(rect, 5, theme::blue_fill());
+    fn sketch_section(&mut self, ui: &mut egui::Ui, promoted: &[Action], secondary: &[Action]) {
+        let mut actions = promoted.to_vec();
+        for action in secondary {
+            if !actions.contains(action) {
+                actions.push(*action);
+            }
         }
-        let color = if ui.is_enabled() {
-            theme::muted()
-        } else {
-            egui::Color32::from_gray(165)
-        };
-        let center = rect.center();
-        ui.painter().add(egui::Shape::convex_polygon(
-            vec![
-                center + egui::vec2(-4., -2.),
-                center + egui::vec2(4., -2.),
-                center + egui::vec2(0., 3.),
-            ],
-            color,
-            egui::Stroke::NONE,
-        ));
-        let mut chosen = None;
-        egui::Popup::menu(&response).show(|ui| {
-            for action in actions {
-                let enabled = self.action_enabled(*action);
-                ui.horizontal(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::Vec2::splat(20.), egui::Sense::hover());
-                    icons::paint(ui.painter(), rect, action.icon(), enabled);
-                    if ui
-                        .add_enabled(
-                            enabled,
-                            egui::Button::new(text(action.label())).frame(false),
-                        )
-                        .clicked()
-                    {
-                        chosen = Some(*action);
-                        ui.close();
-                    }
-                });
-            }
-        });
-        response.on_hover_text(label);
-        if let Some(action) = chosen {
-            self.activate_action(ui.ctx(), action);
-        }
-    }
-
-    fn sketch_section(&mut self, ui: &mut egui::Ui, promoted: &[Action], menu: &[Action]) {
-        let width = group_width(promoted.len())
-            + if menu.is_empty() {
-                0.
-            } else {
-                GROUP_HORIZONTAL_GAP + GROUP_MENU_WIDTH
-            };
-        self.ribbon_group_layout(ui, width, |editor, ui| {
-            for action in promoted {
-                editor.action_button(ui, *action, true);
-            }
-            if !menu.is_empty() {
-                editor.sketch_group_menu(ui, menu);
-            }
-        });
+        self.ribbon_group(ui, &actions);
     }
 
     /// Seção Restringir: Dimencionar em destaque, as seis restrições mais usadas e, sob elas,
@@ -1303,11 +1235,12 @@ impl Editor {
     fn restrict_group(&mut self, ui: &mut egui::Ui) {
         let enabled =
             !self.busy() && self.pending_close.is_none() && self.current().sketch_edit.is_some();
-        let width = group_width(2) + GROUP_HORIZONTAL_GAP + RESTRICT_COLUMN_WIDTH;
+        let width = group_width(3) + GROUP_HORIZONTAL_GAP + RESTRICT_COLUMN_WIDTH;
         self.ribbon_group_layout(ui, width, |editor, ui| {
             editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Dimension), true);
             // Diagnóstico ao lado de Dimensionar, do tamanho das demais ferramentas.
             editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Select), true);
+            editor.action_button(ui, Action::SketchEdit(SketchEdit::Construction), true);
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(RESTRICT_COLUMN_WIDTH, icons::RIBBON_BUTTON_SIZE.y),
                 egui::Sense::hover(),
@@ -1321,7 +1254,7 @@ impl Editor {
             column.spacing_mut().button_padding = egui::vec2(1., 1.);
             column.spacing_mut().interact_size.y = 20.;
             let mut chosen = None;
-            for row in sketch_editor::GALLERY.chunks(3) {
+            for row in sketch_editor::GALLERY.chunks(8) {
                 column.horizontal(|ui| {
                     for restriction in row {
                         let (icon, label) = sketch_editor::presentation(*restriction);
@@ -1409,7 +1342,7 @@ impl Editor {
         width: f32,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
-        ui.vertical(|ui| {
+        ui.allocate_ui(egui::vec2(width, icons::RIBBON_BUTTON_SIZE.y), |ui| {
             ui.set_width(width);
             ui.allocate_ui_with_layout(
                 egui::vec2(width, icons::RIBBON_BUTTON_SIZE.y),
@@ -1433,6 +1366,7 @@ impl Editor {
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
                         Action::Solid(SolidTool::Loft),
+                        Action::Solid(SolidTool::Sweep),
                         Action::Solid(SolidTool::Pipe),
                         Action::Solid(SolidTool::Hole),
                     ],
@@ -1454,6 +1388,9 @@ impl Editor {
                         Action::Solid(SolidTool::Join),
                         Action::Solid(SolidTool::Split),
                         Action::Solid(SolidTool::MergeFaces),
+                        Action::Solid(SolidTool::Mirror),
+                        Action::Solid(SolidTool::LinearPattern),
+                        Action::Solid(SolidTool::CircularPattern),
                     ],
                 );
                 self.sketch_section(
@@ -1494,8 +1431,7 @@ impl Editor {
                 // A aba Rascunho mantém o ferramental completo visível fora da edição;
                 // os botões ficam desativados até existir um rascunho em edição.
                 self.ribbon_group(ui, &[Action::NewSketch]);
-                // Imagem fica no menu ▾ da seção, depois de Projetar e Texto: a faixa
-                // inteira precisa caber numa tela de 1280 pontos.
+                // Todas as ferramentas ficam expostas; os grupos quebram linha.
                 self.sketch_section(
                     ui,
                     &[
@@ -1524,8 +1460,7 @@ impl Editor {
                         Action::SketchEdit(SketchEdit::Fillet),
                         Action::SketchEdit(SketchEdit::Chamfer),
                     ],
-                    // Espelhar fica só no menu ▾: com o Diagnóstico em tamanho inteiro, a
-                    // faixa precisa caber numa tela de 1280 pontos.
+                    // Ações antes secundárias também têm botões visíveis.
                     &[
                         Action::SketchTool(sketch_editor::Tool::Trim),
                         Action::SketchEdit(SketchEdit::Offset),

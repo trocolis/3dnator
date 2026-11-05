@@ -249,7 +249,7 @@ pub(crate) fn render_ui_scenario(
             // Menu Importar da Montagem: clique no botão e cursor sobre a primeira subopção.
             let ribbon_menu = match pointer.as_str() {
                 "menu-new-part" => Some(0),
-                "restrict-menu" => Some(2),
+                "restrict-menu" => Some(0),
                 _ => None,
             };
             if let Some(index) = ribbon_menu
@@ -4328,7 +4328,7 @@ mod tests {
     /// a galeria de restrições e os menus do rascunho, em duas larguras de janela.
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
-    fn ribbon_tabs_keep_the_same_compact_height_in_wide_and_narrow_windows()
+    fn ribbon_wraps_groups_with_canvas_space_in_wide_and_narrow_windows()
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
         let mut document = Document::new("Faixas uniformes")?;
@@ -4364,66 +4364,57 @@ mod tests {
                 tops.push(editor.canvas_rect.top());
             }
             assert!(
-                tops.iter().all(|top| (*top - tops[0]).abs() < 1.),
-                "{size:?}: {tops:?}"
+                tops.iter().all(|top| *top < size.y * 0.5),
+                "A faixa não pode ocupar metade da tela: {size:?}: {tops:?}"
             );
-            // O cabeçalho anterior terminava em 188–206 pontos. A versão
-            // compacta precisa recuperar espaço para o canvas em todas as abas.
-            assert!(tops[0] < 180., "{size:?}: {tops:?}");
         }
         Ok(())
     }
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
-    fn sketch_group_chevron_keeps_secondary_tools_reachable() -> Result<(), Box<dyn Error>> {
+    fn sketch_ribbon_tools_are_visible_without_opening_group_menus() -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
-        let mut document = Document::new("Menu do grupo")?;
+        let mut document = Document::new("Faixa completa")?;
         let mut sketch = Sketch::new("Perfil", Plane::xy());
         sketch.add_rectangle([-20., -10.], [20., 10.], false)?;
         let (part, id) = document.add_sketch(None, sketch)?;
-        let mut editor = Editor::from_gpu(gpu_state()?, &context, document)
-            .map_err(|error| error.to_string())?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
         editor.recoveries.clear();
         editor.show_recovery = false;
         editor.begin_sketch(part, id);
         settle(&mut editor, &context)?;
-        editor.shell.tab = shell::RibbonTab::Sketch;
         frame(&mut editor, &context, vec![])?;
-        let chevrons = editor.shell.menu_rects.clone();
-        // Além dos chevrons de Criar e Modificar, Restringir também abre menu.
-        assert_eq!(chevrons.len(), 3, "menus da aba Rascunho ausentes");
-        click(&mut editor, &context, chevrons[1].center())?;
-        let mut labels = Vec::new();
-        for _ in 0..3 {
-            let mut output = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1440., 900.),
-                    )),
-                    time: Some(context.input(|i| i.time) + 1. / 60.),
-                    ..Default::default()
-                },
-                |ui| editor.draw(ui),
+        for label in [
+            T::SketchImage,
+            T::SketchExtendShort,
+            T::MirrorShort,
+            T::DeleteEntity,
+        ] {
+            let rect = action_rect(&context, label)?;
+            assert!(
+                rect.left() >= 0.
+                    && rect.right() <= 1280.
+                    && rect.bottom() < editor.canvas_rect.top(),
+                "Ferramenta fora da faixa: {} {rect:?}",
+                text(label)
             );
-            labels = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
-                    _ => None,
-                })
-                .collect();
-            output.textures_delta.clear();
         }
-        assert!(
-            labels.iter().any(|label| label.contains("Estender")),
-            "menu do Modificar sem Estender: {labels:?}"
-        );
-        assert!(
-            labels.iter().any(|label| label.contains("Excluir")),
-            "menu do Modificar sem Excluir: {labels:?}"
+        for restriction in sketch_editor::GALLERY {
+            let (_, label) = sketch_editor::presentation(restriction);
+            let rect = context
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("gallery_rect", text(label)))))
+                .ok_or("Restrição ausente")?;
+            assert!(
+                rect.right() <= 1280. && rect.bottom() < editor.canvas_rect.top(),
+                "Restrição fora da faixa: {rect:?}"
+            );
+        }
+        assert_eq!(
+            editor.shell.menu_rects.len(),
+            1,
+            "Só permanece o menu contextual de restrições já expostas"
         );
         Ok(())
     }
@@ -5555,16 +5546,9 @@ mod tests {
         )?;
         settle(&mut editor, &context)?;
 
-        // Espelhar fica no menu ▾ da seção Modificar.
+        // Espelhar tem botão próprio na faixa, sem abrir o menu da seção.
         frame(&mut editor, &context, vec![])?;
-        let chevron = *editor
-            .shell
-            .menu_rects
-            .get(1)
-            .ok_or("Menu Modificar ausente")?;
-        click(&mut editor, &context, chevron.center())?;
-        frame(&mut editor, &context, vec![])?;
-        let mirror = label_position(&mut editor, &context, text(T::MirrorShort))?;
+        let mirror = action_rect(&context, T::MirrorShort)?.center();
         click(&mut editor, &context, mirror)?;
         let center = sketch_scene::project(
             &editor.viewport.camera,
@@ -5594,29 +5578,15 @@ mod tests {
             3
         );
 
-        // Sair participa da mesma faixa rolável dos demais grupos. Em uma
-        // janela compacta, rolar até o fim mantém as duas opções acessíveis.
+        // Em janela compacta, Sair continua visível nas linhas da faixa, sem rolar.
         let mut exits = Vec::new();
-        for index in 0..4 {
+        for _ in 0..4 {
             let mut output = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
                         egui::vec2(900., 600.),
                     )),
-                    events: if index == 1 {
-                        vec![
-                            egui::Event::PointerMoved(egui::pos2(450., 140.)),
-                            egui::Event::MouseWheel {
-                                unit: egui::MouseWheelUnit::Point,
-                                delta: egui::vec2(-2000., 0.),
-                                phase: egui::TouchPhase::Move,
-                                modifiers: egui::Modifiers::NONE,
-                            },
-                        ]
-                    } else {
-                        Vec::new()
-                    },
                     time: Some(context.input(|input| input.time) + 0.1),
                     ..Default::default()
                 },
@@ -5631,8 +5601,9 @@ mod tests {
                             .contains(&t.galley.job.text.as_str()) =>
                     {
                         let rect = t.visual_bounding_rect();
-                        (rect.top() < 198. && clipped.clip_rect.contains_rect(rect))
-                            .then_some(t.galley.job.text.clone())
+                        (rect.bottom() < editor.canvas_rect.top()
+                            && clipped.clip_rect.contains_rect(rect))
+                        .then_some(t.galley.job.text.clone())
                     }
                     _ => None,
                 })
@@ -13016,9 +12987,17 @@ mod tests {
         let context = egui::Context::default();
         let (mut editor, _) = navigation_editor(&context)?;
         frame(&mut editor, &context, vec![])?;
-        // A Construção e seu menu cabem em 1280 pontos, sem rolagem.
-        let menu = *editor.shell.menu_rects.last().ok_or("Menu ausente")?;
-        assert!(menu.right() <= 1280. - 12.);
+        // Ferramentas de inspeção ficam na faixa, sem menu de ferramentas ocultas.
+        assert!(editor.shell.menu_rects.is_empty());
+        for label in [
+            T::CheckSolid,
+            T::OffsetPlane,
+            T::Parameters,
+            T::SectionAnalysis,
+        ] {
+            let rect = action_rect(&context, label)?;
+            assert!(rect.right() <= 1280. && rect.bottom() < editor.canvas_rect.top());
+        }
         // Selecionar fica só na barra de navegação, que não tem legendas.
         for tab in [
             shell::RibbonTab::Model,

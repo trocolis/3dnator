@@ -182,7 +182,6 @@ pub enum Text {
     ArcShort,
     Visibility,
     ModelTab,
-    MoreTools,
     /// Identificador reservado da aba removida, preservado para futuras traduções.
     PrintTab,
     Calibrate,
@@ -1039,7 +1038,6 @@ fn pt(key: Text) -> &'static str {
         Text::ArcShort => "Arco",
         Text::Visibility => "Mostrar / ocultar",
         Text::ModelTab => "Construção",
-        Text::MoreTools => "Mais ferramentas",
         Text::PrintTab => "Impressão",
         Text::Calibrate => "Calibrar",
         Text::CalibrateStepPrint => {

@@ -761,3 +761,8 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 ## Medir sem cintilação — 0.38.7 — 05/11/2026
 
 - O cache de Medir entrega o último candidato enquanto consulta o raio seguinte, sem reutilizar respostas de outra câmera, seção, visibilidade, aba ou revisão. fmt, Clippy sem/com OCCT e testes do workspace sem OCCT passaram. O ensaio gráfico do candidato foi ampliado com vinte movimentos seguidos em cada face/aresta/vértice, na peça e montagem: nenhum quadro perde o realce; trocar o corte remove imediatamente o resultado antigo.
+
+## Faixa sem ferramentas ocultas — 0.38.8 — 05/11/2026
+
+- Botões secundários de criação/modificação, parâmetros e seção ficam expostos; as dezesseis restrições também aparecem na galeria. Os grupos reservam sua largura antes da quebra de linha, evitando corte à direita e rolagem horizontal para acessar ferramentas.
+- fmt, Clippy sem/com OCCT e testes do workspace sem OCCT passaram. Sete ensaios gráficos da faixa passaram, incluindo ferramentas e restrições dentro da janela, transações de rascunho e botões Concluir/Cancelar visíveis em 900×600 sem abrir menus nem rolar. Captura revisada: `target/ajustes3-ribbon-sketch-v2.png`.
