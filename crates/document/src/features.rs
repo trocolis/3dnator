@@ -5,7 +5,9 @@
 //! origem desaparece, o recálculo falha com uma mensagem pedindo nova seleção; nenhuma outra
 //! região, face ou aresta é escolhida no lugar.
 use super::*;
+mod extrusion;
 mod labels;
+pub use extrusion::ExtrusionProfile;
 pub use labels::{LabelMode, LabelSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -236,6 +238,17 @@ pub enum Operation {
         combine: Option<Combine>,
         /// Termina em uma face plana, rascunho ou plano de trabalho da mesma peça.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<ExtrusionLimit>,
+    },
+    /// Uma extrusão de áreas coplanares de corpos/rascunhos distintos da mesma peça.
+    ExtrudeMany {
+        profiles: Vec<ExtrusionProfile>,
+        /// Identidades persistentes das áreas; conservadas ao clonar e reordenar.
+        #[serde(default)]
+        profile_keys: Vec<u64>,
+        from: String,
+        to: String,
+        combine: Option<Combine>,
         until: Option<ExtrusionLimit>,
     },
     Revolve {
@@ -672,6 +685,17 @@ impl Operation {
     /// Corpos consumidos pela operação: ficam ocultos enquanto ela existir.
     pub fn inputs(&self) -> Vec<BodyId> {
         match self {
+            Self::ExtrudeMany {
+                profiles,
+                combine: Some(combine),
+                ..
+            } => {
+                let mut inputs = vec![combine.target];
+                inputs.extend(profiles.iter().filter_map(ExtrusionProfile::base));
+                inputs.sort_unstable_by_key(|b| b.0);
+                inputs.dedup();
+                inputs
+            }
             Self::Extrude {
                 combine: Some(combine),
                 ..
@@ -704,7 +728,9 @@ impl Operation {
     pub fn references(&self) -> Vec<BodyId> {
         let mut bodies = self.inputs();
         match self {
-            Self::Extrude { until, .. } | Self::ExtrudeFace { until, .. } => {
+            Self::Extrude { until, .. }
+            | Self::ExtrudeFace { until, .. }
+            | Self::ExtrudeMany { until, .. } => {
                 if let Some(ExtrusionLimit::Face(limit)) = until {
                     bodies.push(limit.body);
                 }
@@ -719,6 +745,9 @@ impl Operation {
             Self::SplitRemainder { division, .. } => bodies.push(*division),
             _ => {}
         }
+        if let Self::ExtrudeMany { profiles, .. } = self {
+            bodies.extend(profiles.iter().filter_map(ExtrusionProfile::base));
+        }
         bodies.sort_unstable_by_key(|b| b.0);
         bodies.dedup();
         bodies
@@ -732,6 +761,16 @@ impl Operation {
             }
         }
         match self {
+            Self::ExtrudeMany {
+                profiles, until, ..
+            } => profiles
+                .iter_mut()
+                .filter_map(|p| match p {
+                    ExtrusionProfile::Face { base, face, .. } => Some((*base, face)),
+                    _ => None,
+                })
+                .chain(limit(until.as_mut()))
+                .collect(),
             Self::ExtrudeFace {
                 base, face, until, ..
             } => std::iter::once((*base, face))
@@ -779,7 +818,8 @@ impl Operation {
         }
     }
     pub fn uses_sketch(&self, id: SketchId) -> bool {
-        self.sketch() == Some(id)
+        matches!(self,Self::ExtrudeMany {profiles,until,..} if profiles.iter().any(|p|p.uses_sketch(id)) || matches!(until,Some(ExtrusionLimit::Sketch{sketch}) if *sketch==id))
+            || self.sketch() == Some(id)
             || matches!(self,Self::Loft {end,..} | Self::Sweep {end,..} if end.sketch==id)
             || matches!(self,Self::Sweep {route:SweepRoute::Axis {sketch,..}|SweepRoute::Sketch {sketch,..},..} if *sketch==id)
             || matches!(self,Self::Revolve {additional_profiles,axis_sketch,..} if *axis_sketch==Some(id) || additional_profiles.iter().any(|p|p.sketch==id))
@@ -788,12 +828,17 @@ impl Operation {
     }
     pub fn uses_work_plane(&self, id: WorkPlaneId) -> bool {
         matches!(self,
-            Self::Extrude {until:Some(ExtrusionLimit::WorkPlane {work_plane}),..}
+            Self::ExtrudeMany {until:Some(ExtrusionLimit::WorkPlane {work_plane}),..}
+            | Self::Extrude {until:Some(ExtrusionLimit::WorkPlane {work_plane}),..}
             | Self::ExtrudeFace {until:Some(ExtrusionLimit::WorkPlane {work_plane}),..}
             | Self::Split {cutting_plane:Some(ExtrusionLimit::WorkPlane {work_plane}),..} if *work_plane==id)
     }
     pub fn sketch(&self) -> Option<SketchId> {
         match self {
+            Self::ExtrudeMany { profiles, .. } => profiles.iter().find_map(|p| match p {
+                ExtrusionProfile::Sketch(p) => Some(p.sketch),
+                _ => None,
+            }),
             Self::Loft { start, .. } | Self::Sweep { start, .. } => Some(start.sketch),
             Self::Extrude { sketch, .. }
             | Self::Revolve { sketch, .. }
@@ -848,6 +893,22 @@ impl Feature {
             Ok(())
         };
         match &mut self.operation {
+            Operation::ExtrudeMany {
+                profiles,
+                combine,
+                until,
+                ..
+            } => {
+                for profile in profiles {
+                    profile.remap(bodies, sketches)?;
+                }
+                if let Some(combine) = combine {
+                    body(&mut combine.target)?;
+                }
+                if let Some(limit) = until {
+                    limit.remap(bodies, sketches)?;
+                }
+            }
             Operation::ExtrudeFace {
                 base,
                 face,
@@ -1077,6 +1138,42 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
         }
         use parameters::Dimension::{Angle, Length};
         match &f.operation {
+            Operation::ExtrudeMany {
+                profiles,
+                profile_keys,
+                from,
+                to,
+                until,
+                ..
+            } => {
+                if profile_keys.len() != profiles.len()
+                    || profile_keys.iter().copied().collect::<HashSet<_>>().len()
+                        != profile_keys.len()
+                {
+                    return Err(DocumentError(
+                        "Identidades de perfis inválidas ou repetidas.".into(),
+                    ));
+                }
+                if !(2..=64).contains(&profiles.len()) {
+                    return Err(DocumentError(
+                        "Selecione de duas a 64 áreas coplanares.".into(),
+                    ));
+                }
+                for (index, profile) in profiles.iter().enumerate() {
+                    profile.validate(part)?;
+                    if profiles[..index].contains(profile) {
+                        return Err(DocumentError("Perfil de extrusão repetido.".into()));
+                    }
+                }
+                let start = part.parameters.evaluate(from, Length)?;
+                if let Some(limit) = until {
+                    limit.validate(part)?;
+                } else if (start - part.parameters.evaluate(to, Length)?).abs() < 1e-7 {
+                    return Err(DocumentError(
+                        "Extrusão múltipla deve ter comprimento não nulo.".into(),
+                    ));
+                }
+            }
             Operation::ExtrudeFace {
                 face,
                 from,

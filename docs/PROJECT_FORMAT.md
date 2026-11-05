@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 49
+# Formato de projeto — versão interna 50
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 49; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 50; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -17,6 +17,14 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 50, `ExtrudeMany` registra perfis coplanares de faces de corpos e regiões
+de rascunhos diferentes da mesma peça. `profiles` contém variantes `Face` (base, referência
+de face e delimitações) ou `Sketch` (`ProfileRef`); `profile_keys` conserva uma identidade
+persistente por perfil, independente da ordem de seleção e dos IDs remapeados na clonagem.
+`from`, `to`, `combine` e `until` são comuns. Ao combinar, a base inclui o alvo e todos
+os corpos cujas faces foram escolhidas. Ausência de referência, repetição ou perda da
+coplanaridade rejeita a operação inteira. As extrusões antigas conservam suas variantes.
 
 Desde a versão 49, `OriginDistance { point, axis, negative, value }` mede um apoio até a
 origem local do rascunho. `axis` ausente mede distância alinhada; 0/1 medem X/Y e `negative`

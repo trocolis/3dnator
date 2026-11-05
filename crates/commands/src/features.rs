@@ -99,6 +99,13 @@ fn inherited_colors(
     if let Operation::ExtrudeFace { base, .. } = operation {
         inputs.push(*base);
     }
+    if let Operation::ExtrudeMany { profiles, .. } = operation {
+        inputs.extend(
+            profiles
+                .iter()
+                .filter_map(nator_document::features::ExtrusionProfile::base),
+        );
+    }
     inputs.sort_unstable_by_key(|id| id.0);
     inputs.dedup();
     for input in inputs {
@@ -927,6 +934,71 @@ pub(super) fn normalize(
         }
     };
     Ok(match operation {
+        Operation::ExtrudeMany {
+            profiles,
+            profile_keys,
+            from,
+            to,
+            combine,
+            until,
+        } => {
+            let mut stable = Vec::new();
+            for profile in profiles {
+                let operation =
+                    normalize(doc, part, profile.operation(from.clone(), to.clone(), None))?;
+                stable.push(match operation {
+                    Operation::Extrude { sketch, region, .. } => {
+                        nator_document::features::ExtrusionProfile::Sketch(
+                            nator_document::features::ProfileRef { sketch, region },
+                        )
+                    }
+                    Operation::ExtrudeFace {
+                        base,
+                        face,
+                        boundaries,
+                        ..
+                    } => nator_document::features::ExtrusionProfile::Face {
+                        base,
+                        face,
+                        boundaries,
+                    },
+                    _ => return Err(error("Perfil da extrusão múltipla inválido.")),
+                });
+            }
+            let keys = if profile_keys.is_empty() {
+                stable
+                    .iter()
+                    .map(|p| signature(format!("{p:?}").as_bytes()))
+                    .collect()
+            } else {
+                profile_keys
+            };
+            let until = until
+                .map(|limit| {
+                    Ok::<_, DocumentError>(match limit {
+                        ExtrusionLimit::Face(limit) => UntilFace {
+                            body: limit.body,
+                            face: stable_face(doc, part, limit.body, limit.face)?,
+                        }
+                        .into(),
+                        other => other,
+                    })
+                })
+                .transpose()?;
+            let operation = Operation::ExtrudeMany {
+                profiles: stable,
+                profile_keys: keys,
+                from,
+                to,
+                combine,
+                until,
+            };
+            let guide = crate::extrusion::guide(doc, part, &operation)?;
+            if (guide.to - guide.from).abs() < 1e-7 {
+                return Err(error("Extrusão múltipla deve ter comprimento não nulo."));
+            }
+            operation
+        }
         Operation::ExtrudeFace {
             base,
             face,
@@ -1297,7 +1369,8 @@ pub(super) fn construct(
     let mut label_colors = None;
     let mut solid = match operation {
         operation @ (Operation::Extrude { combine, .. }
-        | Operation::ExtrudeFace { combine, .. }) => {
+        | Operation::ExtrudeFace { combine, .. }
+        | Operation::ExtrudeMany { combine, .. }) => {
             let guide = crate::extrusion::guide(doc, part, operation)?;
             if (guide.to - guide.from).abs() < 1e-7 {
                 crate::extrusion::imprint(doc, part, operation, &owner)?
@@ -1306,8 +1379,14 @@ pub(super) fn construct(
                 match combine {
                     // O corpo existente é a base: o corte remove a extrusão dele.
                     Some(combine) => {
-                        let joined = source(doc, part, combine.target)?
-                            .0
+                        let base = crate::extrusion::combined_source(
+                            doc,
+                            part,
+                            operation,
+                            combine.target,
+                            &owner,
+                        )?;
+                        let joined = base
                             .boolean(&extrusion, boolean_mode(combine.mode), &owner)
                             .map_err(error)?;
                         if combine.merge_coplanar && combine.mode == BooleanMode::Join {

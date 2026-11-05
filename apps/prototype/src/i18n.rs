@@ -1306,7 +1306,7 @@ fn pt(key: Text) -> &'static str {
         Text::Sketch => "Rascunho",
         Text::AutomaticExtrusion => "Operação automática",
         Text::ExtrusionProfileHint => {
-            "Clique em uma área: região do rascunho, parte da face delimitada por ele ou face plana. Clique de novo para retirar. Outro plano ou face vira o limite."
+            "Clique em áreas no mesmo plano, de rascunhos ou faces de corpos diferentes da peça. Clique de novo para retirar. Uma área em outro plano vira o limite."
         }
         Text::ExtrusionMouseHint => {
             "A extrusão começa em 0 mm. Arraste a seta ou digite a distância. Clique em outro plano para terminar nele. Escolher uma operação desativa a sugestão automática."

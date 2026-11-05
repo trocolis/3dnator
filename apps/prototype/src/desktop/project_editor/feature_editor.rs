@@ -15,13 +15,14 @@ use super::{
 use nator_commands::solid_check;
 use nator_document::PaintBoundary;
 use nator_document::features::{
-    BooleanMode, Combine, ContactRepair, EdgeRef, ExtrusionLimit, FaceRef, Feature, HoleHeadSpec,
-    HoleSpec, LabelSpec, LinearAxis, Operation, PatternLayout, ProfileRef, RegionRef, SweepRoute,
-    ThreadSpec, UntilFace, signature,
+    BooleanMode, Combine, ContactRepair, EdgeRef, ExtrusionLimit, ExtrusionProfile, FaceRef,
+    Feature, HoleHeadSpec, HoleSpec, LabelSpec, LinearAxis, Operation, PatternLayout, ProfileRef,
+    RegionRef, SweepRoute, ThreadSpec, UntilFace, signature,
 };
 use nator_document::print_profile::{Fastener, HolePreset};
 use nator_sketch::{Curve, Sketch, profiles};
 mod extrusion;
+mod extrusion_profiles;
 pub(super) mod fastening;
 pub(super) mod label;
 mod measure;
@@ -452,6 +453,9 @@ pub(super) struct Draft {
     kept_region: Option<RegionRef>,
     /// Face plana como alternativa a um perfil de rascunho.
     face_profile: Option<FaceArea>,
+    extra_extrusion_profiles: Vec<ExtrusionProfile>,
+    extrusion_profile_keys: std::collections::HashMap<String, u64>,
+    extrusion_plane: Option<nator_sketch::Plane>,
     automatic: bool,
     auto_preferred: Option<BodyId>,
     interaction: extrusion::Interaction,
@@ -520,6 +524,9 @@ impl Draft {
             region: None,
             kept_region: None,
             face_profile: None,
+            extra_extrusion_profiles: Vec::new(),
+            extrusion_profile_keys: std::collections::HashMap::new(),
+            extrusion_plane: None,
             automatic: tool == Tool::Extrude,
             auto_preferred: None,
             interaction: extrusion::Interaction::default(),
@@ -590,6 +597,34 @@ impl Draft {
                 d.base = Some(base);
                 d.kept_topology = Some(Kept::Face(face));
                 d.label = spec;
+            }
+            Operation::ExtrudeMany {
+                profiles,
+                profile_keys,
+                from,
+                to,
+                combine,
+                until,
+            } => {
+                d.extrusion_profile_keys = profiles
+                    .iter()
+                    .zip(profile_keys)
+                    .map(|(p, key)| (format!("{p:?}"), key))
+                    .collect();
+                d.set_extrusion_profiles(profiles);
+                d.extrude = ExtrudeDraft::from_limits(from, to);
+                d.automatic = false;
+                if let Some(combine) = combine {
+                    d.combine = match combine.mode {
+                        BooleanMode::Join => 1,
+                        BooleanMode::Cut => 2,
+                        BooleanMode::Intersect => 3,
+                    };
+                    d.combine_target = Some(combine.target);
+                    d.merge_coplanar = combine.merge_coplanar;
+                }
+                d.extrude.to_face = until.is_some();
+                d.until = until;
             }
             Operation::ExtrudeFace {
                 base,
@@ -1071,36 +1106,29 @@ impl Draft {
             self.field = Some(Field::Profile);
             return;
         }
-        self.face_profile = None;
-        self.interaction = extrusion::Interaction::default();
-        if self.tool == Tool::Extrude && self.sketch == Some(sketch) {
-            let mut selected = self
-                .kept_region
-                .take()
-                .map(|r| r.selections().to_vec())
-                .unwrap_or_default();
-            if let Some(index) = selected.iter().position(|r| *r == region) {
-                selected.remove(index);
-            } else {
-                selected.push(region);
-            }
-            self.kept_region = match selected.len() {
-                0 => None,
-                1 => selected.pop(),
-                _ => Some(RegionRef::Multiple(selected)),
-            };
+        if self.tool == Tool::Extrude {
+            self.toggle_extrusion_profile(ExtrusionProfile::Sketch(ProfileRef { sketch, region }));
         } else {
+            self.face_profile = None;
+            self.interaction = extrusion::Interaction::default();
             self.kept_region = Some(region);
+            self.sketch = Some(sketch);
+            self.region = None;
+            self.field = None;
         }
-        self.sketch = Some(sketch);
-        self.region = None;
-        self.field = if self.tool == Tool::Extrude {
-            Some(Field::Profile)
-        } else {
-            None
-        };
     }
+
     pub(super) fn selected_profiles(&self) -> Vec<ProfileRef> {
+        if self.tool == Tool::Extrude {
+            return self
+                .extrusion_profiles()
+                .into_iter()
+                .filter_map(|p| match p {
+                    ExtrusionProfile::Sketch(p) => Some(p),
+                    _ => None,
+                })
+                .collect();
+        }
         self.sketch
             .zip(self.kept_region.clone())
             .map(|(sketch, region)| ProfileRef { sketch, region })
@@ -1170,16 +1198,23 @@ impl Draft {
                 self.choose_cutting_plane(Some(UntilFace { body, face }.into()), None);
                 return;
             }
-            // A guia só chega com a prévia; até lá, a própria face já é reconhecida.
-            let coplanar = self.interaction.guide.is_some_and(|g| {
-                nator_geometry::norm(nator_geometry::cross(g.normal, plane.normal())) < 1e-7
-                    && nator_geometry::dot(nator_geometry::sub(plane.origin, g.origin), g.normal)
-                        .abs()
+            let support = self.extrusion_plane.or_else(|| {
+                self.interaction
+                    .guide
+                    .and_then(|g| nator_sketch::Plane::from_normal(g.origin, g.normal).ok())
+            });
+            let coplanar = support.is_none_or(|support| {
+                nator_geometry::norm(nator_geometry::cross(support.normal(), plane.normal())) < 1e-7
+                    && nator_geometry::dot(
+                        nator_geometry::sub(plane.origin, support.origin),
+                        support.normal(),
+                    )
+                    .abs()
                         < 1e-6
-            }) || self
-                .face_profile
-                .as_ref()
-                .is_some_and(|area| area.body == body && area.face == face);
+            });
+            if self.extrusion_profiles().is_empty() {
+                self.extrusion_plane = Some(plane);
+            }
             if (self.tool == Tool::Extrude && self.complete() && !coplanar)
                 || self.field == Some(Field::UntilFace)
             {
@@ -1368,15 +1403,16 @@ impl Draft {
     }
     /// Clicar de novo na área escolhida a retira, como nas regiões de rascunho.
     fn choose_face_area(&mut self, area: FaceArea) {
-        if self.face_profile.as_ref() == Some(&area) {
-            self.face_profile = None;
-            self.interaction = extrusion::Interaction::default();
-            self.field = Some(Field::Profile);
-        } else {
-            self.set_face_area(area);
-        }
+        self.toggle_extrusion_profile(ExtrusionProfile::Face {
+            base: area.body,
+            face: area.face,
+            boundaries: area.boundaries,
+        });
     }
+
     fn set_face_area(&mut self, area: FaceArea) {
+        self.extra_extrusion_profiles.clear();
+        self.extrusion_plane = None;
         self.auto_preferred = Some(area.body);
         self.face_profile = Some(area);
         self.sketch = None;
@@ -1601,6 +1637,56 @@ impl Draft {
                         merge_coplanar: self.combine == 1 && self.merge_coplanar,
                     });
                 let until = self.until.clone().filter(|_| self.extrude.to_face);
+                let profiles = self.extrusion_profiles();
+                let same_sketch = profiles
+                    .first()
+                    .and_then(|p| match p {
+                        ExtrusionProfile::Sketch(p) => Some(p.sketch),
+                        _ => None,
+                    })
+                    .filter(|id| {
+                        profiles
+                            .iter()
+                            .all(|p| matches!(p,ExtrusionProfile::Sketch(p) if p.sketch==*id))
+                    });
+                if profiles.len() > 1 && same_sketch.is_none() {
+                    let profile_keys = profiles
+                        .iter()
+                        .map(|p| {
+                            self.extrusion_profile_keys
+                                .get(&format!("{p:?}"))
+                                .copied()
+                                .unwrap_or_else(|| signature(format!("{p:?}").as_bytes()))
+                        })
+                        .collect();
+                    return Operation::ExtrudeMany {
+                        profiles,
+                        profile_keys,
+                        from,
+                        to,
+                        combine,
+                        until,
+                    };
+                }
+                if let Some(sketch) = same_sketch
+                    && profiles.len() > 1
+                {
+                    let regions = profiles
+                        .into_iter()
+                        .filter_map(|p| match p {
+                            ExtrusionProfile::Sketch(p) => Some(p.region),
+                            _ => None,
+                        })
+                        .collect();
+                    return Operation::Extrude {
+                        sketch,
+                        region: RegionRef::Multiple(regions),
+                        from,
+                        to,
+                        combine,
+                        until,
+                    };
+                }
                 if let Some(area) = &self.face_profile {
                     return Operation::ExtrudeFace {
                         base: area.body,
@@ -2352,15 +2438,18 @@ fn profile_rows(
     part: &nator_document::Part,
     regions: &Option<Result<Arc<Vec<profiles::Region>>, String>>,
 ) {
-    let chosen = d
-        .kept_region
-        .as_ref()
-        .map(|r| r.selections().len())
-        .unwrap_or_else(|| usize::from(d.face_profile.is_some() || d.region.is_some()))
-        + d.additional_profiles
-            .iter()
-            .map(|p| p.region.selections().len())
-            .sum::<usize>();
+    let chosen = if d.tool == Tool::Extrude {
+        d.extrusion_profiles().len()
+    } else {
+        d.kept_region
+            .as_ref()
+            .map(|r| r.selections().len())
+            .unwrap_or_else(|| usize::from(d.face_profile.is_some() || d.region.is_some()))
+            + d.additional_profiles
+                .iter()
+                .map(|p| p.region.selections().len())
+                .sum::<usize>()
+    };
     let sketch_name = d
         .sketch
         .and_then(|id| part.sketches.iter().find(|s| s.id == id))
@@ -2386,6 +2475,8 @@ fn profile_rows(
     }
     if selection.clear {
         d.face_profile = None;
+        d.extra_extrusion_profiles.clear();
+        d.extrusion_plane = None;
         d.interaction = extrusion::Interaction::default();
         d.kept_region = None;
         d.additional_profiles.clear();

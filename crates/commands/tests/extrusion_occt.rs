@@ -1389,3 +1389,324 @@ fn joined_extrusions_merge_new_faces_with_coplanar_neighbours_only() -> Result<(
     }
     Ok(())
 }
+
+fn multiple_fixture() -> Result<(
+    Session,
+    PartId,
+    Vec<nator_document::features::ExtrusionProfile>,
+)> {
+    use nator_document::features::{ExtrusionProfile, ProfileRef};
+    let (mut s, part, first) = fixture(false)?;
+    let mut bottom = Sketch::new("Segunda base", Plane::xy());
+    bottom.add_rectangle([40., 0.], [60., 20.], false)?;
+    let (_, sketch) = add_sketch(&mut s, Some(part), bottom)?;
+    let second = created(s.execute(Command::AddFeature {
+        part,
+        name: "Segunda base".into(),
+        operation: Operation::Extrude {
+            sketch,
+            region: RegionRef::Index(0),
+            from: "0 mm".into(),
+            to: "10 mm".into(),
+            combine: None,
+            until: None,
+        },
+    })?)?;
+    let mut profiles = [first, second]
+        .into_iter()
+        .map(|base| ExtrusionProfile::Face {
+            base,
+            face: FaceRef::Named(format!("{}:end", body_owner(base))),
+            boundaries: vec![],
+        })
+        .collect::<Vec<_>>();
+    for (x, reversed) in [(80., false), (100., true)] {
+        let mut plane = Plane {
+            origin: [0., 0., 10.],
+            ..Plane::xy()
+        };
+        if reversed {
+            plane.v = [0., -1., 0.];
+        }
+        let mut profile = Sketch::new("Área independente", plane);
+        profile.add_rectangle([x, 0.], [x + 10., if reversed { -10. } else { 10. }], false)?;
+        let (_, sketch) = add_sketch(&mut s, Some(part), profile)?;
+        profiles.push(ExtrusionProfile::Sketch(ProfileRef {
+            sketch,
+            region: RegionRef::Index(0),
+        }));
+    }
+    Ok((s, part, profiles))
+}
+fn multiple_operation(
+    profiles: Vec<nator_document::features::ExtrusionProfile>,
+    to: &str,
+    combine: Option<Combine>,
+) -> Operation {
+    Operation::ExtrudeMany {
+        profiles,
+        profile_keys: vec![],
+        from: "0 mm".into(),
+        to: to.into(),
+        until: None,
+        combine,
+    }
+}
+
+#[test]
+fn multiple_coplanar_faces_join_and_cut_both_bodies_with_exact_previews() -> Result<()> {
+    for (to, mode, expected) in [
+        ("5 mm", BooleanMode::Join, 12000.),
+        ("-3 mm", BooleanMode::Cut, 5600.),
+    ] {
+        let (mut s, part, mut profiles) = multiple_fixture()?;
+        profiles.truncate(2);
+        let target = profiles[0].base().ok_or("Base")?;
+        let sources = profiles.iter().filter_map(|p| p.base()).collect::<Vec<_>>();
+        let operation = multiple_operation(
+            profiles,
+            to,
+            Some(Combine {
+                target,
+                mode,
+                merge_coplanar: mode == BooleanMode::Join,
+            }),
+        );
+        let preview = if mode == BooleanMode::Cut {
+            extrusion::removed(s.document(), part, &operation)?
+        } else {
+            extrusion::added(s.document(), part, &operation)?
+        }
+        .ok_or("Prévia")?;
+        assert!((preview.signed_volume().abs() - (expected - 8000_f64).abs()).abs() < 1e-4);
+        let count = s.document().part(part).ok_or("Peça")?.features.len();
+        let output = created(s.execute(Command::AddFeature {
+            part,
+            name: "Extrusão conjunta".into(),
+            operation,
+        })?)?;
+        assert!((volume(&s, output)? - expected).abs() < 1e-4);
+        assert_eq!(
+            s.document().part(part).ok_or("Peça")?.features.len(),
+            count + 1
+        );
+        for source in &sources {
+            assert!(!s.document().body(*source).ok_or("Corpo")?.visible);
+        }
+        assert!(s.undo());
+        for source in &sources {
+            assert!(s.document().body(*source).ok_or("Corpo")?.visible);
+        }
+        assert!(s.redo());
+        assert!((volume(&s, output)? - expected).abs() < 1e-4);
+    }
+    Ok(())
+}
+
+#[test]
+fn mixed_extrusion_keeps_opposite_normals_and_names_when_reordered_saved_and_cloned() -> Result<()>
+{
+    let (mut s, part, profiles) = multiple_fixture()?;
+    let output = created(s.execute(Command::AddFeature {
+        part,
+        name: "Quatro perfis".into(),
+        operation: multiple_operation(profiles, "5 mm", None),
+    })?)?;
+    assert!((volume(&s, output)? - 5000.).abs() < 1e-4);
+    let bounds = s
+        .document()
+        .body(output)
+        .ok_or("Corpo")?
+        .geometry
+        .mesh()
+        .bounds();
+    assert!((bounds.min[2] - 10.).abs() < 1e-6 && (bounds.max[2] - 15.).abs() < 1e-6);
+    let names = s
+        .document()
+        .body(output)
+        .ok_or("Corpo")?
+        .face_names
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut operation = s
+        .document()
+        .part(part)
+        .ok_or("Peça")?
+        .features
+        .last()
+        .ok_or("Operação")?
+        .operation
+        .clone();
+    if let Operation::ExtrudeMany {
+        profiles,
+        profile_keys,
+        ..
+    } = &mut operation
+    {
+        profiles.swap(0, 1);
+        profile_keys.swap(0, 1);
+    }
+    s.execute(Command::EditFeature {
+        part,
+        output,
+        operation,
+    })?;
+    assert_eq!(
+        names,
+        s.document()
+            .body(output)
+            .ok_or("Corpo")?
+            .face_names
+            .iter()
+            .cloned()
+            .collect()
+    );
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("multipla.3dnator");
+    nator_project_io::write_project(&path, s.document())?;
+    let mut s = Session::new(nator_project_io::read_project(&path)?)?;
+    let instance = s
+        .document()
+        .instances()
+        .iter()
+        .find(|i| i.part == part)
+        .ok_or("Instância")?
+        .id;
+    s.execute(Command::CloneInstance {
+        id: instance,
+        name: "Cópia".into(),
+    })?;
+    let clone = s
+        .document()
+        .parts()
+        .iter()
+        .find(|p| p.id != part)
+        .ok_or("Clone")?;
+    let copy = clone.id;
+    let copied_output = clone.features.last().ok_or("Operação")?.output;
+    let original_keys = match &s
+        .document()
+        .part(part)
+        .ok_or("Peça")?
+        .features
+        .last()
+        .ok_or("Operação")?
+        .operation
+    {
+        Operation::ExtrudeMany { profile_keys, .. } => profile_keys.clone(),
+        _ => return Err("Operação".into()),
+    };
+    assert!(
+        matches!(&clone.features.last().ok_or("Operação")?.operation,Operation::ExtrudeMany {profile_keys,..} if *profile_keys==original_keys)
+    );
+    s.execute(Command::SetParameter {
+        part: copy,
+        name: "teste".into(),
+        expression: Some("1 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    assert!((volume(&s, copied_output)? - 5000.).abs() < 1e-4);
+    s.document().validate()?;
+    Ok(())
+}
+
+#[test]
+fn multiple_extrusion_rejects_non_coplanar_or_duplicate_profiles_atomically() -> Result<()> {
+    let (mut s, part, profiles) = multiple_fixture()?;
+    let mut invalid = profiles[..2].to_vec();
+    if let nator_document::features::ExtrusionProfile::Face { base, face, .. } = &mut invalid[1] {
+        *face = FaceRef::Named(format!("{}:start", body_owner(*base)));
+    }
+    for selection in [invalid, vec![profiles[0].clone(), profiles[0].clone()]] {
+        let before = s.document().clone();
+        assert!(
+            s.execute(Command::AddFeature {
+                part,
+                name: "Inválida".into(),
+                operation: multiple_operation(selection, "5 mm", None)
+            })
+            .is_err()
+        );
+        assert_eq!(s.document().parts().len(), before.parts().len());
+        assert_eq!(
+            s.document().part(part).ok_or("Peça")?.features.len(),
+            before.part(part).ok_or("Peça")?.features.len()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn multiple_extrusion_respects_face_cells_and_shared_associative_limit() -> Result<()> {
+    use nator_document::features::{ExtrusionLimit, ExtrusionProfile, ProfileRef};
+    let (mut s, part, base, _) = plate_with_contour()?;
+    let Operation::ExtrudeFace {
+        base,
+        face,
+        boundaries,
+        ..
+    } = clicked_area(&s, base, 2., 2., "5 mm")?
+    else {
+        return Err("Área".into());
+    };
+    let mut free = Sketch::new(
+        "Livre",
+        Plane {
+            origin: [0., 0., 10.],
+            ..Plane::xy()
+        },
+    );
+    free.add_rectangle([40., 0.], [50., 10.], false)?;
+    let (_, sketch) = add_sketch(&mut s, Some(part), free)?;
+    let (_, limit) = add_sketch(
+        &mut s,
+        Some(part),
+        Sketch::new(
+            "Limite",
+            Plane {
+                origin: [0., 0., 17.],
+                ..Plane::xy()
+            },
+        ),
+    )?;
+    let mut operation = multiple_operation(
+        vec![
+            ExtrusionProfile::Face {
+                base,
+                face,
+                boundaries,
+            },
+            ExtrusionProfile::Sketch(ProfileRef {
+                sketch,
+                region: RegionRef::Index(0),
+            }),
+        ],
+        "5 mm",
+        None,
+    );
+    if let Operation::ExtrudeMany { until, .. } = &mut operation {
+        *until = Some(ExtrusionLimit::Sketch { sketch: limit });
+    }
+    let output = created(s.execute(Command::AddFeature {
+        part,
+        name: "Célula e região".into(),
+        operation,
+    })?)?;
+    assert!((volume(&s, output)? - 400. * 7.).abs() < 1e-4);
+    assert!(!s.document().sketch(sketch).ok_or("Perfil")?.visible);
+    assert!(s.document().sketch(limit).ok_or("Limite")?.visible);
+    // Deslocar somente o perfil quebra a coplanaridade: o documento anterior é preservado.
+    let before = volume(&s, output)?;
+    let mut moved = s.document().sketch(sketch).ok_or("Perfil")?.sketch.clone();
+    moved.plane.origin[2] = 11.;
+    assert!(
+        s.execute(Command::UpdateSketch {
+            id: sketch,
+            sketch: moved
+        })
+        .is_err()
+    );
+    assert!((volume(&s, output)? - before).abs() < 1e-6);
+    Ok(())
+}

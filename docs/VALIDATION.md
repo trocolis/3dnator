@@ -771,3 +771,12 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 
 - Consulta única para hover/clique reúne pontos e curvas de rascunhos visíveis de peças, ocorrências e referências da montagem, respeitando corte, bloqueio, isolamento e material à frente. Comprimentos de linhas/círculos/arcos e raios são analíticos; apresentação usa polilinhas.
 - fmt, Clippy sem/com OCCT e workspace sem OCCT passaram. Testes numéricos verificam reta 3–4–5, circunferência e quarto de arco em plano/ocorrência transformados e descartam rascunho oculto/atrás de material. Quatro ensaios gráficos de Medir passaram, incluindo comprimentos por hover/clique em peça, referência e ocorrência rotacionada.
+
+## Extrusão de perfis coplanares distintos — 0.40.0 — 05/11/2026
+
+- `cargo fmt --all -- --check`, Clippy com avisos negados e testes de workspace passaram sem e com OCCT, sempre com `--locked`: 405 testes sem OCCT e 590 com OCCT.
+- Os 28 testes de `extrusion_occt` cobrem os modos anteriores e quatro novas regressões: união/corte de faces em dois corpos com volume exato da prévia; mistura de faces e rascunhos com normais opostas; estabilidade ao reordenar, salvar e clonar; rejeição atômica de duplicação e planos diferentes; célula delimitada com limite associativo e recálculo que perde a coplanaridade.
+- Os sete ensaios gráficos `extrusion_` passaram explicitamente com `--ignored --test-threads=1`. O novo `extrusion_selects_faces_and_different_sketches_in_one_operation` seleciona por cliques faces de dois corpos e regiões de dois rascunhos, alterna um perfil, confirma uma única operação, reabre a seleção e desfaz a publicação inteira.
+- Também passaram os sete ensaios gráficos `ribbon_`, incluindo janelas estreitas e exposição das ferramentas secundárias.
+- Formato interno 50: chaves de perfis persistem independentemente da ordem e do remapeamento da clonagem; o leitor continua aceitando projetos anteriores. Diagnóstico e etapas em `docs/AJUSTES_2026_11_05.md`.
+- Passaram ainda os quatro cenários gráficos `measure_`: cursor, continuidade do realce, clique/medida de topologia e rascunhos em ocorrências posicionadas. Logs finais em `target/ajustes3-final-*.log`; pacote local validado no runtime Freedesktop 26.08 com OCCT 7.9.3.

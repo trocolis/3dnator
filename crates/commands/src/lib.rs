@@ -1231,6 +1231,20 @@ fn add_feature(
             additional_profiles,
             ..
         } => profiles.extend(additional_profiles.iter().map(|p| p.sketch)),
+        nator_document::features::Operation::ExtrudeMany {
+            profiles: selected, ..
+        } => {
+            for profile in selected {
+                match profile {
+                    nator_document::features::ExtrusionProfile::Sketch(p) => {
+                        profiles.push(p.sketch)
+                    }
+                    nator_document::features::ExtrusionProfile::Face { boundaries, .. } => {
+                        profiles.extend(boundaries.iter().map(|b| b.mask.sketch))
+                    }
+                }
+            }
+        }
         nator_document::features::Operation::ExtrudeFace { boundaries, .. } => {
             profiles.extend(boundaries.iter().map(|b| b.mask.sketch))
         }

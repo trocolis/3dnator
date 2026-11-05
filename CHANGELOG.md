@@ -6,6 +6,11 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.40.0 — 05/11/2026
+
+- Extrusão seleciona conjuntamente áreas coplanares de faces de corpos diferentes e de rascunhos distintos da peça em edição, com uma operação e uma ação de desfazer. A seleção alterna por clique e conserva todos os realces; o recálculo verifica o plano e usa identidades persistentes por perfil.
+- Formato 50 registra a extrusão de perfis heterogêneos, mantendo leitura dos anteriores. Clonagem remapeia fontes e conserva identidades; perder uma referência ou a coplanaridade falha atomicamente.
+
 ## 0.39.0 — 05/11/2026
 
 - Medir reconhece pontos, linhas, círculos e arcos de rascunhos de peça e de referência, incluindo ocorrências posicionadas. Hover e clique compartilham a consulta; comprimento e raio são analíticos, e os alvos participam das distâncias e ângulos existentes. Ocultação, isolamento, bloqueio, corte e oclusão por material são respeitados.

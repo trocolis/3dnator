@@ -39,6 +39,38 @@ mod precise {
         part: PartId,
         operation: &Operation,
     ) -> Result<Guide, DocumentError> {
+        if let Operation::ExtrudeMany {
+            profiles,
+            from,
+            to,
+            until,
+            ..
+        } = operation
+        {
+            let first = profiles
+                .first()
+                .ok_or_else(|| error("Selecione pelo menos uma área."))?;
+            let g = guide(
+                doc,
+                part,
+                &first.operation(from.clone(), to.clone(), until.clone()),
+            )?;
+            for profile in profiles.iter().skip(1) {
+                let next = guide(
+                    doc,
+                    part,
+                    &profile.operation(from.clone(), to.clone(), until.clone()),
+                )?;
+                if norm(nator_geometry::cross(g.normal, next.normal)) > 1e-7
+                    || dot(sub(next.origin, g.origin), g.normal).abs() > 1e-6
+                {
+                    return Err(error(
+                        "Todas as áreas da extrusão devem estar no mesmo plano.",
+                    ));
+                }
+            }
+            return Ok(g);
+        }
         let piece = doc
             .part(part)
             .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
@@ -229,6 +261,46 @@ mod precise {
         owner: &str,
         span: Option<(f64, f64)>,
     ) -> Result<Solid, DocumentError> {
+        if let Operation::ExtrudeMany {
+            profiles,
+            profile_keys,
+            from,
+            to,
+            until,
+            ..
+        } = operation
+        {
+            let master = guide(doc, part, operation)?;
+            let mut result: Option<Solid> = None;
+            for (index, profile) in profiles.iter().enumerate() {
+                let mut operation = profile.operation(from.clone(), to.clone(), until.clone());
+                let local = guide(doc, part, &operation)?;
+                let reverse = dot(master.normal, local.normal) < 0.;
+                if reverse {
+                    operation =
+                        profile.operation(format!("-({from})"), format!("-({to})"), until.clone());
+                }
+                let key = profile_keys.get(index).copied().unwrap_or_else(|| {
+                    nator_document::features::signature(format!("{profile:?}").as_bytes())
+                });
+                let scoped = format!("{owner}:profile{key:x}");
+                let mut prism = tool(
+                    doc,
+                    part,
+                    &operation,
+                    owner,
+                    span.map(|(a, b)| if reverse { (-a, -b) } else { (a, b) }),
+                )?;
+                prism.map_face_names(|name| {
+                    format!("{scoped}{}", name.strip_prefix(owner).unwrap_or(name))
+                });
+                result = Some(match result {
+                    None => prism,
+                    Some(previous) => previous.boolean(&prism, 0, owner).map_err(error)?,
+                });
+            }
+            return result.ok_or_else(|| error("Selecione uma área de extrusão."));
+        }
         let g = guide(doc, part, operation)?;
         let (from, mut to) = span.unwrap_or((g.from, g.to));
         let until = match operation {
@@ -562,12 +634,30 @@ mod precise {
             merge_coplanar: c.4 == BooleanMode::Join,
         });
         match &mut operation {
-            Operation::Extrude { combine, .. } | Operation::ExtrudeFace { combine, .. } => {
-                *combine = choice
-            }
+            Operation::Extrude { combine, .. }
+            | Operation::ExtrudeFace { combine, .. }
+            | Operation::ExtrudeMany { combine, .. } => *combine = choice,
             _ => {}
         }
         Ok(operation)
+    }
+
+    pub(crate) fn combined_source(
+        doc: &Document,
+        part: PartId,
+        operation: &Operation,
+        target: BodyId,
+        owner: &str,
+    ) -> Result<Solid, DocumentError> {
+        let mut base = source(doc, part, target)?.0;
+        if matches!(operation, Operation::ExtrudeMany { .. }) {
+            for input in operation.inputs().into_iter().filter(|id| *id != target) {
+                base = base
+                    .boolean(&source(doc, part, input)?.0, 0, owner)
+                    .map_err(error)?;
+            }
+        }
+        Ok(base)
     }
 
     /// Volume efetivamente retirado, não o prisma inteiro que pode atravessar o vazio.
@@ -579,7 +669,7 @@ mod precise {
         let Some(combine) = combination(operation).filter(|c| c.mode == BooleanMode::Cut) else {
             return Ok(None);
         };
-        let (base, _) = source(doc, part, combine.target)?;
+        let base = combined_source(doc, part, operation, combine.target, "preview")?;
         let prism = tool(doc, part, operation, "removal", None)?;
         if base.common_volume(&prism).map_err(error)? <= 1e-9 {
             return Ok(None);
@@ -601,7 +691,7 @@ mod precise {
         if (g.to - g.from).abs() < 1e-7 {
             return Ok(None);
         }
-        let (base, _) = source(doc, part, combine.target)?;
+        let base = combined_source(doc, part, operation, combine.target, "preview")?;
         let prism = tool(doc, part, operation, "addition", None)?;
         if prism.volume().map_err(error)? - base.common_volume(&prism).map_err(error)? <= 1e-9 {
             return Ok(None);
@@ -612,14 +702,16 @@ mod precise {
 }
 pub fn combination(operation: &Operation) -> Option<Combine> {
     match operation {
-        Operation::Extrude { combine, .. } | Operation::ExtrudeFace { combine, .. } => *combine,
+        Operation::Extrude { combine, .. }
+        | Operation::ExtrudeFace { combine, .. }
+        | Operation::ExtrudeMany { combine, .. } => *combine,
         _ => None,
     }
 }
 #[cfg(feature = "occt")]
 pub use precise::{added, automatic, guide, removed};
 #[cfg(feature = "occt")]
-pub(super) use precise::{imprint, imprint_target, limit_plane, tool};
+pub(super) use precise::{combined_source, imprint, imprint_target, limit_plane, tool};
 #[cfg(not(feature = "occt"))]
 pub fn automatic(
     _doc: &Document,

@@ -83,6 +83,7 @@ impl Draft {
                     .guide
                     .and_then(|g| nator_sketch::Plane::from_normal(g.origin, g.normal).ok())
             })
+            .or(self.extrusion_plane)
     }
     pub(in crate::desktop::project_editor) fn accepts_face_profile(&self) -> bool {
         self.tool == Tool::Extrude
@@ -98,13 +99,14 @@ impl Draft {
         placement: Placement,
         context: &egui::Context,
     ) {
-        let Some(area) = self
-            .face_profile
-            .clone()
+        let areas: Vec<_> = self
+            .face_areas()
+            .into_iter()
             .filter(|a| !a.boundaries.is_empty())
-        else {
+            .collect();
+        if areas.is_empty() {
             return;
-        };
+        }
         let key = (revision, placement);
         if self.interaction.area_key != Some(key) {
             self.interaction.area = None;
@@ -132,17 +134,22 @@ impl Draft {
             if std::thread::Builder::new()
                 .name("selected-extrusion-area".into())
                 .spawn(move || {
-                    let overlay = document.body(area.body).and_then(|body| {
-                        let pose = placement.compose(body.placement).ok()?;
-                        let mesh = nator_commands::painting::cell_mesh(
-                            &document,
-                            area.body,
-                            &area.face,
-                            &area.boundaries,
-                        )
-                        .ok()?;
-                        cell_hover::area_overlay(&mesh, pose)
-                    });
+                    let overlay = (|| {
+                        let mut result = highlight::Overlay::default();
+                        for area in areas {
+                            let body = document.body(area.body)?;
+                            let pose = placement.compose(body.placement).ok()?;
+                            let mesh = nator_commands::painting::cell_mesh(
+                                &document,
+                                area.body,
+                                &area.face,
+                                &area.boundaries,
+                            )
+                            .ok()?;
+                            result.extend(cell_hover::area_overlay(&mesh, pose)?);
+                        }
+                        Some(result)
+                    })();
                     let _ = sender.send(overlay);
                     context.request_repaint();
                 })
@@ -183,7 +190,7 @@ impl Editor {
         context: &egui::Context,
     ) {
         let Some(draft) = self.feature_edit.as_ref().filter(|d| {
-            d.tab() == self.current().id && d.face_area().is_some_and(|a| !a.boundaries.is_empty())
+            d.tab() == self.current().id && d.face_areas().iter().any(|a| !a.boundaries.is_empty())
         }) else {
             return;
         };

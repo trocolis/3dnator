@@ -699,29 +699,32 @@ impl Editor {
                 }
             }
         }
-        // Área de face escolhida como perfil: a célula vem do trabalhador da prévia.
+        // Todas as faces/células escolhidas permanecem realçadas, independentemente do hover.
         if let Some(draft) = self
             .feature_edit
             .as_ref()
             .filter(|d| d.tab() == self.current().id)
-            && let Some(area) = draft.face_area()
         {
-            if area.boundaries.is_empty() {
-                let document = self.picking_document();
-                if let (Some(body), Ok(placement)) = (
-                    document.body(area.body),
-                    sketch_scene::part_placement(self.current(), draft.part()),
-                ) {
-                    let pose = placement.compose(body.placement).unwrap_or(placement);
-                    selected.extend(reference(
-                        &mut self.highlight_cache,
-                        body,
-                        pose,
-                        &feature_editor::Kept::Face(area.face.clone()),
-                    ));
+            let document = self.picking_document();
+            if let Ok(placement) = sketch_scene::part_placement(self.current(), draft.part()) {
+                for area in draft
+                    .face_areas()
+                    .into_iter()
+                    .filter(|a| a.boundaries.is_empty())
+                {
+                    if let Some(body) = document.body(area.body) {
+                        let pose = placement.compose(body.placement).unwrap_or(placement);
+                        selected.extend(reference(
+                            &mut self.highlight_cache,
+                            body,
+                            pose,
+                            &feature_editor::Kept::Face(area.face),
+                        ));
+                    }
                 }
-            } else if let Some(cell) = draft.area_overlay() {
-                selected.extend(cell.clone());
+                if let Some(cell) = draft.area_overlay() {
+                    selected.extend(cell.clone());
+                }
             }
         }
         if let Some(draft) = self

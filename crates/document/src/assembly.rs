@@ -287,7 +287,11 @@ impl Document {
         }
         for feature in &mut part.features {
             feature.remap(&body_map, &sketch_map)?;
-            if let super::features::Operation::Extrude {
+            if let super::features::Operation::ExtrudeMany {
+                until: Some(super::features::ExtrusionLimit::WorkPlane { work_plane }),
+                ..
+            }
+            | super::features::Operation::Extrude {
                 until: Some(super::features::ExtrusionLimit::WorkPlane { work_plane }),
                 ..
             }

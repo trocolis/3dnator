@@ -352,3 +352,9 @@ Ver [PLAN_AUDIT.md](PLAN_AUDIT.md) e a seção Situação atual de [ROADMAP.md](
 - Testes cobrem reflexão em plano oblíquo no referencial de um pai rotacionado, compartilhamento por vários caminhos da hierarquia, grupos internos, visibilidade, salvamento/reabertura, duplo espelhamento, desfazer/refazer e falhas atômicas.
 - Ensaio com OCCT verifica conjuntos mistos de malhas e sólidos paramétricos, propriedades exatas e alteração independente de parâmetros das subpeças após reabrir o projeto.
 - Formatação e Clippy aprovados nas duas configurações; 78 testes sem OCCT e 101 com OCCT aprovados. O formato de projeto continua na versão interna 7, sem migração nova.
+
+## 05/11/2026 — Extrusão conjunta e encerramento dos cinco ajustes (0.40.0)
+
+Implementada seleção coplanar de faces/células de corpos diferentes e regiões de rascunhos distintos da peça, com uma operação de histórico e desfazer único. `ExtrudeMany` persiste fontes e chaves de identidade por perfil no formato 50; verifica plano e normal no núcleo, respeita limites associativos e rejeita mudanças inválidas atomicamente. Construção e prévias consideram todas as bases consumidas. Clonagem remapeia referências e mantém as chaves. Todos os rascunhos usados são ocultados apenas após a criação bem-sucedida.
+
+Validação final: fmt, Clippy e testes dos workspaces sem/com OCCT (405/590), 28 ensaios de extrusão no núcleo e sete cenários gráficos de extrusão, além de sete cenários da faixa. As quatro etapas anteriores foram commitadas nas versões 0.38.6, 0.38.7, 0.38.8 e 0.39.0. Análise e decisões em `docs/AJUSTES_2026_11_05.md`.

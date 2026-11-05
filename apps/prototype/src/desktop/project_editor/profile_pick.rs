@@ -187,11 +187,9 @@ impl Editor {
             return false;
         };
         let part_id = draft.part();
-        let chosen = draft.sketch().zip(draft.region_reference().cloned());
         let selected_profiles = draft.selected_profiles();
         let coplanar_only = draft.accepts_coplanar_profiles();
         let distinct_plane = draft.requires_distinct_plane();
-        let current = draft.sketch();
         let editing = draft.output().is_some();
         let document = self.current().session.document();
         let Some(part) = document.part(part_id) else {
@@ -317,7 +315,10 @@ impl Editor {
             if let Some(draft) = self.feature_edit.as_mut() {
                 if extrusion && (different || explicit_limit) {
                     draft.choose_limit(nator_document::features::ExtrusionLimit::Sketch { sketch });
-                } else if !extrusion || chosen.is_none() || current == Some(sketch) {
+                } else {
+                    if extrusion {
+                        draft.capture_profile_plane(candidate.frame.plane);
+                    }
                     draft.choose_region(sketch, reference);
                 }
             }

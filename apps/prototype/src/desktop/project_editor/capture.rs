@@ -11579,6 +11579,130 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn extrusion_selects_faces_and_different_sketches_in_one_operation()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Extrusão conjunta")?;
+        let mut part = None;
+        for x in [0., 40.] {
+            let mut solid = nator_kernel::Solid::cuboid([x, 0., 0.], [20., 20., 10.])?;
+            let (mesh, faces) = solid.tessellate_with_faces(0.05, 0.2)?;
+            let (owner, body) = document.add_mesh(
+                part,
+                "Base".into(),
+                Arc::new(MeshAsset::with_faces(mesh, faces)?),
+            )?;
+            part = Some(owner);
+            document.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+            document.body_mut(body)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+                &nator_document::features::body_owner(body),
+                solid.face_count()?,
+            ));
+        }
+        let part = part.ok_or("Peça")?;
+        for x in [80., 100.] {
+            let mut sketch = Sketch::new(
+                "Perfil",
+                Plane {
+                    origin: [0., 0., 10.],
+                    ..Plane::xy()
+                },
+            );
+            sketch.add_rectangle([x, 0.], [x + 10., 10.], false)?;
+            document.add_sketch(Some(part), sketch)?;
+        }
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        settle(&mut editor, &context)?;
+        editor.viewport.camera.span = 2.5;
+        editor
+            .viewport
+            .camera
+            .pan([-180., 0.], f64::from(editor.canvas_rect.height()));
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        for _ in 0..20 {
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let count = |e: &Editor| {
+            e.feature_edit
+                .as_ref()
+                .map(|d| d.extrusion_profiles().len())
+                .unwrap_or(0)
+        };
+        for (i, x) in [5., 45., 85., 105.].into_iter().enumerate() {
+            let point = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                [x, 5., 10.],
+            )
+            .ok_or("Projeção")?;
+            click(&mut editor, &context, point)?;
+            settle(&mut editor, &context)?;
+            wait_extrusion_guide(&mut editor, &context)?;
+            assert_eq!(
+                count(&editor),
+                i + 1,
+                "Clique em x={x}, tela={point:?}, canvas={:?}, estado={}",
+                editor.canvas_rect,
+                editor.status
+            );
+        }
+        let point = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [105., 5., 10.],
+        )
+        .ok_or("Projeção")?;
+        click(&mut editor, &context, point)?;
+        wait_extrusion_guide(&mut editor, &context)?;
+        assert_eq!(count(&editor), 3);
+        click(&mut editor, &context, point)?;
+        wait_extrusion_guide(&mut editor, &context)?;
+        assert_eq!(count(&editor), 4);
+        editor
+            .feature_edit
+            .as_mut()
+            .ok_or("Painel")?
+            .set_size_for_capture("5 mm");
+        wait_feature_preview(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let piece = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?;
+        assert_eq!(piece.features.len(), 1);
+        let feature = piece.features[0].clone();
+        assert!(
+            matches!(&feature.operation,Operation::ExtrudeMany {profiles,..} if profiles.len()==4)
+        );
+        let reopened = feature_editor::Draft::edit(editor.current().id, part, feature);
+        assert_eq!(reopened.extrusion_profiles().len(), 4);
+        assert!(editor.current_mut().session.undo());
+        assert!(
+            editor
+                .current()
+                .session
+                .document()
+                .part(part)
+                .ok_or("Peça")?
+                .features
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn extrusion_clicks_toggle_multiple_projected_cells_in_one_profile()
     -> Result<(), Box<dyn Error>> {
         use nator_document::features::RegionRef;
