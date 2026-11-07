@@ -317,6 +317,18 @@ pub(super) fn button(
     large: bool,
     selected: bool,
 ) -> egui::Response {
+    button_with_hint(ui, icon, label, large, selected, label)
+}
+
+/// Dica única, independente do nome acessível do botão.
+pub(super) fn button_with_hint(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    large: bool,
+    selected: bool,
+    hint: &str,
+) -> egui::Response {
     draw_button(
         ui,
         icon,
@@ -327,6 +339,7 @@ pub(super) fn button(
             ButtonLayout::Compact
         },
         selected,
+        hint,
     )
 }
 
@@ -335,8 +348,9 @@ pub(super) fn ribbon_button(
     icon: Icon,
     label: &str,
     selected: bool,
+    hint: &str,
 ) -> egui::Response {
-    draw_button(ui, icon, label, ButtonLayout::Ribbon, selected)
+    draw_button(ui, icon, label, ButtonLayout::Ribbon, selected, hint)
 }
 
 fn draw_button(
@@ -345,6 +359,7 @@ fn draw_button(
     label: &str,
     layout: ButtonLayout,
     selected: bool,
+    hint: &str,
 ) -> egui::Response {
     let (size, icon_size, icon_shift, label_top, font_size) = match layout {
         ButtonLayout::Compact => (egui::vec2(30., 30.), 18., 0., None, 11.),
@@ -418,7 +433,7 @@ fn draw_button(
             egui::StrokeKind::Inside,
         );
     }
-    response.on_hover_text(label)
+    response.on_hover_text(hint)
 }
 
 /// Botão compacto das linhas da árvore (visibilidade, edição), na altura de uma linha.
@@ -474,6 +489,18 @@ pub(super) fn entry_styled(
     selected: bool,
     dimmed: bool,
 ) -> egui::Response {
+    entry_with_hint(ui, icon, label, selected, dimmed, label)
+}
+
+/// Linha da árvore com uma única explicação, preservando o nome acessível.
+pub(super) fn entry_with_hint(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+    dimmed: bool,
+    hint: &str,
+) -> egui::Response {
     let ink = if dimmed { theme::muted() } else { theme::ink() };
     let response = ui.add(
         egui::Button::new("")
@@ -517,7 +544,7 @@ pub(super) fn entry_styled(
             egui::StrokeKind::Inside,
         );
     }
-    response.on_hover_text(label)
+    response.on_hover_text(hint)
 }
 
 #[cfg(test)]

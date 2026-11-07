@@ -437,3 +437,5 @@ As ferramentas de construção, montagem e rascunho mostram o ícone ativo ao la
 Na Extrusão, o perfil escolhido mantém seu realce ao apontar para outra área, inclusive com distância zero ou expressão inválida. Passar o mouse não troca a seleção; clicar novamente na área escolhida a retira.
 
 Medir também aceita rascunhos de peças e referências da montagem, incluindo ocorrências posicionadas. Pontos têm prioridade sobre curvas próximas. Linhas mostram comprimento; círculos e arcos também mostram raio/diâmetro. Os alvos podem ser combinados com elementos de sólidos para medir distâncias e ângulos.
+
+Cada ícone mostra um único balão de descrição. Na faixa, a dica reúne o nome completo e o atalho; opções com explicação própria mantêm o nome acessível sem gerar uma segunda dica.

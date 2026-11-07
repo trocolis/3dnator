@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.40.2 — 07/11/2026
+
+- Ícones exibem uma única dica: nome completo e atalho na faixa, explicação nas opções e informações da árvore, preservando nomes acessíveis e ativação por teclado.
+
 ## 0.40.0 — 05/11/2026
 
 - Extrusão seleciona conjuntamente áreas coplanares de faces de corpos diferentes e de rascunhos distintos da peça em edição, com uma operação e uma ação de desfazer. A seleção alterna por clique e conserva todos os realces; o recálculo verifica o plano e usa identidades persistentes por perfil.

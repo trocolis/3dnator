@@ -780,3 +780,9 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Também passaram os sete ensaios gráficos `ribbon_`, incluindo janelas estreitas e exposição das ferramentas secundárias.
 - Formato interno 50: chaves de perfis persistem independentemente da ordem e do remapeamento da clonagem; o leitor continua aceitando projetos anteriores. Diagnóstico e etapas em `docs/AJUSTES_2026_11_05.md`.
 - Passaram ainda os quatro cenários gráficos `measure_`: cursor, continuidade do realce, clique/medida de topologia e rascunhos em ocorrências posicionadas. Logs finais em `target/ajustes3-final-*.log`; pacote local validado no runtime Freedesktop 26.08 com OCCT 7.9.3.
+
+## 0.40.2 — Dicas únicas nos ícones (07/11/2026)
+
+- `cargo fmt --all -- --check`, Clippy do workspace com e sem OCCT e `cargo test --workspace --locked`: aprovados.
+- A faixa cria uma única dica com nome completo/atalho; opções e nós com informações próprias fornecem sua dica diretamente ao widget. Nomes acessíveis, cliques e teclado permanecem cobertos pelos ensaios existentes de ícones.
+- Registros locais: `target/codex-validation/ajustes-20261107/`. Sem ensaio interativo da janela.

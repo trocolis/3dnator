@@ -590,12 +590,24 @@ impl Editor {
     fn action_button(&mut self, ui: &mut egui::Ui, action: Action, large: bool) {
         let enabled = self.action_enabled(action);
         let selected = self.action_selected(action);
+        let hint = if let Some(shortcut) = action.shortcut() {
+            format!("{} · {shortcut}", text(action.label()))
+        } else {
+            text(action.label()).to_owned()
+        };
         let response = ui
             .add_enabled_ui(enabled, |ui| {
                 if large {
-                    icons::ribbon_button(ui, action.icon(), text(action.caption()), selected)
+                    icons::ribbon_button(ui, action.icon(), text(action.caption()), selected, &hint)
                 } else {
-                    icons::button(ui, action.icon(), text(action.label()), false, selected)
+                    icons::button_with_hint(
+                        ui,
+                        action.icon(),
+                        text(action.label()),
+                        false,
+                        selected,
+                        &hint,
+                    )
                 }
             })
             .inner;
@@ -606,12 +618,6 @@ impl Editor {
                 response.rect,
             );
         });
-        let hint = if let Some(shortcut) = action.shortcut() {
-            format!("{} · {shortcut}", text(action.label()))
-        } else {
-            text(action.label()).to_owned()
-        };
-        let response = response.on_hover_text(hint);
         if !enabled && action == Action::OffsetPlane && self.current().active_part.is_none() {
             response
                 .clone()

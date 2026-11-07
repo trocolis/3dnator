@@ -441,7 +441,7 @@ pub(super) fn choice<V: PartialEq + Copy>(
 }
 
 /// Como `choice`, mas cada opção tem uma dica própria; o rótulo continua no
-/// nome acessível e no tooltip curto do botão compacto.
+/// nome acessível do botão compacto.
 pub(super) fn choice_hints<V: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut V,
@@ -452,7 +452,7 @@ pub(super) fn choice_hints<V: PartialEq + Copy>(
     for (option, icon, label, hint) in options {
         let selected = *value == *option;
         let response =
-            icons::button(ui, *icon, text(*label), false, selected).on_hover_text(text(*hint));
+            icons::button_with_hint(ui, *icon, text(*label), false, selected, text(*hint));
         #[cfg(all(test, feature = "occt"))]
         ui.ctx().data_mut(|data| {
             data.insert_temp(egui::Id::new(("choice_rect", text(*label))), response.rect)

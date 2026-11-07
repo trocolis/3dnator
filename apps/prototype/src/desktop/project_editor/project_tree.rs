@@ -434,14 +434,14 @@ impl<'a> Tree<'a> {
                         visible: !record.visible,
                     })));
             }
-            let response = icons::entry_styled(
+            let response = icons::entry_with_hint(
                 ui,
                 Icon::ReferenceSketch,
                 &record.sketch.name,
                 editing,
                 !(parent_shown && record.visible),
-            )
-            .on_hover_text(text(T::ReferenceSketchHint));
+                text(T::ReferenceSketchHint),
+            );
             if response.clicked() && !tree.busy {
                 tree.intents.push(Intent::EditReference(record.id));
             }
@@ -461,14 +461,14 @@ impl<'a> Tree<'a> {
                         visible: !instance.visible,
                     })));
             }
-            let response = icons::entry_styled(
+            let response = icons::entry_with_hint(
                 ui,
                 Icon::Import,
                 &instance.name,
                 tree.tab.is_selected(Selection::Instance(instance.id)),
                 !shown,
-            )
-            .on_hover_text(text(T::ReferenceModelHint));
+                text(T::ReferenceModelHint),
+            );
             if response.clicked() {
                 tree.intents
                     .push(Intent::Select(Selection::Instance(instance.id)));
@@ -548,15 +548,15 @@ impl<'a> Tree<'a> {
                         Intent::EditPart(part.id, id)
                     });
                 }
-                let response = icons::entry_styled(
+                let response = icons::entry_with_hint(
                     ui,
                     Icon::Part,
                     &instance.name,
                     tree.tab.is_selected(Selection::Instance(instance.id)),
                     !shown,
+                    &part.name,
                 )
-                .interact(egui::Sense::drag())
-                .on_hover_text(&part.name);
+                .interact(egui::Sense::drag());
                 if !tree.busy {
                     response.dnd_set_drag_payload(Dragged::Instance(instance.id));
                 }
@@ -699,18 +699,18 @@ impl<'a> Tree<'a> {
                         visible: !record.visible,
                     })));
             }
-            let response = icons::entry_styled(
+            let response = icons::entry_with_hint(
                 ui,
                 Icon::WorkPlane,
                 &record.name,
                 false,
                 !(parent_shown && record.visible),
-            )
-            .on_hover_text(format!(
-                "{}: {}",
-                text(T::OffsetField),
-                command_panel::settings(ui.ctx()).length_label(record.plane.offset)
-            ));
+                &format!(
+                    "{}: {}",
+                    text(T::OffsetField),
+                    command_panel::settings(ui.ctx()).length_label(record.plane.offset)
+                ),
+            );
             let editable = !tree.busy && tree.tab.sketch_edit.is_none();
             if response.clicked() && !tree.busy {
                 tree.intents.push(Intent::PickWorkPlane(record.id));
@@ -843,8 +843,13 @@ impl<'a> Tree<'a> {
                 .map(|id| Selection::Instance(*id))
                 .collect::<Vec<_>>();
             let chosen = !members.is_empty() && members.iter().all(|m| self.tab.is_selected(*m));
-            let response = icons::entry(ui, Icon::Group, &group.name, chosen).on_hover_text(
-                format!("{} {}", group.members.len(), text(T::SelectedCount)),
+            let response = icons::entry_with_hint(
+                ui,
+                Icon::Group,
+                &group.name,
+                chosen,
+                false,
+                &format!("{} {}", group.members.len(), text(T::SelectedCount)),
             );
             if response.clicked() {
                 self.intents
