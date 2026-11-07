@@ -404,26 +404,52 @@ impl Editor {
             || self
                 .feature_edit
                 .as_ref()
-                .is_some_and(|d| d.field() == Some(feature_editor::Field::Profile))
-            || self
-                .scene
-                .as_ref()
-                .is_none_or(|s| s.triangles().len() > HOVER_TRIANGLES);
-        let Some(position) = position.filter(|_| !blocked) else {
+                .is_some_and(|d| d.field() == Some(feature_editor::Field::Profile));
+        let heavy = self
+            .scene
+            .as_ref()
+            .is_none_or(|s| s.triangles().len() > HOVER_TRIANGLES);
+        let points = self.alignment_pick_mode() == Some(navigation::PickMode::Vertex);
+        // No ponto a ponto o realce dos apoios é o guia do movimento: continua em cenas
+        // grandes, com o mesmo intervalo mínimo entre consultas da pré-seleção comum.
+        let Some(position) = position.filter(|_| !blocked && (points || !heavy)) else {
             self.hover = None;
             return;
         };
         let tab = self.current().id;
         let revision = self.current().session.revision();
         let context = self.hover_context();
-        if self.alignment_pick_mode() == Some(navigation::PickMode::Vertex) {
+        if points {
+            if heavy
+                && let Some(hover) = &self.hover
+                && hover.tab == tab
+                && hover.revision == revision
+                && hover.context == context
+                && hover.computed.elapsed() < HOVER_INTERVAL
+            {
+                if hover.captured.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                }
+                if hover.position.distance(position) >= 1.5 {
+                    ui.ctx().request_repaint_after(HOVER_INTERVAL);
+                }
+                return;
+            }
             let Some(bounds) = self.current().scene_bounds else {
                 return;
             };
             let document = self.current().session.document().clone();
-            let (overlay, label, captured) = if let Some((point, label)) =
-                self.alignment_reference_point(bounds, response.rect, position)
-            {
+            let model = self.point_target(&document, response.rect, position, ui.ctx());
+            // Rascunhos e origens ganham do modelo, salvo um ponto do modelo capturado mais
+            // perto do cursor.
+            let reference = self
+                .alignment_reference_point(bounds, response.rect, position)
+                .filter(|(distance, ..)| {
+                    model
+                        .as_ref()
+                        .is_none_or(|t| !t.captured || *distance <= t.distance)
+                });
+            let (overlay, label, captured) = if let Some((_, point, label)) = reference {
                 (
                     Overlay {
                         points: vec![point],
@@ -432,9 +458,7 @@ impl Editor {
                     label,
                     Some(point),
                 )
-            } else if let Some(target) =
-                self.point_target(&document, response.rect, position, ui.ctx())
-            {
+            } else if let Some(target) = model {
                 let label = match target.kind {
                     nator_commands::point_snap::PointKind::CircleCenter => {
                         text(T::VirtualCenter).into()

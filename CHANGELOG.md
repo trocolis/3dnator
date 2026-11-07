@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.43.0 — 07/11/2026
+
+- Movimento ponto a ponto, na montagem e na construção: todos os elementos exibidos servem de destino. Além dos corpos e dos rascunhos de referência, valem os rascunhos das peças (na pose de cada ocorrência, com extremos, pontos médios, centros e quadrantes) e as origens visíveis do projeto e das peças; pontos atrás de material ou removidos pelo corte não são oferecidos. Um ponto do modelo capturado mais perto do cursor deixa de perder para um apoio de rascunho a até 12 pt. O realce dos apoios continua em cenas acima de 400 mil triângulos (como STEPs grandes), com o intervalo mínimo da pré-seleção.
+
+- Importação STEP não falha mais com "Uma face não possui triangulação." quando o BRepMesh rejeita faces válidas (cones e B-splines exportados pelo Fusion). A ponte tenta, face a face, remalhar com ângulo mais folgado, uma cópia NURBS com a qualidade pedida e, por fim, deflexões maiores; só então informa o erro. Faces de área nula (lascas entre duas arestas coincidentes, como um toro de largura zero num suporte do Fusion) não exigem mais triângulos: ficam fora da malha de exibição, sem alterar o B-rep.
+
 - Analisadas as quatro pendências atuais de `AJUSTES.md` em `docs/PLANO_AJUSTES_VIEWPORT.md`, com viabilidade, evidências no código, ordem de implementação e critérios de aceite para precisão, cubo e corte de seção. Sem alteração funcional.
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.

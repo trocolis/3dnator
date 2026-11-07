@@ -23,6 +23,7 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeShape.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
@@ -78,6 +79,7 @@
 #include <TopTools_ListOfShape.hxx>
 
 #include <algorithm>
+#include <optional>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -933,6 +935,52 @@ static bool append_apex_fan(const TopoDS_Face& face, const Handle(Poly_Triangula
     return true;
 }
 
+// Faces de STEP reais (cones e B-splines vindos do Fusion, por exemplo) às vezes fazem o
+// BRepMesh falhar na tesselação conjunta, embora sejam válidas. Tenta-se primeiro remalhar a
+// própria face com ângulo mais folgado, o que reaproveita a discretização das arestas
+// compartilhadas; depois uma cópia NURBS com a qualidade pedida (a geometria é a mesma, só a
+// parametrização muda); por fim, deflexões maiores. Devolve a face cuja triangulação vale,
+// ou nada para uma face de área nula (uma "lasca" entre duas arestas coincidentes, que
+// alguns exportadores deixam em sólidos válidos): ela não tem superfície a desenhar.
+static std::optional<TopoDS_Face> triangulated_face(const TopoDS_Face& face, double linear,
+                                                    double angular) {
+    TopLoc_Location location;
+    const auto meshed = [&](const TopoDS_Face& candidate) {
+        return !BRep_Tool::Triangulation(candidate, location).IsNull();
+    };
+    if (meshed(face)) {
+        return face;
+    }
+    GProp_GProps properties;
+    BRepGProp::SurfaceProperties(face, properties);
+    Bnd_Box box;
+    BRepBndLib::Add(face, box);
+    const double extent = box.IsVoid() ? 0. : box.SquareExtent();
+    if (std::abs(properties.Mass()) <= 1e-9 * std::max(extent, 1e-12)) {
+        return std::nullopt;
+    }
+    const double relaxed = std::max(angular, 0.5);
+    BRepMesh_IncrementalMesh(face, linear, false, relaxed, false);
+    if (meshed(face)) {
+        return face;
+    }
+    BRepBuilderAPI_NurbsConvert converted(face, true);
+    if (converted.IsDone() && converted.Shape().ShapeType() == TopAbs_FACE) {
+        const auto nurbs = TopoDS::Face(converted.Shape());
+        BRepMesh_IncrementalMesh(nurbs, linear, false, angular, false);
+        if (meshed(nurbs)) {
+            return nurbs;
+        }
+    }
+    for (const double factor : {2., 4., 10.}) {
+        BRepMesh_IncrementalMesh(face, linear * factor, false, relaxed, false);
+        if (meshed(face)) {
+            return face;
+        }
+    }
+    throw std::runtime_error("Uma face não possui triangulação.");
+}
+
 bool nator_tessellate(Shape* body, double linear, double angular) noexcept {
     return guarded([&] {
         BRepMesh_IncrementalMesh mesher(body->value, linear, false, angular, false);
@@ -944,12 +992,13 @@ bool nator_tessellate(Shape* body, double linear, double angular) noexcept {
         std::vector<std::int32_t> faces_of_triangles;
         const auto& faces = faces_of(body);
         for (int index = 1; index <= faces.Extent(); ++index) {
-            const auto face = TopoDS::Face(faces(index));
+            const auto meshable = triangulated_face(TopoDS::Face(faces(index)), linear, angular);
+            if (!meshable) {
+                continue;
+            }
+            const auto& face = *meshable;
             TopLoc_Location location;
             const auto mesh = BRep_Tool::Triangulation(face, location);
-            if (mesh.IsNull()) {
-                throw std::runtime_error("Uma face não possui triangulação.");
-            }
             std::vector<gp_Pnt> fan;
             if (append_apex_fan(face, mesh, location, fan)) {
                 for (const auto& point : fan) {

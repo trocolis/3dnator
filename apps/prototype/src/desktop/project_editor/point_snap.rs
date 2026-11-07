@@ -40,10 +40,17 @@ impl Cache {
                 .flat_map(|p| p.shown_bodies().cloned())
                 .collect::<Vec<_>>();
             let (sender, receiver) = mpsc::channel();
+            // Rascunhos de referência e das peças exibidas: todos servem de destino.
             let references = document
                 .reference_sketches()
                 .iter()
                 .filter(|s| document.shows_reference_sketch(s))
+                .chain(
+                    document
+                        .parts()
+                        .iter()
+                        .flat_map(|p| p.sketches.iter().filter(|s| p.shows_sketch(s))),
+                )
                 .cloned()
                 .collect::<Vec<_>>();
             let context = context.clone();
@@ -96,6 +103,38 @@ pub(super) struct Target {
     pub pick: Pick,
     pub captured: bool,
     pub kind: PointKind,
+    /// Distância em pontos de tela entre o cursor e o apoio.
+    pub distance: f32,
+}
+
+/// Verdadeiro quando nenhum material visível (nem a tampa do corte) fica entre a câmera e
+/// o ponto. Apoios atrás do modelo não são oferecidos, como no clique comum.
+pub(super) fn unobstructed(
+    document: &Document,
+    camera: &Camera,
+    bounds: Bounds,
+    rect: egui::Rect,
+    view: &ViewState,
+    section: Option<section::Section>,
+    point: Point3,
+) -> bool {
+    let Some(screen) = sketch_scene::project(camera, bounds, rect, point) else {
+        return false;
+    };
+    let ray = screen_ray(camera, bounds, rect, screen);
+    let Ok(query) = document.pick_clipped_with(ray, |o| view.pickable(o), section::clip(section))
+    else {
+        return false;
+    };
+    let tolerance = bounds.size().into_iter().fold(1_f64, f64::max) * 1e-6;
+    let blocked = query.cap_distance.unwrap_or(f64::INFINITY).min(
+        query
+            .picks
+            .first()
+            .map(|hit| dot(sub(hit.point, ray.origin), ray.direction))
+            .unwrap_or(f64::INFINITY),
+    );
+    blocked >= dot(sub(point, ray.origin), ray.direction) - tolerance
 }
 
 /// Raio que passa por uma posição de tela; usado também no centro virtual para
@@ -142,7 +181,6 @@ struct Candidate {
     target: Target,
     distance: f32,
     depth: f64,
-    screen: egui::Pos2,
 }
 
 struct Query<'a> {
@@ -239,10 +277,10 @@ impl Query<'_> {
                             },
                             captured,
                             kind: anchor.kind,
+                            distance,
                         },
                         distance,
                         depth: dot(sub(point, target_ray.origin), target_ray.direction),
-                        screen,
                     });
                 }
             }
@@ -258,25 +296,17 @@ impl Query<'_> {
                 .then(a.depth.total_cmp(&b.depth))
                 .then(a.distance.total_cmp(&b.distance))
         });
-        for candidate in candidates {
-            let target_ray = screen_ray(camera, bounds, rect, candidate.screen);
-            let query = document
-                .pick_clipped_with(target_ray, |o| view.pickable(o), section::clip(section))
-                .ok()?;
-            let tolerance = bounds.size().into_iter().fold(1_f64, f64::max) * 1e-6;
-            let blocked = query.cap_distance.unwrap_or(f64::INFINITY).min(
-                query
-                    .picks
-                    .first()
-                    .map(|hit| dot(sub(hit.point, target_ray.origin), target_ray.direction))
-                    .unwrap_or(f64::INFINITY),
-            );
-            if blocked < candidate.depth - tolerance {
-                continue;
-            }
-            return Some(candidate.target);
-        }
-        None
+        candidates.into_iter().map(|c| c.target).find(|target| {
+            unobstructed(
+                document,
+                camera,
+                bounds,
+                rect,
+                view,
+                section,
+                target.pick.point,
+            )
+        })
     }
 }
 

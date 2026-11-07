@@ -286,38 +286,80 @@ fn segment_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> (f32, f32) {
     (p.distance(a + d * t), t)
 }
 
-/// Geometria de rascunhos de referência sob o cursor, conforme o tipo de alinhamento:
-/// ponto mais próximo (12 pt), linha mais próxima (8 pt) ou o plano dentro da extensão do
-/// rascunho.
+/// Cena em que se procuram apoios de rascunhos e origens para o destino.
+pub(super) struct ReferenceScene<'a> {
+    pub document: &'a Document,
+    pub camera: &'a Camera,
+    pub bounds: nator_geometry::Bounds,
+    pub rect: egui::Rect,
+    pub view: &'a ViewState,
+    pub section: Option<section::Section>,
+    pub points: Option<&'a super::point_snap::ReferencePoints>,
+}
+
+/// Geometria de rascunhos sob o cursor, conforme o tipo de alinhamento: ponto mais próximo
+/// (12 pt), linha mais próxima (8 pt) ou o plano dentro da extensão do rascunho. Valem os
+/// rascunhos de referência e os das peças exibidas (na pose de cada ocorrência), além das
+/// origens visíveis. Devolve também a distância em tela, para competir com o modelo.
+/// Pontos de peças atrás de material visível não são oferecidos.
 fn reference_anchor(
-    document: &Document,
-    camera: &Camera,
-    bounds: nator_geometry::Bounds,
-    rect: egui::Rect,
+    scene: &ReferenceScene,
     position: egui::Pos2,
     kind: navigation::PickMode,
-    points: Option<&super::point_snap::ReferencePoints>,
-) -> Option<Anchor> {
-    let mut best: Option<(f32, Anchor)> = None;
-    let mut offer = |distance: f32, anchor: Anchor| {
-        if best.as_ref().is_none_or(|(d, _)| distance < *d) {
-            best = Some((distance, anchor));
-        }
-    };
-    for record in document
+) -> Option<(f32, Anchor)> {
+    let ReferenceScene {
+        document,
+        camera,
+        bounds,
+        rect,
+        view,
+        section,
+        points,
+    } = *scene;
+    // (distância, apoio, sujeito a oclusão)
+    let mut candidates: Vec<(f32, Anchor, bool)> = Vec::new();
+    let occurrences = document.occurrences().unwrap_or_default();
+    let mut sources = document
         .reference_sketches()
         .iter()
         .filter(|s| document.shows_reference_sketch(s))
-    {
+        .map(|record| (record, Placement::default(), false))
+        .collect::<Vec<_>>();
+    let mut origins = Vec::new();
+    if document.shows_origin() {
+        origins.push((Placement::default(), text(T::Origin).to_string()));
+    }
+    for occurrence in occurrences.iter().filter(|o| view.pickable(o)) {
+        let Some(instance) = document.instance(occurrence.instance) else {
+            continue;
+        };
+        let Some(part) = document.part(instance.part) else {
+            continue;
+        };
+        sources.extend(
+            part.sketches
+                .iter()
+                .filter(|s| part.shows_sketch(s))
+                .map(|record| (record, occurrence.placement, true)),
+        );
+        if part.folders.origin {
+            origins.push((
+                occurrence.placement,
+                format!("{} · {}", instance.name, text(T::Origin)),
+            ));
+        }
+    }
+    let kept = |point: Point3| section.is_none_or(|s| s.keeps(point));
+    for (record, placement, occludable) in sources {
         let sketch = &record.sketch;
         let frame = sketch_scene::Frame {
             camera: camera.clone(),
             bounds,
             rect,
-            placement: Placement::default(),
+            placement,
             plane: sketch.plane,
         };
-        let normal = sketch.plane.normal();
+        let normal = placement.apply_vector(sketch.plane.normal());
         match kind {
             navigation::PickMode::Vertex => {
                 let Some(points) = points.and_then(|points| points.get(&record.id)) else {
@@ -326,9 +368,9 @@ fn reference_anchor(
                 for &point in points {
                     if let Some(screen) = frame.screen(point) {
                         let distance = screen.distance(position);
-                        if distance < 12. {
-                            let world = frame.world(point);
-                            offer(
+                        let world = frame.world(point);
+                        if distance < 12. && (!occludable || kept(world)) {
+                            candidates.push((
                                 distance,
                                 Anchor {
                                     point: world,
@@ -337,7 +379,8 @@ fn reference_anchor(
                                     label: sketch.name.clone(),
                                     reference: true,
                                 },
-                            );
+                                occludable,
+                            ));
                         }
                     }
                 }
@@ -351,23 +394,27 @@ fn reference_anchor(
                         continue;
                     };
                     let (distance, t) = segment_distance(position, sa, sb);
-                    if distance < 8. {
-                        let (wa, wb) = (frame.world(a), frame.world(b));
-                        let t = f64::from(t);
-                        offer(
+                    let (wa, wb) = (frame.world(a), frame.world(b));
+                    let t = f64::from(t);
+                    let point = std::array::from_fn(|i| wa[i] + (wb[i] - wa[i]) * t);
+                    if distance < 8. && (!occludable || kept(point)) {
+                        candidates.push((
                             distance,
                             Anchor {
-                                point: std::array::from_fn(|i| wa[i] + (wb[i] - wa[i]) * t),
+                                point,
                                 normal,
                                 edge: [wa, wb],
                                 label: sketch.name.clone(),
                                 reference: true,
                             },
-                        );
+                            occludable,
+                        ));
                     }
                 }
             }
-            navigation::PickMode::Face => {
+            // O plano de um rascunho de peça costuma coincidir com faces do modelo, que já
+            // são escolhidas pelo clique; só o rascunho de referência oferece o plano livre.
+            navigation::PickMode::Face if !occludable => {
                 let (Some(hit), Some((min, max))) =
                     (frame.cursor(position), sketch_scene::sketch_limits(sketch))
                 else {
@@ -379,7 +426,7 @@ fn reference_anchor(
                     .fold(10_f64, f64::max);
                 if (0..2).all(|k| hit[k] >= min[k] - margin && hit[k] <= max[k] + margin) {
                     let world = frame.world(hit);
-                    offer(
+                    candidates.push((
                         f32::MAX / 2.,
                         Anchor {
                             point: world,
@@ -388,12 +435,51 @@ fn reference_anchor(
                             label: sketch.name.clone(),
                             reference: true,
                         },
-                    );
+                        false,
+                    ));
                 }
+            }
+            navigation::PickMode::Face => {}
+        }
+    }
+    if kind == navigation::PickMode::Vertex {
+        for (placement, label) in origins {
+            let point = placement.apply([0.; 3]);
+            let Some(screen) = sketch_scene::project(camera, bounds, rect, point) else {
+                continue;
+            };
+            let distance = screen.distance(position);
+            if distance < 12. && kept(point) {
+                candidates.push((
+                    distance,
+                    Anchor {
+                        point,
+                        normal: placement.apply_vector([0., 0., 1.]),
+                        edge: [point; 2],
+                        label,
+                        reference: true,
+                    },
+                    true,
+                ));
             }
         }
     }
-    best.map(|(_, anchor)| anchor)
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+    candidates
+        .into_iter()
+        .find(|(_, anchor, occludable)| {
+            !occludable
+                || super::point_snap::unobstructed(
+                    document,
+                    camera,
+                    bounds,
+                    rect,
+                    view,
+                    section,
+                    anchor.point,
+                )
+        })
+        .map(|(distance, anchor, _)| (distance, anchor))
 }
 
 pub(super) struct PatternDraft {
@@ -749,24 +835,33 @@ impl Editor {
         bounds: nator_geometry::Bounds,
         rect: egui::Rect,
         position: egui::Pos2,
-    ) -> Option<(Point3, String)> {
+    ) -> Option<(f32, Point3, String)> {
         let Some(Panel::Align(d)) = &self.assembly_panel else {
             return None;
         };
         if d.field != Some(AlignField::To) {
             return None;
         }
-        reference_anchor(
-            self.current().session.document(),
-            &self.viewport.camera,
+        reference_anchor(&self.reference_scene(bounds, rect), position, d.kind)
+            .map(|(distance, anchor)| (distance, anchor.point, anchor.label))
+    }
+
+    fn reference_scene(
+        &self,
+        bounds: nator_geometry::Bounds,
+        rect: egui::Rect,
+    ) -> ReferenceScene<'_> {
+        ReferenceScene {
+            document: self.current().session.document(),
+            camera: &self.viewport.camera,
             bounds,
             rect,
-            position,
-            d.kind,
-            self.point_cache
+            view: &self.current().view,
+            section: self.current().section.filter(|s| s.visible),
+            points: self
+                .point_cache
                 .references((self.current().id, self.current().session.revision())),
-        )
-        .map(|anchor| (anchor.point, anchor.label))
+        }
     }
 
     fn change_movement(&mut self, panel: Panel, movement: Movement) -> Panel {
@@ -1232,9 +1327,15 @@ impl Editor {
         );
         let view = self.current().view.clone();
         let document = self.picking_document();
+        // Distância em tela do ponto do modelo capturado; sem captura, um apoio de
+        // rascunho ou origem próximo do cursor tem a preferência.
+        let mut captured_distance = None;
         let model = if self.alignment_pick_mode() == Some(navigation::PickMode::Vertex) {
             self.point_target(&document, rect, position, &response.ctx)
-                .map(|target| target.pick)
+                .map(|target| {
+                    captured_distance = target.captured.then_some(target.distance);
+                    target.pick
+                })
         } else {
             document
                 .pick_all_clipped_with(
@@ -1252,16 +1353,9 @@ impl Editor {
             && d.field == Some(AlignField::To)
         {
             let kind = d.kind;
-            let reference = reference_anchor(
-                self.current().session.document(),
-                &self.viewport.camera,
-                bounds,
-                rect,
-                position,
-                kind,
-                self.point_cache
-                    .references((self.current().id, self.current().session.revision())),
-            );
+            let reference = reference_anchor(&self.reference_scene(bounds, rect), position, kind)
+                .filter(|(distance, _)| captured_distance.is_none_or(|d| *distance <= d))
+                .map(|(_, anchor)| anchor);
             let anchor = match (kind, reference, model) {
                 (navigation::PickMode::Face, _, Some(pick)) | (_, None, Some(pick)) => {
                     let mut pick = pick;
@@ -2261,19 +2355,95 @@ mod tests {
         ] {
             let position =
                 sketch_scene::project(&camera, bounds, rect, point).ok_or("Projeção ausente")?;
-            let anchor = reference_anchor(
-                &document,
-                &camera,
+            let scene = ReferenceScene {
+                document: &document,
+                camera: &camera,
                 bounds,
                 rect,
-                position,
-                navigation::PickMode::Vertex,
-                Some(&points),
-            )
-            .ok_or("Apoio de referência ausente")?;
+                view: &ViewState::default(),
+                section: None,
+                points: Some(&points),
+            };
+            let (_, anchor) = reference_anchor(&scene, position, navigation::PickMode::Vertex)
+                .ok_or("Apoio de referência ausente")?;
             assert!(norm(sub(anchor.point, point)) < 1e-9);
             assert!(anchor.reference);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn part_sketches_and_origins_follow_the_occurrence_and_hide_behind_material()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut document = Document::new("Apoios das peças")?;
+        let mut sketch = nator_sketch::Sketch::new("Perfil", nator_sketch::Plane::xy());
+        sketch.add_line([0., 0.], [20., 0.], false)?;
+        let (part, _) = document.add_sketch(None, sketch)?;
+        let instance = document
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância ausente")?
+            .id;
+        let pose = Placement::new([30., 10., 0.], [0., 0., 0.])?;
+        document.instance_mut(instance)?.placement = pose;
+        document.part_mut(part)?.folders.origin = true;
+        let points = document
+            .parts()
+            .iter()
+            .flat_map(|p| &p.sketches)
+            .map(|s| {
+                nator_commands::point_snap::reference_points(&s.sketch).map(|points| (s.id, points))
+            })
+            .collect::<Result<super::super::point_snap::ReferencePoints, _>>()?;
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let bounds = nator_geometry::Bounds {
+            min: [0., -20., -5.],
+            max: [80., 40., 5.],
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        let view = ViewState::default();
+        let at = |document: &Document, point: Point3| -> Option<(f32, Anchor)> {
+            let position = sketch_scene::project(&camera, bounds, rect, point)?;
+            let scene = ReferenceScene {
+                document,
+                camera: &camera,
+                bounds,
+                rect,
+                view: &view,
+                section: None,
+                points: Some(&points),
+            };
+            reference_anchor(
+                &scene,
+                position + egui::vec2(3., 2.),
+                navigation::PickMode::Vertex,
+            )
+        };
+        // Extremidade, ponto médio e origem da peça, na pose da ocorrência.
+        for point in [[50., 10., 0.], [40., 10., 0.], [30., 10., 0.]] {
+            let (distance, anchor) = at(&document, point).ok_or("Apoio da peça ausente")?;
+            assert!(norm(sub(anchor.point, point)) < 1e-9);
+            assert!(distance < 4.);
+        }
+        // Uma placa opaca acima do rascunho esconde os apoios dele.
+        let (plate_part, _) = document.add_mesh(
+            None,
+            "Placa".into(),
+            Arc::new(MeshAsset::new(Mesh::new(
+                vec![[20., 0., 3.], [60., 0., 3.], [60., 20., 3.], [20., 20., 3.]],
+                vec![[0, 1, 2], [0, 2, 3]],
+            )?)),
+        )?;
+        let plate_instance = document
+            .instances()
+            .iter()
+            .find(|i| i.part == plate_part)
+            .ok_or("Instância da placa ausente")?
+            .id;
+        document.instance_mut(plate_instance)?.placement = Placement::default();
+        assert!(at(&document, [50., 10., 0.]).is_none());
         Ok(())
     }
 
