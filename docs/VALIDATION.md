@@ -794,3 +794,9 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - Capturas reais `tree-folders`, `tree-collapsed` e variantes `-dark` em 1440 × 900, conferidas nos dois temas: nós sobre a cena, sem painel traseiro, cabeçalho e balões separados. Adaptador llvmpipe/OpenGL, sem erros de validação wgpu.
 - Executável release 0.41.0 com OCCT compilado; ensaios de núcleo, peça e STEP do empacotamento aprovados no runtime Freedesktop 26.08. Artefatos e registros em `target/codex-validation/ajustes-20261107/`.
 - Não houve ensaio manual da janela. A mitigação local anterior do lançador Flatpak foi mantida no pacote, fora destes commits.
+
+## 0.41.1 — Altura da árvore flutuante (07/11/2026)
+
+- A área da árvore recebe a altura real do canvas, descontando as margens. A rolagem usa o espaço restante após o cabeçalho, sem herdar o limite inicial das áreas flutuantes do egui nem encolher com poucos nós.
+- Formatação, Clippy com e sem OCCT, testes do workspace sem OCCT e cinco ensaios gráficos de árvore com OCCT aprovados. O ensaio existente verifica agora também o limite inferior da árvore.
+- Capturas `tree-folders` nos temas claro/escuro, em 1440 × 900 e 900 × 600: conteúdo completo quando cabe e recorte/rolagem apenas quando excede a altura. Registros e imagens em `target/codex-validation/tree-height-20261107/`. Sem ensaio manual da janela.

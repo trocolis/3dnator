@@ -6,6 +6,10 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.41.1 — 07/11/2026
+
+- Árvore flutuante ocupa toda a altura disponível até a barra inferior; rolagem aparece somente quando os nós excedem esse espaço, sem o limite inicial de altura das áreas do egui.
+
 ## 0.41.0 — 07/11/2026
 
 - Árvore do projeto sempre flutua sobre a área de edição, aberta ou recolhida, sem painel atrás dos nós nem coluna lateral reservada. Cabeçalho, rolagem, menus e balões de edição continuam acessíveis.

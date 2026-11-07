@@ -440,4 +440,4 @@ Medir também aceita rascunhos de peças e referências da montagem, incluindo o
 
 Cada ícone mostra um único balão de descrição. Na faixa, a dica reúne o nome completo e o atalho; opções com explicação própria mantêm o nome acessível sem gerar uma segunda dica.
 
-A árvore do projeto flutua sobre o canto superior esquerdo do canvas, tanto aberta quanto recolhida. Somente o cabeçalho tem fundo; os nós aparecem sobre a cena, com rolagem limitada à altura disponível. Recolher ou expandir preserva o tamanho e o enquadramento do canvas. Os balões de edição ficam ao lado do cabeçalho nos dois estados.
+A árvore do projeto flutua sobre o canto superior esquerdo do canvas, tanto aberta quanto recolhida. Somente o cabeçalho tem fundo; os nós aparecem sobre a cena e usam toda a altura disponível até a barra inferior. A rolagem aparece apenas quando o conteúdo ultrapassa esse espaço. Recolher ou expandir preserva o tamanho e o enquadramento do canvas. Os balões de edição ficam ao lado do cabeçalho nos dois estados.

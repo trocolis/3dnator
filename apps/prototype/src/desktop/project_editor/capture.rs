@@ -13174,6 +13174,7 @@ mod tests {
         let tree = area_rect(&context, "floating_tree")?;
         assert!((tree.left() - canvas.left() - 8.).abs() < 1.);
         assert!((tree.top() - canvas.top() - 8.).abs() < 1.);
+        assert!((tree.bottom() - (canvas.bottom() - 8.)).abs() < 1.);
         // O balão da peça fica ao lado do cabeçalho, sem cobrir a árvore.
         let balloon = area_rect(&context, "edit_balloon")?;
         assert!(balloon.left() > tree.right() && balloon.left() < tree.right() + 16.);

@@ -288,6 +288,9 @@ impl Editor {
             .fixed_pos(canvas.left_top() + egui::vec2(8., 8.))
             .show(context, |ui| {
                 ui.set_width(TREE_WIDTH);
+                // A área não herda a altura inicial de janela flutuante do egui.
+                // Cabeçalho e margens são descontados pelo layout antes da rolagem.
+                ui.set_height((canvas.height() - 16.).max(0.));
                 ui.spacing_mut().item_spacing.y = 0.;
                 let tab = self.current();
                 let document = tab.session.document();
@@ -298,7 +301,7 @@ impl Editor {
                 egui::Frame::new().inner_margin(12).show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("project_browser")
-                        .max_height((canvas.height() - 88.).max(40.))
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
                             let mut tree = project_tree::Tree::new(
                                 document,
