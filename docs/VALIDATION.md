@@ -1,5 +1,13 @@
 # Validação local do protótipo
 
+## Mitigação de janela Flatpak paralisada — 05/11/2026
+
+- Etapa 0.40.1, formato 50 preservado. Na ocorrência 0.40.0 confirmada pelo usuário, a thread principal estava em `polling::Poller::wait_impl`, via `calloop` e o laço Wayland do `winit`. Não havia trabalhador CAD ativo; minimizar/restaurar e redimensionar não recuperaram a interface. A captura foi feita com GDB e a instância foi liberada em seguida, sem encerramento.
+- O lançador Flatpak passa a preferir X11/XWayland se `DISPLAY` existir. O pacote permite ambos os sockets, pois `fallback-x11` ocultava `DISPLAY` nesta sessão Wayland. `THREEDNATOR_WAYLAND=1` mantém a escolha nativa; sem X11, Wayland permanece disponível.
+- Formatação e Clippy com todos os alvos e avisos negados aprovados com e sem OCCT. Testes: 405 aprovados sem OCCT; 590 aprovados e 98 ignorados com OCCT. As verificações do lançador cobrem presença simultânea dos dois ambientes, ausência de X11, `DISPLAY` vazio, escolha explícita de Wayland e conservação de argumentos/bibliotecas.
+- Bundle local gerado com Freedesktop 26.08 e OCCT 7.9.3; `--version`, `--validate`, `--validate-part` e `--validate-step` aprovados dentro do Platform. O lançador foi executado com rastreamento no runtime e a remoção das variáveis Wayland foi conferida. Evidências em `target/codex-validation/idle-freeze-20261105/`.
+- A captura não identifica a causa interna do bloqueio. A troca de backend é uma mitigação e ainda exige confirmação com o projeto aberto por um período prolongado; os ensaios CLI não reproduzem essa condição da janela.
+
 ## Etapas 0.19.0 a 0.29.0 — 02/11/2026
 
 - Registradas juntas na 0.29.0, formato `.3dnator` 46: cada etapa tem sua versão no `CHANGELOG.md`, mas o código foi desenvolvido sem commits intermediários e entra num só commit.

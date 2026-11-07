@@ -1,5 +1,6 @@
-//! Painel de configurações da aplicação. Desenho guarda as escolhas do documento
-//! (unidade, precisões e casas); as demais abas tratam do aplicativo.
+//! Painel de configurações da aplicação, numa coluna única dividida em seções. Desenho
+//! guarda as escolhas do documento (unidade, precisões e casas); Aparência e os atalhos
+//! tratam do aplicativo. Atalhos e Sobre abrem janelas próprias.
 use super::{
     Command, Editor, T, command_panel, egui,
     icons::{self, Icon},
@@ -8,25 +9,21 @@ use super::{
 use nator_document::LengthUnit;
 
 const REPOSITORY: &str = "https://github.com/trocolis/3dnator";
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum Tab {
-    Appearance,
-    #[default]
-    Drawing,
-    Shortcut,
-    Help,
-    About,
-}
+/// Coluna dos rótulos: as entradas de todas as seções começam no mesmo ponto.
+const LABEL_WIDTH: f32 = 190.;
+/// Largura comum das entradas, seletores, campos numéricos e botões.
+const FIELD_WIDTH: f32 = 170.;
+/// Largura da tecla na janela de atalhos.
+const KEY_WIDTH: f32 = 130.;
+const ICON_SIZE: f32 = 18.;
 
 #[derive(Default)]
 pub(super) struct Panel {
     open: bool,
-    tab: Tab,
-    /// Atalho esperando a tecla nova na aba Atalhos.
+    shortcuts: bool,
+    about: bool,
+    /// Atalho esperando a tecla nova na janela de atalhos.
     capture: Option<&'static str>,
-    /// Busca da aba Ajuda.
-    search: String,
 }
 
 impl Panel {
@@ -34,64 +31,196 @@ impl Panel {
         self.open = true;
     }
 
-    pub(super) fn capturing(&self) -> bool {
-        self.open && self.capture.is_some()
+    pub(super) fn open_shortcuts(&mut self) {
+        self.shortcuts = true;
     }
 
-    pub(super) fn open_at(&mut self, tab: Tab) {
-        self.tab = tab;
-        self.open();
+    pub(super) fn open_about(&mut self) {
+        self.about = true;
+    }
+
+    pub(super) fn capturing(&self) -> bool {
+        self.shortcuts && self.capture.is_some()
     }
 }
 
 impl Editor {
     pub(super) fn settings_dialog(&mut self, context: &egui::Context) {
-        if !self.settings_panel.open {
-            return;
-        }
-        let mut open = self.settings_panel.open;
-        let mut recovery = false;
-        egui::Window::new(text(T::SettingsMenu))
-            .id(egui::Id::new("application_settings"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .default_width(540.)
-            .show(context, |ui| {
-                ui.set_min_width(540.);
-                ui.set_min_height(230.);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.;
-                    for (tab, label) in [
-                        (Tab::Appearance, T::SettingsAppearance),
-                        (Tab::Drawing, T::SettingsDrawing),
-                        (Tab::Shortcut, T::SettingsShortcuts),
-                        (Tab::Help, T::SettingsHelp),
-                        (Tab::About, T::SettingsAbout),
-                    ] {
-                        ui.selectable_value(&mut self.settings_panel.tab, tab, text(label));
+        if self.settings_panel.open {
+            let mut open = true;
+            egui::Window::new(text(T::SettingsMenu))
+                .id(egui::Id::new("application_settings"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(context, |ui| {
+                    ui.spacing_mut().item_spacing.y = 6.;
+                    heading(ui, T::SettingsAppearance);
+                    self.settings_appearance(ui);
+                    ui.add_space(8.);
+                    heading(ui, T::SettingsDrawing);
+                    self.settings_drawing(ui);
+                    ui.add_space(4.);
+                    ui.separator();
+                    if ui.button(text(T::SettingsAboutButton)).clicked() {
+                        self.settings_panel.about = true;
                     }
                 });
-                ui.separator();
-                ui.add_space(8.);
-                match self.settings_panel.tab {
-                    Tab::Appearance => self.settings_appearance(ui),
-                    Tab::Shortcut => self.settings_shortcuts(ui),
-                    Tab::Drawing => self.settings_drawing(ui),
-                    Tab::Help => recovery = self.settings_help(ui),
-                    Tab::About => about(ui),
-                }
-            });
-        self.settings_panel.open = open;
-        if recovery {
-            self.settings_panel.open = false;
-            self.show_recovery = true;
+            self.settings_panel.open = open;
+        }
+        if self.settings_panel.shortcuts {
+            let mut open = true;
+            egui::Window::new(text(T::SettingsShortcuts))
+                .id(egui::Id::new("application_shortcuts"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .pivot(egui::Align2::CENTER_CENTER)
+                .default_pos(context.content_rect().center())
+                .show(context, |ui| self.settings_shortcuts(ui));
+            self.settings_panel.shortcuts = open;
+            if !open {
+                self.settings_panel.capture = None;
+            }
+        }
+        if self.settings_panel.about {
+            let mut open = true;
+            egui::Window::new(text(T::SettingsAbout))
+                .id(egui::Id::new("application_about"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .pivot(egui::Align2::CENTER_CENTER)
+                .default_pos(context.content_rect().center())
+                .show(context, |ui| {
+                    ui.set_width(420.);
+                    about(ui);
+                });
+            self.settings_panel.about = open;
         }
     }
 
-    /// Atalhos por contexto. Clicar na tecla espera a nova combinação; Esc desiste.
-    /// Uma combinação já usada no mesmo contexto é recusada com aviso.
+    /// Tema e idioma: escolhas pessoais, gravadas fora do projeto e sem desfazer.
+    fn settings_appearance(&mut self, ui: &mut egui::Ui) {
+        use crate::i18n::Language;
+        let mut next = self.preferences.clone();
+        row(ui, T::SettingsTheme, T::SettingsThemeHint, |ui| {
+            choice(
+                ui,
+                "settings_theme",
+                &mut next.theme,
+                &[
+                    (theme::Choice::System, text(T::SettingsSystem)),
+                    (theme::Choice::Light, text(T::SettingsThemeLight)),
+                    (theme::Choice::Dark, text(T::SettingsThemeDark)),
+                ],
+            )
+        });
+        // Cada idioma aparece no próprio nome, para ser achado por quem não lê o atual.
+        row(ui, T::SettingsLanguage, T::SettingsLanguageHint, |ui| {
+            choice(
+                ui,
+                "settings_language",
+                &mut next.language,
+                &[
+                    (None, text(T::SettingsSystem)),
+                    (Some(Language::Portuguese), "Português"),
+                    (Some(Language::Spanish), "Español"),
+                    (Some(Language::English), "English"),
+                ],
+            )
+        });
+        if next != self.preferences {
+            self.preferences = next;
+            self.save_preferences(ui.ctx());
+        }
+    }
+
+    /// Escolhas do documento: unidade, precisões do mouse e casas exibidas. Cada
+    /// alteração é uma ação do documento, reversível por desfazer. Os atalhos, do
+    /// aplicativo, ficam aqui por serem a ferramenta de quem desenha.
+    fn settings_drawing(&mut self, ui: &mut egui::Ui) {
+        let current = self.current().session.document().settings();
+        let mut next = current;
+        let height = ui.spacing().interact_size.y;
+        ui.add_enabled_ui(!self.busy(), |ui| {
+            row(ui, T::SettingsUnit, T::SettingsUnitHint, |ui| {
+                choice(
+                    ui,
+                    "settings_unit",
+                    &mut next.unit,
+                    &[
+                        (LengthUnit::Millimeter, text(T::SettingsUnitMillimeter)),
+                        (LengthUnit::Inch, text(T::SettingsUnitInch)),
+                    ],
+                )
+            });
+            // As caixas aplicam o valor ao confirmar a digitação e não respondem a
+            // arraste, que criaria dezenas de ações.
+            row(ui, T::SettingsMouseStep, T::SettingsMouseStepHint, |ui| {
+                let context = ui.ctx().clone();
+                ui.add_sized(
+                    [FIELD_WIDTH, height],
+                    command_panel::length_value(
+                        &context,
+                        &mut next.mouse_step_mm,
+                        nator_document::MIN_MOUSE_STEP_MM..=nator_document::MAX_MOUSE_STEP_MM,
+                    )
+                    .speed(0.)
+                    .max_decimals(usize::from(nator_document::MAX_DISPLAY_DECIMALS))
+                    .update_while_editing(false),
+                )
+            });
+            row(
+                ui,
+                T::SettingsMouseAngleStep,
+                T::SettingsMouseStepHint,
+                |ui| {
+                    ui.add_sized(
+                        [FIELD_WIDTH, height],
+                        command_panel::localized(egui::DragValue::new(
+                            &mut next.mouse_angle_step_deg,
+                        ))
+                        .speed(0.)
+                        .range(
+                            nator_document::MIN_MOUSE_ANGLE_STEP_DEG
+                                ..=nator_document::MAX_MOUSE_ANGLE_STEP_DEG,
+                        )
+                        .max_decimals(2)
+                        .suffix("°")
+                        .update_while_editing(false),
+                    )
+                },
+            );
+            row(ui, T::DisplayDecimals, T::DisplayDecimalsHint, |ui| {
+                ui.add_sized(
+                    [FIELD_WIDTH, height],
+                    egui::DragValue::new(&mut next.display_decimals)
+                        .range(0..=nator_document::MAX_DISPLAY_DECIMALS)
+                        .speed(0.)
+                        .update_while_editing(false),
+                )
+            });
+        });
+        row(ui, T::SettingsShortcuts, T::SettingsShortcutsHint, |ui| {
+            let button = ui.add_sized(
+                [FIELD_WIDTH, height],
+                egui::Button::new(text(T::SettingsConfigure)),
+            );
+            if button.clicked() {
+                self.settings_panel.shortcuts = true;
+            }
+            button
+        });
+        if next != current {
+            self.execute(Command::SetSettings { settings: next });
+        }
+    }
+
+    /// Atalhos por contexto, em três colunas: ícone, ação e tecla. Clicar na tecla
+    /// espera a nova combinação; Esc desiste. Uma combinação já usada no mesmo
+    /// contexto é recusada com aviso.
     fn settings_shortcuts(&mut self, ui: &mut egui::Ui) {
         use super::shortcuts::{self, Scope};
         if let Some(id) = self.settings_panel.capture {
@@ -126,25 +255,34 @@ impl Editor {
                 }
             }
         }
-        hint(ui, text(T::ShortcutsHint));
         let all = shortcuts::bindings();
+        let height = ui.spacing().interact_size.y;
         egui::ScrollArea::vertical()
-            .max_height(320.)
+            .max_height(460.)
             .show(ui, |ui| {
-                for scope in [
-                    Scope::System,
-                    Scope::Workspace,
-                    Scope::Model,
-                    Scope::Assembly,
-                    Scope::Sketch,
-                ] {
-                    theme::section(ui, text(scope.label()));
-                    egui::Grid::new(("shortcuts", scope as u8))
-                        .num_columns(2)
-                        .spacing([24., 4.])
-                        .show(ui, |ui| {
+                // Uma grade só para todos os contextos mantém as colunas alinhadas.
+                egui::Grid::new("application_shortcuts_grid")
+                    .num_columns(3)
+                    .spacing([12., 4.])
+                    .min_col_width(ICON_SIZE)
+                    .show(ui, |ui| {
+                        for scope in [
+                            Scope::System,
+                            Scope::Workspace,
+                            Scope::Model,
+                            Scope::Assembly,
+                            Scope::Sketch,
+                        ] {
+                            ui.label("");
+                            heading(ui, scope.label());
+                            ui.end_row();
                             for binding in all.iter().filter(|b| b.scope == scope) {
-                                ui.label(text(binding.target.label()));
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::Vec2::splat(ICON_SIZE),
+                                    egui::Sense::hover(),
+                                );
+                                icons::paint(ui.painter(), rect, binding.target.icon(), true);
+                                fixed_label(ui, text(binding.target.label()));
                                 let waiting = self.settings_panel.capture == Some(binding.id);
                                 let label = if waiting {
                                     text(T::ShortcutWaiting).to_owned()
@@ -154,188 +292,32 @@ impl Editor {
                                         binding,
                                     ))
                                 };
-                                if ui.selectable_label(waiting, label).clicked() {
+                                let key = ui
+                                    .add(
+                                        egui::Button::new(label)
+                                            .selected(waiting)
+                                            .min_size(egui::vec2(KEY_WIDTH, height)),
+                                    )
+                                    .on_hover_text(text(T::ShortcutsHint));
+                                if key.clicked() {
                                     self.settings_panel.capture = Some(binding.id);
                                 }
                                 ui.end_row();
                             }
-                        });
-                }
+                        }
+                    });
             });
-        if !self.preferences.shortcuts.is_empty() && ui.button(text(T::ShortcutsReset)).clicked() {
+        ui.separator();
+        if ui
+            .add_enabled(
+                !self.preferences.shortcuts.is_empty(),
+                egui::Button::new(text(T::ShortcutsReset)),
+            )
+            .clicked()
+        {
             self.preferences.shortcuts.clear();
             self.save_preferences(ui.ctx());
         }
-    }
-
-    /// Tema e idioma: escolhas pessoais, gravadas fora do projeto e sem desfazer.
-    fn settings_appearance(&mut self, ui: &mut egui::Ui) {
-        let mut next = self.preferences.clone();
-        ui.horizontal(|ui| {
-            ui.label(text(T::SettingsTheme));
-            for (choice, label) in [
-                (theme::Choice::System, T::SettingsSystem),
-                (theme::Choice::Light, T::SettingsThemeLight),
-                (theme::Choice::Dark, T::SettingsThemeDark),
-            ] {
-                ui.selectable_value(&mut next.theme, choice, text(label));
-            }
-        });
-        ui.add_space(8.);
-        ui.horizontal(|ui| {
-            use crate::i18n::Language;
-            ui.label(text(T::SettingsLanguage));
-            // Cada idioma aparece no próprio nome, para ser achado por quem não lê o atual.
-            ui.selectable_value(&mut next.language, None, text(T::SettingsSystem));
-            for (language, name) in [
-                (Language::Portuguese, "Português"),
-                (Language::Spanish, "Español"),
-                (Language::English, "English"),
-            ] {
-                ui.selectable_value(&mut next.language, Some(language), name);
-            }
-        });
-        hint(ui, text(T::SettingsAppearanceHint));
-        if next != self.preferences {
-            self.preferences = next;
-            self.save_preferences(ui.ctx());
-        }
-    }
-
-    /// Escolhas do documento: unidade, precisões do mouse e casas exibidas. Cada
-    /// alteração é uma ação do documento, reversível por desfazer.
-    fn settings_drawing(&mut self, ui: &mut egui::Ui) {
-        let current = self.current().session.document().settings();
-        let mut next = current;
-        ui.add_enabled_ui(!self.busy(), |ui| {
-            ui.horizontal(|ui| {
-                ui.label(text(T::SettingsUnit));
-                for (unit, label) in [
-                    (LengthUnit::Millimeter, T::SettingsUnitMillimeter),
-                    (LengthUnit::Inch, T::SettingsUnitInch),
-                ] {
-                    ui.selectable_value(&mut next.unit, unit, text(label));
-                }
-            });
-            hint(ui, text(T::SettingsUnitHint));
-            ui.add_space(8.);
-            // Cada alteração vira uma ação do documento: as caixas aplicam o valor ao
-            // confirmar a digitação e não respondem a arraste, que criaria dezenas delas.
-            ui.horizontal(|ui| {
-                ui.label(text(T::SettingsMouseStep));
-                let context = ui.ctx().clone();
-                ui.add(
-                    command_panel::length_value(
-                        &context,
-                        &mut next.mouse_step_mm,
-                        nator_document::MIN_MOUSE_STEP_MM..=nator_document::MAX_MOUSE_STEP_MM,
-                    )
-                    .speed(0.)
-                    .max_decimals(usize::from(nator_document::MAX_DISPLAY_DECIMALS))
-                    .update_while_editing(false),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.label(text(T::SettingsMouseAngleStep));
-                ui.add(
-                    command_panel::localized(egui::DragValue::new(&mut next.mouse_angle_step_deg))
-                        .speed(0.)
-                        .range(
-                            nator_document::MIN_MOUSE_ANGLE_STEP_DEG
-                                ..=nator_document::MAX_MOUSE_ANGLE_STEP_DEG,
-                        )
-                        .max_decimals(2)
-                        .suffix("°")
-                        .update_while_editing(false),
-                );
-            });
-            hint(ui, text(T::SettingsMouseStepHint));
-            ui.add_space(8.);
-            ui.horizontal(|ui| {
-                ui.label(text(T::DisplayDecimals));
-                ui.add(
-                    egui::DragValue::new(&mut next.display_decimals)
-                        .range(0..=nator_document::MAX_DISPLAY_DECIMALS),
-                );
-            });
-            hint(ui, text(T::DisplayDecimalsHint));
-        });
-        if next != current {
-            self.execute(Command::SetSettings { settings: next });
-        }
-    }
-
-    /// Tutorial por tarefa, com busca, e a lista dos atalhos em vigor.
-    fn settings_help(&mut self, ui: &mut egui::Ui) -> bool {
-        use super::{help, shortcuts};
-        ui.horizontal(|ui| {
-            ui.label(text(T::HelpSearch));
-            ui.add(
-                egui::TextEdit::singleline(&mut self.settings_panel.search)
-                    .desired_width(260.)
-                    .hint_text(text(T::HelpSearchHint)),
-            );
-        });
-        let query = self.settings_panel.search.clone();
-        egui::ScrollArea::vertical()
-            .max_height(300.)
-            .show(ui, |ui| {
-                let mut found = false;
-                for topic in help::TOPICS.iter().filter(|t| help::matches(t, &query)) {
-                    found = true;
-                    egui::CollapsingHeader::new(egui::RichText::new(topic.title).strong())
-                        .default_open(!query.trim().is_empty())
-                        .show(ui, |ui| {
-                            for (number, step) in topic.steps.iter().enumerate() {
-                                ui.label(format!("{}. {step}", number + 1));
-                            }
-                        });
-                }
-                // Os atalhos acompanham o que o usuário configurou.
-                let title = text(T::SettingsShortcuts);
-                let all = shortcuts::bindings();
-                let rows = all
-                    .iter()
-                    .map(|b| {
-                        (
-                            text(b.target.label()),
-                            shortcuts::format(shortcuts::effective(&self.preferences.shortcuts, b)),
-                        )
-                    })
-                    .filter(|(name, key)| {
-                        query.trim().is_empty()
-                            || help::fold(&format!("{title} {name} {key}"))
-                                .contains(&help::fold(query.trim()))
-                    })
-                    .collect::<Vec<_>>();
-                if !rows.is_empty() {
-                    found = true;
-                    egui::CollapsingHeader::new(egui::RichText::new(title).strong()).show(
-                        ui,
-                        |ui| {
-                            egui::Grid::new("help_shortcuts")
-                                .num_columns(2)
-                                .show(ui, |ui| {
-                                    for (name, key) in rows {
-                                        ui.label(name);
-                                        ui.label(egui::RichText::new(key).monospace());
-                                        ui.end_row();
-                                    }
-                                });
-                        },
-                    );
-                }
-                if !found {
-                    hint(ui, text(T::HelpNothingFound));
-                }
-            });
-        ui.separator();
-        hint(ui, text(T::SettingsRecoveryHint));
-        ui.add_enabled(
-            !self.busy() && !self.recoveries.is_empty(),
-            egui::Button::new(text(T::Recovery)),
-        )
-        .clicked()
     }
 }
 
@@ -380,21 +362,21 @@ fn about(ui: &mut egui::Ui) {
         .num_columns(2)
         .spacing([24., 7.])
         .show(ui, |ui| {
-            row(
+            about_row(
                 ui,
                 T::SettingsAboutAuthor,
                 text(T::SettingsAboutAuthorValue),
             );
-            row(
+            about_row(
                 ui,
                 T::SettingsAboutLicense,
                 text(T::SettingsAboutLicenseValue),
             );
-            row(ui, T::SettingsAboutProjectFormat, &format);
+            about_row(ui, T::SettingsAboutProjectFormat, &format);
             ui.label(egui::RichText::new(text(T::SettingsAboutRepository)).color(theme::muted()));
             ui.hyperlink_to(text(T::SettingsAboutRepositoryLink), REPOSITORY);
             ui.end_row();
-            row(
+            about_row(
                 ui,
                 T::SettingsAboutTechnologies,
                 text(T::SettingsAboutTechnologiesValue),
@@ -410,14 +392,64 @@ fn about(ui: &mut egui::Ui) {
     });
 }
 
-fn row(ui: &mut egui::Ui, label: T, value: &str) {
+fn about_row(ui: &mut egui::Ui, label: T, value: &str) {
     ui.label(egui::RichText::new(text(label)).color(theme::muted()));
     ui.label(egui::RichText::new(value).strong());
     ui.end_row();
 }
 
-fn hint(ui: &mut egui::Ui, message: &str) {
-    ui.label(egui::RichText::new(message).size(12.).color(theme::muted()));
+fn heading(ui: &mut egui::Ui, label: T) {
+    ui.label(
+        egui::RichText::new(text(label))
+            .size(12.)
+            .strong()
+            .color(theme::muted()),
+    );
+}
+
+/// Linha de configuração: rótulo na coluna fixa e a entrada em seguida. A descrição
+/// aparece em balão sobre o rótulo e sobre a entrada.
+fn row(ui: &mut egui::Ui, label: T, hint: T, field: impl FnOnce(&mut egui::Ui) -> egui::Response) {
+    ui.horizontal(|ui| {
+        fixed_label(ui, text(label)).on_hover_text(text(hint));
+        field(ui).on_hover_text(text(hint));
+    });
+}
+
+/// Rótulo alinhado à esquerda na largura da coluna de rótulos; o excesso é cortado.
+fn fixed_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let height = ui.spacing().interact_size.y;
+    ui.allocate_ui_with_layout(
+        egui::vec2(LABEL_WIDTH, height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(LABEL_WIDTH);
+            ui.add(egui::Label::new(label).truncate())
+        },
+    )
+    .inner
+}
+
+/// Seletor de uma opção entre poucas, com a largura comum das entradas.
+fn choice<V: Clone + PartialEq>(
+    ui: &mut egui::Ui,
+    id: &str,
+    value: &mut V,
+    options: &[(V, &str)],
+) -> egui::Response {
+    let current = options
+        .iter()
+        .find(|(option, _)| option == value)
+        .map_or("", |(_, label)| *label);
+    egui::ComboBox::from_id_salt(id)
+        .width(FIELD_WIDTH)
+        .selected_text(current)
+        .show_ui(ui, |ui| {
+            for (option, label) in options {
+                ui.selectable_value(value, option.clone(), *label);
+            }
+        })
+        .response
 }
 
 #[cfg(test)]
@@ -425,19 +457,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn panel_starts_closed_on_drawing() {
+    fn panel_starts_closed() {
         let mut panel = Panel::default();
-        assert!(!panel.open);
-        assert_eq!(panel.tab, Tab::Drawing);
+        assert!(!panel.open && !panel.shortcuts && !panel.about);
         panel.open();
         assert!(panel.open);
     }
 
     #[test]
-    fn opens_the_requested_tab() {
-        let mut panel = Panel::default();
-        panel.open_at(Tab::About);
-        assert!(panel.open);
-        assert_eq!(panel.tab, Tab::About);
+    fn captures_keys_only_with_the_shortcuts_window() {
+        let mut panel = Panel {
+            capture: Some("save"),
+            ..Panel::default()
+        };
+        assert!(!panel.capturing());
+        panel.open_shortcuts();
+        assert!(panel.capturing());
     }
 }

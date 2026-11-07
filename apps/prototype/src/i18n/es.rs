@@ -327,9 +327,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SettingsAppearance => "Apariencia",
         Text::SettingsDrawing => "Dibujo",
         Text::SettingsShortcuts => "Atajos",
-        Text::SettingsHelp => "Ayuda",
         Text::SettingsAbout => "Acerca de",
-        Text::SettingsRecoveryHint => "Abra una copia automática para continuar el trabajo.",
         Text::SettingsAboutDescription => {
             "CAD paramétrico en Rust para modelar piezas mecánicas precisas para prototipos."
         }
@@ -938,9 +936,6 @@ pub fn text(key: Text) -> &'static str {
         Text::ReferenceSketch => "Boceto de referencia",
         Text::NewPartMenu => "Nueva pieza",
         Text::AddFaceLines => "Traer líneas de la cara",
-        Text::HelpSearch => "Buscar",
-        Text::HelpSearchHint => "Ej.: extrusión, atajo, medir",
-        Text::HelpNothingFound => "No se encontró nada. Pruebe otra palabra.",
         Text::ShortcutsSystem => "Sistema",
         Text::ShortcutsWorkspace => "Construcción y ensamblaje",
         Text::ShortcutsSketch => "Boceto",
@@ -958,9 +953,17 @@ pub fn text(key: Text) -> &'static str {
         Text::SettingsThemeLight => "Claro",
         Text::SettingsThemeDark => "Oscuro",
         Text::SettingsLanguage => "Idioma",
-        Text::SettingsAppearanceHint => {
-            "Valen para todos los proyectos en este equipo. Sistema sigue el tema y el idioma del sistema operativo; fuera de portugués, español e inglés, se usa el portugués."
+        Text::SettingsConfigure => "Configurar",
+        Text::SettingsShortcutsHint => {
+            "Teclas que activan las herramientas, separadas por contexto."
         }
+        Text::SettingsThemeHint => {
+            "Vale para todos los proyectos en este equipo. Sistema sigue el tema del sistema operativo."
+        }
+        Text::SettingsLanguageHint => {
+            "Vale para todos los proyectos en este equipo. Sistema sigue el idioma del sistema operativo; fuera de portugués, español e inglés, se usa el portugués."
+        }
+        Text::SettingsAboutButton => "Acerca de 3dnator",
         Text::SketchTextX => "Posición X",
         Text::SketchTextY => "Posición Y",
         Text::SketchTextAdjustHint => "Ajusta las propiedades y confirma para aplicar el texto.",

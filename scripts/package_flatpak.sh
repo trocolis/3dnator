@@ -27,6 +27,12 @@ install -m755 "$BIN_PATH" "$BUILD_DIR/files/libexec/3dnator"
 cat > "$BUILD_DIR/files/bin/3dnator" <<'LAUNCHER'
 #!/bin/sh
 export LD_LIBRARY_PATH="/app/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Contorno para a janela parada na espera de eventos Wayland. Com XWayland
+# disponível, evitar esse caminho sem impor redesenho contínuo ao editor.
+# Permitir diagnóstico com Wayland nativo e conservar sessões sem X11.
+if [ "${THREEDNATOR_WAYLAND:-0}" != 1 ] && [ -n "${DISPLAY:-}" ]; then
+    unset WAYLAND_DISPLAY WAYLAND_SOCKET
+fi
 exec /app/libexec/3dnator "$@"
 LAUNCHER
 chmod 755 "$BUILD_DIR/files/bin/3dnator"
@@ -83,7 +89,9 @@ cat > "$BUILD_DIR/files/share/metainfo/$APP_ID.metainfo.xml" <<XML
   <releases><release version="$APP_VERSION" date="$(date -u +%F)"/></releases>
 </component>
 XML
-flatpak build-finish --command=3dnator --share=ipc --socket=wayland --socket=fallback-x11 --device=dri --filesystem=host "$BUILD_DIR"
+# fallback-x11 oculta DISPLAY quando Wayland existe; o lançador precisa dos
+# dois sockets para escolher X11/XWayland e ainda aceitar o modo de diagnóstico.
+flatpak build-finish --command=3dnator --share=ipc --socket=wayland --socket=x11 --device=dri --filesystem=host "$BUILD_DIR"
 # Os testes usam o Platform, não o Sdk, e uma pasta nova dentro da área de build.
 # Não instalam o aplicativo nem alteram preferências reais do usuário.
 flatpak build --runtime "$BUILD_DIR" /app/bin/3dnator --version

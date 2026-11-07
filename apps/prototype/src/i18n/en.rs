@@ -313,9 +313,7 @@ pub fn text(key: Text) -> &'static str {
         Text::SettingsAppearance => "Appearance",
         Text::SettingsDrawing => "Drawing",
         Text::SettingsShortcuts => "Shortcuts",
-        Text::SettingsHelp => "Help",
         Text::SettingsAbout => "About",
-        Text::SettingsRecoveryHint => "Open an automatic copy to continue working.",
         Text::SettingsAboutDescription => {
             "Parametric CAD in Rust for modeling precise mechanical parts for prototypes."
         }
@@ -910,9 +908,6 @@ pub fn text(key: Text) -> &'static str {
         Text::ReferenceSketch => "Reference sketch",
         Text::NewPartMenu => "New part",
         Text::AddFaceLines => "Bring in face lines",
-        Text::HelpSearch => "Search",
-        Text::HelpSearchHint => "E.g.: extrude, shortcut, measure",
-        Text::HelpNothingFound => "Nothing found. Try another word.",
         Text::ShortcutsSystem => "System",
         Text::ShortcutsWorkspace => "Construction and assembly",
         Text::ShortcutsSketch => "Sketch",
@@ -930,9 +925,15 @@ pub fn text(key: Text) -> &'static str {
         Text::SettingsThemeLight => "Light",
         Text::SettingsThemeDark => "Dark",
         Text::SettingsLanguage => "Language",
-        Text::SettingsAppearanceHint => {
-            "They apply to all projects on this computer. System follows the operating system's theme and language; other than Portuguese, Spanish and English, Portuguese is used."
+        Text::SettingsConfigure => "Configure",
+        Text::SettingsShortcutsHint => "Keys that trigger the tools, grouped by context.",
+        Text::SettingsThemeHint => {
+            "Applies to all projects on this computer. System follows the operating system's theme."
         }
+        Text::SettingsLanguageHint => {
+            "Applies to all projects on this computer. System follows the operating system's language; other than Portuguese, Spanish and English, Portuguese is used."
+        }
+        Text::SettingsAboutButton => "About 3dnator",
         Text::SketchTextX => "Position X",
         Text::SketchTextY => "Position Y",
         Text::SketchTextAdjustHint => "Adjust the properties and confirm to apply the text.",

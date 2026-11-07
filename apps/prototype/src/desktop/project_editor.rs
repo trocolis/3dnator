@@ -10,6 +10,8 @@ mod drawing_editor;
 mod export_editor;
 mod feature_editor;
 mod fit_check;
+// A ajuda saiu das configurações por ora; o conteúdo fica para voltar noutro lugar.
+#[allow(dead_code)]
 mod help;
 mod highlight;
 mod history;

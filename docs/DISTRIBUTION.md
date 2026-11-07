@@ -13,6 +13,18 @@ A versão exibida pelo aplicativo corresponde ao Cargo e à tag `v0.3.0-alpha.1`
 
 ## Gerar Flatpak e EXE
 
+Desde 0.40.1, o lançador Flatpak prefere X11/XWayland quando `DISPLAY` está disponível,
+como mitigação para uma ocorrência de interface paralisada na espera de eventos Wayland.
+O pacote permite os dois sockets; sessões sem X11 continuam usando Wayland. Para comparar
+com o caminho nativo, execute
+`flatpak run --env=THREEDNATOR_WAYLAND=1 io.github.trocolis.ThreeDnator`.
+Essa mitigação ainda exige acompanhamento com projetos abertos por períodos longos;
+a captura de threads não identifica sozinha a causa interna do bloqueio.
+
+Na versão anterior, um teste temporário equivalente é
+`flatpak run --nosocket=wayland --socket=x11 io.github.trocolis.ThreeDnator`.
+As opções desse comando valem somente para aquela execução.
+
 Execute manualmente **Empacotar pré-release** na revisão a distribuir; `platform` permite gerar ambos os formatos ou repetir somente Flatpak/Windows. O workflow não publica nem altera tags. O job Linux compila em Ubuntu 24.04 e verifica o carregamento/ensaios no **Platform** Freedesktop 25.08, sem depender do SDK; o job Windows valida a pasta relocada com PATH limpo e a instalação silenciosa do EXE. Cada artefato inclui seu SHA-256. A geração usa `scripts/collect_licenses.py` para textos e inventário das crates resolvidas (incluindo fontes) e `scripts/collect_native_licenses.py` para metadados/licenças dos pacotes do SDK. O inventário é mais amplo que os binários vinculados; `NATIVE_DEPENDENCIES.txt` distingue as bibliotecas efetivas.
 
 Localmente, com Platform e Sdk Freedesktop 25.08 instalados e um executável compilado com ABI compatível:

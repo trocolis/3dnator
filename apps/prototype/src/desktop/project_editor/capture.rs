@@ -87,9 +87,7 @@ pub(crate) fn render_ui_scenario(
         | "repair"
         | "recovery"
         | "settings"
-        | "settings-drawing"
         | "settings-shortcuts"
-        | "settings-help"
         | "settings-about"
         | "insert"
         | "mesh-import"
@@ -136,7 +134,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: cursor-extrude, cursor-hole, cursor-measure, cursor-pan, cursor-select, timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-drawing, settings-shortcuts, settings-help, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-shortcuts, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
         }
@@ -569,16 +567,14 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
     }
     if matches!(
         scenario,
-        "settings" | "settings-drawing" | "settings-shortcuts" | "settings-help" | "settings-about"
+        "settings" | "settings-shortcuts" | "settings-about"
     ) {
-        let tab = match scenario {
-            "settings-drawing" => settings::Tab::Drawing,
-            "settings-shortcuts" => settings::Tab::Shortcut,
-            "settings-help" => settings::Tab::Help,
-            "settings-about" => settings::Tab::About,
-            _ => settings::Tab::Appearance,
-        };
-        editor.settings_panel.open_at(tab);
+        editor.settings_panel.open();
+        match scenario {
+            "settings-shortcuts" => editor.settings_panel.open_shortcuts(),
+            "settings-about" => editor.settings_panel.open_about(),
+            _ => {}
+        }
         return Ok(());
     }
     // A aba Rascunho é fixa; sem edição ativa ela oferece o início de um rascunho.

@@ -353,14 +353,14 @@ O controle acompanha a câmera de cada aba durante a sessão. Ele atua na visual
 
 A captura do projeto mostra a modelagem 3D. Para revisar o rascunho aberto sobre o modelo no mesmo viewport, use a captura específica de rascunho. Os dois comandos aceitam dimensões opcionais (900–3840 × 600–2160 pixels):
 
-Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `cell-hover`, `paint-hover`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `section-contact`, `section-contact-perspective`, `section-contact-hover`, `repair`, `recovery`, `settings`, `settings-drawing`, `settings-about`, `insert`, `mesh-import`, `menu-new-part`, `menu-move`, `menu-copy`, `reference-align`, `reference-sketch`, `copy-beside`, `tree-folders`, `tree-collapsed`, `navigation-pan`, `restriction-marks`, `restrict-menu`, `part-menu-move`, `measure`, `sketch-line-input`, `sketch-circle-input`, `sketch-rectangle-input`, `extrude-face`, `extrude-cut`, `extrude-zero`, `paint`, `icons`, `rascunho-tab`, `sketch-line-panel`, `sketch-project-panel`), que não alteram o projeto de origem:
+Estados interativos também podem ser capturados por cenários (`timeline`, `timeline-menu`, `extrude`, `edit-last`, `failure`, `cell-hover`, `paint-hover`, `hover-face`, `hover-edge`, `select-body`, `window`, `assembly-select`, `move`, `align`, `assembly-ribbon`, `section`, `section-contact`, `section-contact-perspective`, `section-contact-hover`, `repair`, `recovery`, `settings`, `settings-shortcuts`, `settings-about`, `insert`, `mesh-import`, `menu-new-part`, `menu-move`, `menu-copy`, `reference-align`, `reference-sketch`, `copy-beside`, `tree-folders`, `tree-collapsed`, `navigation-pan`, `restriction-marks`, `restrict-menu`, `part-menu-move`, `measure`, `sketch-line-input`, `sketch-circle-input`, `sketch-rectangle-input`, `extrude-face`, `extrude-cut`, `extrude-zero`, `paint`, `icons`, `rascunho-tab`, `sketch-line-panel`, `sketch-project-panel`), que não alteram o projeto de origem:
 
 ```sh
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel.png extrude
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator icones.png icons 1920 1200
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator rascunho.png rascunho-tab
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator painel-linha.png sketch-line-panel
-cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator desenho.png settings-drawing
+cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator atalhos.png settings-shortcuts
 cargo run -p nator-prototype --features occt -- --render-ui-scenario projeto.3dnator sobre.png settings-about
 cargo run -p nator-prototype --features occt -- --render-project-preview projeto.3dnator modelo.png
 cargo run -p nator-prototype --features occt -- --render-sketch-preview projeto.3dnator rascunho.png

@@ -2,7 +2,7 @@
 //! preferências), um contexto e a tecla padrão. Os contextos seguem a lógica do rascunho:
 //! uma letra, sem modificador, vale só onde a ferramenta existe; os atalhos do sistema
 //! valem em toda parte. A mesma letra pode se repetir em contextos diferentes.
-use super::{T, egui, sketch_editor};
+use super::{T, egui, icons::Icon, sketch_editor};
 use nator_sketch::edit::Action as Edit;
 use std::collections::BTreeMap;
 
@@ -59,6 +59,24 @@ impl Target {
             Self::Fillet => T::Fillet,
             Self::Chamfer => T::Chamfer,
             Self::Move => T::MoveMenu,
+        }
+    }
+    /// Ícone da ação na janela de atalhos, o mesmo da faixa ou da ferramenta.
+    pub(super) fn icon(self) -> Icon {
+        match self {
+            Self::Save => Icon::Save,
+            Self::Undo => Icon::Undo,
+            Self::Redo => Icon::Redo,
+            Self::Search => Icon::Search,
+            Self::Tool(tool) => tool.icon(),
+            Self::Edit(action) => sketch_editor::edit_icon(action),
+            Self::Delete => Icon::Delete,
+            Self::Stroke => Icon::LineConstruction,
+            Self::Extrude => Icon::Extrude,
+            Self::Revolve => Icon::Revolve,
+            Self::Fillet => Icon::Fillet,
+            Self::Chamfer => Icon::Chamfer,
+            Self::Move => Icon::Move,
         }
     }
 }

@@ -6,6 +6,12 @@
 
 - Documentado em `docs/PLANO_AJUSTES.md` o diagnóstico de viabilidade dos 11 itens pendentes de `AJUSTES.md`, com sequência de implementação, limites de compatibilidade e critérios de aceite. Nenhuma funcionalidade foi alterada nesta análise.
 
+## 0.42.0 — 07/11/2026
+
+- Configurações reunidas num painel único, com as seções Aparência e Desenho. Rótulos à esquerda e entradas alinhadas numa coluna de largura comum; tema, idioma e unidade passam a seletores (combobox) e as descrições aparecem em balões ao passar o mouse.
+- Atalhos ganham janela própria, aberta por **Configurar** na seção Desenho: seções por contexto em três colunas (ícone, ação e tecla). **Sobre** também abre janela própria. A ajuda sai das configurações por enquanto, e com ela o botão de recuperação, que continua aparecendo na abertura quando há cópias automáticas.
+- Cenários de captura `settings-drawing` e `settings-help` removidos; `settings-shortcuts` e `settings-about` abrem as novas janelas.
+
 ## 0.41.1 — 07/11/2026
 
 - Árvore flutuante ocupa toda a altura disponível até a barra inferior; rolagem aparece somente quando os nós excedem esse espaço, sem o limite inicial de altura das áreas do egui.
@@ -17,6 +23,10 @@
 ## 0.40.2 — 07/11/2026
 
 - Ícones exibem uma única dica: nome completo e atalho na faixa, explicação nas opções e informações da árvore, preservando nomes acessíveis e ativação por teclado.
+
+## 0.40.1 — 05/11/2026
+
+- Mitigação para a interface Flatpak paralisada após inatividade: o lançador prefere X11/XWayland quando disponível, preservando Wayland em sessões sem X11. `THREEDNATOR_WAYLAND=1` permite testar o caminho nativo. A ocorrência capturada estava na espera de eventos Wayland, sem trabalhador CAD ativo; a causa interna e a estabilidade prolongada ainda precisam de confirmação.
 
 ## 0.40.0 — 05/11/2026
 

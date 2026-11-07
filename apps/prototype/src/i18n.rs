@@ -326,9 +326,7 @@ pub enum Text {
     SettingsAppearance,
     SettingsDrawing,
     SettingsShortcuts,
-    SettingsHelp,
     SettingsAbout,
-    SettingsRecoveryHint,
     SettingsAboutDescription,
     SettingsAboutVersion,
     SettingsAboutAuthor,
@@ -858,9 +856,6 @@ pub enum Text {
     ReferenceSketch,
     NewPartMenu,
     AddFaceLines,
-    HelpSearch,
-    HelpSearchHint,
-    HelpNothingFound,
     ShortcutsSystem,
     ShortcutsWorkspace,
     ShortcutsSketch,
@@ -876,7 +871,11 @@ pub enum Text {
     SettingsThemeLight,
     SettingsThemeDark,
     SettingsLanguage,
-    SettingsAppearanceHint,
+    SettingsConfigure,
+    SettingsShortcutsHint,
+    SettingsThemeHint,
+    SettingsLanguageHint,
+    SettingsAboutButton,
     SketchTextTool,
     SketchTextX,
     SketchTextY,
@@ -1234,10 +1233,8 @@ fn pt(key: Text) -> &'static str {
         Text::SettingsMenu => "Configurações",
         Text::SettingsAppearance => "Aparência",
         Text::SettingsDrawing => "Desenho",
-        Text::SettingsShortcuts => "Atalho",
-        Text::SettingsHelp => "Ajuda",
+        Text::SettingsShortcuts => "Atalhos",
         Text::SettingsAbout => "Sobre",
-        Text::SettingsRecoveryHint => "Abra uma cópia automática para continuar o trabalho.",
         Text::SettingsAboutDescription => {
             "CAD paramétrico em Rust para modelar peças mecânicas precisas para protótipos."
         }
@@ -1858,9 +1855,6 @@ fn pt(key: Text) -> &'static str {
         Text::ReferenceSketch => "Rascunho de referência",
         Text::NewPartMenu => "Nova peça",
         Text::AddFaceLines => "Trazer linhas da face",
-        Text::HelpSearch => "Buscar",
-        Text::HelpSearchHint => "Ex.: extrusão, atalho, medir",
-        Text::HelpNothingFound => "Nada encontrado. Tente outra palavra.",
         Text::ShortcutsSystem => "Sistema",
         Text::ShortcutsWorkspace => "Construção e montagem",
         Text::ShortcutsSketch => "Rascunho",
@@ -1878,9 +1872,15 @@ fn pt(key: Text) -> &'static str {
         Text::SettingsThemeLight => "Claro",
         Text::SettingsThemeDark => "Escuro",
         Text::SettingsLanguage => "Idioma",
-        Text::SettingsAppearanceHint => {
-            "Valem para todos os projetos, neste computador. Sistema segue o tema e o idioma do sistema operacional; fora de português, espanhol e inglês, vale o português."
+        Text::SettingsConfigure => "Configurar",
+        Text::SettingsShortcutsHint => "Teclas que acionam as ferramentas, separadas por contexto.",
+        Text::SettingsThemeHint => {
+            "Vale para todos os projetos neste computador. Sistema segue o tema do sistema operacional."
         }
+        Text::SettingsLanguageHint => {
+            "Vale para todos os projetos neste computador. Sistema segue o idioma do sistema operacional; fora de português, espanhol e inglês, vale o português."
+        }
+        Text::SettingsAboutButton => "Sobre o 3dnator",
         Text::SketchTextX => "Posição X",
         Text::SketchTextY => "Posição Y",
         Text::SketchTextAdjustHint => "Ajuste as propriedades e confirme para aplicar o texto.",
