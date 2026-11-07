@@ -1,6 +1,8 @@
 //! Composição visual. Alterações do documento são encaminhadas ao editor e aos comandos.
 use super::*;
 
+/// Largura da árvore sobre a área de edição.
+const TREE_WIDTH: f32 = 270.;
 /// Largura da barra de título da árvore recolhida.
 const COLLAPSED_TREE_WIDTH: f32 = 200.;
 /// Ícone, botão e espaçamentos que dividem o balão com o nome da peça ou do rascunho.
@@ -272,25 +274,31 @@ impl Editor {
             self.step_history(context, redo);
         }
     }
-    pub(super) fn tree(&mut self, ui: &mut egui::Ui) {
+    /// Árvore sobre o canvas, sem painel de fundo nem reserva de coluna lateral.
+    pub(super) fn tree(&mut self, context: &egui::Context) {
         let menu = self.menu_context();
         let busy = self.busy();
         let mut intents = Vec::new();
-        let mut collapse = false;
-        egui::Panel::left("tree")
-            .default_size(270.)
-            .min_size(190.)
-            .max_size(420.)
-            .frame(theme::panel_frame().inner_margin(0))
-            .show(ui, |ui| {
+        let canvas = self.canvas_rect;
+        let shown = egui::Area::new(egui::Id::new("floating_tree"))
+            .order(egui::Order::Middle)
+            .fade_in(false)
+            .movable(false)
+            .constrain(false)
+            .fixed_pos(canvas.left_top() + egui::vec2(8., 8.))
+            .show(context, |ui| {
+                ui.set_width(TREE_WIDTH);
                 ui.spacing_mut().item_spacing.y = 0.;
                 let tab = self.current();
                 let document = tab.session.document();
-                collapse = tree_title(ui, document.name(), true, 0);
-                ui.add(egui::Separator::default().spacing(0.));
+                let collapse = theme::floating_frame()
+                    .show(ui, |ui| tree_title(ui, document.name(), true, 8))
+                    .inner;
+                // Apenas o cabeçalho tem fundo: os nós ficam diretamente sobre a cena.
                 egui::Frame::new().inner_margin(12).show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("project_browser")
+                        .max_height((canvas.height() - 88.).max(40.))
                         .show(ui, |ui| {
                             let mut tree = project_tree::Tree::new(
                                 document,
@@ -303,12 +311,13 @@ impl Editor {
                             intents.append(&mut tree.intents);
                         });
                 });
+                for intent in intents {
+                    self.apply_tree_intent(ui, intent);
+                }
+                collapse
             });
-        if collapse {
+        if shown.inner {
             self.shell.browser_visible = false;
-        }
-        for intent in intents {
-            self.apply_tree_intent(ui, intent);
         }
     }
     /// Árvore recolhida: resta a barra de título, no canto superior da área de edição.
@@ -355,10 +364,10 @@ impl Editor {
         });
         let canvas = self.canvas_rect;
         let busy = self.busy() || self.pending_close.is_some();
-        // Com a árvore recolhida, a barra dela ocupa o canto: a fila vem logo depois.
+        // A árvore ocupa o canto nos dois estados: a fila vem depois do cabeçalho.
         let mut left = canvas.left()
             + if self.shell.browser_visible {
-                8.
+                TREE_WIDTH + 18.
             } else {
                 COLLAPSED_TREE_WIDTH + 18.
             };

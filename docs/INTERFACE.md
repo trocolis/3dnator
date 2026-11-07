@@ -1,6 +1,6 @@
 # Interface desktop
 
-A organização visual usa como referência o shell compacto do SolidCraft e seus estudos em `docs/design/ux-redesign/`: barra escura de documentos, faixa clara de ferramentas agrupadas por tarefa, árvore lateral e histórico na base. Código, desenhos vetoriais e textos desta entrega foram produzidos no 3dnator, sob a licença MIT do projeto.
+A organização visual usa como referência o shell compacto do SolidCraft e seus estudos em `docs/design/ux-redesign/`: barra escura de documentos, faixa clara de ferramentas agrupadas por tarefa, árvore flutuante e histórico na base. Código, desenhos vetoriais e textos desta entrega foram produzidos no 3dnator, sob a licença MIT do projeto.
 
 ## Organização e uso
 
@@ -163,7 +163,7 @@ O rascunho permanece visível ao concluir. Criar uma extrusão, revolução ou f
 
 O rascunho existente é enquadrado ao abrir, considerando centros e extensões de círculos/arcos. O comando **Enquadrar**, na barra de navegação e na busca por S, restaura essa vista após zoom, deslocamento ou redimensionamento da janela. As cotas usam a formatação em português, sem zeros decimais desnecessários.
 
-A árvore usa ícones, controles de visibilidade, nomes abreviados por elipse e pastas por tipo (ver **Árvore do projeto**). Duplo clique em peça entra na edição dela. O botão da barra de título recolhe/mostra a árvore. O painel lateral Propriedades foi eliminado; o viewport ocupa todo o espaço à direita da árvore. A árvore tem largura ajustável e rolagem; a faixa de ferramentas também rola horizontalmente em janelas menores.
+A árvore usa ícones, controles de visibilidade, nomes abreviados por elipse e pastas por tipo (ver **Árvore do projeto**). Duplo clique em peça entra na edição dela. O botão da barra de título recolhe/mostra a árvore. O viewport ocupa toda a largura, com a árvore sobreposta sem fundo atrás dos nós. A árvore tem rolagem; a faixa de ferramentas também rola horizontalmente em janelas menores.
 
 Arraste o fundo livre da barra escura para mover a janela. Duplo clique nessa região maximiza ou restaura; as bordas e os cantos redimensionam a janela quando ela não está maximizada. Os botões da barra recebem seus próprios cliques. Fechar o aplicativo aguarda a tarefa em andamento e segue a confirmação de salvamento dos projetos modificados.
 
@@ -278,7 +278,7 @@ O corte é um controle visual da aba, como isolamento e transparência: não alt
 
 ## Árvore do projeto
 
-A árvore usa linhas compactas sob a barra de título **Projeto**, que traz o ícone do aplicativo, o nome do projeto na dica e o botão de recolher/mostrar. Recolhida, a árvore sobe e só a barra fica, flutuando no canto superior esquerdo da área de edição, que passa a ocupar toda a largura; a busca por S oferece o mesmo comando. Abaixo da barra ficam **Peças**, **Rascunhos** (de referência da montagem) e **Origem**. Cada peça é um nó com o nome da ocorrência (a definição aparece na dica) e as pastas **Corpos**, **Sub-peças**, **Rascunhos**, **Planos** e **Origem**; cada subpeça repete a mesma estrutura. Pastas vazias permanecem visíveis para criar elementos pelo menu de contexto. O nó Imagens reúne as referências raster da peça.
+A árvore usa linhas compactas sob a barra de título **Projeto**, que traz o ícone do aplicativo, o nome do projeto na dica e o botão de recolher/mostrar. A árvore flutua no canto superior esquerdo da área de edição; recolhida, só a barra fica, sem mudar o tamanho do canvas; a busca por S oferece o mesmo comando. Abaixo da barra ficam **Peças**, **Rascunhos** (de referência da montagem) e **Origem**. Cada peça é um nó com o nome da ocorrência (a definição aparece na dica) e as pastas **Corpos**, **Sub-peças**, **Rascunhos**, **Planos** e **Origem**; cada subpeça repete a mesma estrutura. Pastas vazias permanecem visíveis para criar elementos pelo menu de contexto. O nó Imagens reúne as referências raster da peça.
 
 - **Corpos e operações:** a pasta Corpos lista os resultados atuais, sem acumular etapas anteriores ocultas. Arredondar, chanfrar ou modificar um corpo conserva seu nome; a operação aparece na linha do tempo. Para inspecionar uma etapa anterior, recue o marcador do histórico. Corpos independentes ocultados manualmente continuam listados para permitir reexibi-los, assim como etapas antigas explicitamente mostradas em projetos existentes.
 - **Visibilidade:** os nós da árvore têm um olho. O da pasta não altera a escolha de cada elemento: a visibilidade efetiva combina a do elemento com a dos nós acima dele, e o que fica oculto por um ancestral aparece esmaecido. **Peças** controla as peças da raiz; **Sub-peças**, as subpeças daquela peça. As opções são gravadas no projeto, participam de desfazer/refazer e valem para todas as ocorrências da peça. Um projeto oculto em arquivo antigo é restaurado ao abrir, conservando as escolhas dos descendentes.
@@ -439,3 +439,5 @@ Na Extrusão, o perfil escolhido mantém seu realce ao apontar para outra área,
 Medir também aceita rascunhos de peças e referências da montagem, incluindo ocorrências posicionadas. Pontos têm prioridade sobre curvas próximas. Linhas mostram comprimento; círculos e arcos também mostram raio/diâmetro. Os alvos podem ser combinados com elementos de sólidos para medir distâncias e ângulos.
 
 Cada ícone mostra um único balão de descrição. Na faixa, a dica reúne o nome completo e o atalho; opções com explicação própria mantêm o nome acessível sem gerar uma segunda dica.
+
+A árvore do projeto flutua sobre o canto superior esquerdo do canvas, tanto aberta quanto recolhida. Somente o cabeçalho tem fundo; os nós aparecem sobre a cena, com rolagem limitada à altura disponível. Recolher ou expandir preserva o tamanho e o enquadramento do canvas. Os balões de edição ficam ao lado do cabeçalho nos dois estados.

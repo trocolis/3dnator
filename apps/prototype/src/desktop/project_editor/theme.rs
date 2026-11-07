@@ -177,13 +177,6 @@ pub(super) fn apply(context: &egui::Context, choice: Choice) {
     sync(context);
 }
 
-pub(super) fn panel_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(panel())
-        .inner_margin(12)
-        .stroke(egui::Stroke::new(1., border()))
-}
-
 /// Cartão flutuante sobre a área de edição, com a borda e a sombra dos painéis de comando.
 pub(super) fn floating_frame() -> egui::Frame {
     egui::Frame::new()

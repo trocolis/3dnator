@@ -786,3 +786,11 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - `cargo fmt --all -- --check`, Clippy do workspace com e sem OCCT e `cargo test --workspace --locked`: aprovados.
 - A faixa cria uma única dica com nome completo/atalho; opções e nós com informações próprias fornecem sua dica diretamente ao widget. Nomes acessíveis, cliques e teclado permanecem cobertos pelos ensaios existentes de ícones.
 - Registros locais: `target/codex-validation/ajustes-20261107/`. Sem ensaio interativo da janela.
+
+## 0.41.0 — Árvore flutuante (07/11/2026)
+
+- Formatação e Clippy do workspace com e sem OCCT aprovados; suítes completas `cargo test --workspace --locked` e `cargo test --workspace --features occt --locked` aprovadas.
+- Cinco ensaios gráficos de árvore aprovados com `WGPU_BACKEND=gl`: recolher/expandir preserva o canvas e permite concluir a edição; arraste de corpos/subpeças, mover montagem, editar plano e menus de rascunho. A busca pelo nome do rascunho foi limitada à árvore para distinguir o balão de edição homônimo.
+- Capturas reais `tree-folders`, `tree-collapsed` e variantes `-dark` em 1440 × 900, conferidas nos dois temas: nós sobre a cena, sem painel traseiro, cabeçalho e balões separados. Adaptador llvmpipe/OpenGL, sem erros de validação wgpu.
+- Executável release 0.41.0 com OCCT compilado; ensaios de núcleo, peça e STEP do empacotamento aprovados no runtime Freedesktop 26.08. Artefatos e registros em `target/codex-validation/ajustes-20261107/`.
+- Não houve ensaio manual da janela. A mitigação local anterior do lançador Flatpak foi mantida no pacote, fora destes commits.

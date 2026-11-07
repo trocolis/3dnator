@@ -1965,11 +1965,11 @@ impl Editor {
         }
         self.shortcuts(ui.ctx());
         self.toolbar(ui);
-        if self.shell.browser_visible {
-            self.tree(ui);
-        }
         self.canvas(ui);
-        // Depois do canvas: Selecionar e o balão podem encerrar a edição do rascunho.
+        // Depois do canvas: árvore e balões flutuam sem reduzir a área de edição.
+        if self.shell.browser_visible {
+            self.tree(ui.ctx());
+        }
         self.collapsed_tree(ui.ctx());
         self.edit_balloons(ui.ctx());
         self.navigation_bar(ui.ctx());

@@ -11898,7 +11898,9 @@ mod tests {
                 .name,
             "Principal"
         );
-        let node = label_position(&mut editor, &context, "Principal")?;
+        // O mesmo nome aparece no balão de edição; o menu pertence ao nó da árvore.
+        let tree = area_rect(&context, "floating_tree")?;
+        let node = label_position_in(&mut editor, &context, "Principal", Some(tree))?;
         right(&mut editor, node)?;
         let delete = label_position(&mut editor, &context, text(T::DeleteFeature))?;
         click(&mut editor, &context, delete)?;
@@ -13164,20 +13166,23 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
-    fn tree_title_collapses_upward_and_balloon_saves_out_of_the_part() -> Result<(), Box<dyn Error>>
-    {
+    fn floating_tree_preserves_canvas_when_collapsed_and_balloon_saves_out_of_the_part()
+    -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
         let (mut editor, _) = navigation_editor(&context)?;
-        let docked = editor.canvas_rect;
-        // O balão da peça fica no canto, junto da árvore.
+        let canvas = editor.canvas_rect;
+        let tree = area_rect(&context, "floating_tree")?;
+        assert!((tree.left() - canvas.left() - 8.).abs() < 1.);
+        assert!((tree.top() - canvas.top() - 8.).abs() < 1.);
+        // O balão da peça fica ao lado do cabeçalho, sem cobrir a árvore.
         let balloon = area_rect(&context, "edit_balloon")?;
-        assert!((balloon.left() - docked.left() - 8.).abs() < 1.);
-        assert!((balloon.top() - docked.top() - 8.).abs() < 1.);
-        let collapse = egui::pos2(docked.left() - 8. - 27., docked.top() + 13.);
+        assert!(balloon.left() > tree.right() && balloon.left() < tree.right() + 16.);
+        assert!((balloon.top() - canvas.top() - 8.).abs() < 1.);
+        let collapse = egui::pos2(tree.right() - 27., tree.top() + 27.);
         click(&mut editor, &context, collapse)?;
         assert!(!editor.shell.browser_visible);
         frame(&mut editor, &context, vec![])?;
-        assert!(editor.canvas_rect.left() < docked.left() - 100.);
+        assert_eq!(editor.canvas_rect, canvas);
         let bar = area_rect(&context, "collapsed_tree")?;
         assert!(bar.height() < 60.);
         assert_eq!(bar.top(), editor.canvas_rect.top() + 8.);
@@ -13192,7 +13197,7 @@ mod tests {
         )?;
         assert!(editor.shell.browser_visible);
         frame(&mut editor, &context, vec![])?;
-        assert!((editor.canvas_rect.left() - docked.left()).abs() < 1.);
+        assert_eq!(editor.canvas_rect, canvas);
 
         let balloon = area_rect(&context, "edit_balloon")?;
         click(
@@ -13259,6 +13264,14 @@ mod tests {
         context: &egui::Context,
         label: &str,
     ) -> Result<egui::Pos2, Box<dyn Error>> {
+        label_position_in(editor, context, label, None)
+    }
+    fn label_position_in(
+        editor: &mut Editor,
+        context: &egui::Context,
+        label: &str,
+        bounds: Option<egui::Rect>,
+    ) -> Result<egui::Pos2, Box<dyn Error>> {
         let mut output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -13272,7 +13285,10 @@ mod tests {
         );
         let position_for = |clipped: &egui::epaint::ClippedShape| match &clipped.shape {
             egui::Shape::Text(t) if t.galley.job.text == label => {
-                Some(t.visual_bounding_rect().center())
+                let center = t.visual_bounding_rect().center();
+                bounds
+                    .is_none_or(|rect| rect.contains(center))
+                    .then_some(center)
             }
             _ => None,
         };
