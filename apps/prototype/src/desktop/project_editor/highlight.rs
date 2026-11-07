@@ -449,60 +449,72 @@ impl Editor {
                         .as_ref()
                         .is_none_or(|t| !t.captured || *distance <= t.distance)
                 });
-            let (overlay, label, captured) = if let Some((_, point, label)) = reference {
-                (
-                    Overlay {
-                        points: vec![point],
-                        ..Default::default()
-                    },
-                    label,
-                    Some(point),
-                )
-            } else if let Some(target) = model {
-                let label = match target.kind {
-                    nator_commands::point_snap::PointKind::CircleCenter => {
-                        text(T::VirtualCenter).into()
-                    }
-                    nator_commands::point_snap::PointKind::ArcCenter => {
-                        text(T::VirtualArcCenter).into()
-                    }
-                    nator_commands::point_snap::PointKind::CircleBoundary => {
-                        text(T::CircleBoundaryPoint).into()
-                    }
-                    nator_commands::point_snap::PointKind::EdgeMidpoint => {
-                        text(T::EdgeMidpoint).into()
-                    }
-                    nator_commands::point_snap::PointKind::FaceCenter => text(T::FaceCenter).into(),
-                    nator_commands::point_snap::PointKind::Vertex => document
-                        .body(target.pick.body)
-                        .map(|b| b.name.clone())
-                        .unwrap_or_default(),
-                };
-                (
-                    Overlay {
-                        points: vec![target.pick.point],
-                        ..Default::default()
-                    },
-                    label,
-                    target.captured.then_some(target.pick.point),
-                )
-            } else {
-                (Overlay::default(), String::new(), None)
-            };
-            if captured.is_some() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+            // Sem corpo mapeado, a pré-seleção mostra o corpo a escolher; em cenas grandes,
+            // o clique basta, sem consultar a cena a cada movimento.
+            let choose_body =
+                model.is_none() && reference.is_none() && self.alignment_awaits_body();
+            if choose_body && heavy {
+                self.hover = None;
+                return;
             }
-            self.hover = Some(Hover {
-                tab,
-                revision,
-                position,
-                context,
-                overlay,
-                label,
-                captured,
-                computed: Instant::now(),
-            });
-            return;
+            if !choose_body {
+                let (overlay, label, captured) = if let Some((_, point, label)) = reference {
+                    (
+                        Overlay {
+                            points: vec![point],
+                            ..Default::default()
+                        },
+                        label,
+                        Some(point),
+                    )
+                } else if let Some(target) = model {
+                    let label = match target.kind {
+                        nator_commands::point_snap::PointKind::CircleCenter => {
+                            text(T::VirtualCenter).into()
+                        }
+                        nator_commands::point_snap::PointKind::ArcCenter => {
+                            text(T::VirtualArcCenter).into()
+                        }
+                        nator_commands::point_snap::PointKind::CircleBoundary => {
+                            text(T::CircleBoundaryPoint).into()
+                        }
+                        nator_commands::point_snap::PointKind::EdgeMidpoint => {
+                            text(T::EdgeMidpoint).into()
+                        }
+                        nator_commands::point_snap::PointKind::FaceCenter => {
+                            text(T::FaceCenter).into()
+                        }
+                        nator_commands::point_snap::PointKind::Vertex => document
+                            .body(target.pick.body)
+                            .map(|b| b.name.clone())
+                            .unwrap_or_default(),
+                    };
+                    (
+                        Overlay {
+                            points: vec![target.pick.point],
+                            ..Default::default()
+                        },
+                        label,
+                        target.captured.then_some(target.pick.point),
+                    )
+                } else {
+                    (Overlay::default(), String::new(), None)
+                };
+                if captured.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                }
+                self.hover = Some(Hover {
+                    tab,
+                    revision,
+                    position,
+                    context,
+                    overlay,
+                    label,
+                    captured,
+                    computed: Instant::now(),
+                });
+                return;
+            }
         }
         if let Some(hover) = &self.hover
             && hover.tab == tab
@@ -583,7 +595,12 @@ impl Editor {
                 .is_some_and(|d| d.part() != pick.part);
         let construction = self.current().active_part == Some(pick.part);
         let mode = self.pick_mode;
+        let awaits_body = self.alignment_awaits_body();
         let cache = &mut self.highlight_cache;
+        // Ponto a ponto antes de escolher o corpo: realça o corpo inteiro a mapear.
+        if awaits_body {
+            return (body_outline(cache, body, pose), body.name.clone());
+        }
         if let Some(awaiting) = awaiting {
             if other_part {
                 return Default::default();

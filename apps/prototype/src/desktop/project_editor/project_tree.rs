@@ -35,13 +35,17 @@ pub(super) enum Intent {
     OpenSection,
     RemoveSection,
     OpenDrawing(Box<SheetRecord>),
+    /// Peça ou subpeça solta na pasta Referências: caminho da ocorrência na árvore.
+    MoveToReferences(Vec<InstanceId>),
 }
 
-/// O que está sendo arrastado na árvore; a peça sob o cursor recebe ao soltar.
-#[derive(Clone, Copy)]
+/// O que está sendo arrastado na árvore; a peça sob o cursor recebe ao soltar. A instância
+/// leva o caminho da ocorrência (da raiz até ela), pois a mesma subpeça pode aparecer sob
+/// vários pais.
+#[derive(Clone)]
 enum Dragged {
     Body(BodyId),
-    Instance(InstanceId),
+    Instance(Vec<InstanceId>),
 }
 
 pub(super) struct Tree<'a> {
@@ -283,6 +287,7 @@ impl<'a> Tree<'a> {
                         })));
                 }
                 let response = icons::entry_styled(ui, icon, &label, false, !shown);
+                tree.references_drop(ui, &response, folder);
                 tree.folder_menu(&response, folder);
             });
             return;
@@ -300,11 +305,39 @@ impl<'a> Tree<'a> {
                         })));
                 }
                 let response = icons::entry_styled(ui, icon, &label, false, !shown);
+                tree.references_drop(ui, &response, folder);
                 tree.folder_menu(&response, folder);
                 response.clicked()
             },
             |tree, ui| body(tree, ui, shown),
         );
+    }
+
+    /// A pasta Referências recebe peças e subpeças arrastadas, que viram referência.
+    fn references_drop(&mut self, ui: &egui::Ui, response: &egui::Response, folder: Folder) {
+        if folder != Folder::References {
+            return;
+        }
+        let response = response.clone().on_hover_text(text(T::ReferencesDropHint));
+        if self.busy {
+            return;
+        }
+        if matches!(
+            response.dnd_hover_payload::<Dragged>().as_deref(),
+            Some(Dragged::Instance(_))
+        ) {
+            ui.painter().rect_stroke(
+                response.rect,
+                3,
+                egui::Stroke::new(1.5, theme::accent()),
+                egui::StrokeKind::Outside,
+            );
+        }
+        if let Some(dragged) = response.dnd_release_payload::<Dragged>()
+            && let Dragged::Instance(path) = &*dragged
+        {
+            self.intents.push(Intent::MoveToReferences(path.clone()));
+        }
     }
 
     fn origin(&mut self, ui: &mut egui::Ui, folder: Folder, parent_shown: bool) {
@@ -483,6 +516,13 @@ impl<'a> Tree<'a> {
                             })));
                         ui.close();
                     }
+                    if ui.button(text(T::ExportStep)).clicked() {
+                        tree.intents
+                            .push(Intent::Menu(browser::MenuAction::ExportStep(
+                                nator_commands::export::StepScope::Part(instance.part),
+                            )));
+                        ui.close();
+                    }
                     if ui.button(text(T::DeleteFeature)).clicked() {
                         tree.intents
                             .push(Intent::Command(Box::new(Command::RemoveInstance {
@@ -558,7 +598,9 @@ impl<'a> Tree<'a> {
                 )
                 .interact(egui::Sense::drag());
                 if !tree.busy {
-                    response.dnd_set_drag_payload(Dragged::Instance(instance.id));
+                    response.dnd_set_drag_payload(Dragged::Instance(
+                        path.iter().map(|&id| InstanceId(id)).collect(),
+                    ));
                 }
                 if response.dnd_hover_payload::<Dragged>().is_some() {
                     ui.painter().rect_stroke(
@@ -569,21 +611,25 @@ impl<'a> Tree<'a> {
                     );
                 }
                 if let Some(dragged) = response.dnd_release_payload::<Dragged>() {
-                    match *dragged {
-                        Dragged::Body(id) if !part.bodies.iter().any(|b| b.id == id) => {
+                    match &*dragged {
+                        &Dragged::Body(id) if !part.bodies.iter().any(|b| b.id == id) => {
                             tree.intents
                                 .push(Intent::Command(Box::new(Command::TransferBody {
                                     id,
                                     destination: part.id,
                                 })));
                         }
-                        Dragged::Instance(id) if id != instance.id => {
-                            tree.intents.push(Intent::Command(Box::new(
-                                Command::ReparentInstance {
-                                    id,
-                                    parent: Some(part.id),
-                                },
-                            )));
+                        Dragged::Instance(path) => {
+                            if let Some(&id) = path.last()
+                                && id != instance.id
+                            {
+                                tree.intents.push(Intent::Command(Box::new(
+                                    Command::ReparentInstance {
+                                        id,
+                                        parent: Some(part.id),
+                                    },
+                                )));
+                            }
                         }
                         _ => {}
                     }

@@ -887,6 +887,10 @@ pub enum Text {
     CreatePartFromReference,
     ConvertToReference,
     ConvertToReferenceHint,
+    ReferencesDropHint,
+    PointBodyPrompt,
+    PointBody,
+    PointBodyChange,
     ReferenceNotEditable,
     MergeCoplanarAreas,
     ImportMenu,
@@ -1898,6 +1902,9 @@ fn pt(key: Text) -> &'static str {
         Text::ConvertToReferenceHint => {
             "Vale para todas as instâncias desta peça. Confirme ou cancele a ferramenta aberta antes de converter."
         }
+        Text::ReferencesDropHint => {
+            "Arraste uma peça ou subpeça para cá para convertê-la em referência, na mesma posição."
+        }
         Text::ReferenceNotEditable => {
             "Referências não podem ser editadas. Use Criar peça no menu dela, na árvore."
         }
@@ -1923,8 +1930,11 @@ fn pt(key: Text) -> &'static str {
             "Arestas paralelas; aceita linhas de rascunhos de referência como destino."
         }
         Text::MovePointHint => {
-            "Vértices, pontos médios, centros de círculos e arcos e quadrantes da borda: aproxime o cursor para capturar. Aceita pontos de rascunhos de referência como destino."
+            "Clique primeiro num corpo: só os pontos dele são mapeados. Vértices, pontos médios, centros de círculos e arcos e quadrantes da borda: aproxime o cursor para capturar. Pontos de rascunhos e origens valem como destino sem escolher corpo."
         }
+        Text::PointBodyPrompt => "Clique num corpo para mapear os pontos dele.",
+        Text::PointBody => "Pontos de",
+        Text::PointBodyChange => "Trocar corpo",
         Text::VirtualCenter => "Centro circular (virtual)",
         Text::VirtualArcCenter => "Centro do arco (virtual)",
         Text::EdgeMidpoint => "Ponto médio da aresta",

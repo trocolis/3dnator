@@ -950,6 +950,9 @@ pub fn text(key: Text) -> &'static str {
         Text::ConvertToReferenceHint => {
             "Applies to every instance of this part. Confirm or cancel the open tool before converting."
         }
+        Text::ReferencesDropHint => {
+            "Drag a part or subpart here to turn it into a reference, keeping its position."
+        }
         Text::CreatePartFromReference => "Create part",
         Text::ReferenceNotEditable => {
             "References cannot be edited. Use Create part in its menu, in the tree."
@@ -974,8 +977,11 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::MoveEdgeHint => "Parallel edges; accepts lines of reference sketches as target.",
         Text::MovePointHint => {
-            "Vertices, midpoints, circle and arc centers and edge quadrants: bring the cursor close to snap. Accepts points of reference sketches as target."
+            "Click a body first: only its points are mapped. Vertices, midpoints, circle and arc centers and edge quadrants: bring the cursor close to snap. Sketch points and origins work as target without choosing a body."
         }
+        Text::PointBodyPrompt => "Click a body to map its points.",
+        Text::PointBody => "Points of",
+        Text::PointBodyChange => "Change body",
         Text::VirtualCenter => "Circular center (virtual)",
         Text::VirtualArcCenter => "Arc center (virtual)",
         Text::EdgeMidpoint => "Edge midpoint",

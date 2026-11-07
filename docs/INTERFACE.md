@@ -198,6 +198,12 @@ indisponível durante rascunho ou ferramenta não confirmada. Converter a peça 
 Montagem; **Criar peça**, no menu da referência, libera a edição novamente. Referências
 aninhadas também aparecem sem ferramentas internas de edição na árvore.
 
+Arrastar uma peça ou subpeça até a pasta **Referências** faz a mesma conversão: a subpeça sai
+do pai, vai à raiz na posição que tinha no mundo (a ocorrência arrastada decide, quando o pai
+aparece mais de uma vez) e vira referência, numa só ação de desfazer. Outras instâncias da
+mesma definição continuam onde estão, também como referência. O menu da referência oferece
+**Exportar STEP…**, com os corpos e subpeças dela.
+
 ## Barra de navegação
 
 Centrada na base da área de edição, a barra tem seis botões, separados em três grupos:
@@ -217,7 +223,9 @@ Arrastar e Rotacionar suspendem a ferramenta em uso, sem cancelá-la: dá para r
 - **Janela:** arraste com o botão esquerdo a partir de um ponto livre. Da esquerda para a direita (contorno azul), entram só os elementos inteiramente contidos; da direita para a esquerda (tracejado verde), os tocados. Com Ctrl, a janela acrescenta à seleção. Na montagem, a unidade é a instância; na construção, o corpo da peça ativa.
 - **Sobrepostos:** segure o botão esquerdo parado sobre o modelo para listar todos os elementos sob o cursor, do mais próximo ao mais distante. Percorrer a lista realça cada um; o clique seleciona (com Ctrl, alterna). Esc ou um clique fora fecha a lista.
 
-No movimento **Vértice a vértice**, círculos e arcos de sólidos CAD oferecem um **centro virtual**, inclusive no vazio de um furo ou fora do material. Cada centro fica no plano da curva: numa arruela, há apoios nas alturas das duas superfícies, e a vista decide qual está à frente. Passar pelo disco circular ou pelo setor do arco revela o centro; aproximar o cursor a até 14 pontos de tela mostra a mira encaixada nele. O alcance de captura independe do zoom.
+No movimento **Vértice a vértice**, cada campo (origem e destino) começa pela escolha de um **corpo**: o primeiro clique o escolhe, realçado ao passar o mouse (em cenas acima de 400 mil triângulos, sem a pré-seleção), e só os apoios dele são calculados, desenhados como marcas discretas e capturados. O painel mostra o corpo mapeado e **Trocar corpo**; clicar noutro corpo, longe de um ponto, troca o mapeamento, e clicar no vazio o desfaz. Uma seleção feita antes de abrir a ferramenta vale como o corpo da origem. Pontos de rascunhos e origens valem como destino sem escolher corpo. A oclusão confere o próprio corpo e, em cenas menores, as demais peças, para poucos candidatos.
+
+Círculos e arcos de sólidos CAD oferecem um **centro virtual**, inclusive no vazio de um furo ou fora do material. Cada centro fica no plano da curva: numa arruela, há apoios nas alturas das duas superfícies, e a vista decide qual está à frente. Passar pelo disco circular ou pelo setor do arco revela o centro; aproximar o cursor a até 14 pontos de tela mostra a mira encaixada nele. O alcance de captura independe do zoom.
 
 As arestas oferecem também o **ponto médio**, na metade do comprimento percorrido sobre a curva. Nos arcos, ele fica sobre a curva, enquanto o centro virtual fica no centro do círculo de apoio. Círculos completos oferecem quatro **quadrantes na borda**, espaçados a cada 90° no plano local. Vértices, pontos médios e quadrantes seguem a mesma captura por proximidade. O ponto destacado é o usado pelo clique, tanto na origem quanto no destino; no destino, todos os elementos exibidos servem de referência: corpos de qualquer peça, rascunhos de referência e rascunhos das peças (na posição de cada ocorrência), com pontos, extremos, pontos médios de linhas/arcos, quadrantes de círculos e centros de polígonos, além das origens visíveis do projeto e das peças. Um apoio de rascunho ou origem perto do cursor tem preferência, salvo quando um ponto do modelo está capturado mais perto. A captura respeita ocultação, bloqueio, isolamento, seção e material à frente, e o realce continua em cenas acima de 400 mil triângulos, com intervalo mínimo entre consultas. Corpos importados como STL oferecem vértices e pontos médios das arestas vivas, sem apoios nas diagonais internas de superfícies planas.
 

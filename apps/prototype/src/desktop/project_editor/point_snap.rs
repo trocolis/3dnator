@@ -3,7 +3,7 @@
 //! entra no raio em pontos de tela, mantendo a mesma sensação em qualquer zoom.
 use super::*;
 use nator_commands::point_snap::{PointAnchor, PointKind, body_anchors};
-use nator_document::assembly::Pick;
+use nator_document::assembly::{Occurrence, Pick};
 use nator_geometry::{Bounds, dot, norm, query::Ray, sub};
 use std::collections::HashMap;
 
@@ -12,32 +12,44 @@ type Anchors = HashMap<BodyId, Vec<PointAnchor>>;
 pub(super) type ReferencePoints = HashMap<SketchId, Vec<nator_sketch::Point2>>;
 type QueryResult = Result<(Anchors, ReferencePoints), String>;
 
+/// Apoios do corpo mapeado no ponto a ponto e pontos dos rascunhos. Só o corpo escolhido
+/// é consultado: varrer todos os corpos de uma montagem grande travava a interface.
 #[derive(Default)]
 pub(super) struct Cache {
-    revision: Option<(u64, u64)>,
+    revision: Option<(u64, u64, Option<BodyId>)>,
     entries: Anchors,
     references: ReferencePoints,
     running: Option<Receiver<QueryResult>>,
 }
 impl Cache {
     pub(super) fn references(&self, revision: (u64, u64)) -> Option<&ReferencePoints> {
-        (self.revision == Some(revision)).then_some(&self.references)
+        self.revision
+            .filter(|(tab, rev, _)| (*tab, *rev) == revision)
+            .map(|_| &self.references)
     }
-    fn prepare(
+    /// Apoios já calculados do corpo, em coordenadas locais.
+    pub(super) fn anchors(&self, revision: (u64, u64), body: BodyId) -> Option<&[PointAnchor]> {
+        (self.revision == Some((revision.0, revision.1, Some(body))))
+            .then(|| self.entries.get(&body).map(Vec::as_slice))
+            .flatten()
+    }
+    pub(super) fn prepare(
         &mut self,
         revision: (u64, u64),
+        body: Option<BodyId>,
         document: &Document,
         context: &egui::Context,
     ) -> Result<(), String> {
-        if self.revision != Some(revision) {
+        let key = (revision.0, revision.1, body);
+        if self.revision != Some(key) {
             self.entries.clear();
             self.references.clear();
             self.running = None;
-            self.revision = Some(revision);
-            let bodies = document
-                .parts()
-                .iter()
-                .flat_map(|p| p.shown_bodies().cloned())
+            self.revision = Some(key);
+            let bodies = body
+                .and_then(|id| document.body(id))
+                .cloned()
+                .into_iter()
                 .collect::<Vec<_>>();
             let (sender, receiver) = mpsc::channel();
             // Rascunhos de referência e das peças exibidas: todos servem de destino.
@@ -109,12 +121,13 @@ pub(super) struct Target {
 
 /// Verdadeiro quando nenhum material visível (nem a tampa do corte) fica entre a câmera e
 /// o ponto. Apoios atrás do modelo não são oferecidos, como no clique comum.
+/// `allowed` escolhe as ocorrências que podem ocultar o ponto.
 pub(super) fn unobstructed(
     document: &Document,
     camera: &Camera,
     bounds: Bounds,
     rect: egui::Rect,
-    view: &ViewState,
+    allowed: impl Fn(&Occurrence) -> bool,
     section: Option<section::Section>,
     point: Point3,
 ) -> bool {
@@ -122,8 +135,7 @@ pub(super) fn unobstructed(
         return false;
     };
     let ray = screen_ray(camera, bounds, rect, screen);
-    let Ok(query) = document.pick_clipped_with(ray, |o| view.pickable(o), section::clip(section))
-    else {
+    let Ok(query) = document.pick_clipped_with(ray, allowed, section::clip(section)) else {
         return false;
     };
     let tolerance = bounds.size().into_iter().fold(1_f64, f64::max) * 1e-6;
@@ -191,11 +203,16 @@ struct Query<'a> {
     position: egui::Pos2,
     view: &'a ViewState,
     section: Option<section::Section>,
-    source_part: Option<PartId>,
+    focus: &'a super::assembly_tools::PointFocus,
+    /// Conferir também se outras peças escondem o ponto; desligado em cenas grandes, onde
+    /// cada raio na cena inteira pesa demais para o movimento do cursor.
+    scene_occlusion: bool,
 }
 
 impl Query<'_> {
-    fn target(self, entries: &Anchors) -> Option<Target> {
+    /// Apoio do corpo mapeado sob o cursor. Raios e oclusão ficam restritos à ocorrência
+    /// dele, para a consulta não crescer com o resto da montagem.
+    fn target(self, anchors: &[PointAnchor]) -> Option<Target> {
         let Self {
             document,
             camera,
@@ -204,86 +221,70 @@ impl Query<'_> {
             position,
             view,
             section,
-            source_part,
+            focus,
+            scene_occlusion,
         } = self;
-        let ray = screen_ray(camera, bounds, rect, position);
-        let hovered = document
-            .pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
-            .ok()
-            .and_then(|hits| section::first_visible(hits, section));
-        let mut candidates = Vec::new();
-        for occurrence in document
+        let occurrence = document
             .occurrences()
             .ok()?
             .into_iter()
-            .filter(|o| view.pickable(o))
-        {
-            let instance = document.instance(occurrence.instance)?;
-            let part = document.part(instance.part)?;
-            if source_part.is_some_and(|id| id != part.id) {
+            .find(|o| o.path == focus.path && view.pickable(o))?;
+        let instance = document.instance(occurrence.instance)?;
+        let part = document.part(instance.part)?;
+        let body = part.shown_bodies().find(|b| b.id == focus.body)?;
+        let pose = occurrence.placement.compose(body.placement).ok()?;
+        let same = |o: &Occurrence| o.path == focus.path;
+        let ray = screen_ray(camera, bounds, rect, position);
+        let hovered = document
+            .pick_all_clipped_with(ray, same, section::clip(section))
+            .ok()
+            .and_then(|hits| section::first_visible(hits, section))
+            .is_some_and(|p| p.body == body.id);
+        let mut candidates = Vec::new();
+        for anchor in anchors {
+            let point = pose.apply(anchor.point);
+            if section.is_some_and(|s| !s.keeps(point)) {
                 continue;
             }
-            for body in part.shown_bodies() {
-                let Some(anchors) = entries.get(&body.id) else {
-                    continue;
-                };
-                let Ok(pose) = occurrence.placement.compose(body.placement) else {
-                    continue;
-                };
-                for anchor in anchors {
-                    let point = pose.apply(anchor.point);
-                    if section.is_some_and(|s| !s.keeps(point)) {
-                        continue;
-                    }
-                    let Some(screen) = sketch_scene::project(camera, bounds, rect, point)
-                        .filter(|p| rect.contains(*p))
-                    else {
-                        continue;
-                    };
-                    let distance = screen.distance(position);
-                    let captured = distance <= CAPTURE_RADIUS;
-                    let normal = anchor
-                        .circle
-                        .map(|c| pose.apply_vector(c.normal))
-                        .unwrap_or(camera.direction());
-                    let discovered = anchor
-                        .circle
-                        .is_some_and(|c| inside_circular_region(ray, c, pose))
-                        || (anchor.circle.is_none()
-                            && hovered.as_ref().is_some_and(|p| {
-                                p.body == body.id
-                                    && p.instance == instance.id
-                                    && norm(sub(
-                                        p.placement.apply([0.; 3]),
-                                        occurrence.placement.apply([0.; 3]),
-                                    )) < 1e-9
-                            }));
-                    if !captured && !discovered {
-                        continue;
-                    }
-                    let target_ray = screen_ray(camera, bounds, rect, screen);
-                    candidates.push(Candidate {
-                        target: Target {
-                            pick: Pick {
-                                instance: instance.id,
-                                part: part.id,
-                                body: body.id,
-                                // Captura transitória de ponto: não é referência de face.
-                                triangle: 0,
-                                point,
-                                normal,
-                                vertices: [point; 3],
-                                placement: occurrence.placement,
-                            },
-                            captured,
-                            kind: anchor.kind,
-                            distance,
-                        },
-                        distance,
-                        depth: dot(sub(point, target_ray.origin), target_ray.direction),
-                    });
-                }
+            let Some(screen) =
+                sketch_scene::project(camera, bounds, rect, point).filter(|p| rect.contains(*p))
+            else {
+                continue;
+            };
+            let distance = screen.distance(position);
+            let captured = distance <= CAPTURE_RADIUS;
+            let normal = anchor
+                .circle
+                .map(|c| pose.apply_vector(c.normal))
+                .unwrap_or(camera.direction());
+            let discovered = anchor
+                .circle
+                .is_some_and(|c| inside_circular_region(ray, c, pose))
+                || (anchor.circle.is_none() && hovered);
+            if !captured && !discovered {
+                continue;
             }
+            let target_ray = screen_ray(camera, bounds, rect, screen);
+            candidates.push(Candidate {
+                target: Target {
+                    pick: Pick {
+                        instance: instance.id,
+                        part: part.id,
+                        body: body.id,
+                        // Captura transitória de ponto: não é referência de face.
+                        triangle: 0,
+                        point,
+                        normal,
+                        vertices: [point; 3],
+                        placement: occurrence.placement,
+                    },
+                    captured,
+                    kind: anchor.kind,
+                    distance,
+                },
+                distance,
+                depth: dot(sub(point, target_ray.origin), target_ray.direction),
+            });
         }
         // Captura ganha da descoberta. Distâncias arredondadas ao pixel evitam
         // que ruído de projeção escolha o verso de centros sobrepostos: nesse caso
@@ -296,21 +297,38 @@ impl Query<'_> {
                 .then(a.depth.total_cmp(&b.depth))
                 .then(a.distance.total_cmp(&b.distance))
         });
-        candidates.into_iter().map(|c| c.target).find(|target| {
+        // Primeiro a oclusão pelo próprio corpo, barata; depois, para poucos candidatos,
+        // pelas demais peças visíveis.
+        let visible = |target: &Target, allowed: &dyn Fn(&Occurrence) -> bool| {
             unobstructed(
                 document,
                 camera,
                 bounds,
                 rect,
-                view,
+                allowed,
                 section,
                 target.pick.point,
             )
-        })
+        };
+        candidates
+            .into_iter()
+            .map(|c| c.target)
+            .filter(|target| visible(target, &same))
+            .take(if scene_occlusion { 3 } else { 1 })
+            .find(|target| !scene_occlusion || visible(target, &|o| view.pickable(o)))
     }
 }
 
 impl Editor {
+    /// Atualiza o cache para o corpo mapeado (ou só os rascunhos, sem corpo escolhido).
+    pub(super) fn prepare_points(&mut self, document: &Document, context: &egui::Context) {
+        let body = self.alignment_point_focus().map(|f| f.body);
+        let revision = (self.current().id, self.current().session.revision());
+        if let Err(error) = self.point_cache.prepare(revision, body, document, context) {
+            self.status.error(error);
+        }
+    }
+    /// Apoio do corpo mapeado no ponto a ponto sob o cursor; sem corpo escolhido, nada.
     pub(super) fn point_target(
         &mut self,
         document: &Document,
@@ -319,13 +337,10 @@ impl Editor {
         context: &egui::Context,
     ) -> Option<Target> {
         let bounds = self.current().scene_bounds?;
-        if let Err(error) = self.point_cache.prepare(
-            (self.current().id, self.current().session.revision()),
-            document,
-            context,
-        ) {
-            self.status.error(error);
-        }
+        self.prepare_points(document, context);
+        let focus = self.alignment_point_focus()?.clone();
+        let revision = (self.current().id, self.current().session.revision());
+        let anchors = self.point_cache.anchors(revision, focus.body)?;
         Query {
             document,
             camera: &self.viewport.camera,
@@ -334,10 +349,29 @@ impl Editor {
             position,
             view: &self.current().view,
             section: self.current().section.filter(|s| s.visible),
-            source_part: self.alignment_source_part(),
+            focus: &focus,
+            scene_occlusion: self
+                .scene
+                .as_ref()
+                .is_some_and(|s| s.triangles().len() <= super::highlight::HOVER_TRIANGLES),
         }
-        .target(&self.point_cache.entries)
+        .target(anchors)
     }
+}
+
+/// Corpo mapeado na primeira instância da peça, para os ensaios.
+#[cfg(test)]
+fn test_focus(
+    document: &Document,
+    part: PartId,
+    body: BodyId,
+) -> Option<super::assembly_tools::PointFocus> {
+    let instance = document.instances().iter().find(|i| i.part == part)?;
+    Some(super::assembly_tools::PointFocus {
+        path: vec![instance.id],
+        body,
+        name: String::new(),
+    })
 }
 
 #[cfg(test)]
@@ -356,10 +390,8 @@ mod mesh_tests {
                 vec![[0, 1, 2]],
             )?)),
         )?;
-        let entries = HashMap::from([(
-            body,
-            body_anchors(document.body(body).ok_or("Corpo ausente")?)?,
-        )]);
+        let anchors = body_anchors(document.body(body).ok_or("Corpo ausente")?)?;
+        let focus = test_focus(&document, part, body).ok_or("Instância ausente")?;
         let mut camera = Camera::default();
         camera.set_direction([0., 0., 1.]);
         let bounds = document.scene_mesh()?.ok_or("Cena ausente")?.bounds();
@@ -380,9 +412,10 @@ mod mesh_tests {
                 position,
                 view: &ViewState::default(),
                 section: None,
-                source_part: Some(part),
+                focus: &focus,
+                scene_occlusion: true,
             };
-            let target = query.target(&entries).ok_or("Vértice ausente")?;
+            let target = query.target(&anchors).ok_or("Vértice ausente")?;
             assert_eq!(target.pick.point, point);
             assert!(target.captured && target.kind == kind);
         }
@@ -396,9 +429,10 @@ mod mesh_tests {
             position,
             view: &ViewState::default(),
             section: None,
-            source_part: Some(part),
+            focus: &focus,
+            scene_occlusion: true,
         }
-        .target(&entries)
+        .target(&anchors)
         .ok_or("Pré-seleção distante ausente")?;
         assert_eq!(target.pick.point, [10. / 3., 10. / 3., 0.]);
         assert_eq!(target.kind, PointKind::FaceCenter);
@@ -406,6 +440,61 @@ mod mesh_tests {
             !target.captured,
             "No interior da face o apoio aparece antes da captura"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn only_the_mapped_body_offers_points() -> Result<()> {
+        let mut document = Document::new("Dois corpos")?;
+        let triangle = |x: f64| {
+            Mesh::new(
+                vec![[x, 0., 0.], [x + 10., 0., 0.], [x, 10., 0.]],
+                vec![[0, 1, 2]],
+            )
+        };
+        let (left_part, left) = document.add_mesh(
+            None,
+            "Esquerda".into(),
+            Arc::new(MeshAsset::new(triangle(0.)?)),
+        )?;
+        let (right_part, right) = document.add_mesh(
+            None,
+            "Direita".into(),
+            Arc::new(MeshAsset::new(triangle(30.)?)),
+        )?;
+        for part in [left_part, right_part] {
+            let instance = document
+                .instances()
+                .iter()
+                .find(|i| i.part == part)
+                .ok_or("Instância ausente")?
+                .id;
+            document.instance_mut(instance)?.placement = Placement::default();
+        }
+        let anchors = body_anchors(document.body(left).ok_or("Corpo ausente")?)?;
+        let focus = test_focus(&document, left_part, left).ok_or("Instância ausente")?;
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let bounds = document.scene_mesh()?.ok_or("Cena ausente")?.bounds();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 600.));
+        let at = |point: Point3| -> Option<Target> {
+            Query {
+                document: &document,
+                camera: &camera,
+                bounds,
+                rect,
+                position: sketch_scene::project(&camera, bounds, rect, point)?,
+                view: &ViewState::default(),
+                section: None,
+                focus: &focus,
+                scene_occlusion: true,
+            }
+            .target(&anchors)
+        };
+        assert!(at([10., 0., 0.]).is_some_and(|t| t.pick.body == left));
+        // Vértice do outro corpo sob o cursor: não está mapeado.
+        assert!(at([40., 0., 0.]).is_none());
+        assert_ne!(left, right);
         Ok(())
     }
 
@@ -424,21 +513,21 @@ mod mesh_tests {
             HashMap::new(),
         )))?;
         let mut cache = Cache {
-            revision: Some((1, 1)),
+            revision: Some((1, 1, None)),
             entries: HashMap::new(),
             references: HashMap::new(),
             running: Some(receiver),
         };
         let document = Document::new("Nova revisão")?;
         let context = egui::Context::default();
-        cache.prepare((1, 2), &document, &context)?;
+        cache.prepare((1, 2), None, &document, &context)?;
         let deadline = Instant::now() + Duration::from_secs(5);
         while cache.running.is_some() {
             if Instant::now() > deadline {
                 return Err("Consulta de pontos não terminou".into());
             }
             std::thread::sleep(Duration::from_millis(1));
-            cache.prepare((1, 2), &document, &context)?;
+            cache.prepare((1, 2), None, &document, &context)?;
         }
         assert!(cache.entries.is_empty());
         Ok(())
@@ -507,10 +596,14 @@ mod tests {
             point: Point3,
             offset: egui::Vec2,
             section: Option<section::Section>,
-            source_part: Option<PartId>,
+            mapped: Option<BodyId>,
         ) -> Option<Target> {
             let position =
                 sketch_scene::project(&self.camera, self.bounds, self.rect, point)? + offset;
+            // Sem corpo indicado, mapeia o da arruela; outro corpo não tem apoios aqui.
+            let body = mapped.unwrap_or(self.body);
+            let focus = test_focus(&self.document, self.part, body)?;
+            let anchors = self.entries.get(&body).map(Vec::as_slice).unwrap_or(&[]);
             Query {
                 document: &self.document,
                 camera: &self.camera,
@@ -519,9 +612,10 @@ mod tests {
                 position,
                 view: &self.view,
                 section,
-                source_part,
+                focus: &focus,
+                scene_occlusion: true,
             }
-            .target(&self.entries)
+            .target(anchors)
         }
     }
 
@@ -685,7 +779,7 @@ mod tests {
         f.bounds = f.document.scene_mesh()?.ok_or("Cena ausente")?.bounds();
         let center = pose.apply([0., 0., 6.]);
         let target = f
-            .at(center, egui::Vec2::ZERO, None, Some(f.part))
+            .at(center, egui::Vec2::ZERO, None, Some(f.body))
             .ok_or("Centro transformado ausente")?;
         assert!(norm(sub(target.pick.point, center)) < 1e-8);
         assert!(
@@ -695,7 +789,7 @@ mod tests {
             )) < 1e-9
         );
         assert!(
-            f.at(center, egui::Vec2::ZERO, None, Some(PartId(u64::MAX)))
+            f.at(center, egui::Vec2::ZERO, None, Some(BodyId(u64::MAX)))
                 .is_none()
         );
         f.view.locked.insert(instance);

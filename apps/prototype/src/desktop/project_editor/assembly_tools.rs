@@ -254,6 +254,28 @@ pub(super) struct AlignDraft {
     independent: bool,
     /// Movimento feito antes de escolher este tipo: o alinhamento continua dali.
     carried: Placement,
+    /// Ponto a ponto: corpo cujos apoios estão mapeados para o campo em edição. Escolhido
+    /// com um clique antes dos pontos; só os apoios dele são calculados e oferecidos.
+    focus: Option<PointFocus>,
+}
+
+/// Corpo escolhido no ponto a ponto, identificado pela ocorrência na montagem.
+#[derive(Debug, Clone)]
+pub(super) struct PointFocus {
+    pub path: Vec<InstanceId>,
+    pub body: BodyId,
+    pub name: String,
+}
+impl PointFocus {
+    fn from_pick(document: &Document, pick: &Pick) -> Option<Self> {
+        let occurrence = document.occurrence_at(pick).ok()?;
+        let body = document.body(pick.body)?;
+        Some(Self {
+            path: occurrence.path,
+            body: body.id,
+            name: body.name.clone(),
+        })
+    }
 }
 
 /// Destino de um alinhamento: geometria do modelo ou de um rascunho de referência da
@@ -474,7 +496,7 @@ fn reference_anchor(
                     camera,
                     bounds,
                     rect,
-                    view,
+                    |o| view.pickable(o),
                     section,
                     anchor.point,
                 )
@@ -821,13 +843,29 @@ impl Editor {
         }
     }
 
-    pub(super) fn alignment_source_part(&self) -> Option<PartId> {
+    /// Corpo mapeado no ponto a ponto, com um campo em edição.
+    pub(super) fn alignment_point_focus(&self) -> Option<&PointFocus> {
         match &self.assembly_panel {
-            Some(Panel::Align(d)) if d.field == Some(AlignField::From) => {
-                self.current().active_part
+            Some(Panel::Align(d))
+                if d.tab == self.current().id
+                    && d.kind == navigation::PickMode::Vertex
+                    && d.field.is_some() =>
+            {
+                d.focus.as_ref()
             }
             _ => None,
         }
+    }
+
+    /// Ponto a ponto esperando o clique que escolhe o corpo a mapear.
+    pub(super) fn alignment_awaits_body(&self) -> bool {
+        matches!(
+            &self.assembly_panel,
+            Some(Panel::Align(d)) if d.tab == self.current().id
+                && d.kind == navigation::PickMode::Vertex
+                && d.field.is_some()
+                && d.focus.is_none()
+        )
     }
 
     pub(super) fn alignment_reference_point(
@@ -937,6 +975,7 @@ impl Editor {
                 mode,
                 independent,
                 carried,
+                focus: None,
             }))
         } else {
             let mut draft = MoveDraft::new(tab, targets);
@@ -1129,10 +1168,18 @@ impl Editor {
         self.pick_mode = kind;
         // O último clique válido já fornece a geometria da origem. Uma seleção
         // feita só pela árvore não inventa uma face/aresta/ponto para alinhar.
-        let from = self.selected_pick().cloned().map(|mut pick| {
-            navigation::snap_pick(&mut pick, kind);
-            pick
-        });
+        let selected = self.selected_pick().cloned();
+        // No ponto a ponto, a seleção vale só como o corpo cujos pontos se mapeiam.
+        let focus = selected
+            .as_ref()
+            .filter(|_| kind == navigation::PickMode::Vertex)
+            .and_then(|pick| PointFocus::from_pick(self.current().session.document(), pick));
+        let from = selected
+            .filter(|_| kind != navigation::PickMode::Vertex)
+            .map(|mut pick| {
+                navigation::snap_pick(&mut pick, kind);
+                pick
+            });
         let targets = self.movable_selection();
         let field = Some(if from.is_some() {
             AlignField::To
@@ -1150,6 +1197,7 @@ impl Editor {
             mode: MoveMode::MoveOrCopy(false),
             independent: false,
             carried: Placement::default(),
+            focus,
         })));
     }
     pub(super) fn open_instance_pattern(&mut self, circular: bool) {
@@ -1330,12 +1378,17 @@ impl Editor {
         // Distância em tela do ponto do modelo capturado; sem captura, um apoio de
         // rascunho ou origem próximo do cursor tem a preferência.
         let mut captured_distance = None;
-        let model = if self.alignment_pick_mode() == Some(navigation::PickMode::Vertex) {
-            self.point_target(&document, rect, position, &response.ctx)
-                .map(|target| {
-                    captured_distance = target.captured.then_some(target.distance);
-                    target.pick
-                })
+        let vertex = self.alignment_pick_mode() == Some(navigation::PickMode::Vertex);
+        let model = if vertex {
+            if self.alignment_awaits_body() {
+                None
+            } else {
+                self.point_target(&document, rect, position, &response.ctx)
+                    .map(|target| {
+                        captured_distance = target.captured.then_some(target.distance);
+                        target.pick
+                    })
+            }
         } else {
             document
                 .pick_all_clipped_with(
@@ -1346,6 +1399,45 @@ impl Editor {
                 .ok()
                 .and_then(|picks| section::first_visible(picks, self.current().section))
         };
+        // Ponto a ponto em dois passos: sem ponto sob o cursor (nem de rascunho, no
+        // destino), o clique escolhe o corpo a mapear; no vazio, desfaz a escolha.
+        if vertex && model.is_none() {
+            let to_field = matches!(
+                &self.assembly_panel,
+                Some(Panel::Align(d)) if d.field == Some(AlignField::To)
+            );
+            let reference = to_field
+                && reference_anchor(
+                    &self.reference_scene(bounds, rect),
+                    position,
+                    navigation::PickMode::Vertex,
+                )
+                .is_some();
+            if !reference {
+                let hit = document
+                    .pick_all_clipped_with(
+                        ray,
+                        |o| view.pickable(o),
+                        section::clip(self.current().section),
+                    )
+                    .ok()
+                    .and_then(|picks| section::first_visible(picks, self.current().section));
+                let active = self.current().active_part;
+                if !to_field
+                    && hit
+                        .as_ref()
+                        .is_some_and(|p| active.is_some_and(|a| a != p.part))
+                {
+                    self.status.warning(text(T::PickOtherPart));
+                    return true;
+                }
+                let focus = hit.and_then(|pick| PointFocus::from_pick(&document, &pick));
+                if let Some(Panel::Align(d)) = &mut self.assembly_panel {
+                    d.focus = focus;
+                }
+                return true;
+            }
+        }
         // Destino do alinhamento: pontos e linhas de rascunhos de referência têm prioridade
         // (são encaixes precisos); para faces, o plano do rascunho vale quando o clique não
         // atinge o modelo.
@@ -1375,6 +1467,7 @@ impl Editor {
             if let (Some(anchor), Some(Panel::Align(d))) = (anchor, &mut self.assembly_panel) {
                 d.to = Some(anchor);
                 d.field = None;
+                d.focus = None;
             }
             return true;
         }
@@ -1421,6 +1514,8 @@ impl Editor {
                         }
                         d.from = Some(pick);
                         d.field = d.to.is_none().then_some(AlignField::To);
+                        // O destino costuma estar noutro corpo: escolhe-se de novo.
+                        d.focus = None;
                     }
                 }
             }
@@ -1971,6 +2066,32 @@ impl Editor {
                 painter.circle(p, 6., egui::Color32::WHITE, egui::Stroke::new(2.5, color));
             }
         };
+        // Pontos mapeados do corpo escolhido no ponto a ponto, discretos: o realce forte
+        // fica para o ponto sob o cursor.
+        if let Some(focus) = self.alignment_point_focus() {
+            let document = self.current().session.document();
+            let revision = (self.current().id, self.current().session.revision());
+            if let Some(anchors) = self.point_cache.anchors(revision, focus.body)
+                && let Some(occurrence) = document
+                    .occurrences()
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|o| o.path == focus.path))
+                && let Some(body) = document.body(focus.body)
+                && let Ok(pose) = occurrence.placement.compose(body.placement)
+            {
+                let color = theme::accent().gamma_multiply(0.8);
+                let section = self.current().section.filter(|s| s.visible);
+                for anchor in anchors {
+                    let point = pose.apply(anchor.point);
+                    if section.is_some_and(|s| !s.keeps(point)) {
+                        continue;
+                    }
+                    if let Some(p) = project(point) {
+                        painter.circle(p, 2.5, egui::Color32::WHITE, egui::Stroke::new(1.2, color));
+                    }
+                }
+            }
+        }
         let edge = d.kind == navigation::PickMode::Edge;
         if let Some(from) = &d.from {
             mark(
@@ -2159,6 +2280,9 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
             d.field == Some(field),
         );
         if s.activate {
+            if d.field != Some(field) {
+                d.focus = None;
+            }
             d.field = Some(field);
         }
         if s.clear {
@@ -2167,6 +2291,31 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
                 AlignField::To => d.to = None,
             }
             d.field = Some(field);
+            d.focus = None;
+        }
+    }
+    // Ponto a ponto: primeiro o corpo, depois os pontos dele.
+    if d.kind == navigation::PickMode::Vertex && d.field.is_some() {
+        match &d.focus {
+            None => {
+                ui.label(
+                    egui::RichText::new(text(T::PointBodyPrompt))
+                        .small()
+                        .strong()
+                        .color(theme::accent()),
+                );
+            }
+            Some(focus) => {
+                let mut change = false;
+                panel::row(ui, text(T::PointBody), |ui| {
+                    ui.label(&focus.name);
+                    change = icons::button(ui, Icon::Close, text(T::PointBodyChange), false, false)
+                        .clicked();
+                });
+                if change {
+                    d.focus = None;
+                }
+            }
         }
     }
     if d.kind != navigation::PickMode::Vertex {
@@ -2515,6 +2664,7 @@ mod tests {
             mode: MoveMode::Move,
             independent: false,
             carried: Placement::default(),
+            focus: None,
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
         // O ponto de origem vai ao destino e a normal fica oposta à do destino.

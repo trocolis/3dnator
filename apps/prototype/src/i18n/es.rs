@@ -980,6 +980,9 @@ pub fn text(key: Text) -> &'static str {
         Text::ConvertToReferenceHint => {
             "Se aplica a todas las instancias de esta pieza. Confirma o cancela la herramienta abierta antes de convertir."
         }
+        Text::ReferencesDropHint => {
+            "Arrastra una pieza o subpieza aquí para convertirla en referencia, en la misma posición."
+        }
         Text::CreatePartFromReference => "Crear pieza",
         Text::ReferenceNotEditable => {
             "Las referencias no se pueden editar. Use Crear pieza en su menú, en el árbol."
@@ -1006,8 +1009,11 @@ pub fn text(key: Text) -> &'static str {
             "Aristas paralelas; acepta líneas de bocetos de referencia como destino."
         }
         Text::MovePointHint => {
-            "Vértices, puntos medios, centros de círculos y arcos y cuadrantes del borde: acerque el cursor para capturar. Acepta puntos de bocetos de referencia como destino."
+            "Haga clic primero en un cuerpo: solo se mapean sus puntos. Vértices, puntos medios, centros de círculos y arcos y cuadrantes del borde: acerque el cursor para capturar. Los puntos de bocetos y orígenes valen como destino sin elegir cuerpo."
         }
+        Text::PointBodyPrompt => "Haga clic en un cuerpo para mapear sus puntos.",
+        Text::PointBody => "Puntos de",
+        Text::PointBodyChange => "Cambiar cuerpo",
         Text::VirtualCenter => "Centro circular (virtual)",
         Text::VirtualArcCenter => "Centro del arco (virtual)",
         Text::EdgeMidpoint => "Punto medio de la arista",

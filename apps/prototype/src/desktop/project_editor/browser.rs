@@ -5,7 +5,7 @@ use super::{
     icons::{self, Icon},
     *,
 };
-use nator_document::{GroupId, Instance};
+use nator_document::{DocumentError, GroupId, Instance};
 
 /// Elemento renomeado pela árvore.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -325,7 +325,7 @@ pub(super) fn group_menu(
 }
 
 impl Editor {
-    fn can_convert_reference(&self) -> bool {
+    pub(super) fn can_convert_reference(&self) -> bool {
         !self.busy()
             && self.current().sketch_edit.is_none()
             && self.selection_active()
@@ -522,5 +522,180 @@ impl Editor {
         } else if cancel {
             self.rename = None;
         }
+    }
+}
+
+/// Comando para levar uma peça ou subpeça à pasta Referências, arrastando-a na árvore.
+/// `path` é o caminho da ocorrência (instâncias da raiz até ela): uma subpeça sai do pai
+/// e vai à raiz com a posição que tinha no mundo, e a definição passa a ser referência.
+/// Devolve `None` quando já é referência.
+pub(super) fn move_to_references(
+    document: &Document,
+    path: &[InstanceId],
+) -> Result<Option<Command>, DocumentError> {
+    let (&id, ancestors) = path
+        .split_last()
+        .ok_or_else(|| DocumentError("Caminho da peça vazio.".into()))?;
+    let mut world = Placement::default();
+    let mut parent = None;
+    for &step in path {
+        let instance = document
+            .instance(step)
+            .ok_or_else(|| DocumentError("Instância inexistente.".into()))?;
+        if instance.parent != parent {
+            return Err(DocumentError("Caminho da peça inconsistente.".into()));
+        }
+        world = world
+            .compose(instance.placement)
+            .map_err(|e| DocumentError(e.to_string()))?;
+        parent = Some(instance.part);
+    }
+    let part = document
+        .instance(id)
+        .map(|i| i.part)
+        .ok_or_else(|| DocumentError("Instância inexistente.".into()))?;
+    if document.part(part).is_some_and(|p| p.reference) {
+        return Ok(None);
+    }
+    let mut commands = Vec::new();
+    if !ancestors.is_empty() {
+        commands.push(Command::ReparentInstance { id, parent: None });
+        commands.push(Command::MoveInstance {
+            id,
+            placement: world,
+        });
+    }
+    commands.push(Command::SetPartReference {
+        part,
+        reference: true,
+    });
+    Ok(Some(if commands.len() == 1 {
+        commands.remove(0)
+    } else {
+        Command::Batch {
+            label: "Mover para Referências",
+            commands,
+        }
+    }))
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    use nator_geometry::{norm, sub};
+    type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    #[test]
+    fn subpart_moves_to_references_keeping_its_world_position() -> Result<()> {
+        let mut document = Document::new("Montagem")?;
+        let (parent_part, _) = document.add_mesh(
+            None,
+            "Conjunto".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let (child_part, _) = document.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let instance_of = |document: &Document, part| {
+            document
+                .instances()
+                .iter()
+                .find(|i| i.part == part)
+                .map(|i| i.id)
+                .ok_or("Instância ausente")
+        };
+        let root = instance_of(&document, parent_part)?;
+        let child = instance_of(&document, child_part)?;
+        document.instance_mut(root)?.placement = Placement::new([100., 0., 0.], [0., 0., 0.5])?;
+        document.reparent(child, Some(parent_part))?;
+        document.instance_mut(child)?.placement = Placement::new([0., 20., 5.], [0.2, 0., 0.])?;
+        let before = document
+            .occurrences()?
+            .into_iter()
+            .find(|o| o.instance == child)
+            .ok_or("Ocorrência ausente")?
+            .placement;
+        let command = move_to_references(&document, &[root, child])?.ok_or("Comando ausente")?;
+        let mut session = Session::new(document)?;
+        session.execute(command)?;
+        let document = session.document();
+        let moved = document.instance(child).ok_or("Subpeça ausente")?;
+        assert!(moved.parent.is_none());
+        assert!(document.part(child_part).ok_or("Peça ausente")?.reference);
+        assert!(!document.part(parent_part).ok_or("Pai ausente")?.reference);
+        for point in [[0., 0., 0.], [10., -3., 7.]] {
+            assert!(norm(sub(moved.placement.apply(point), before.apply(point))) < 1e-9);
+        }
+        // Já é referência: nada a fazer. Caminho que não corresponde à árvore falha.
+        assert!(move_to_references(document, &[child])?.is_none());
+        assert!(move_to_references(document, &[root, child]).is_err());
+        assert!(session.undo());
+        assert_eq!(
+            session
+                .document()
+                .instance(child)
+                .ok_or("Subpeça ausente")?
+                .parent,
+            Some(parent_part)
+        );
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "occt"))]
+mod reference_step_tests {
+    use super::*;
+    type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    /// Ensaio optativo com um STEP de montagem real: uma subpeça vai às Referências na
+    /// mesma posição e continua exportável em STEP com seus corpos.
+    #[test]
+    #[ignore = "Requer um STEP externo indicado por NATOR_STEP_PATH."]
+    fn external_step_subpart_moves_to_references_and_exports_step() -> Result<()> {
+        let path = std::path::PathBuf::from(
+            std::env::var_os("NATOR_STEP_PATH").ok_or("Informe NATOR_STEP_PATH.")?,
+        );
+        let mut session = Session::new(Document::new("STEP")?)?;
+        session.execute(Command::ImportStep {
+            path,
+            destination: None,
+            name: "Montagem".into(),
+        })?;
+        let occurrence = session
+            .document()
+            .occurrences()?
+            .into_iter()
+            .find(|o| o.path.len() >= 2)
+            .ok_or("O STEP não tem subpeças")?;
+        let part = session
+            .document()
+            .instance(occurrence.instance)
+            .ok_or("Instância ausente")?
+            .part;
+        let command =
+            move_to_references(session.document(), &occurrence.path)?.ok_or("Comando ausente")?;
+        session.execute(command)?;
+        let document = session.document();
+        let moved = document
+            .instance(occurrence.instance)
+            .ok_or("Subpeça ausente")?;
+        assert!(moved.parent.is_none());
+        assert!(document.part(part).ok_or("Peça ausente")?.reference);
+        let origin = moved.placement.apply([0.; 3]);
+        let before = occurrence.placement.apply([0.; 3]);
+        assert!(nator_geometry::norm(nator_geometry::sub(origin, before)) < 1e-9);
+        let scene = nator_commands::export::step_scene(
+            document,
+            nator_commands::export::StepScope::Part(part),
+        )?;
+        assert!(scene.parts.iter().any(|p| !p.bodies.is_empty()));
+        eprintln!(
+            "Subpeça {} movida às Referências; STEP com {} peças.",
+            moved.name,
+            scene.parts.len()
+        );
+        Ok(())
     }
 }

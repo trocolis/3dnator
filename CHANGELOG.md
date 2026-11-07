@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.44.0 — 07/11/2026
+
+- Ponto a ponto mais leve, na montagem e na construção: cada campo começa pela escolha de um corpo (realçado ao passar o mouse; em cenas grandes, só pelo clique) e somente os apoios desse corpo são calculados, mostrados como marcas discretas e capturados. Raios e oclusão ficam restritos à ocorrência dele, com conferência pelas demais peças só para até três candidatos e em cenas abaixo de 400 mil triângulos. O painel mostra o corpo mapeado e **Trocar corpo**; clicar noutro corpo troca o mapeamento. Antes, cada movimento do cursor varria os apoios e os triângulos de toda a montagem, o que travava a interface em STEPs grandes. Pontos de rascunhos e origens continuam valendo como destino sem escolher corpo.
+- Menu de contexto das referências na árvore ganha **Exportar STEP…**, com os corpos e subpeças da referência, como já havia no menu das peças.
+- Peças e subpeças podem ser arrastadas até a pasta **Referências**: a subpeça sai do pai, vai à raiz na mesma posição no mundo (pela ocorrência arrastada) e vira referência, numa só ação de desfazer. A pasta mostra a dica ao passar o mouse; a conversão segue as mesmas restrições de **Converter para objeto de referência**.
+
 ## 0.43.0 — 07/11/2026
 
 - Movimento ponto a ponto, na montagem e na construção: todos os elementos exibidos servem de destino. Além dos corpos e dos rascunhos de referência, valem os rascunhos das peças (na pose de cada ocorrência, com extremos, pontos médios, centros e quadrantes) e as origens visíveis do projeto e das peças; pontos atrás de material ou removidos pelo corte não são oferecidos. Um ponto do modelo capturado mais perto do cursor deixa de perder para um apoio de rascunho a até 12 pt. O realce dos apoios continua em cenas acima de 400 mil triângulos (como STEPs grandes), com o intervalo mínimo da pré-seleção.
