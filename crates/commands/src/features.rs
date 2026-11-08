@@ -1274,6 +1274,13 @@ pub(super) fn normalize(
                 .collect::<Result<_, _>>()?,
             base,
         },
+        Operation::RemoveFaces { base, faces } => Operation::RemoveFaces {
+            faces: faces
+                .into_iter()
+                .map(|face| stable_face(doc, part, base, face))
+                .collect::<Result<_, _>>()?,
+            base,
+        },
         Operation::Lip { base, face, spec } => Operation::Lip {
             face: stable_face(doc, part, base, face)?,
             base,
@@ -1592,6 +1599,16 @@ pub(super) fn construct(
                 }
             }
             solid.merge_faces(&indices, &owner).map_err(error)?
+        }
+        Operation::RemoveFaces { base, faces } => {
+            let (solid, bytes) = source(doc, part, *base)?;
+            let mut indices = faces
+                .iter()
+                .map(|face| face_index(&solid, &bytes, face))
+                .collect::<Result<Vec<_>, _>>()?;
+            indices.sort_unstable();
+            indices.dedup();
+            solid.remove_faces(&indices, &owner).map_err(error)?
         }
         Operation::Lip { base, face, spec } => {
             let (solid, bytes) = source(doc, part, *base)?;

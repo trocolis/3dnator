@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.47.0 — 08/11/2026
+
+- Nova ferramenta **Remover faces** (faixa Sólido, ao lado de Arredondar e Chanfrar), no estilo da exclusão de faces do Fusion: escolha as faces de arredondamentos, chanfros, furos ou ressaltos e as faces vizinhas se estendem até fecharem o sólido. Serve sobretudo para STEP importado, em que o arredondamento não está no histórico. A operação usa o `BRepAlgoAPI_Defeaturing` do OCCT, entra no histórico como as demais (editável e recalculada ao mudar parâmetros) e as faces estendidas conservam o nome, então operações posteriores continuam achando a mesma face. Se alguma face não puder ser removida (por exemplo, a tampa de um prisma), a operação falha inteira, sem sólido removido só em parte. Formato 52: operação `RemoveFaces`.
+- Isolamento visível: o componente isolado ganha a marca **Isolado** na árvore, e um balão no topo da área de edição mostra o nome dele (ou a quantidade de componentes isolados) com o botão **Sair do isolamento**. Antes, nada indicava que a cena estava reduzida.
+- Grupos ganham o olho de visibilidade na árvore: um clique mostra ou oculta todos os membros numa só ação de desfazer. O grupo continua sem visibilidade própria (aparece visível enquanto algum membro estiver), então o formato não muda.
+- O painel de **Unir áreas** não mostra mais os campos de espessura e direção da casca, que não tinham efeito.
+
 ## 0.46.0 — 08/11/2026
 
 - Janela de recuperação: cada cópia ganha **Excluir**, ao lado de **Recuperar**, com confirmação em **Excluir definitivamente**. Só arquivos marcados como cópia de recuperação são apagados; sem cópias restantes, a janela fecha.

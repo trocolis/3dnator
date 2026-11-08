@@ -142,6 +142,8 @@ pub enum Text {
     DetachVertex,
     RemoveVertex,
     MergeAreas,
+    RemoveFaces,
+    RemoveFacesHint,
     UnlinkedEnds,
     FixElement,
     ReleaseElement,
@@ -416,6 +418,9 @@ pub enum Text {
     NeutralColor,
     Isolate,
     ExitIsolation,
+    IsolatedBadge,
+    IsolatedMany,
+    GroupVisibility,
     TransparentToggle,
     /// Reservado do antigo painel Propriedades.
     NewBody,
@@ -1392,6 +1397,10 @@ fn pt(key: Text) -> &'static str {
         Text::DetachVertex => "Soltar vértice",
         Text::RemoveVertex => "Remover vértice",
         Text::MergeAreas => "Unir áreas",
+        Text::RemoveFaces => "Remover faces",
+        Text::RemoveFacesHint => {
+            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido."
+        }
         Text::UnlinkedEnds => "Pontas sem ligação. Clique para ligar.",
         Text::FixElement => "Fixar elemento",
         Text::ReleaseElement => "Liberar elemento",
@@ -1502,6 +1511,9 @@ fn pt(key: Text) -> &'static str {
         Text::NeutralColor => "Restaurar cor neutra",
         Text::Isolate => "Isolar",
         Text::ExitIsolation => "Sair do isolamento",
+        Text::IsolatedBadge => "Isolado",
+        Text::IsolatedMany => "componentes",
+        Text::GroupVisibility => "Mostrar ou ocultar todos os membros do grupo",
         Text::TransparentToggle => "Transparente",
         Text::NewBody => "Novo corpo",
         Text::ExportScope => "O que exportar",

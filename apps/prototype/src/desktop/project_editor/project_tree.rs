@@ -233,6 +233,41 @@ impl<'a> Tree<'a> {
         .clicked()
     }
 
+    /// Marca de isolamento na ponta direita da linha da instância isolada.
+    fn isolation_badge(&self, ui: &egui::Ui, response: &egui::Response, instance: InstanceId) {
+        if !self
+            .tab
+            .view
+            .isolated
+            .as_ref()
+            .is_some_and(|set| set.contains(&instance))
+        {
+            return;
+        }
+        let galley = ui.painter().layout_no_wrap(
+            text(T::IsolatedBadge).to_owned(),
+            egui::FontId::proportional(11.),
+            theme::accent(),
+        );
+        let size = galley.size() + egui::vec2(10., 4.);
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(
+                response.rect.right() - size.x - 4.,
+                response.rect.center().y - size.y / 2.,
+            ),
+            size,
+        );
+        ui.painter().rect_filled(rect, 6, theme::blue_fill());
+        ui.painter().rect_stroke(
+            rect,
+            6,
+            egui::Stroke::new(1., theme::accent()),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter()
+            .galley(rect.min + egui::vec2(5., 2.), galley, theme::accent());
+    }
+
     /// Nó recolhível: a seta e o clique no rótulo (quando `header` devolve verdadeiro)
     /// abrem e fecham o corpo.
     fn node(
@@ -526,6 +561,7 @@ impl<'a> Tree<'a> {
                 text(T::ReferenceModelHint),
             )
             .interact(egui::Sense::drag());
+            tree.isolation_badge(ui, &response, instance.id);
             // Arrastada até uma peça ou pasta Referências, muda de dono na mesma posição.
             if !tree.busy {
                 response.dnd_set_drag_payload(Dragged::Instance(path));
@@ -630,6 +666,7 @@ impl<'a> Tree<'a> {
                     &part.name,
                 )
                 .interact(egui::Sense::drag());
+                tree.isolation_badge(ui, &response, instance.id);
                 if !tree.busy {
                     response.dnd_set_drag_payload(Dragged::Instance(
                         path.iter().map(|&id| InstanceId(id)).collect(),
@@ -956,14 +993,42 @@ impl<'a> Tree<'a> {
                 .map(|id| Selection::Instance(*id))
                 .collect::<Vec<_>>();
             let chosen = !members.is_empty() && members.iter().all(|m| self.tab.is_selected(*m));
-            let response = icons::entry_with_hint(
-                ui,
-                Icon::Group,
-                &group.name,
-                chosen,
-                false,
-                &format!("{} {}", group.members.len(), text(T::SelectedCount)),
-            );
+            // O grupo não tem visibilidade própria: aparece visível enquanto algum membro
+            // estiver, e o olho mostra ou oculta todos de uma vez.
+            let visible = group
+                .members
+                .iter()
+                .any(|id| self.document.instance(*id).is_some_and(|i| i.visible));
+            let response = ui
+                .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.;
+                    let eye = ui
+                        .add_enabled_ui(!self.busy && !group.members.is_empty(), |ui| {
+                            icons::tree_button(
+                                ui,
+                                if visible { Icon::Eye } else { Icon::EyeOff },
+                                text(T::GroupVisibility),
+                                false,
+                            )
+                        })
+                        .inner;
+                    if eye.clicked() {
+                        self.intents.push(Intent::Command(Box::new(group_visibility(
+                            self.document,
+                            group,
+                            !visible,
+                        ))));
+                    }
+                    icons::entry_with_hint(
+                        ui,
+                        Icon::Group,
+                        &group.name,
+                        chosen,
+                        !visible,
+                        &format!("{} {}", group.members.len(), text(T::SelectedCount)),
+                    )
+                })
+                .inner;
             if response.clicked() {
                 self.intents
                     .push(Intent::Menu(browser::MenuAction::Select(members)));
@@ -1032,5 +1097,27 @@ impl<'a> Tree<'a> {
                     .push(Intent::OpenDrawing(Box::new(sheet.clone())));
             }
         }
+    }
+}
+
+/// Mostra ou oculta todos os membros de um grupo numa só ação de desfazer. Membros que já
+/// estão no estado pedido ficam de fora.
+fn group_visibility(
+    document: &Document,
+    group: &nator_document::assembly::Group,
+    visible: bool,
+) -> Command {
+    Command::Batch {
+        label: "Alterar visibilidade do grupo",
+        commands: group
+            .members
+            .iter()
+            .filter(|id| {
+                document
+                    .instance(**id)
+                    .is_some_and(|i| i.visible != visible)
+            })
+            .map(|&id| Command::SetInstanceVisibility { id, visible })
+            .collect(),
     }
 }

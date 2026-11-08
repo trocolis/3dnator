@@ -352,6 +352,19 @@ impl Editor {
     /// liberdade dele. Todos têm o estilo da árvore recolhida e não quebram linha.
     pub(super) fn edit_balloons(&mut self, context: &egui::Context) {
         let tab = self.current();
+        // Isolamento: o nome do componente (ou a contagem) com o botão de sair, para que a
+        // cena reduzida nunca pareça um projeto com peças sumidas.
+        let isolation = tab.view.isolated.as_ref().map(|set| {
+            let document = tab.session.document();
+            let name = match set.iter().next() {
+                Some(id) if set.len() == 1 => document
+                    .instance(*id)
+                    .map(|i| i.name.clone())
+                    .unwrap_or_default(),
+                _ => format!("{} {}", set.len(), text(T::IsolatedMany)),
+            };
+            format!("{}: {name}", text(T::IsolatedBadge))
+        });
         let part = tab
             .active_part
             .and_then(|part| tab.session.document().part(part))
@@ -376,7 +389,9 @@ impl Editor {
             };
         // Os nomes dividem o espaço até o cubo; nomes longos ficam abreviados.
         let room = canvas.right() - view_cube::rect(canvas).width() - 16. - left;
-        let names = usize::from(part.is_some()) + usize::from(sketch.is_some());
+        let names = usize::from(part.is_some())
+            + usize::from(sketch.is_some())
+            + usize::from(isolation.is_some());
         let name_width = if names == 0 {
             0.
         } else {
@@ -384,6 +399,24 @@ impl Editor {
                 .clamp(60., 240.)
         };
         let top = canvas.top() + 8.;
+        if let Some(name) = isolation {
+            let (rect, exit) = balloon(context, "isolation_balloon", egui::pos2(left, top), |ui| {
+                named_balloon(
+                    ui,
+                    icons::Icon::Eye,
+                    &name,
+                    name_width,
+                    icons::Icon::Close,
+                    text(T::ExitIsolation),
+                    true,
+                )
+            });
+            left = rect.right() + 8.;
+            if exit {
+                self.apply_menu_action(context, browser::MenuAction::ExitIsolation);
+                context.request_repaint();
+            }
+        }
         if let Some(name) = part {
             let (rect, save) = balloon(context, "edit_balloon", egui::pos2(left, top), |ui| {
                 named_balloon(

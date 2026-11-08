@@ -111,6 +111,10 @@ pub fn text(key: Text) -> &'static str {
         Text::DetachVertex => "Separar vértice",
         Text::RemoveVertex => "Eliminar vértice",
         Text::MergeAreas => "Unir áreas",
+        Text::RemoveFaces => "Eliminar caras",
+        Text::RemoveFacesHint => {
+            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido."
+        }
         Text::UnlinkedEnds => "Extremos sin unir. Haga clic para unir.",
         Text::FixElement => "Fijar elemento",
         Text::ReleaseElement => "Liberar elemento",
@@ -437,6 +441,9 @@ pub fn text(key: Text) -> &'static str {
         Text::NeutralColor => "Restaurar color neutro",
         Text::Isolate => "Aislar",
         Text::ExitIsolation => "Salir del aislamiento",
+        Text::IsolatedBadge => "Aislado",
+        Text::IsolatedMany => "componentes",
+        Text::GroupVisibility => "Mostrar u ocultar todos los miembros del grupo",
         Text::TransparentToggle => "Transparente",
         Text::NewBody => "Nuevo cuerpo",
         Text::ExportScope => "Qué exportar",

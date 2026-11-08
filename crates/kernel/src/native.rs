@@ -67,6 +67,7 @@ unsafe extern "C" {
     fn nator_transform(body: *const c_void, matrix: *const f64) -> *mut c_void;
     fn nator_opposite_face(body: *const c_void, index: usize, output: *mut usize) -> bool;
     fn nator_merge_faces(body: *const c_void, faces: *const usize, count: usize) -> *mut c_void;
+    fn nator_remove_faces(body: *const c_void, faces: *const usize, count: usize) -> *mut c_void;
     fn nator_shell(
         body: *const c_void,
         faces: *const usize,
@@ -722,6 +723,37 @@ impl Solid {
             ));
         }
         Ok(merged)
+    }
+
+    /// Remove faces (arredondamentos, chanfros, furos) e estende as vizinhas para fechar o
+    /// sólido. As faces estendidas mantêm o nome; a remoção que o OCCT não consegue concluir
+    /// por inteiro falha, sem resultado parcial.
+    pub fn remove_faces(&self, faces: &[usize], owner: &str) -> Result<Self, KernelError> {
+        owner_name(owner)?;
+        if faces.is_empty() || faces.len() > 1000 {
+            return Err(KernelError(
+                "Escolha de 1 a 1000 faces para remover.".into(),
+            ));
+        }
+        let count = self.face_count()?;
+        // SAFETY: lista de índices viva durante a chamada; a ponte valida cada índice.
+        let removed = Self::from_pointer(unsafe {
+            nator_remove_faces(self.pointer.as_ptr(), faces.as_ptr(), faces.len())
+        })?
+        .with_inherited(
+            &[&self.faces],
+            &Inheritance {
+                owner,
+                generated: "filled",
+                modified_suffix: None,
+            },
+        )?;
+        if removed.face_count()? >= count {
+            return Err(KernelError(
+                "A remoção não retirou nenhuma face do sólido.".into(),
+            ));
+        }
+        Ok(removed)
     }
 
     pub fn shell(

@@ -1647,7 +1647,7 @@ fn gpu_state() -> Result<egui_wgpu::RenderState, Box<dyn Error>> {
 #[cfg(all(test, feature = "occt"))]
 mod tests {
     use super::*;
-    use nator_document::features::{Operation, RegionRef};
+    use nator_document::features::{EdgeRef, Operation, RegionRef};
     use nator_sketch::{Plane, Sketch};
 
     fn arrow_key(key: egui::Key) -> egui::Event {
@@ -7587,6 +7587,226 @@ mod tests {
         assert!(matches!(feature.operation, Operation::MergeFaces { .. }));
         let body = document.body(feature.output).ok_or("Corpo")?;
         assert_eq!(body.face_names.len(), faces - 1);
+        Ok(())
+    }
+
+    /// Placa 40 × 30 × 10 mm com as quatro arestas do topo chanfradas em 3 mm, vista de cima.
+    fn chamfered_plate_editor(
+        context: &egui::Context,
+    ) -> Result<(Editor, PartId, BodyId), Box<dyn Error>> {
+        let mut session = Session::new(Document::new("Chanfro removível")?)?;
+        let mut plate = Sketch::new("Placa", Plane::xy());
+        let lines = plate.add_rectangle([0., 0.], [40., 30.], false)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: plate,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Corpo ausente".into());
+        };
+        let owner = nator_document::features::body_owner(body);
+        let mut edges = lines
+            .iter()
+            .map(|line| EdgeRef::Between([format!("{owner}:end"), format!("{owner}:e{line}")]));
+        let edge = edges.next().ok_or("Aresta ausente")?;
+        let Effect::Imported {
+            body: chamfered, ..
+        } = session.execute(Command::AddFeature {
+            part,
+            name: "Chanfro".into(),
+            operation: Operation::Chamfer {
+                base: body,
+                edge,
+                distance: "3 mm".into(),
+                angle: None,
+                additional_edges: edges.collect(),
+            },
+        })?
+        else {
+            return Err("Chanfro ausente".into());
+        };
+        let mut editor = Editor::from_gpu(gpu_state()?, context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, context)?;
+        Ok((editor, part, chamfered))
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn remove_faces_takes_the_clicked_chamfers_back_to_sharp_edges() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part, chamfered) = chamfered_plate_editor(&context)?;
+        let faces = editor
+            .current()
+            .session
+            .document()
+            .body(chamfered)
+            .ok_or("Corpo")?
+            .face_names
+            .len();
+        editor.open_feature_tool(feature_editor::Tool::RemoveFaces);
+        frame(&mut editor, &context, vec![])?;
+        // Um clique no meio de cada faixa chanfrada, vista de cima.
+        for point in [
+            [1.5, 15., 8.5],
+            [38.5, 15., 8.5],
+            [20., 1.5, 8.5],
+            [20., 28.5, 8.5],
+        ] {
+            let at = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                point,
+            )
+            .ok_or("Ponto sem projeção")?;
+            click(&mut editor, &context, at)?;
+            settle(&mut editor, &context)?;
+        }
+        wait_feature_preview(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.feature_edit.is_none(), "{}", editor.status);
+        let document = editor.current().session.document();
+        let feature = document
+            .part(part)
+            .and_then(|p| p.features.last())
+            .ok_or("Operação")?;
+        let Operation::RemoveFaces { faces: chosen, .. } = &feature.operation else {
+            return Err(format!("Operação inesperada: {:?}", feature.operation).into());
+        };
+        assert_eq!(chosen.len(), 4);
+        let body = document.body(feature.output).ok_or("Corpo")?;
+        assert_eq!(body.face_names.len(), faces - 4);
+        Ok(())
+    }
+
+    /// Dois blocos, cada um na sua peça, reunidos no grupo "Conjunto".
+    fn grouped_blocks_editor(
+        context: &egui::Context,
+    ) -> Result<(Editor, [InstanceId; 2]), Box<dyn Error>> {
+        let mut document = Document::new("Grupo")?;
+        for (name, x) in [("Bloco A", 0.), ("Bloco B", 60.)] {
+            let mut solid = nator_kernel::Solid::cuboid([x, 0., 0.], [40., 40., 10.])?;
+            let (mesh, _) = solid.tessellate_with_faces(0.05, 0.2)?;
+            document.add_mesh(None, name.into(), Arc::new(MeshAsset::new(mesh)))?;
+        }
+        let ids = document
+            .instances()
+            .iter()
+            .map(|i| i.id)
+            .collect::<Vec<_>>();
+        let [a, b] = ids[..] else {
+            return Err(format!("Instâncias inesperadas: {}", ids.len()).into());
+        };
+        let mut session = Session::new(document)?;
+        session.execute(Command::CreateGroup {
+            name: "Conjunto".into(),
+            members: vec![a, b],
+        })?;
+        let mut editor = Editor::from_gpu(gpu_state()?, context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.shell.tab = shell::RibbonTab::Assembly;
+        editor.shell.browser_visible = true;
+        settle(&mut editor, context)?;
+        Ok((editor, [a, b]))
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn isolation_shows_a_balloon_and_a_tree_badge_and_the_balloon_exits()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, [a, _]) = grouped_blocks_editor(&context)?;
+        assert!(label_position(&mut editor, &context, text(T::IsolatedBadge)).is_err());
+        editor.apply_menu_action(&context, browser::MenuAction::Isolate(a));
+        settle(&mut editor, &context)?;
+        let name = editor
+            .current()
+            .session
+            .document()
+            .instance(a)
+            .ok_or("Instância")?
+            .name
+            .clone();
+        label_position(
+            &mut editor,
+            &context,
+            &format!("{}: {name}", text(T::IsolatedBadge)),
+        )?;
+        label_position(&mut editor, &context, text(T::IsolatedBadge))?;
+        let balloon = area_rect(&context, "isolation_balloon")?;
+        click(
+            &mut editor,
+            &context,
+            egui::pos2(balloon.right() - 28., balloon.center().y),
+        )?;
+        settle(&mut editor, &context)?;
+        assert!(editor.current().view.isolated.is_none());
+        assert!(label_position(&mut editor, &context, text(T::IsolatedBadge)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn group_eye_hides_and_shows_every_member_in_one_undo() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, members) = grouped_blocks_editor(&context)?;
+        let visible = |editor: &Editor| -> Vec<bool> {
+            members
+                .iter()
+                .filter_map(|id| editor.current().session.document().instance(*id))
+                .map(|i| i.visible)
+                .collect()
+        };
+        let eye = |editor: &mut Editor| -> Result<egui::Pos2, Box<dyn Error>> {
+            let label = label_position(editor, &context, "Conjunto")?;
+            let galley = context.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    "Conjunto".into(),
+                    egui::FontId::proportional(13.),
+                    egui::Color32::WHITE,
+                )
+            });
+            // Texto começa 28 pt após a borda da linha; o olho (20 pt) vem logo antes.
+            Ok(egui::pos2(
+                label.x - galley.size().x / 2. - 28. - 2. - 10.,
+                label.y,
+            ))
+        };
+        let at = eye(&mut editor)?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(visible(&editor), [false, false]);
+        let at = eye(&mut editor)?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(visible(&editor), [true, true]);
+        // Cada clique é uma só ação de desfazer.
+        assert!(editor.current_mut().session.undo());
+        assert_eq!(visible(&editor), [false, false]);
         Ok(())
     }
 

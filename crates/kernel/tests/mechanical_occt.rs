@@ -208,6 +208,42 @@ fn multiple_edges_tangent_propagation_and_chamfer_by_angle() -> Result<()> {
     Ok(())
 }
 
+/// Remover faces desfaz chanfros e arredondamentos, inclusive vários de uma vez, e falha
+/// quando as vizinhas não fecham o sólido sem a face escolhida.
+#[test]
+fn removing_chamfer_and_fillet_faces_restores_the_block() -> Result<()> {
+    let body = block()?;
+    let verticals = vertical_edges(&body)?;
+    let generated = |solid: &Solid, suffix: &str| -> Vec<usize> {
+        solid
+            .face_names()
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.ends_with(suffix))
+            .map(|(i, _)| i)
+            .collect()
+    };
+    let chamfered = body.chamfer(&verticals[..1], 3., None, "b2")?;
+    let bevel = generated(&chamfered, "b2:chamfer");
+    assert_eq!(bevel.len(), 1);
+    let sharp = chamfered.remove_faces(&bevel, "b3")?;
+    assert!((sharp.volume()? - BLOCK).abs() < 1e-4);
+    assert_eq!(sharp.face_count()?, body.face_count()?);
+    // As laterais estendidas continuam com o nome original.
+    let mut names = sharp.face_names().to_vec();
+    let mut original = body.face_names().to_vec();
+    names.sort();
+    original.sort();
+    assert_eq!(names, original);
+    let rounded = body.fillet(&verticals, 2., "b4")?;
+    let rounds = generated(&rounded, "b4:round");
+    assert_eq!(rounds.len(), 4);
+    assert!((rounded.remove_faces(&rounds, "b5")?.volume()? - BLOCK).abs() < 1e-4);
+    let top = body.face_named("b1:end")?;
+    assert!(body.remove_faces(&[top], "b6").is_err());
+    Ok(())
+}
+
 #[test]
 fn shell_outward_and_with_several_open_faces() -> Result<()> {
     let body = block()?;

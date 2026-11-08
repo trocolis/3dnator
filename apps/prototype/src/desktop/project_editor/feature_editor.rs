@@ -44,6 +44,7 @@ pub(super) enum Tool {
     Chamfer,
     Shell,
     MergeFaces,
+    RemoveFaces,
     Hole,
     LinearPattern,
     CircularPattern,
@@ -70,6 +71,7 @@ impl Tool {
             Self::Chamfer => T::Chamfer,
             Self::Shell => T::Shell,
             Self::MergeFaces => T::MergeAreas,
+            Self::RemoveFaces => T::RemoveFaces,
             Self::Hole => T::HoleTool,
             Self::LinearPattern => T::RectangularPattern,
             Self::CircularPattern => T::CircularPattern,
@@ -96,6 +98,7 @@ impl Tool {
             Self::Chamfer => Icon::Chamfer,
             Self::Shell => Icon::Shell,
             Self::MergeFaces => Icon::Join,
+            Self::RemoveFaces => Icon::Delete,
             Self::Mirror => Icon::Mirror,
             Self::LinearPattern | Self::CircularPattern => Icon::Pattern,
             Self::Split => Icon::Split,
@@ -121,9 +124,12 @@ impl Tool {
             Self::Extrude | Self::Revolve | Self::Loft | Self::Sweep => Field::Profile,
             Self::Pipe => Field::SweepPath,
             Self::Fillet | Self::Chamfer => Field::Edges,
-            Self::Shell | Self::MergeFaces | Self::Label | Self::BedFace | Self::Lip => {
-                Field::Faces
-            }
+            Self::Shell
+            | Self::MergeFaces
+            | Self::RemoveFaces
+            | Self::Label
+            | Self::BedFace
+            | Self::Lip => Field::Faces,
             Self::ComponentCut => Field::Component,
             _ => Field::Base,
         }
@@ -591,6 +597,7 @@ impl Draft {
                 .position(|(_, v)| nator_geometry::dot(*v, direction).abs() > 0.999)
                 .unwrap_or(0)
         };
+        let removing = matches!(feature.operation, Operation::RemoveFaces { .. });
         match feature.operation {
             Operation::Label { base, face, spec } => {
                 d.tool = Tool::Label;
@@ -894,8 +901,12 @@ impl Draft {
                 f.through = depth.is_none();
                 f.depth = depth.unwrap_or_else(|| f.depth.clone());
             }
-            Operation::MergeFaces { base, faces } => {
-                d.tool = Tool::MergeFaces;
+            Operation::MergeFaces { base, faces } | Operation::RemoveFaces { base, faces } => {
+                d.tool = if removing {
+                    Tool::RemoveFaces
+                } else {
+                    Tool::MergeFaces
+                };
                 d.base = Some(base);
                 let mut faces = faces.into_iter().map(Kept::Face);
                 d.kept_topology = faces.next();
@@ -1053,6 +1064,15 @@ impl Draft {
     /// Arestas e faces escolhidas no corpo base, para o realce na área 3D.
     pub(super) fn references(&self) -> impl Iterator<Item = &Kept> {
         self.kept_topology.iter().chain(&self.extra_topology)
+    }
+    /// Faces escolhidas, na ordem da seleção.
+    fn chosen_faces(&self) -> Vec<FaceRef> {
+        self.references()
+            .filter_map(|kept| match kept {
+                Kept::Face(face) => Some(face.clone()),
+                _ => None,
+            })
+            .collect()
     }
     /// Região do perfil escolhida por clique no rascunho.
     pub(super) fn choose_region(&mut self, sketch: SketchId, region: RegionRef) {
@@ -1550,6 +1570,7 @@ impl Draft {
             Tool::Fillet
             | Tool::Chamfer
             | Tool::Shell
+            | Tool::RemoveFaces
             | Tool::Label
             | Tool::BedFace
             | Tool::Lip => self.base.is_some() && self.kept_topology.is_some(),
@@ -1822,13 +1843,11 @@ impl Draft {
             },
             Tool::MergeFaces => Operation::MergeFaces {
                 base,
-                faces: self
-                    .references()
-                    .filter_map(|kept| match kept {
-                        Kept::Face(face) => Some(face.clone()),
-                        _ => None,
-                    })
-                    .collect(),
+                faces: self.chosen_faces(),
+            },
+            Tool::RemoveFaces => Operation::RemoveFaces {
+                base,
+                faces: self.chosen_faces(),
             },
             Tool::Lip => Operation::Lip {
                 base,
@@ -2054,6 +2073,7 @@ impl Editor {
             | Tool::Chamfer
             | Tool::Shell
             | Tool::MergeFaces
+            | Tool::RemoveFaces
             | Tool::Label
             | Tool::BedFace
             | Tool::Lip => {
@@ -2327,9 +2347,11 @@ impl Editor {
                     Tool::Pipe => pipe_panel(ui, &mut d, &part),
                     Tool::Loft | Tool::Sweep => loft_panel(ui, &mut d, &part, &regions),
                     Tool::Join | Tool::Cut | Tool::Intersect => combine_panel(ui, &mut d, &part),
-                    Tool::Fillet | Tool::Chamfer | Tool::Shell | Tool::MergeFaces => {
-                        topology_panel(ui, &mut d, &part)
-                    }
+                    Tool::Fillet
+                    | Tool::Chamfer
+                    | Tool::Shell
+                    | Tool::MergeFaces
+                    | Tool::RemoveFaces => topology_panel(ui, &mut d, &part),
                     Tool::Hole => hole_panel(ui, &mut d, &part, record, &fasteners),
                     Tool::LinearPattern | Tool::CircularPattern => pattern_panel(ui, &mut d, &part),
                     Tool::Mirror | Tool::Split => plane_panel(ui, &mut d, &part),
@@ -2928,7 +2950,7 @@ fn combine_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) 
 }
 
 fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
-    let field = if matches!(d.tool, Tool::Shell | Tool::MergeFaces) {
+    let field = if matches!(d.tool, Tool::Shell | Tool::MergeFaces | Tool::RemoveFaces) {
         Field::Faces
     } else {
         Field::Edges
@@ -2985,6 +3007,15 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
             if let Some(angle) = &mut d.chamfer_angle {
                 panel::row(ui, text(T::Angle), |ui| panel::expression(ui, angle));
             }
+        }
+        // Sem medidas: as faces escolhidas bastam.
+        Tool::MergeFaces => {}
+        Tool::RemoveFaces => {
+            ui.label(
+                egui::RichText::new(text(T::RemoveFacesHint))
+                    .small()
+                    .color(theme::muted()),
+            );
         }
         _ => {
             panel::row(ui, text(T::ThicknessField), |ui| {

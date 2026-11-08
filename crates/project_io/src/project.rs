@@ -66,7 +66,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 49: cotas até a origem local do rascunho, sem pontos auxiliares.
 /// Versão 51: pasta Referências em cada peça (`folders.references`), para os modelos de
 /// referência filhos dela. Ausente, a pasta fica visível.
-pub const FORMAT_VERSION: u32 = 51;
+/// Versão 52: operação `RemoveFaces` (remover arredondamentos, chanfros e outras faces).
+pub const FORMAT_VERSION: u32 = 52;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

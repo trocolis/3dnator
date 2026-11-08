@@ -109,6 +109,10 @@ pub fn text(key: Text) -> &'static str {
         Text::DetachVertex => "Detach vertex",
         Text::RemoveVertex => "Remove vertex",
         Text::MergeAreas => "Merge areas",
+        Text::RemoveFaces => "Remove faces",
+        Text::RemoveFacesHint => {
+            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid."
+        }
         Text::UnlinkedEnds => "Unlinked ends. Click to link.",
         Text::FixElement => "Fix element",
         Text::ReleaseElement => "Release element",
@@ -421,6 +425,9 @@ pub fn text(key: Text) -> &'static str {
         Text::NeutralColor => "Restore neutral color",
         Text::Isolate => "Isolate",
         Text::ExitIsolation => "Exit isolation",
+        Text::IsolatedBadge => "Isolated",
+        Text::IsolatedMany => "components",
+        Text::GroupVisibility => "Show or hide every member of the group",
         Text::TransparentToggle => "Transparent",
         Text::NewBody => "New body",
         Text::ExportScope => "What to export",

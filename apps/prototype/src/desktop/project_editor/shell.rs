@@ -254,6 +254,7 @@ impl Action {
                 SolidTool::Chamfer => Icon::Chamfer,
                 SolidTool::Shell => Icon::Shell,
                 SolidTool::MergeFaces => Icon::Join,
+                SolidTool::RemoveFaces => Icon::Delete,
                 SolidTool::Mirror => Icon::Mirror,
                 SolidTool::LinearPattern | SolidTool::CircularPattern => Icon::Pattern,
                 SolidTool::Split => Icon::Split,
@@ -364,6 +365,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::Solid(SolidTool::Chamfer),
     Action::Solid(SolidTool::Shell),
     Action::Solid(SolidTool::MergeFaces),
+    Action::Solid(SolidTool::RemoveFaces),
     Action::Solid(SolidTool::Hole),
     Action::Solid(SolidTool::Join),
     Action::Solid(SolidTool::Cut),
@@ -1383,6 +1385,7 @@ impl Editor {
                         Action::Solid(SolidTool::Shell),
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
+                        Action::Solid(SolidTool::RemoveFaces),
                         Action::Paint,
                     ],
                 );

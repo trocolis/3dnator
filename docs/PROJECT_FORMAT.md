@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 50
+# Formato de projeto — versão interna 52
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 50; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 52; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -17,6 +17,14 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 52, `RemoveFaces { base, faces }` remove de 1 a 1000 faces do corpo base
+(arredondamentos, chanfros, furos, ressaltos) e estende as faces vizinhas até fecharem o
+sólido, pelo `BRepAlgoAPI_Defeaturing` do OCCT. As faces estendidas conservam o nome;
+faces que o núcleo precisar criar recebem `{dono}:filled`. Se alguma face não puder ser
+removida, a operação falha inteira, sem resultado parcial.
+
+Desde a versão 51, `folders.references` grava a visibilidade da pasta Referências de cada peça.
 
 Desde a versão 50, `ExtrudeMany` registra perfis coplanares de faces de corpos e regiões
 de rascunhos diferentes da mesma peça. `profiles` contém variantes `Face` (base, referência

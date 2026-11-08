@@ -73,6 +73,7 @@ pub(super) fn operation_icon(operation: &Operation) -> Icon {
         Operation::ComponentCut { .. } => Icon::ComponentCut,
         Operation::Lip { .. } => Icon::Lip,
         Operation::MergeFaces { .. } => Icon::Join,
+        Operation::RemoveFaces { .. } => Icon::Delete,
         Operation::ScrewBoss { .. } => Icon::ScrewBoss,
         Operation::SnapFit { .. } => Icon::SnapFit,
     }

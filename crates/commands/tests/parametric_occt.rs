@@ -5,7 +5,7 @@
 use nator_commands::{Command, Effect, Session};
 use nator_document::{
     BodyId, Document, PartId, SketchId,
-    features::{EdgeRef, Operation, RegionRef, body_owner, signature},
+    features::{EdgeRef, FaceRef, Operation, RegionRef, body_owner, signature},
     parameters::Dimension,
 };
 use nator_kernel::Solid;
@@ -431,5 +431,54 @@ fn print_profile_values_drive_parts_and_survive_saving() -> Result<()> {
         .is_err()
     );
     assert_eq!(s.revision(), revision);
+    Ok(())
+}
+
+/// Remove o arredondamento como no Fusion: a face arredondada some, as duas paredes do canto
+/// se estendem até se encontrarem e o recálculo por parâmetro continua valendo.
+#[test]
+fn removing_the_rounded_face_restores_the_sharp_corner() -> Result<()> {
+    let (mut session, part, _, extrusion, fillet, _) = build()?;
+    let round = session
+        .document()
+        .body(fillet)
+        .ok_or("Arredondamento ausente")?
+        .face_names
+        .iter()
+        .find(|name| name.ends_with(":round"))
+        .ok_or("Face arredondada sem nome")?
+        .clone();
+    let sharp = imported(session.execute(Command::AddFeature {
+        part,
+        name: "Remover faces".into(),
+        operation: Operation::RemoveFaces {
+            base: fillet,
+            faces: vec![FaceRef::Named(round)],
+        },
+    })?)?;
+    let corner = |t: f64| (60. * t + t * (30. - t)) * 20.;
+    assert!((solid(&session, sharp)?.volume()? - corner(6.)).abs() < 1e-3);
+    let faces =
+        |session: &Session, body: BodyId| session.document().body(body).map(|b| b.face_names.len());
+    assert_eq!(faces(&session, sharp), faces(&session, extrusion));
+    // As paredes estendidas mantêm o nome da extrusão, então o recálculo acha a mesma face.
+    set_thickness(&mut session, part, "9 mm")?;
+    assert!((solid(&session, sharp)?.volume()? - corner(9.)).abs() < 1e-3);
+    // Tirar a tampa de um prisma não fecha o sólido: falha inteira, sem resultado parcial.
+    let revision = session.revision();
+    let cap = format!("{}:start", body_owner(extrusion));
+    assert!(
+        session
+            .execute(Command::AddFeature {
+                part,
+                name: "Remover tampa".into(),
+                operation: Operation::RemoveFaces {
+                    base: sharp,
+                    faces: vec![FaceRef::Named(cap)],
+                },
+            })
+            .is_err()
+    );
+    assert_eq!(session.revision(), revision);
     Ok(())
 }

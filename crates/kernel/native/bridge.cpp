@@ -16,6 +16,7 @@
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Defeaturing.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -572,6 +573,38 @@ Shape* nator_merge_faces(const Shape* body, const std::size_t* faces, std::size_
             }
         }
         shape.origins = table.take();
+    });
+}
+
+// Remoção de faces (defeaturing): arredondamentos, chanfros, furos ou ressaltos escolhidos
+// somem e as faces vizinhas se estendem até se encontrarem de novo. Um aviso do OCCT indica
+// que alguma face não pôde ser removida; nesse caso a operação falha inteira, em vez de
+// devolver um sólido removido só em parte.
+Shape* nator_remove_faces(const Shape* body, const std::size_t* faces, std::size_t count) noexcept {
+    return build([&](Shape& shape) {
+        if (count == 0 || count > 1000) {
+            throw std::runtime_error("Selecione de 1 a 1000 faces.");
+        }
+        const auto& all = faces_of(body);
+        BRepAlgoAPI_Defeaturing operation;
+        operation.SetShape(body->value);
+        for (std::size_t i = 0; i < count; ++i) {
+            if (faces[i] >= static_cast<std::size_t>(all.Extent())) {
+                throw std::runtime_error("Face inexistente na remoção.");
+            }
+            operation.AddFaceToRemove(all(static_cast<int>(faces[i]) + 1));
+        }
+        operation.SetToFillHistory(true);
+        operation.Build();
+        if (!operation.IsDone() || operation.HasErrors()) {
+            throw std::runtime_error("Não foi possível remover as faces escolhidas.");
+        }
+        if (operation.HasWarnings()) {
+            throw std::runtime_error(
+                "Parte das faces não pôde ser removida: as vizinhas não se encontram sem elas.");
+        }
+        shape.value = operation.Shape();
+        shape.origins = history(operation, shape.value, {&body->value});
     });
 }
 

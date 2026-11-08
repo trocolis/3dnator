@@ -396,6 +396,10 @@ pub enum Operation {
     },
     /// Une áreas vizinhas no mesmo plano, retirando a linha divisória. Volume igual.
     MergeFaces { base: BodyId, faces: Vec<FaceRef> },
+    /// Remove faces escolhidas (arredondamentos, chanfros, furos) e estende as vizinhas até
+    /// fecharem o sólido, como a exclusão de faces de outros CADs. Útil em STEP importado,
+    /// onde o arredondamento não está no histórico.
+    RemoveFaces { base: BodyId, faces: Vec<FaceRef> },
     /// Ressalto ou rebaixo ao longo do contorno de uma face plana, para fechar tampas.
     Lip {
         base: BodyId,
@@ -718,6 +722,7 @@ impl Operation {
             | Self::ComponentCut { base, .. }
             | Self::Lip { base, .. }
             | Self::MergeFaces { base, .. }
+            | Self::RemoveFaces { base, .. }
             | Self::ScrewBoss { base, .. }
             | Self::SnapFit { base, .. } => vec![*base],
             _ => Vec::new(),
@@ -781,7 +786,9 @@ impl Operation {
                 limit(cutting_plane.as_mut()).into_iter().collect()
             }
             Self::Label { base, face, .. } | Self::Lip { base, face, .. } => vec![(*base, face)],
-            Self::MergeFaces { base, faces } => faces.iter_mut().map(|f| (*base, f)).collect(),
+            Self::MergeFaces { base, faces } | Self::RemoveFaces { base, faces } => {
+                faces.iter_mut().map(|f| (*base, f)).collect()
+            }
             Self::Shell {
                 base,
                 face,
@@ -990,7 +997,7 @@ impl Feature {
                     *name = remap_face_name(name, bodies);
                 }
             }
-            Operation::MergeFaces { base, faces } => {
+            Operation::MergeFaces { base, faces } | Operation::RemoveFaces { base, faces } => {
                 body(base)?;
                 for face in faces {
                     if let FaceRef::Named(name) = face {
@@ -1517,6 +1524,18 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                 if faces.len() < 2 || faces.len() > 1000 {
                     return Err(DocumentError(
                         "União de áreas exige pelo menos duas faces.".into(),
+                    ));
+                }
+                for face in faces {
+                    if let FaceRef::Named(name) = face {
+                        validate_face_name(name)?;
+                    }
+                }
+            }
+            Operation::RemoveFaces { faces, .. } => {
+                if faces.is_empty() || faces.len() > 1000 {
+                    return Err(DocumentError(
+                        "Remover faces exige de 1 a 1000 faces.".into(),
                     ));
                 }
                 for face in faces {
