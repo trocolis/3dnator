@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.45.1 — 08/11/2026
+
+- **Renomear** uma peça na árvore leva junto o nome da definição (exibido na edição e usado nas cópias) quando só essa instância a usa ou quando ela ainda tem o nome automático, numa só ação de desfazer. Cópias compartilhadas (nova instância, copiar componente) herdam o nome da instância copiada em vez do nome da definição.
+- Na construção, as referências da própria peça (pasta Referências dela) podem ser selecionadas e movidas (Mover, alinhamentos e ponto a ponto), sempre inteiras, em vez do aviso "O corpo selecionado pertence a outra peça". Um clique dentro de um STEP de referência escolhe a referência de nível mais alto. Referências do projeto ou de outras peças continuam fora, com aviso próprio que indica a Montagem ou o arrastar para as Referências da peça.
+- **Converter para objeto de referência** não falha mais em silêncio: o item fica clicável e, com cálculo em andamento, rascunho aberto, falha pendente ou ferramenta não confirmada, o aviso diz o que falta. Ao entrar na edição de uma peça grande, o cálculo inicial bloqueava a conversão sem explicação.
+
 ## 0.45.0 — 08/11/2026
 
 - Cada peça tem a própria pasta **Referências** na árvore, separada de Sub-peças, para os modelos de referência posicionados dentro dela. Referências (e peças ou subpeças a converter) podem ser arrastadas entre as pastas Referências do projeto e das peças, ou soltas sobre o nome de uma peça, mudando de dono na mesma posição no mundo e numa só ação de desfazer. Formato 51: `folders.references` grava a visibilidade da pasta de cada peça; projetos anteriores abrem com ela visível.

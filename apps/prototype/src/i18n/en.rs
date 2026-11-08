@@ -982,6 +982,12 @@ pub fn text(key: Text) -> &'static str {
         Text::PointBodyPrompt => "Click a body to map its points.",
         Text::PointBody => "Points of",
         Text::PointBodyChange => "Change body",
+        Text::PickForeignReference => {
+            "This reference belongs to the project or to another part. Move it in Assembly or drag it, in the tree, into this part's References."
+        }
+        Text::ConvertWaitWork => "Wait for the running calculation to finish and convert again.",
+        Text::ConvertFinishSketch => "Finish the open sketch before converting.",
+        Text::ConvertResolveFailure => "Resolve the pending history failure before converting.",
         Text::VirtualCenter => "Circular center (virtual)",
         Text::VirtualArcCenter => "Arc center (virtual)",
         Text::EdgeMidpoint => "Edge midpoint",

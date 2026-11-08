@@ -891,6 +891,10 @@ pub enum Text {
     PointBodyPrompt,
     PointBody,
     PointBodyChange,
+    ConvertWaitWork,
+    PickForeignReference,
+    ConvertFinishSketch,
+    ConvertResolveFailure,
     ReferenceNotEditable,
     MergeCoplanarAreas,
     ImportMenu,
@@ -1935,6 +1939,12 @@ fn pt(key: Text) -> &'static str {
         Text::PointBodyPrompt => "Clique num corpo para mapear os pontos dele.",
         Text::PointBody => "Pontos de",
         Text::PointBodyChange => "Trocar corpo",
+        Text::PickForeignReference => {
+            "Esta referência pertence ao projeto ou a outra peça. Mova-a na Montagem ou arraste-a, na árvore, para as Referências desta peça."
+        }
+        Text::ConvertWaitWork => "Aguarde o cálculo em andamento terminar e converta de novo.",
+        Text::ConvertFinishSketch => "Conclua o rascunho aberto antes de converter.",
+        Text::ConvertResolveFailure => "Resolva a falha pendente do histórico antes de converter.",
         Text::VirtualCenter => "Centro circular (virtual)",
         Text::VirtualArcCenter => "Centro do arco (virtual)",
         Text::EdgeMidpoint => "Ponto médio da aresta",

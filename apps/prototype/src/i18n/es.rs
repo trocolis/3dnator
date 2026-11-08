@@ -1014,6 +1014,14 @@ pub fn text(key: Text) -> &'static str {
         Text::PointBodyPrompt => "Haga clic en un cuerpo para mapear sus puntos.",
         Text::PointBody => "Puntos de",
         Text::PointBodyChange => "Cambiar cuerpo",
+        Text::PickForeignReference => {
+            "Esta referencia pertenece al proyecto o a otra pieza. Muévala en Ensamblaje o arrástrela, en el árbol, a las Referencias de esta pieza."
+        }
+        Text::ConvertWaitWork => "Espere a que termine el cálculo en curso y convierta de nuevo.",
+        Text::ConvertFinishSketch => "Termine el boceto abierto antes de convertir.",
+        Text::ConvertResolveFailure => {
+            "Resuelva el fallo pendiente del historial antes de convertir."
+        }
         Text::VirtualCenter => "Centro circular (virtual)",
         Text::VirtualArcCenter => "Centro del arco (virtual)",
         Text::EdgeMidpoint => "Punto medio de la arista",

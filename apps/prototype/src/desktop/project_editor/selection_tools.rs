@@ -39,6 +39,49 @@ pub(super) struct SelectionGestures {
     pub press: Option<Press>,
 }
 
+/// Referência de nível mais alto na ocorrência clicada. Na construção, um modelo de
+/// referência se move inteiro: nada dentro dele é editável.
+pub(super) fn reference_instance(document: &Document, pick: &Pick) -> Option<InstanceId> {
+    document
+        .occurrence_at(pick)
+        .ok()?
+        .path
+        .into_iter()
+        .find(|id| {
+            document
+                .instance(*id)
+                .and_then(|i| document.part(i.part))
+                .is_some_and(|p| p.reference)
+        })
+}
+
+/// Referência que pertence à peça em edição: filha direta dela (pasta Referências).
+pub(super) fn owned_reference(document: &Document, active: Option<PartId>, id: InstanceId) -> bool {
+    document.instance(id).is_some_and(|i| {
+        active.is_some() && i.parent == active && document.part(i.part).is_some_and(|p| p.reference)
+    })
+}
+
+/// Na construção, movem-se os corpos da peça ativa e as referências dela; referências do
+/// projeto ou de outras peças só na Montagem. O erro diz por que o clique foi recusado.
+pub(super) fn movable_in_construction(
+    document: &Document,
+    active: Option<PartId>,
+    pick: &Pick,
+) -> Result<(), T> {
+    let Some(part) = active else {
+        return Ok(());
+    };
+    if part == pick.part {
+        return Ok(());
+    }
+    match reference_instance(document, pick) {
+        Some(id) if owned_reference(document, active, id) => Ok(()),
+        Some(_) => Err(T::PickForeignReference),
+        None => Err(T::PickOtherPart),
+    }
+}
+
 impl Tab {
     /// Na montagem, cliques no modelo escolhem o conjunto da raiz. Componentes
     /// internos continuam acessíveis explicitamente pela árvore.
@@ -50,7 +93,9 @@ impl Tab {
             });
         }
         if self.active_part.is_some() {
-            return Some(Selection::Instance(pick.instance));
+            return Some(Selection::Instance(
+                reference_instance(self.session.document(), pick).unwrap_or(pick.instance),
+            ));
         }
         self.session
             .document()
@@ -497,5 +542,109 @@ impl Editor {
         } else if outside || context.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.gestures.other = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod reference_pick_tests {
+    use super::*;
+    type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn pick(document: &Document, instance: InstanceId) -> Result<Pick> {
+        let occurrence = document
+            .occurrences()?
+            .into_iter()
+            .find(|o| o.instance == instance)
+            .ok_or("Ocorrência ausente")?;
+        let record = document.instance(instance).ok_or("Instância ausente")?;
+        let body = document
+            .part(record.part)
+            .ok_or("Peça ausente")?
+            .bodies
+            .first()
+            .ok_or("Corpo ausente")?
+            .id;
+        Ok(Pick {
+            instance,
+            part: record.part,
+            body,
+            triangle: 0,
+            point: [0.; 3],
+            normal: [0., 0., 1.],
+            vertices: [[0.; 3]; 3],
+            placement: occurrence.placement,
+        })
+    }
+
+    fn add_other(document: &mut Document) -> Result<(PartId, InstanceId)> {
+        let (part, _) = document.add_mesh(
+            None,
+            "Outra".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let instance = document
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância ausente")?
+            .id;
+        Ok((part, instance))
+    }
+
+    #[test]
+    fn clicks_inside_a_reference_assembly_select_its_top_reference() -> Result<()> {
+        let mut document = Document::new("Construção")?;
+        let mut add = |name: &str| -> Result<(PartId, InstanceId)> {
+            let (part, _) = document.add_mesh(
+                None,
+                name.into(),
+                Arc::new(MeshAsset::new(reference_bracket()?)),
+            )?;
+            let instance = document
+                .instances()
+                .iter()
+                .find(|i| i.part == part)
+                .ok_or("Instância ausente")?
+                .id;
+            Ok((part, instance))
+        };
+        let (_, own) = add("Peça")?;
+        let (motor, motor_instance) = add("Motor")?;
+        let (shaft, shaft_instance) = add("Eixo")?;
+        document.reparent(shaft_instance, Some(motor))?;
+        document.part_mut(motor)?.reference = true;
+        document.part_mut(shaft)?.reference = true;
+        // O eixo dentro do motor importado: move-se o motor inteiro.
+        assert_eq!(
+            reference_instance(&document, &pick(&document, shaft_instance)?),
+            Some(motor_instance)
+        );
+        assert_eq!(
+            reference_instance(&document, &pick(&document, motor_instance)?),
+            Some(motor_instance)
+        );
+        assert_eq!(reference_instance(&document, &pick(&document, own)?), None);
+        // Em edição da "Peça": o motor do projeto não pertence a ela.
+        let own_part = document.instance(own).ok_or("Instância ausente")?.part;
+        let active = Some(own_part);
+        assert!(matches!(
+            movable_in_construction(&document, active, &pick(&document, shaft_instance)?),
+            Err(T::PickForeignReference)
+        ));
+        assert!(movable_in_construction(&document, active, &pick(&document, own)?).is_ok());
+        // Levado às Referências da peça, o motor (e o eixo dentro dele) passa a se mover.
+        document.reparent(motor_instance, Some(own_part))?;
+        assert!(owned_reference(&document, active, motor_instance));
+        assert!(!owned_reference(&document, active, shaft_instance));
+        assert!(
+            movable_in_construction(&document, active, &pick(&document, shaft_instance)?).is_ok()
+        );
+        // Outra peça comum continua recusada como corpo de outra peça.
+        let (_, other) = add_other(&mut document)?;
+        assert!(matches!(
+            movable_in_construction(&document, active, &pick(&document, other)?),
+            Err(T::PickOtherPart)
+        ));
+        Ok(())
     }
 }

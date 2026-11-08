@@ -472,8 +472,8 @@ impl Editor {
                 source,
                 destination,
             } => {
-                if !self.can_convert_reference() {
-                    self.status.warning(text(T::ConvertToReferenceHint));
+                if let Some(reason) = self.convert_reference_blocker() {
+                    self.status.warning(text(reason));
                     return;
                 }
                 let Some(&instance) = source.last() else {

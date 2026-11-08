@@ -1071,10 +1071,25 @@ impl Editor {
             .iter()
             .copied()
             .filter(|s| match *s {
-                Selection::Instance(_) => active.is_none(),
+                // Na construção, as referências da própria peça também se movem, inteiras.
+                Selection::Instance(id) => active.is_none() || self.owned_reference(id),
                 Selection::Body { part, .. } => active == Some(part),
             })
             .collect()
+    }
+    fn owned_reference(&self, id: InstanceId) -> bool {
+        super::selection_tools::owned_reference(
+            self.current().session.document(),
+            self.current().active_part,
+            id,
+        )
+    }
+    fn movable_in_construction(&self, pick: &Pick) -> Result<(), T> {
+        super::selection_tools::movable_in_construction(
+            self.current().session.document(),
+            self.current().active_part,
+            pick,
+        )
     }
     pub(super) fn selected_instance(&self) -> Option<InstanceId> {
         self.current().selected.iter().rev().find_map(|s| match s {
@@ -1422,13 +1437,10 @@ impl Editor {
                     )
                     .ok()
                     .and_then(|picks| section::first_visible(picks, self.current().section));
-                let active = self.current().active_part;
                 if !to_field
-                    && hit
-                        .as_ref()
-                        .is_some_and(|p| active.is_some_and(|a| a != p.part))
+                    && let Some(Err(reason)) = hit.as_ref().map(|p| self.movable_in_construction(p))
                 {
-                    self.status.warning(text(T::PickOtherPart));
+                    self.status.warning(text(reason));
                     return true;
                 }
                 let focus = hit.and_then(|pick| PointFocus::from_pick(&document, &pick));
@@ -1474,11 +1486,11 @@ impl Editor {
         let Some(mut pick) = model else {
             return true;
         };
-        let active = self.current().active_part;
         let Some(item) = self.current().selection_for_pick(&pick) else {
             return true;
         };
         let document = self.current().session.document().clone();
+        let movable = self.movable_in_construction(&pick);
         let mode = self.pick_mode;
         let additive = response
             .ctx
@@ -1489,9 +1501,9 @@ impl Editor {
                 self.current_mut().picked = Some(pick);
             }
             Some(Panel::Move(d)) => {
-                // Alterna o elemento; na construção, só corpos da peça ativa se movem.
-                if active.is_some_and(|p| p != pick.part) {
-                    self.status.warning(text(T::PickOtherPart));
+                // Alterna o elemento; na construção, corpos e referências da peça ativa.
+                if let Err(reason) = movable {
+                    self.status.warning(text(reason));
                 } else if let Some(i) = d.targets.iter().position(|t| *t == item) {
                     d.targets.remove(i);
                 } else {
@@ -1502,8 +1514,8 @@ impl Editor {
                 navigation::snap_pick(&mut pick, d.kind);
                 // A origem é sempre geometria do elemento que se move.
                 if d.field == Some(AlignField::From) {
-                    if active.is_some_and(|p| p != pick.part) {
-                        self.status.warning(text(T::PickOtherPart));
+                    if let Err(reason) = movable {
+                        self.status.warning(text(reason));
                     } else {
                         if !d
                             .targets

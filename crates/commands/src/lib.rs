@@ -792,6 +792,8 @@ impl Command {
                     .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
                     .clone();
                 let copy = doc.add_instance(source.part, source.parent, source.placement)?;
+                // A nova instância leva o nome dado à original, não o da definição.
+                doc.instance_mut(copy)?.name = source.name;
                 doc.instance_mut(copy)?.color = source.color;
                 doc.place_beside(&[copy])?;
             }
@@ -811,6 +813,10 @@ impl Command {
                     source.part
                 };
                 let copy = doc.add_instance(part, source.parent, placement)?;
+                // Cópia compartilhada: a instância leva o nome dado à original.
+                if !independent {
+                    doc.instance_mut(copy)?.name = source.name;
+                }
                 doc.instance_mut(copy)?.color = source.color;
             }
             Self::ReparentInstance { id, parent } => doc.reparent(id, parent)?,

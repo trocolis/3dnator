@@ -208,6 +208,13 @@ Referências dela. Referências não recebem elementos, e uma peça não entra e
 mesma definição continuam onde estão, também como referência. O menu da referência oferece
 **Exportar STEP…**, com os corpos e subpeças dela.
 
+**Renomear**, no menu de uma peça, muda o nome da instância e também o da definição (o que
+aparece na edição e nas cópias) quando só essa instância usa a definição ou quando ela ainda
+tem o nome automático ("Peça 34"); definições compartilhadas e já nomeadas mudam por
+**Renomear definição da peça**. Cópias compartilhadas herdam o nome da instância copiada.
+**Converter para objeto de referência** fica sempre clicável: com um cálculo em andamento,
+rascunho aberto, falha pendente ou ferramenta não confirmada, o clique explica o que falta.
+
 ## Barra de navegação
 
 Centrada na base da área de edição, a barra tem seis botões, separados em três grupos:
@@ -224,7 +231,7 @@ Arrastar e Rotacionar suspendem a ferramenta em uso, sem cancelá-la: dá para r
 - **Pré-seleção:** o elemento sob o cursor é realçado em azul claro antes do clique, com o nome numa etiqueta. Na peça em construção, a pré-seleção mostra a face, a aresta ou o vértice; fora dela, a unidade é o componente inteiro. Com um painel aberto, o campo ativo decide (arestas, faces ou corpos), e outras peças não são realçadas. A pré-seleção é desligada acima de 400 mil triângulos na cena.
 - **Seleção:** corpos e componentes selecionados ficam tingidos de azul, com arestas vivas azuis, desenhados pela GPU com profundidade. Faces e arestas escolhidas e as referências do painel aparecem realçadas sobre o modelo.
 - **Ctrl+clique** acrescenta ou retira um elemento, na área 3D e na árvore. Clicar no vazio limpa a seleção.
-- **Janela:** arraste com o botão esquerdo a partir de um ponto livre. Da esquerda para a direita (contorno azul), entram só os elementos inteiramente contidos; da direita para a esquerda (tracejado verde), os tocados. Com Ctrl, a janela acrescenta à seleção. Na montagem, a unidade é a instância; na construção, o corpo da peça ativa.
+- **Janela:** arraste com o botão esquerdo a partir de um ponto livre. Da esquerda para a direita (contorno azul), entram só os elementos inteiramente contidos; da direita para a esquerda (tracejado verde), os tocados. Com Ctrl, a janela acrescenta à seleção. Na montagem, a unidade é a instância; na construção, o corpo da peça ativa. Na construção, as referências da própria peça (pasta Referências dela) também podem ser selecionadas e movidas (Mover, alinhamentos e ponto a ponto), sempre inteiras: um clique dentro de um STEP de referência escolhe a referência de nível mais alto. Referências do projeto ou de outras peças são recusadas com aviso; movem-se na Montagem ou, arrastadas na árvore, passam às Referências da peça.
 - **Sobrepostos:** segure o botão esquerdo parado sobre o modelo para listar todos os elementos sob o cursor, do mais próximo ao mais distante. Percorrer a lista realça cada um; o clique seleciona (com Ctrl, alterna). Esc ou um clique fora fecha a lista.
 
 No movimento **Vértice a vértice**, cada campo (origem e destino) começa pela escolha de um **corpo**: o primeiro clique o escolhe, realçado ao passar o mouse (em cenas acima de 400 mil triângulos, sem a pré-seleção), e só os apoios dele são calculados, desenhados como marcas discretas e capturados. O painel mostra o corpo mapeado e **Trocar corpo**; clicar noutro corpo, longe de um ponto, troca o mapeamento, e clicar no vazio o desfaz. Uma seleção feita antes de abrir a ferramenta vale como o corpo da origem. Pontos de rascunhos e origens valem como destino sem escolher corpo. A oclusão confere o próprio corpo e, em cenas menores, as demais peças, para poucos candidatos.

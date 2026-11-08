@@ -48,7 +48,6 @@ pub(super) enum MenuAction {
 /// Estado da aba usado pelos menus.
 pub(super) struct MenuContext {
     pub active: Option<PartId>,
-    pub can_convert_reference: bool,
     pub isolated: bool,
     pub transparent: HashSet<InstanceId>,
     pub locked: HashSet<InstanceId>,
@@ -82,9 +81,9 @@ pub(super) fn instance_menu(
     } else if item(ui, Icon::Cube, T::EditPart) {
         action = Some(MenuAction::Activate(instance.part));
     }
-    let convert = ui.add_enabled_ui(context.can_convert_reference, |ui| {
-        item(ui, Icon::Import, T::ConvertToReference)
-    });
+    // Sempre clicável: com uma ferramenta aberta ou um cálculo em andamento, o clique
+    // explica o que falta em vez de não fazer nada.
+    let convert = ui.scope(|ui| item(ui, Icon::Import, T::ConvertToReference));
     convert
         .response
         .on_hover_text(text(T::ConvertToReferenceHint));
@@ -325,17 +324,24 @@ pub(super) fn group_menu(
 }
 
 impl Editor {
-    pub(super) fn can_convert_reference(&self) -> bool {
-        !self.busy()
-            && self.current().sketch_edit.is_none()
-            && self.selection_active()
-            && self.pending_failure.is_none()
+    /// Motivo que impede converter em referência agora, para avisar em vez de ignorar.
+    pub(super) fn convert_reference_blocker(&self) -> Option<T> {
+        if self.busy() {
+            Some(T::ConvertWaitWork)
+        } else if self.current().sketch_edit.is_some() {
+            Some(T::ConvertFinishSketch)
+        } else if self.pending_failure.is_some() {
+            Some(T::ConvertResolveFailure)
+        } else if !self.selection_active() {
+            Some(T::ConvertToReferenceHint)
+        } else {
+            None
+        }
     }
     pub(super) fn menu_context(&self) -> MenuContext {
         let tab = self.current();
         MenuContext {
             active: tab.active_part,
-            can_convert_reference: self.can_convert_reference(),
             isolated: tab.view.isolated.is_some(),
             transparent: tab.view.transparent.clone(),
             locked: tab.view.locked.clone(),
@@ -369,7 +375,8 @@ impl Editor {
                 self.status.warning(text(T::ReferenceNotEditable));
             }
             MenuAction::MakeReference(instance) => {
-                if !self.can_convert_reference() {
+                if let Some(reason) = self.convert_reference_blocker() {
+                    self.status.warning(text(reason));
                     return;
                 }
                 let Some(part) = self
@@ -511,8 +518,9 @@ impl Editor {
         }
         if apply && let Some(draft) = self.rename.take() {
             let name = draft.name.trim().to_owned();
+            let document = self.current().session.document();
             let command = match draft.target {
-                RenameTarget::Instance(id) => Command::RenameInstance { id, name },
+                RenameTarget::Instance(id) => rename_instance(document, id, name),
                 RenameTarget::Part(id) => Command::RenamePart { id, name },
                 RenameTarget::Body(id) => Command::RenameBody { id, name },
                 RenameTarget::Group(id) => Command::RenameGroup { id, name },
@@ -522,6 +530,38 @@ impl Editor {
         } else if cancel {
             self.rename = None;
         }
+    }
+}
+
+/// Renomear uma peça na árvore muda o nome da instância e também o da definição — que
+/// aparece na edição e nas cópias — quando só essa instância usa a definição ou quando ela
+/// ainda tem o nome automático ("Peça 34"). Definições compartilhadas e já nomeadas mantêm
+/// o nome; para elas há "Renomear definição da peça".
+pub(super) fn rename_instance(document: &Document, id: InstanceId, name: String) -> Command {
+    let rename = Command::RenameInstance {
+        id,
+        name: name.clone(),
+    };
+    let Some(part) = document.instance(id).and_then(|i| document.part(i.part)) else {
+        return rename;
+    };
+    let shared = document
+        .instances()
+        .iter()
+        .filter(|i| i.part == part.id)
+        .count()
+        > 1;
+    let automatic = part.name.rsplit_once(' ').is_some_and(|(prefix, number)| {
+        ["Peça", "Part", "Pieza"].contains(&prefix)
+            && !number.is_empty()
+            && number.chars().all(|c| c.is_ascii_digit())
+    });
+    if (shared && !automatic) || part.name == name {
+        return rename;
+    }
+    Command::Batch {
+        label: "Renomear peça",
+        commands: vec![rename, Command::RenamePart { id: part.id, name }],
     }
 }
 
@@ -615,6 +655,68 @@ pub(super) fn move_to_references(
             commands,
         }),
     })
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+    type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn part_name(session: &Session, part: PartId) -> Result<String> {
+        Ok(session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?
+            .name
+            .clone())
+    }
+
+    #[test]
+    fn renaming_a_part_in_the_tree_also_renames_its_definition_when_appropriate() -> Result<()> {
+        let mut document = Document::new("Nomes")?;
+        let (part, _) = document.add_mesh(
+            None,
+            "Corpo".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let first = document
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância ausente")?
+            .id;
+        document.part_mut(part)?.name = "Peça 34".into();
+        let mut session = Session::new(document)?;
+        // Instância única: a definição acompanha, numa só ação de desfazer.
+        session.execute(rename_instance(session.document(), first, "Barra".into()))?;
+        assert_eq!(part_name(&session, part)?, "Barra");
+        assert!(session.undo());
+        assert_eq!(part_name(&session, part)?, "Peça 34");
+        // Compartilhada com nome automático: também acompanha.
+        session.execute(Command::DuplicateInstance { id: first })?;
+        session.execute(rename_instance(session.document(), first, "Barra 1".into()))?;
+        assert_eq!(part_name(&session, part)?, "Barra 1");
+        // Compartilhada e já nomeada: só a instância muda.
+        session.execute(rename_instance(session.document(), first, "Barra X".into()))?;
+        assert_eq!(part_name(&session, part)?, "Barra 1");
+        let names = session
+            .document()
+            .instances()
+            .iter()
+            .filter(|i| i.part == part)
+            .map(|i| i.name.clone())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"Barra X".to_owned()));
+        // A cópia compartilhada herda o nome da instância copiada.
+        session.execute(Command::DuplicateInstance { id: first })?;
+        let copy = session
+            .document()
+            .instances()
+            .last()
+            .ok_or("Cópia ausente")?;
+        assert_eq!(copy.name, "Barra X");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
