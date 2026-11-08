@@ -525,17 +525,9 @@ impl Editor {
     }
 }
 
-/// Comando para levar uma peça ou subpeça à pasta Referências, arrastando-a na árvore.
-/// `path` é o caminho da ocorrência (instâncias da raiz até ela): uma subpeça sai do pai
-/// e vai à raiz com a posição que tinha no mundo, e a definição passa a ser referência.
-/// Devolve `None` quando já é referência.
-pub(super) fn move_to_references(
-    document: &Document,
-    path: &[InstanceId],
-) -> Result<Option<Command>, DocumentError> {
-    let (&id, ancestors) = path
-        .split_last()
-        .ok_or_else(|| DocumentError("Caminho da peça vazio.".into()))?;
+/// Posição no mundo da ocorrência dada pelo caminho (instâncias da raiz até ela),
+/// conferindo que cada passo é filho do anterior.
+fn path_world(document: &Document, path: &[InstanceId]) -> Result<Placement, DocumentError> {
     let mut world = Placement::default();
     let mut parent = None;
     for &step in path {
@@ -550,33 +542,79 @@ pub(super) fn move_to_references(
             .map_err(|e| DocumentError(e.to_string()))?;
         parent = Some(instance.part);
     }
-    let part = document
+    Ok(world)
+}
+
+/// Comando para levar uma peça ou subpeça às Referências, arrastando-a na árvore.
+/// `source` é o caminho da ocorrência arrastada; `destination`, o caminho da peça que a
+/// recebe (`None`: Referências do projeto). A instância muda de pai mantendo a posição no
+/// mundo, medida nas ocorrências arrastada e de destino, e a definição passa a ser
+/// referência. Devolve `None` quando nada muda.
+pub(super) fn move_to_references(
+    document: &Document,
+    source: &[InstanceId],
+    destination: Option<&[InstanceId]>,
+) -> Result<Option<Command>, DocumentError> {
+    let &id = source
+        .last()
+        .ok_or_else(|| DocumentError("Caminho da peça vazio.".into()))?;
+    let world = path_world(document, source)?;
+    let instance = document
         .instance(id)
-        .map(|i| i.part)
         .ok_or_else(|| DocumentError("Instância inexistente.".into()))?;
-    if document.part(part).is_some_and(|p| p.reference) {
-        return Ok(None);
-    }
+    let part = instance.part;
+    let (parent, parent_world) = match destination {
+        None => (None, Placement::default()),
+        Some(path) => {
+            let &last = path
+                .last()
+                .ok_or_else(|| DocumentError("Peça de destino ausente.".into()))?;
+            if path.contains(&id) {
+                return Err(DocumentError(
+                    "Uma peça não pode ir para dentro de si mesma.".into(),
+                ));
+            }
+            let target = document
+                .instance(last)
+                .ok_or_else(|| DocumentError("Peça de destino inexistente.".into()))?
+                .part;
+            if target == part {
+                return Err(DocumentError(
+                    "Uma peça não pode ir para dentro de si mesma.".into(),
+                ));
+            }
+            if document.part(target).is_some_and(|p| p.reference) {
+                return Err(DocumentError(
+                    "Referências não recebem outros elementos.".into(),
+                ));
+            }
+            (Some(target), path_world(document, path)?)
+        }
+    };
     let mut commands = Vec::new();
-    if !ancestors.is_empty() {
-        commands.push(Command::ReparentInstance { id, parent: None });
-        commands.push(Command::MoveInstance {
-            id,
-            placement: world,
+    // Mesmo pai: a instância já pertence à definição dele, em todas as ocorrências.
+    if instance.parent != parent {
+        let placement = parent_world
+            .inverse()
+            .and_then(|inverse| inverse.compose(world))
+            .map_err(|e| DocumentError(e.to_string()))?;
+        commands.push(Command::ReparentInstance { id, parent });
+        commands.push(Command::MoveInstance { id, placement });
+    }
+    if !document.part(part).is_some_and(|p| p.reference) {
+        commands.push(Command::SetPartReference {
+            part,
+            reference: true,
         });
     }
-    commands.push(Command::SetPartReference {
-        part,
-        reference: true,
-    });
-    Ok(Some(if commands.len() == 1 {
-        commands.remove(0)
-    } else {
-        Command::Batch {
+    Ok(match commands.len() {
+        0 => None,
+        1 => commands.pop(),
+        _ => Some(Command::Batch {
             label: "Mover para Referências",
             commands,
-        }
-    }))
+        }),
+    })
 }
 
 #[cfg(test)]
@@ -584,6 +622,106 @@ mod reference_tests {
     use super::*;
     use nator_geometry::{norm, sub};
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+    #[test]
+    fn references_move_between_parts_keeping_their_world_position() -> Result<()> {
+        let mut document = Document::new("Montagem")?;
+        let mut add = |name: &str| -> Result<(PartId, InstanceId)> {
+            let (part, _) = document.add_mesh(
+                None,
+                name.into(),
+                Arc::new(MeshAsset::new(reference_bracket()?)),
+            )?;
+            let instance = document
+                .instances()
+                .iter()
+                .find(|i| i.part == part)
+                .ok_or("Instância ausente")?
+                .id;
+            Ok((part, instance))
+        };
+        let (a, a_instance) = add("A")?;
+        let (b, b_instance) = add("B")?;
+        let (reference, r_instance) = add("Motor")?;
+        document.instance_mut(a_instance)?.placement =
+            Placement::new([50., 0., 0.], [0., 0., 0.7])?;
+        document.instance_mut(b_instance)?.placement =
+            Placement::new([0., -40., 10.], [0.3, 0., 0.])?;
+        document.instance_mut(r_instance)?.placement = Placement::new([5., 6., 7.], [0., 0.2, 0.])?;
+        let world = document
+            .instance(r_instance)
+            .ok_or("Referência ausente")?
+            .placement;
+        let mut session = Session::new(document)?;
+        // Da raiz para dentro de A: vira referência e mantém a posição no mundo.
+        let command = move_to_references(session.document(), &[r_instance], Some(&[a_instance]))?
+            .ok_or("Comando ausente")?;
+        session.execute(command)?;
+        let at = |document: &Document, path: &[InstanceId]| path_world(document, path);
+        let document = session.document();
+        assert_eq!(
+            document
+                .instance(r_instance)
+                .ok_or("Referência ausente")?
+                .parent,
+            Some(a)
+        );
+        assert!(document.part(reference).ok_or("Peça ausente")?.reference);
+        let moved = at(document, &[a_instance, r_instance])?;
+        for point in [[0., 0., 0.], [10., -3., 7.]] {
+            assert!(
+                nator_geometry::norm(nator_geometry::sub(moved.apply(point), world.apply(point)))
+                    < 1e-9
+            );
+        }
+        // De A para B, pela ocorrência arrastada.
+        let command = move_to_references(
+            session.document(),
+            &[a_instance, r_instance],
+            Some(&[b_instance]),
+        )?
+        .ok_or("Comando ausente")?;
+        session.execute(command)?;
+        let document = session.document();
+        assert_eq!(
+            document
+                .instance(r_instance)
+                .ok_or("Referência ausente")?
+                .parent,
+            Some(b)
+        );
+        let moved = at(document, &[b_instance, r_instance])?;
+        assert!(
+            nator_geometry::norm(nator_geometry::sub(
+                moved.apply([1., 2., 3.]),
+                world.apply([1., 2., 3.])
+            )) < 1e-9
+        );
+        // Soltar no mesmo pai não faz nada; referência não recebe; peça não entra em si.
+        assert!(
+            move_to_references(document, &[b_instance, r_instance], Some(&[b_instance]))?.is_none()
+        );
+        assert!(
+            move_to_references(document, &[a_instance], Some(&[b_instance, r_instance])).is_err()
+        );
+        assert!(move_to_references(document, &[b_instance], Some(&[b_instance])).is_err());
+        // De volta à raiz do projeto.
+        let command = move_to_references(document, &[b_instance, r_instance], None)?
+            .ok_or("Comando ausente")?;
+        session.execute(command)?;
+        let back = session
+            .document()
+            .instance(r_instance)
+            .ok_or("Referência ausente")?;
+        assert!(back.parent.is_none());
+        assert!(
+            nator_geometry::norm(nator_geometry::sub(
+                back.placement.apply([1., 2., 3.]),
+                world.apply([1., 2., 3.])
+            )) < 1e-9
+        );
+        Ok(())
+    }
 
     #[test]
     fn subpart_moves_to_references_keeping_its_world_position() -> Result<()> {
@@ -617,7 +755,8 @@ mod reference_tests {
             .find(|o| o.instance == child)
             .ok_or("Ocorrência ausente")?
             .placement;
-        let command = move_to_references(&document, &[root, child])?.ok_or("Comando ausente")?;
+        let command =
+            move_to_references(&document, &[root, child], None)?.ok_or("Comando ausente")?;
         let mut session = Session::new(document)?;
         session.execute(command)?;
         let document = session.document();
@@ -629,8 +768,8 @@ mod reference_tests {
             assert!(norm(sub(moved.placement.apply(point), before.apply(point))) < 1e-9);
         }
         // Já é referência: nada a fazer. Caminho que não corresponde à árvore falha.
-        assert!(move_to_references(document, &[child])?.is_none());
-        assert!(move_to_references(document, &[root, child]).is_err());
+        assert!(move_to_references(document, &[child], None)?.is_none());
+        assert!(move_to_references(document, &[root, child], None).is_err());
         assert!(session.undo());
         assert_eq!(
             session
@@ -674,8 +813,8 @@ mod reference_step_tests {
             .instance(occurrence.instance)
             .ok_or("Instância ausente")?
             .part;
-        let command =
-            move_to_references(session.document(), &occurrence.path)?.ok_or("Comando ausente")?;
+        let command = move_to_references(session.document(), &occurrence.path, None)?
+            .ok_or("Comando ausente")?;
         session.execute(command)?;
         let document = session.document();
         let moved = document

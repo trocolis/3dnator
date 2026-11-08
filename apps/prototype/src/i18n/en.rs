@@ -951,7 +951,7 @@ pub fn text(key: Text) -> &'static str {
             "Applies to every instance of this part. Confirm or cancel the open tool before converting."
         }
         Text::ReferencesDropHint => {
-            "Drag a part or subpart here to turn it into a reference, keeping its position."
+            "Drag a part, subpart or reference here: it becomes a reference here, keeping its position."
         }
         Text::CreatePartFromReference => "Create part",
         Text::ReferenceNotEditable => {

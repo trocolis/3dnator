@@ -35,8 +35,12 @@ pub(super) enum Intent {
     OpenSection,
     RemoveSection,
     OpenDrawing(Box<SheetRecord>),
-    /// Peça ou subpeça solta na pasta Referências: caminho da ocorrência na árvore.
-    MoveToReferences(Vec<InstanceId>),
+    /// Peça ou subpeça solta numa pasta Referências (do projeto, `destination` vazio, ou de
+    /// uma peça) ou referência solta sobre uma peça: caminhos das ocorrências na árvore.
+    MoveToReferences {
+        source: Vec<InstanceId>,
+        destination: Option<Vec<InstanceId>>,
+    },
 }
 
 /// O que está sendo arrastado na árvore; a peça sob o cursor recebe ao soltar. A instância
@@ -55,6 +59,9 @@ pub(super) struct Tree<'a> {
     busy: bool,
     /// Painel de corte em edição (realça a análise na árvore).
     section_open: bool,
+    /// Caminho da peça cuja pasta Referências está sendo desenhada: o cabeçalho da pasta
+    /// é desenhado logo após a definição, antes dos nós internos.
+    references_owner: Option<Vec<InstanceId>>,
     pub intents: Vec<Intent>,
 }
 
@@ -203,6 +210,7 @@ impl<'a> Tree<'a> {
             menu,
             busy,
             section_open,
+            references_owner: None,
             intents: Vec::new(),
         }
     }
@@ -313,11 +321,17 @@ impl<'a> Tree<'a> {
         );
     }
 
-    /// A pasta Referências recebe peças e subpeças arrastadas, que viram referência.
+    /// As pastas Referências (do projeto e das peças) recebem peças, subpeças e referências
+    /// arrastadas, que viram referência ali, na mesma posição no mundo.
     fn references_drop(&mut self, ui: &egui::Ui, response: &egui::Response, folder: Folder) {
-        if folder != Folder::References {
-            return;
-        }
+        let destination = match folder {
+            Folder::References => None,
+            Folder::PartReferences(_) => match &self.references_owner {
+                Some(path) => Some(path.clone()),
+                None => return,
+            },
+            _ => return,
+        };
         let response = response.clone().on_hover_text(text(T::ReferencesDropHint));
         if self.busy {
             return;
@@ -336,7 +350,10 @@ impl<'a> Tree<'a> {
         if let Some(dragged) = response.dnd_release_payload::<Dragged>()
             && let Dragged::Instance(path) = &*dragged
         {
-            self.intents.push(Intent::MoveToReferences(path.clone()));
+            self.intents.push(Intent::MoveToReferences {
+                source: path.clone(),
+                destination,
+            });
         }
     }
 
@@ -418,7 +435,7 @@ impl<'a> Tree<'a> {
             imported.is_empty(),
             |tree, ui, shown| {
                 for instance in imported {
-                    tree.reference_part(ui, instance, shown);
+                    tree.reference_part(ui, instance, vec![instance.id], shown);
                 }
             },
         );
@@ -484,7 +501,13 @@ impl<'a> Tree<'a> {
 
     /// Modelo de referência: olho, nome, seleção e o menu com Criar peça. Sem pastas
     /// internas nem edição, porque nada nele pode ser alterado.
-    fn reference_part(&mut self, ui: &mut egui::Ui, instance: &'a Instance, parent_shown: bool) {
+    fn reference_part(
+        &mut self,
+        ui: &mut egui::Ui,
+        instance: &'a Instance,
+        path: Vec<InstanceId>,
+        parent_shown: bool,
+    ) {
         let shown = parent_shown && instance.visible;
         self.leaf(ui, |tree, ui| {
             if tree.eye(ui, instance.visible, true) {
@@ -501,7 +524,12 @@ impl<'a> Tree<'a> {
                 tree.tab.is_selected(Selection::Instance(instance.id)),
                 !shown,
                 text(T::ReferenceModelHint),
-            );
+            )
+            .interact(egui::Sense::drag());
+            // Arrastada até uma peça ou pasta Referências, muda de dono na mesma posição.
+            if !tree.busy {
+                response.dnd_set_drag_payload(Dragged::Instance(path));
+            }
             if response.clicked() {
                 tree.intents
                     .push(Intent::Select(Selection::Instance(instance.id)));
@@ -553,7 +581,8 @@ impl<'a> Tree<'a> {
             return;
         }
         if part.reference {
-            self.reference_part(ui, instance, parent_shown);
+            let path = path.iter().map(|&id| InstanceId(id)).collect();
+            self.reference_part(ui, instance, path, parent_shown);
             return;
         }
         let shown = parent_shown && instance.visible;
@@ -619,6 +648,19 @@ impl<'a> Tree<'a> {
                                     destination: part.id,
                                 })));
                         }
+                        Dragged::Instance(source)
+                            if source.last().is_some_and(|id| {
+                                document
+                                    .instance(*id)
+                                    .and_then(|i| document.part(i.part))
+                                    .is_some_and(|p| p.reference)
+                            }) =>
+                        {
+                            tree.intents.push(Intent::MoveToReferences {
+                                source: source.clone(),
+                                destination: Some(path.iter().map(|&id| InstanceId(id)).collect()),
+                            });
+                        }
                         Dragged::Instance(path) => {
                             if let Some(&id) = path.last()
                                 && id != instance.id
@@ -672,11 +714,12 @@ impl<'a> Tree<'a> {
                         },
                     );
                 }
-                let children = document
+                // Referências filhas têm pasta própria, separada das subpeças.
+                let (references, children): (Vec<_>, Vec<_>) = document
                     .instances()
                     .iter()
                     .filter(|i| i.parent == Some(part.id))
-                    .collect::<Vec<_>>();
+                    .partition(|i| document.part(i.part).is_some_and(|p| p.reference));
                 {
                     tree.folder(
                         ui,
@@ -694,6 +737,26 @@ impl<'a> Tree<'a> {
                             }
                         },
                     );
+                }
+                {
+                    tree.references_owner = Some(path.iter().map(|&id| InstanceId(id)).collect());
+                    tree.folder(
+                        ui,
+                        tree.id(("part-references", &path)),
+                        Folder::PartReferences(part.id),
+                        Icon::Folder,
+                        format!("{} ({})", text(T::ReferencesFolder), references.len()),
+                        shown,
+                        references.is_empty(),
+                        |tree, ui, shown| {
+                            for reference in references {
+                                let mut nested = path.clone();
+                                nested.push(reference.id.0);
+                                tree.part(ui, reference, nested, shown, depth + 1);
+                            }
+                        },
+                    );
+                    tree.references_owner = None;
                 }
                 {
                     tree.folder(

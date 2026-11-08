@@ -1903,7 +1903,7 @@ fn pt(key: Text) -> &'static str {
             "Vale para todas as instâncias desta peça. Confirme ou cancele a ferramenta aberta antes de converter."
         }
         Text::ReferencesDropHint => {
-            "Arraste uma peça ou subpeça para cá para convertê-la em referência, na mesma posição."
+            "Arraste para cá uma peça, subpeça ou referência: ela fica como referência aqui, na mesma posição."
         }
         Text::ReferenceNotEditable => {
             "Referências não podem ser editadas. Use Criar peça no menu dela, na árvore."

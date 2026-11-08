@@ -198,9 +198,13 @@ indisponível durante rascunho ou ferramenta não confirmada. Converter a peça 
 Montagem; **Criar peça**, no menu da referência, libera a edição novamente. Referências
 aninhadas também aparecem sem ferramentas internas de edição na árvore.
 
-Arrastar uma peça ou subpeça até a pasta **Referências** faz a mesma conversão: a subpeça sai
-do pai, vai à raiz na posição que tinha no mundo (a ocorrência arrastada decide, quando o pai
-aparece mais de uma vez) e vira referência, numa só ação de desfazer. Outras instâncias da
+Cada peça tem a própria pasta **Referências**, ao lado de Sub-peças, para os modelos de
+referência posicionados dentro dela; a visibilidade da pasta é gravada no projeto (formato 51).
+Arrastar uma peça, subpeça ou referência até uma pasta **Referências** (do projeto ou de uma
+peça) faz a mesma conversão: o elemento muda de dono mantendo a posição que tinha no mundo (as
+ocorrências arrastada e de destino decidem, quando o pai aparece mais de uma vez) e vira
+referência, numa só ação de desfazer. Soltar uma referência sobre o nome de uma peça a leva às
+Referências dela. Referências não recebem elementos, e uma peça não entra em si mesma. Outras instâncias da
 mesma definição continuam onde estão, também como referência. O menu da referência oferece
 **Exportar STEP…**, com os corpos e subpeças dela.
 

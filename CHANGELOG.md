@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.45.0 — 08/11/2026
+
+- Cada peça tem a própria pasta **Referências** na árvore, separada de Sub-peças, para os modelos de referência posicionados dentro dela. Referências (e peças ou subpeças a converter) podem ser arrastadas entre as pastas Referências do projeto e das peças, ou soltas sobre o nome de uma peça, mudando de dono na mesma posição no mundo e numa só ação de desfazer. Formato 51: `folders.references` grava a visibilidade da pasta de cada peça; projetos anteriores abrem com ela visível.
+
 ## 0.44.0 — 07/11/2026
 
 - Ponto a ponto mais leve, na montagem e na construção: cada campo começa pela escolha de um corpo (realçado ao passar o mouse; em cenas grandes, só pelo clique) e somente os apoios desse corpo são calculados, mostrados como marcas discretas e capturados. Raios e oclusão ficam restritos à ocorrência dele, com conferência pelas demais peças só para até três candidatos e em cenas abaixo de 400 mil triângulos. O painel mostra o corpo mapeado e **Trocar corpo**; clicar noutro corpo troca o mapeamento. Antes, cada movimento do cursor varria os apoios e os triângulos de toda a montagem, o que travava a interface em STEPs grandes. Pontos de rascunhos e origens continuam valendo como destino sem escolher corpo.

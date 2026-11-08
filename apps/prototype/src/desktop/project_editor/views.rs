@@ -468,15 +468,22 @@ impl Editor {
             Intent::EditSketch(part, id) => self.begin_sketch(part, id),
             Intent::PickWorkPlane(id) => self.choose_work_plane(id),
             Intent::EditWorkPlane(id) => self.edit_work_plane(id),
-            Intent::MoveToReferences(path) => {
+            Intent::MoveToReferences {
+                source,
+                destination,
+            } => {
                 if !self.can_convert_reference() {
                     self.status.warning(text(T::ConvertToReferenceHint));
                     return;
                 }
-                let Some(&instance) = path.last() else {
+                let Some(&instance) = source.last() else {
                     return;
                 };
-                match browser::move_to_references(self.current().session.document(), &path) {
+                match browser::move_to_references(
+                    self.current().session.document(),
+                    &source,
+                    destination.as_deref(),
+                ) {
                     Ok(Some(command)) => {
                         let tab = self.current().id;
                         self.current_mut()

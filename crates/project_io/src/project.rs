@@ -64,7 +64,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 47: Pipe circular por trajetória associativa, com diâmetro e espessura por expressão.
 /// Versão 48: Tubo aceita círculos e cadeias fechadas, com emenda periódica sem tampas.
 /// Versão 49: cotas até a origem local do rascunho, sem pontos auxiliares.
-pub const FORMAT_VERSION: u32 = 50;
+/// Versão 51: pasta Referências em cada peça (`folders.references`), para os modelos de
+/// referência filhos dela. Ausente, a pasta fica visível.
+pub const FORMAT_VERSION: u32 = 51;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -1510,9 +1512,12 @@ mod tests {
         doc.set_folder_visible(Folder::Bodies(part), false)?;
         doc.set_folder_visible(Folder::PartOrigin(part), true)?;
         doc.set_folder_visible(Folder::ReferenceSketches, false)?;
+        assert!(doc.folder_visible(Folder::PartReferences(part))?);
+        doc.set_folder_visible(Folder::PartReferences(part), false)?;
         let second = directory.path().join("pastas-2.3dnator");
         write_project(&second, &doc)?;
         let reopened = read_project(&second)?;
+        assert!(!reopened.folder_visible(Folder::PartReferences(part))?);
         assert!(!reopened.folder_visible(Folder::Bodies(part))?);
         assert!(reopened.folder_visible(Folder::PartOrigin(part))?);
         assert!(!reopened.folder_visible(Folder::ReferenceSketches)?);

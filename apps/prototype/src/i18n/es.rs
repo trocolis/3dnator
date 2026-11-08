@@ -981,7 +981,7 @@ pub fn text(key: Text) -> &'static str {
             "Se aplica a todas las instancias de esta pieza. Confirma o cancela la herramienta abierta antes de convertir."
         }
         Text::ReferencesDropHint => {
-            "Arrastra una pieza o subpieza aquí para convertirla en referencia, en la misma posición."
+            "Arrastre aquí una pieza, subpieza o referencia: queda como referencia aquí, en la misma posición."
         }
         Text::CreatePartFromReference => "Crear pieza",
         Text::ReferenceNotEditable => {

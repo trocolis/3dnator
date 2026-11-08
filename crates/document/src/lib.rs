@@ -492,6 +492,8 @@ pub struct PartFolders {
     pub planes: bool,
     /// Eixos da origem da peça, desenhados em cada ocorrência; ocultos por padrão.
     pub origin: bool,
+    /// Modelos de referência posicionados dentro da peça (versão 51); visíveis por padrão.
+    pub references: bool,
 }
 impl Default for PartFolders {
     fn default() -> Self {
@@ -501,6 +503,7 @@ impl Default for PartFolders {
             sketches: true,
             planes: true,
             origin: false,
+            references: true,
         }
     }
 }
@@ -542,6 +545,8 @@ pub enum Folder {
     Sketches(PartId),
     WorkPlanes(PartId),
     PartOrigin(PartId),
+    /// Referências da peça: instâncias filhas cuja definição é referência.
+    PartReferences(PartId),
 }
 #[derive(Debug, Clone)]
 pub struct Instance {
@@ -673,6 +678,7 @@ impl Document {
             Folder::Sketches(id) => part(id)?.sketches,
             Folder::WorkPlanes(id) => part(id)?.planes,
             Folder::PartOrigin(id) => part(id)?.origin,
+            Folder::PartReferences(id) => part(id)?.references,
         })
     }
     pub fn set_folder_visible(
@@ -696,20 +702,23 @@ impl Document {
             Folder::Sketches(id) => &mut self.part_mut(id)?.folders.sketches,
             Folder::WorkPlanes(id) => &mut self.part_mut(id)?.folders.planes,
             Folder::PartOrigin(id) => &mut self.part_mut(id)?.folders.origin,
+            Folder::PartReferences(id) => &mut self.part_mut(id)?.folders.references,
         };
         *flag = visible;
         Ok(())
     }
-    /// Instância exibida no seu nível: visível e com a pasta que a contém visível (Peças,
-    /// na raiz, dentro do projeto; Subpeças, dentro de uma peça). Os níveis acima são
-    /// conferidos ao percorrer a montagem (`occurrences`).
+    /// Instância exibida no seu nível: visível e com a pasta que a contém visível (Peças ou
+    /// Referências, na raiz, dentro do projeto; Subpeças ou Referências, dentro de uma
+    /// peça). Os níveis acima são conferidos ao percorrer a montagem (`occurrences`).
     pub fn shows_instance(&self, instance: &Instance) -> bool {
+        let reference = self.part(instance.part).is_some_and(|p| p.reference);
         instance.visible
             && match instance.parent {
-                None if self.part(instance.part).is_some_and(|p| p.reference) => {
-                    self.folders.project && self.folders.references
-                }
+                None if reference => self.folders.project && self.folders.references,
                 None => self.folders.project && self.folders.parts,
+                Some(parent) if reference => {
+                    self.part(parent).is_some_and(|p| p.folders.references)
+                }
                 Some(parent) => self.part(parent).is_some_and(|p| p.folders.subparts),
             }
     }
