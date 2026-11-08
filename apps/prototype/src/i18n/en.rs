@@ -433,6 +433,7 @@ pub fn text(key: Text) -> &'static str {
         Text::RigidBadge => "Rigid",
         Text::RigidMoveHint => "Rigid group: the other members move along",
         Text::RibbonSizeMenu => "Ribbon size",
+        Text::RibbonSizeHint => "Large shows each section name; Compact keeps only the icons.",
         Text::RibbonLarge => "Large (with section names)",
         Text::RibbonNormal => "Normal",
         Text::RibbonCompact => "Compact (icons only)",
@@ -1031,6 +1032,15 @@ pub fn text(key: Text) -> &'static str {
         Text::ConvertResolveFailure => "Resolve the pending history failure before converting.",
         Text::VirtualCenter => "Circular center (virtual)",
         Text::VirtualArcCenter => "Arc center (virtual)",
+        Text::CircleCenterPoint => "Circle center",
+        Text::MirrorLineField => "Reference line",
+        Text::MirrorLinePrompt => {
+            "Click a line of a reference sketch: the plane passes through it."
+        }
+        Text::MirrorLineNotParallel => {
+            "The line must be parallel to the chosen plane (for example, in a sketch parallel to it)."
+        }
+        Text::ArcCenterPoint => "Arc center",
         Text::EdgeMidpoint => "Edge midpoint",
         Text::FaceCenter => "Face center",
         Text::CircleBoundaryPoint => "Circular edge quadrant",

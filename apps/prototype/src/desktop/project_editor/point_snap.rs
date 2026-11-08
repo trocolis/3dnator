@@ -119,6 +119,8 @@ pub(super) struct Target {
     pub distance: f32,
     /// Centros de círculos e arcos: o contorno da curva no mundo, para realçá-lo junto.
     pub outline: Vec<Point3>,
+    /// Centro no vazio (furo, canto côncavo), sem material sob o ponto.
+    pub virtual_center: bool,
 }
 
 /// Contorno de um círculo ou arco do corpo, em coordenadas do mundo (pela pose dada).
@@ -311,6 +313,7 @@ impl Query<'_> {
                             .unwrap_or_default(),
                         _ => Vec::new(),
                     },
+                    virtual_center: anchor.circle.is_some_and(|c| !c.on_material),
                 },
                 distance,
                 depth: dot(sub(point, target_ray.origin), target_ray.direction),

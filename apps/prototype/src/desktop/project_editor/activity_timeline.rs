@@ -156,8 +156,10 @@ impl Editor {
         self.timeline.tiles.clear();
         let entries = self.context_activities(context);
         let mut chosen = None;
+        // Como a linha do tempo das operações, abre na última alteração.
         egui::ScrollArea::horizontal()
             .id_salt("context_timeline")
+            .stick_to_right(true)
             .show(ui, |ui| {
                 ui.horizontal(|ui| chosen = self.activity_cards(ui, &entries));
             });

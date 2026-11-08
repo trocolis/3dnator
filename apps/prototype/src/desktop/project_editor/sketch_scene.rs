@@ -31,6 +31,14 @@ pub(super) struct PlanePicker {
     /// Os planos da origem e de trabalho têm prioridade sobre a face desenhada atrás deles.
     origin_hovered: bool,
     hover: plane_hover::Cache,
+    /// Camada escolhida com ↑/↓ entre os planos sobrepostos sob o cursor: primeiro os da
+    /// origem e de trabalho (do mais próximo da frente), depois as faces planas do modelo.
+    layer: usize,
+    /// Posição do cursor em que a camada foi escolhida; mover o mouse volta à primeira.
+    layer_at: Option<egui::Pos2>,
+    /// Planos da origem/de trabalho e camadas de faces sob o cursor no último quadro.
+    planes_under: usize,
+    faces_under: usize,
 }
 impl PlanePicker {
     pub fn new(
@@ -46,6 +54,10 @@ impl PlanePicker {
             purpose,
             origin_hovered: false,
             hover: plane_hover::Cache::default(),
+            layer: 0,
+            layer_at: None,
+            planes_under: 0,
+            faces_under: 0,
         }
     }
     /// Planos de trabalho só servem a rascunhos de peça: são locais à peça de destino.
@@ -495,6 +507,13 @@ impl Editor {
         context: &egui::Context,
         ray: nator_geometry::query::Ray,
     ) {
+        // Camada de face escolhida com ↑/↓ (0: a primeira sob o cursor).
+        let layer = self
+            .current()
+            .plane_pick
+            .as_ref()
+            .and_then(|p| p.layer.checked_sub(p.planes_under))
+            .unwrap_or(0);
         if self.busy() {
             return;
         }
@@ -512,10 +531,17 @@ impl Editor {
         let view = self.current().view.clone();
         let section = self.current().section;
         self.start(context, None, move || {
-            let picks = document
-                .pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
-                .map_err(|e| e.to_string())?;
-            let pick = section::first_visible(picks, section);
+            let pick = if layer > 0 {
+                plane_hover::plane_layers(&document, &view, section, ray)
+                    .get(layer)
+                    .cloned()
+                    .flatten()
+            } else {
+                let picks = document
+                    .pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
+                    .map_err(|e| e.to_string())?;
+                section::first_visible(picks, section)
+            };
             if purpose == PlanePurpose::OffsetBase {
                 // Clicar fora de uma face plana só avisa: a escolha continua aberta.
                 let plane = pick
@@ -886,7 +912,8 @@ impl Editor {
         let painter = ui
             .painter()
             .with_clip_rect(response.rect.intersect(ui.clip_rect()));
-        let camera = &self.viewport.camera;
+        // Cópia: a escolha da camada altera o seletor da aba durante o desenho.
+        let camera = &self.viewport.camera.clone();
         let world_screen = |point| project(camera, bounds, response.rect, point);
         let screen = |point| world_screen(placement.apply(point));
         let hover = response
@@ -954,16 +981,35 @@ impl Editor {
                 }
             }
             planes.sort_by(|a, b| a.0.total_cmp(&b.0));
-            // O último plano desenhado recebe o clique quando há sobreposição;
-            // apenas esse mesmo plano recebe o destaque de pré-seleção.
-            selected = planes
+            // Planos sob o cursor, do último desenhado (o de cima) para trás. Sem ↑/↓, o de
+            // cima recebe o clique; as setas percorrem estes e depois as faces do modelo.
+            let under = planes
                 .iter()
                 .rev()
-                .find_map(|(_, candidate, _, _, points, _)| {
-                    hover
-                        .is_some_and(|p| polygon_contains(points, p))
-                        .then_some(*candidate)
-                });
+                .filter(|(_, _, _, _, points, _)| {
+                    hover.is_some_and(|p| polygon_contains(points, p))
+                })
+                .map(|(_, candidate, ..)| *candidate)
+                .collect::<Vec<_>>();
+            let context = ui.ctx().clone();
+            let layer = match self.current_mut().plane_pick.as_mut() {
+                Some(picker) => {
+                    if hover.is_none_or(|p| picker.layer_at.is_none_or(|at| at.distance(p) > 3.)) {
+                        picker.layer = 0;
+                        picker.layer_at = hover;
+                    }
+                    picker.planes_under = under.len();
+                    if hover.is_some() {
+                        let total = under.len() + picker.faces_under;
+                        if plane_hover::step_layer(&context, &mut picker.layer, total) {
+                            context.request_repaint();
+                        }
+                    }
+                    picker.layer
+                }
+                None => 0,
+            };
+            selected = under.get(layer).copied();
             for (_, candidate, name, color, points, label) in planes {
                 // Um plano de perfil para a câmera não tem área para receber cliques.
                 let center = points.iter().fold(egui::Pos2::ZERO, |a, b| {

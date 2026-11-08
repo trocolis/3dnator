@@ -263,3 +263,25 @@ fn shell_outward_and_with_several_open_faces() -> Result<()> {
     assert!((open.volume()? - (BLOCK - cavity)).abs() < 1e-3);
     Ok(())
 }
+
+/// O centro de um disco cai sobre o material; o de um furo, e o da borda externa de uma
+/// arruela (também no vazio do furo), são virtuais.
+#[test]
+fn circle_centers_know_whether_they_lie_on_material() -> Result<()> {
+    let centers = |solid: &Solid| -> Result<Vec<bool>> {
+        let mut flags = Vec::new();
+        for edge in 0..solid.edge_count()? {
+            if let Some(circle) = solid.edge_anchors(edge)?.circle {
+                flags.push(circle.on_material);
+            }
+        }
+        Ok(flags)
+    };
+    let disk = Solid::cylinder([0., 0., 0.], 20., 4.)?;
+    let flags = centers(&disk)?;
+    assert!(!flags.is_empty() && flags.iter().all(|on| *on), "{flags:?}");
+    let washer = disk.cut(&Solid::cylinder([0., 0., -1.], 10., 6.)?)?;
+    let flags = centers(&washer)?;
+    assert!(!flags.is_empty() && flags.iter().all(|on| !on), "{flags:?}");
+    Ok(())
+}

@@ -22,6 +22,8 @@ pub(super) struct TimelineState {
     drag: Option<Drag>,
     /// Posição de cada operação no último quadro (capturas e ensaios de eventos).
     pub tiles: Vec<(BodyId, egui::Rect)>,
+    /// Marcador já levado à vista (aba, peça, posição): só um marcador novo rola a faixa.
+    shown_marker: Option<(u64, PartId, usize)>,
 }
 
 struct Rename {
@@ -245,8 +247,13 @@ impl Editor {
         let mut started = None;
         let mut tiles = Vec::with_capacity(count);
         let mut gaps = Vec::with_capacity(count + 1);
+        // A faixa abre na última alteração e acompanha as novas, salvo se o usuário rolou
+        // para trás; um marcador movido para o meio do histórico é trazido à vista.
+        let reveal = self.timeline.shown_marker != Some((tab, part.id, marker));
+        self.timeline.shown_marker = Some((tab, part.id, marker));
         egui::ScrollArea::horizontal()
             .id_salt("feature_timeline")
+            .stick_to_right(true)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 3.;
@@ -257,6 +264,9 @@ impl Editor {
                         if index == marker {
                             let (rect, response) =
                                 ui.allocate_exact_size(egui::vec2(9., TILE), egui::Sense::drag());
+                            if reveal && marker < count {
+                                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                            }
                             let response = response.on_hover_text(text(T::HistoryMarker));
                             let color = if response.hovered() || drag == Some(Drag::Marker) {
                                 theme::accent()

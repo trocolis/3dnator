@@ -90,10 +90,10 @@ bool nator_face_nearest(const Shape* body,std::size_t index,const double* point,
 bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         const auto edge=edge_at(body,index);
-        // Vinte e sete doubles: extremos, centro, indicador circular, normal,
-        // raio, fechamento, costura, ponto médio, direção radial, intervalo angular e a
-        // soma das normais externas das faces vizinhas no ponto médio.
-        std::fill(output,output+27,0.);
+        // Vinte e oito doubles: extremos, centro, indicador circular, normal,
+        // raio, fechamento, costura, ponto médio, direção radial, intervalo angular, a
+        // soma das normais externas das faces vizinhas no ponto médio e o centro no material.
+        std::fill(output,output+28,0.);
         // Polos de esferas/cones podem ter uma aresta sem curva 3D. Ela não
         // oferece captura, mas continua fornecendo um apoio finito para cotas.
         if (BRep_Tool::Degenerated(edge)) {
@@ -131,6 +131,23 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
             const auto radial=circle.Position().XDirection();
             output[19]=radial.X();output[20]=radial.Y();output[21]=radial.Z();
             output[22]=curve.FirstParameter();output[23]=curve.LastParameter()-curve.FirstParameter();
+            // Centro sobre o material: dentro de uma face plana vizinha que contém o círculo
+            // (o disco de um cilindro). No vazio de um furo ou no canto de um arredondamento
+            // côncavo, o centro é virtual.
+            const auto& neighbours=ancestors_of(body);
+            if (neighbours.Contains(edge)) {
+                for (const auto& shape:neighbours.FindFromKey(edge)) {
+                    const auto face=TopoDS::Face(shape);
+                    const BRepAdaptor_Surface surface(face);
+                    if (surface.GetType()!=GeomAbs_Plane) continue;
+                    const auto plane=surface.Plane();
+                    if (plane.Distance(center)>1e-7) continue;
+                    double u=0.,v=0.;
+                    ElSLib::Parameters(plane,center,u,v);
+                    const BRepClass_FaceClassifier inside(face,gp_Pnt2d(u,v),1e-7);
+                    if (inside.State()==TopAbs_IN || inside.State()==TopAbs_ON) {output[27]=1.;break;}
+                }
+            }
         }
         // Uma costura cilíndrica possui duas curvas paramétricas na mesma face.
         // Seus extremos não são vértices geométricos para a captura pelo usuário.

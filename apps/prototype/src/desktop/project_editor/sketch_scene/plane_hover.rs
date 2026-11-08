@@ -17,7 +17,43 @@ struct Candidate {
     label: String,
 }
 
-type Answer = Option<Arc<Candidate>>;
+/// Camadas sob o cursor, da frente para trás: cada face plana visível vira um suporte; uma
+/// superfície curva ou malha na frente ocupa a primeira camada sem suporte (`None`), para
+/// não ser atravessada sem querer. As setas ↑/↓ percorrem as camadas.
+type Answer = Arc<Vec<Option<Arc<Candidate>>>>;
+
+/// Faces sob o raio, na ordem das camadas oferecidas, com o acerto de cada suporte.
+pub(super) fn plane_layers(
+    document: &Document,
+    view: &ViewState,
+    section: Option<section::Section>,
+    ray: Ray,
+) -> Vec<Option<Pick>> {
+    let Ok(picks) =
+        document.pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
+    else {
+        return Vec::new();
+    };
+    let visible = section.filter(|s| s.visible);
+    let mut seen = std::collections::HashSet::new();
+    let mut layers = Vec::new();
+    for pick in picks
+        .into_iter()
+        .filter(|p| visible.is_none_or(|s| s.keeps(p.point)))
+    {
+        let planar = nator_commands::measure::sketch_plane(document, &pick).is_ok();
+        let face = document.face_index_at(&pick).ok();
+        if planar {
+            // A mesma face atingida duas vezes (ou por triângulos vizinhos) conta uma vez.
+            if face.is_some_and(|f| seen.insert((pick.instance, pick.body, f))) {
+                layers.push(Some(pick));
+            }
+        } else if layers.is_empty() {
+            layers.push(None);
+        }
+    }
+    layers
+}
 
 #[derive(Default)]
 pub(super) struct Cache {
@@ -27,22 +63,29 @@ pub(super) struct Cache {
 
 /// Não atravessar uma superfície inválida para realçar outra atrás dela. Curvas e
 /// malhas obstruem o raio, mas não são suportes exatos para um novo rascunho.
+fn candidates(document: &Document, view: &ViewState, key: Key) -> Answer {
+    let ray = Ray {
+        origin: key.origin,
+        direction: key.direction,
+    };
+    Arc::new(
+        plane_layers(document, view, key.section, ray)
+            .into_iter()
+            .map(|pick| pick.and_then(|pick| layer(document, &pick)))
+            .collect(),
+    )
+}
+
+/// Primeira camada: o suporte que o clique simples escolhe.
+#[cfg(all(test, feature = "occt"))]
 fn candidate(document: &Document, view: &ViewState, key: Key) -> Option<Arc<Candidate>> {
-    let picks = document
-        .pick_all_clipped_with(
-            Ray {
-                origin: key.origin,
-                direction: key.direction,
-            },
-            |o| view.pickable(o),
-            section::clip(key.section),
-        )
-        .ok()?;
-    let pick = section::first_visible(picks, key.section)?;
-    nator_commands::measure::sketch_plane(document, &pick).ok()?;
+    candidates(document, view, key).first().cloned().flatten()
+}
+
+fn layer(document: &Document, pick: &Pick) -> Option<Arc<Candidate>> {
     let body = document.body(pick.body)?;
     let pose = pick.placement.compose(body.placement).ok()?;
-    let face = u32::try_from(document.face_index_at(&pick).ok()?).ok()?;
+    let face = u32::try_from(document.face_index_at(pick).ok()?).ok()?;
     Some(Arc::new(Candidate {
         overlay: highlight::face(body, pose, face),
         label: body.name.clone(),
@@ -56,11 +99,11 @@ impl Cache {
         document: &Document,
         view: &ViewState,
         context: &egui::Context,
-    ) -> Result<Answer, String> {
+    ) -> Result<Option<Answer>, String> {
         if let Some((running_key, receiver)) = &self.running {
             let answer = match receiver.try_recv() {
                 Ok(answer) => Some(answer),
-                Err(mpsc::TryRecvError::Disconnected) => Some(None),
+                Err(mpsc::TryRecvError::Disconnected) => Some(Arc::new(Vec::new())),
                 Err(mpsc::TryRecvError::Empty) => None,
             };
             if let Some(answer) = answer {
@@ -71,7 +114,7 @@ impl Cache {
         if let Some((ready_key, answer)) = &self.ready
             && *ready_key == key
         {
-            return Ok(answer.clone());
+            return Ok(Some(answer.clone()));
         }
         // Uma consulta por vez: movimento contínuo não cria uma fila de workers.
         // Uma entrega antiga nunca é desenhada sobre outra aba/revisão/posição.
@@ -83,7 +126,7 @@ impl Cache {
             std::thread::Builder::new()
                 .name("sketch-plane-hover".into())
                 .spawn(move || {
-                    let _ = sender.send(candidate(&document, &view, key));
+                    let _ = sender.send(candidates(&document, &view, key));
                     context.request_repaint();
                 })
                 .map_err(|e| e.to_string())?;
@@ -91,6 +134,27 @@ impl Cache {
         }
         Ok(None)
     }
+}
+
+/// Muda a camada escolhida com ↑/↓ entre `total` camadas; devolve se mudou.
+pub(super) fn step_layer(context: &egui::Context, layer: &mut usize, total: usize) -> bool {
+    if total < 2 {
+        return false;
+    }
+    let (up, down) = context.input_mut(|i| {
+        (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+        )
+    });
+    let before = *layer;
+    if down {
+        *layer = (*layer + 1) % total;
+    }
+    if up {
+        *layer = (*layer + total - 1) % total;
+    }
+    *layer != before
 }
 
 impl Editor {
@@ -134,15 +198,26 @@ impl Editor {
             .hover
             .query(key, tab.session.document(), &tab.view, ui.ctx())
         {
-            Ok(Some(candidate)) => {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                self.hover = Some(highlight::Hover::fixed(
-                    key.scene.tab,
-                    key.scene.revision,
-                    position,
-                    candidate.overlay.clone(),
-                    candidate.label.clone(),
-                ));
+            Ok(Some(layers)) => {
+                picker.faces_under = layers.len();
+                // As camadas dos planos da origem e de trabalho vêm antes das faces.
+                let index = picker.layer.checked_sub(picker.planes_under);
+                let total = picker.planes_under + layers.len();
+                if let Some(Some(candidate)) = index.and_then(|i| layers.get(i)) {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    let label = if total > 1 {
+                        format!("{} ({}/{total}, ↑/↓)", candidate.label, picker.layer + 1)
+                    } else {
+                        candidate.label.clone()
+                    };
+                    self.hover = Some(highlight::Hover::fixed(
+                        key.scene.tab,
+                        key.scene.revision,
+                        position,
+                        candidate.overlay.clone(),
+                        label,
+                    ));
+                }
             }
             Ok(None) => {}
             Err(error) => self.status.error(error),
@@ -228,6 +303,68 @@ mod tests {
         Ok(())
     }
 
+    /// Dois blocos empilhados sob o cursor: o topo de cada um, da frente para trás (faces
+    /// vistas por trás não são suportes); uma malha na frente ocupa a primeira camada, sem
+    /// suporte, e as faces atrás continuam alcançáveis pelas setas.
+    #[test]
+    fn overlapping_planes_are_layered_front_to_back() -> Result<(), Box<dyn std::error::Error>> {
+        let mut document = Document::new("Planos sobrepostos")?;
+        import(&mut document, Solid::cuboid([0.; 3], [20., 20., 5.])?)?;
+        import(&mut document, Solid::cuboid([0., 0., 10.], [20., 20., 5.])?)?;
+        let view = ViewState::default();
+        let ray = key([5., 5., 100.], [0., 0., -1.]);
+        let heights = |layers: &Answer| -> Vec<Option<f64>> {
+            layers
+                .iter()
+                .map(|l| {
+                    l.as_ref()
+                        .and_then(|c| c.overlay.triangles.first().map(|t| t[0][2]))
+                })
+                .collect()
+        };
+        let layers = candidates(&document, &view, ray);
+        assert_eq!(heights(&layers), [Some(15.), Some(5.)]);
+        document.add_mesh(
+            None,
+            "Malha na frente".into(),
+            Arc::new(MeshAsset::new(Mesh::new(
+                vec![[-30., -30., 40.], [30., -30., 40.], [0., 30., 40.]],
+                vec![[0, 1, 2]],
+            )?)),
+        )?;
+        let layers = candidates(&document, &view, ray);
+        assert_eq!(heights(&layers), [None, Some(15.), Some(5.)]);
+        // As setas percorrem as camadas em volta.
+        let context = egui::Context::default();
+        let mut layer = 0;
+        let press = |key: egui::Key| egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let step = |layer: &mut usize, key| {
+            let mut changed = false;
+            let mut output = context.run_ui(press(key), |ui| {
+                changed = step_layer(ui.ctx(), layer, 5);
+            });
+            output.textures_delta.clear();
+            changed
+        };
+        assert!(step(&mut layer, egui::Key::ArrowDown));
+        assert!(step(&mut layer, egui::Key::ArrowDown));
+        assert_eq!(layer, 2);
+        for _ in 0..3 {
+            assert!(step(&mut layer, egui::Key::ArrowUp));
+        }
+        assert_eq!(layer, 4);
+        Ok(())
+    }
+
     #[test]
     fn queued_hover_from_an_old_revision_or_cursor_is_never_displayed()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -235,9 +372,13 @@ mod tests {
         import(&mut document, Solid::cuboid([0.; 3], [20.; 3])?)?;
         let view = ViewState::default();
         let old = key([5., 5., 100.], [0., 0., -1.]);
-        let stale = candidate(&document, &view, old).ok_or("Suporte ausente")?;
+        let stale = candidates(&document, &view, old);
+        assert!(
+            stale.first().is_some_and(Option::is_some),
+            "Suporte ausente"
+        );
         let (sender, receiver) = mpsc::channel();
-        sender.send(Some(stale))?;
+        sender.send(stale)?;
         let mut cache = Cache {
             ready: None,
             running: Some((old, receiver)),
@@ -248,7 +389,10 @@ mod tests {
         let context = egui::Context::default();
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            assert!(cache.query(current, &document, &view, &context)?.is_none());
+            // Nunca a resposta antiga: enquanto calcula, nada; pronta, a do cursor atual
+            // (vazia, porque o raio passa ao lado do bloco).
+            let answer = cache.query(current, &document, &view, &context)?;
+            assert!(answer.is_none_or(|layers| layers.is_empty()));
             if cache.ready.as_ref().is_some_and(|(k, _)| *k == current) {
                 break;
             }

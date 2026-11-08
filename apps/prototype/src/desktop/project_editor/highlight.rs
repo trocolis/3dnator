@@ -470,10 +470,20 @@ impl Editor {
                 } else if let Some(target) = model {
                     let label = match target.kind {
                         nator_commands::point_snap::PointKind::CircleCenter => {
-                            text(T::VirtualCenter).into()
+                            text(if target.virtual_center {
+                                T::VirtualCenter
+                            } else {
+                                T::CircleCenterPoint
+                            })
+                            .into()
                         }
                         nator_commands::point_snap::PointKind::ArcCenter => {
-                            text(T::VirtualArcCenter).into()
+                            text(if target.virtual_center {
+                                T::VirtualArcCenter
+                            } else {
+                                T::ArcCenterPoint
+                            })
+                            .into()
                         }
                         nator_commands::point_snap::PointKind::CircleBoundary => {
                             text(T::CircleBoundaryPoint).into()

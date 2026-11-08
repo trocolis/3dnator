@@ -558,22 +558,6 @@ pub(super) fn menu_item(
     label: &str,
     height: f32,
 ) -> egui::Response {
-    menu_row(ui, icon, icon.is_some(), label, height)
-}
-
-/// Opção de escolha num menu: a marca aparece só na opção atual, e a coluna dela fica
-/// reservada nas demais, para os rótulos alinharem.
-pub(super) fn menu_choice(ui: &mut egui::Ui, current: bool, label: &str) -> egui::Response {
-    menu_row(ui, current.then_some(Icon::Check), true, label, 24.)
-}
-
-fn menu_row(
-    ui: &mut egui::Ui,
-    icon: Option<Icon>,
-    reserve: bool,
-    label: &str,
-    height: f32,
-) -> egui::Response {
     let font = egui::TextStyle::Button.resolve(ui.style());
     let enabled = ui.is_enabled();
     let ink = if enabled {
@@ -582,7 +566,7 @@ fn menu_row(
         theme::muted()
     };
     let galley = ui.painter().layout_no_wrap(label.to_owned(), font, ink);
-    let icon_width = if reserve { 24. } else { 0. };
+    let icon_width = if icon.is_some() { 24. } else { 0. };
     let needed = 6. + icon_width + galley.size().x + 12.;
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(needed.max(ui.available_width()), height),

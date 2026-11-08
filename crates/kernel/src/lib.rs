@@ -178,6 +178,9 @@ pub struct CircleAnchor {
     pub sweep_rad: f64,
     /// Círculos completos oferecem quatro quadrantes; arcos conservam seus extremos.
     pub closed: bool,
+    /// O centro cai sobre o material (dentro de uma face plana vizinha). Falso no vazio de
+    /// um furo ou no canto de um arredondamento côncavo: centro virtual.
+    pub on_material: bool,
 }
 
 /// Nomes posicionais (`{dono}:f{i}`) para sólidos importados, que nunca são recalculados.

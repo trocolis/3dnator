@@ -4635,6 +4635,175 @@ mod tests {
         Ok(())
     }
 
+    /// Com mais operações do que cabem no rodapé, a linha do tempo abre na última.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn timeline_opens_scrolled_to_the_last_change() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut profile = Sketch::new("Base", Plane::xy());
+        profile.add_rectangle([0., 0.], [10., 10.], false)?;
+        let mut session = Session::new(Document::new("Histórico longo")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: profile,
+        })?
+        else {
+            return Err("Rascunho base ausente".into());
+        };
+        for k in 0..40 {
+            session.execute(Command::AddFeature {
+                part,
+                name: format!("Placa {k}"),
+                operation: Operation::Extrude {
+                    sketch,
+                    region: RegionRef::Index(0),
+                    from: format!("{} mm", 2 * k),
+                    to: format!("{} mm", 2 * k + 1),
+                    combine: None,
+                    until: None,
+                },
+            })?;
+        }
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        frame(&mut editor, &context, vec![])?;
+        frame(&mut editor, &context, vec![])?;
+        let tiles = &editor.timeline.tiles;
+        let (first, last) = (
+            tiles.first().ok_or("Linha do tempo vazia")?.1,
+            tiles.last().ok_or("Linha do tempo vazia")?.1,
+        );
+        let canvas = editor.canvas_rect;
+        // A última operação aparece; a primeira ficou para trás, fora da faixa.
+        assert!(last.right() < canvas.right() - 100., "{last:?}");
+        assert!(first.left() < 160., "{first:?}");
+        Ok(())
+    }
+
+    /// Duas placas empilhadas (topos em z = 5 e z = 15), vistas de cima: ↓ troca a face
+    /// realçada pela de trás e o clique cria o rascunho nela.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn arrow_keys_cycle_overlapping_planes_and_the_click_takes_the_chosen_one()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut profile = Sketch::new("Base", Plane::xy());
+        profile.add_rectangle([-30., -30.], [30., 30.], false)?;
+        let mut session = Session::new(Document::new("Planos sobrepostos")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: profile,
+        })?
+        else {
+            return Err("Rascunho base ausente".into());
+        };
+        for (name, from, to) in [("Baixo", "0 mm", "5 mm"), ("Cima", "10 mm", "15 mm")] {
+            session.execute(Command::AddFeature {
+                part,
+                name: name.into(),
+                operation: Operation::Extrude {
+                    sketch,
+                    region: RegionRef::Index(0),
+                    from: from.into(),
+                    to: to.into(),
+                    combine: None,
+                    until: None,
+                },
+            })?;
+        }
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        frame(&mut editor, &context, Vec::new())?;
+        settle(&mut editor, &context)?;
+        let sketches = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .sketches
+            .len();
+        let button = label_position(&mut editor, &context, text(T::NewSketch))?;
+        click(&mut editor, &context, button)?;
+        assert!(editor.current().plane_pick.is_some());
+        // Longe da origem, para os planos da origem não entrarem nas camadas.
+        let target = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [22., 22., 15.],
+        )
+        .ok_or("Face sem projeção")?;
+        let highlighted = |editor: &Editor| {
+            editor
+                .hover
+                .as_ref()
+                .and_then(|h| h.overlay.triangles.first().map(|t| t[0][2]))
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while highlighted(&editor).is_none() {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(target)],
+            )?;
+            if Instant::now() > deadline {
+                return Err("Face apta não foi realçada".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(highlighted(&editor).is_some_and(|z| (z - 15.).abs() < 1e-8));
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                egui::Event::PointerMoved(target),
+                egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        )?;
+        frame(
+            &mut editor,
+            &context,
+            vec![egui::Event::PointerMoved(target)],
+        )?;
+        assert!(
+            highlighted(&editor).is_some_and(|z| (z - 5.).abs() < 1e-8),
+            "{:?}",
+            highlighted(&editor)
+        );
+        click(&mut editor, &context, target)?;
+        settle(&mut editor, &context)?;
+        let document = editor.current().session.document();
+        let record = document
+            .part(part)
+            .and_then(|p| p.sketches.last())
+            .filter(|_| {
+                document
+                    .part(part)
+                    .is_some_and(|p| p.sketches.len() > sketches)
+            })
+            .ok_or_else(|| format!("Rascunho não criado: {}", editor.status))?;
+        assert!((record.sketch.plane.origin[2] - 5.).abs() < 1e-8);
+        Ok(())
+    }
+
     /// Ensaio optativo porque precisa de adaptador wgpu. Usa eventos reais egui
     /// sobre o canvas completo; não exige compositor nem janela nativa.
     #[test]
@@ -7929,6 +8098,67 @@ mod tests {
         assert!(
             heights[0] < heights[1] && heights[1] < heights[2],
             "{heights:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn mirror_plane_passes_through_a_clicked_reference_line() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, [a, _]) = grouped_blocks_editor(&context)?;
+        // Linha vertical em x = 150, num rascunho de referência no plano XY.
+        let mut sketch = Sketch::new("Eixo", Plane::xy());
+        sketch.add_line([150., -20.], [150., 60.], false)?;
+        editor.execute(Command::AddReferenceSketch { sketch });
+        editor.current_mut().select(Some(Selection::Instance(a)));
+        editor.open_instance_mirror();
+        settle(&mut editor, &context)?;
+        // Plano YZ (normal X) e o campo da linha ativo.
+        editor.await_mirror_line_for_capture();
+        settle(&mut editor, &context)?;
+        let on_line = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [150., 20., 0.],
+        )
+        .ok_or("Linha sem projeção")?;
+        // A cena de referência é preparada em segundo plano: o campo continua aguardando
+        // a linha até o clique encontrá-la.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            click(&mut editor, &context, on_line)?;
+            settle(&mut editor, &context)?;
+            if editor.mirror_line_for_capture().is_some() {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err("Linha de referência não escolhida".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        settle(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        // O bloco A (x de 0 a 40) refletido em x = 150 fica entre 260 e 300.
+        let document = editor.current().session.document();
+        let mirrored = document
+            .instances()
+            .last()
+            .ok_or("Cópia espelhada ausente")?;
+        let x = mirrored.placement.apply([0., 0., 0.])[0];
+        let bounds = document
+            .part(mirrored.part)
+            .and_then(|p| p.bodies.first())
+            .map(|b| b.geometry.mesh().bounds())
+            .ok_or("Corpo espelhado ausente")?;
+        let (low, high) = (x + bounds.min[0], x + bounds.max[0]);
+        let (low, high) = (low.min(high), low.max(high));
+        assert!(
+            (low - 260.).abs() < 1e-6 && (high - 300.).abs() < 1e-6,
+            "{low} – {high}"
         );
         Ok(())
     }

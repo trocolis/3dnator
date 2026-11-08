@@ -532,6 +532,36 @@ pub(super) struct MirrorDraft {
     picking: bool,
     plane: usize,
     offset: f64,
+    /// Linha de um rascunho de referência que posiciona o plano: ele passa por ela, com a
+    /// orientação escolhida. Só a posição no momento da escolha é usada, sem vínculo.
+    line: Option<MirrorLine>,
+    /// O clique na área 3D escolhe a linha.
+    picking_line: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct MirrorLine {
+    edge: [Point3; 2],
+    label: String,
+}
+
+impl MirrorDraft {
+    /// Ponto do plano de espelhamento: na linha escolhida ou pelo deslocamento digitado.
+    /// Uma linha que não é paralela ao plano não define posição e é recusada.
+    fn origin(&self) -> Result<Point3, T> {
+        let normal = PLANES[self.plane].1;
+        match &self.line {
+            None => Ok(normal.map(|v| v * self.offset)),
+            Some(line) => {
+                let direction = sub(line.edge[1], line.edge[0]);
+                let length = nator_geometry::norm(direction);
+                if length < 1e-9 || nator_geometry::dot(direction, normal).abs() > 1e-6 * length {
+                    return Err(T::MirrorLineNotParallel);
+                }
+                Ok(line.edge[0])
+            }
+        }
+    }
 }
 
 /// Posição atual de um elemento: local (instância relativa ao pai, corpo relativo à peça) e
@@ -1251,6 +1281,26 @@ impl Editor {
             origin_inputs: Default::default(),
         })));
     }
+    /// Linha de referência escolhida no espelhar, para os ensaios.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn mirror_line_for_capture(&self) -> Option<[Point3; 2]> {
+        match &self.assembly_panel {
+            Some(Panel::Mirror(d)) => d.line.as_ref().map(|l| l.edge),
+            _ => None,
+        }
+    }
+    /// Espelhar com o plano YZ e o campo da linha aguardando o clique, para os ensaios.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn await_mirror_line_for_capture(&mut self) {
+        if let Some(Panel::Mirror(d)) = &mut self.assembly_panel {
+            d.plane = PLANES
+                .iter()
+                .position(|(name, _)| *name == "YZ")
+                .unwrap_or(2);
+            d.picking = false;
+            d.picking_line = true;
+        }
+    }
     pub(super) fn open_instance_mirror(&mut self) {
         let target = self.selected_instance();
         self.feature_edit = None;
@@ -1260,6 +1310,8 @@ impl Editor {
             picking: target.is_none(),
             plane: 2,
             offset: 0.,
+            line: None,
+            picking_line: false,
         }));
     }
 
@@ -1384,7 +1436,7 @@ impl Editor {
             Some(Panel::Move(d)) => d.drag.is_none() && d.floating.valid(),
             Some(Panel::Align(d)) => d.field.is_some(),
             Some(Panel::Pattern(d)) => d.picking,
-            Some(Panel::Mirror(d)) => d.picking,
+            Some(Panel::Mirror(d)) => d.picking || d.picking_line,
             None => false,
         };
         if !waiting {
@@ -1400,6 +1452,27 @@ impl Editor {
             return true;
         };
         let rect = response.rect;
+        // Espelhar: a linha de referência vem só dos rascunhos, nunca do modelo.
+        if matches!(&self.assembly_panel, Some(Panel::Mirror(d)) if d.picking_line) {
+            let found = reference_anchor(
+                &self.reference_scene(bounds, rect),
+                position,
+                navigation::PickMode::Edge,
+            )
+            .map(|(_, anchor)| MirrorLine {
+                edge: anchor.edge,
+                label: anchor.label,
+            });
+            if let Some(Panel::Mirror(d)) = &mut self.assembly_panel {
+                if let Some(line) = found {
+                    d.line = Some(line);
+                    d.picking_line = false;
+                } else {
+                    self.status.warning(text(T::MirrorLinePrompt));
+                }
+            }
+            return true;
+        }
         let ray = self.viewport.camera.world_ray(
             [
                 f64::from((position.x - rect.center().x) / rect.width() * 2.),
@@ -1754,7 +1827,7 @@ impl Editor {
                 let normal = PLANES[d.plane].1;
                 Some(Command::MirrorInstance {
                     id,
-                    origin: normal.map(|v| v * d.offset),
+                    origin: d.origin().ok()?,
                     normal,
                     name: format!("{} ({})", instance.name, text(T::MirroredSuffix)),
                 })
@@ -2091,6 +2164,10 @@ impl Editor {
     /// Origem e destino do alinhamento escolhidos, desenhados sobre o modelo: origem em
     /// azul, destino na cor das referências quando vem de um rascunho de referência.
     pub(super) fn align_overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
+        if let Some(Panel::Mirror(d)) = &self.assembly_panel {
+            self.mirror_line_overlay(ui, rect, d);
+            return;
+        }
         let Some(Panel::Align(d)) = &self.assembly_panel else {
             return;
         };
@@ -2149,6 +2226,11 @@ impl Editor {
                         painter.circle(p, 2.5, egui::Color32::WHITE, egui::Stroke::new(1.2, color));
                         continue;
                     };
+                    // Só centros virtuais (no vazio) ganham seta; os demais, só a marca.
+                    if !anchor.circle.is_some_and(|c| !c.on_material) {
+                        anchor_mark(&painter, p, style);
+                        continue;
+                    }
                     // Seta perpendicular ao plano do ponto, vinda do lado do observador.
                     let normal = anchor.normal.map(|n| {
                         let n = pose.apply_vector(n);
@@ -2189,6 +2271,28 @@ impl Editor {
                     egui::Color32::from_rgb(232, 128, 22)
                 },
             );
+        }
+    }
+}
+
+impl Editor {
+    /// Linha de referência escolhida no espelhar, na cor das referências (ou de erro, quando
+    /// não é paralela ao plano).
+    fn mirror_line_overlay(&self, ui: &egui::Ui, rect: egui::Rect, d: &MirrorDraft) {
+        let (Some(line), Some(bounds)) = (&d.line, self.current().scene_bounds) else {
+            return;
+        };
+        let camera = &self.viewport.camera;
+        let project = |p: Point3| sketch_scene::project(camera, bounds, rect, p);
+        if let (Some(a), Some(b)) = (project(line.edge[0]), project(line.edge[1])) {
+            let color = if d.origin().is_ok() {
+                theme::reference()
+            } else {
+                theme::danger()
+            };
+            ui.painter()
+                .with_clip_rect(rect.intersect(ui.clip_rect()))
+                .line_segment([a, b], egui::Stroke::new(3.5, color));
         }
     }
 }
@@ -2614,7 +2718,11 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
 }
 
 fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
+    let picking = d.picking;
     instance_selection(ui, &mut d.target, &mut d.picking, document);
+    if d.picking && !picking {
+        d.picking_line = false;
+    }
     panel::row(ui, text(T::PlaneField), |ui| {
         ui.spacing_mut().item_spacing.x = 2.;
         for (i, (name, _)) in PLANES.iter().enumerate() {
@@ -2623,10 +2731,56 @@ fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
             }
         }
     });
-    panel::row(ui, text(T::OffsetField), |ui| {
-        let context = ui.ctx().clone();
-        ui.add(panel::length_value(&context, &mut d.offset, -1e7..=1e7))
-    });
+    let description = d.line.as_ref().map(|l| l.label.clone());
+    let s = panel::selection(
+        ui,
+        text(T::MirrorLineField),
+        usize::from(d.line.is_some()),
+        description.as_deref(),
+        d.picking_line,
+    );
+    if s.activate {
+        d.picking_line = !d.picking_line;
+        d.picking = false;
+    }
+    if s.clear {
+        d.line = None;
+        d.picking_line = false;
+    }
+    match d.origin() {
+        // Com a linha, o deslocamento é o dela, só para conferência.
+        Ok(origin) if d.line.is_some() => {
+            let normal = PLANES[d.plane].1;
+            let mut offset = nator_geometry::dot(origin, normal);
+            panel::row(ui, text(T::OffsetField), |ui| {
+                let context = ui.ctx().clone();
+                ui.add_enabled(
+                    false,
+                    panel::length_value(&context, &mut offset, -1e7..=1e7),
+                )
+            });
+        }
+        Ok(_) => {
+            panel::row(ui, text(T::OffsetField), |ui| {
+                let context = ui.ctx().clone();
+                ui.add(panel::length_value(&context, &mut d.offset, -1e7..=1e7))
+            });
+        }
+        Err(problem) => {
+            ui.label(
+                egui::RichText::new(text(problem))
+                    .small()
+                    .color(theme::danger()),
+            );
+        }
+    }
+    if d.picking_line {
+        ui.label(
+            egui::RichText::new(text(T::MirrorLinePrompt))
+                .small()
+                .color(theme::accent()),
+        );
+    }
     ui.label(
         egui::RichText::new(text(T::MirrorHint))
             .small()
@@ -2637,6 +2791,38 @@ fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O plano escolhido passa pela linha quando ela é paralela a ele; uma linha
+    /// atravessando o plano não define posição e o comando não é montado.
+    #[test]
+    fn mirror_plane_follows_a_parallel_reference_line_and_rejects_a_crossing_one() {
+        let yz = PLANES
+            .iter()
+            .position(|(_, normal)| *normal == [1., 0., 0.])
+            .unwrap_or_default();
+        let mut draft = MirrorDraft {
+            tab: 1,
+            target: None,
+            picking: false,
+            plane: yz,
+            offset: 5.,
+            line: None,
+            picking_line: false,
+        };
+        assert!(matches!(draft.origin(), Ok(p) if p == [5., 0., 0.]));
+        // Linha vertical em x = 30 num rascunho XY: paralela ao plano YZ.
+        draft.line = Some(MirrorLine {
+            edge: [[30., 0., 0.], [30., 40., 0.]],
+            label: "Eixo".into(),
+        });
+        assert!(matches!(draft.origin(), Ok(p) if p == [30., 0., 0.]));
+        // A mesma linha não serve para o plano XZ (normal Y): ela o atravessa.
+        draft.plane = PLANES
+            .iter()
+            .position(|(_, normal)| *normal == [0., 1., 0.])
+            .unwrap_or_default();
+        assert!(matches!(draft.origin(), Err(T::MirrorLineNotParallel)));
+    }
 
     #[test]
     fn reference_sketches_offer_line_midpoints_and_circle_quadrants()

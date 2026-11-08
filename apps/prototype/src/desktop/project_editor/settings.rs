@@ -101,7 +101,7 @@ impl Editor {
         }
     }
 
-    /// Tema e idioma: escolhas pessoais, gravadas fora do projeto e sem desfazer.
+    /// Tema, idioma e tamanho da faixa: escolhas pessoais, gravadas fora do projeto e sem desfazer.
     fn settings_appearance(&mut self, ui: &mut egui::Ui) {
         use crate::i18n::Language;
         let mut next = self.preferences.clone();
@@ -128,6 +128,19 @@ impl Editor {
                     (Some(Language::Portuguese), "Português"),
                     (Some(Language::Spanish), "Español"),
                     (Some(Language::English), "English"),
+                ],
+            )
+        });
+        row(ui, T::RibbonSizeMenu, T::RibbonSizeHint, |ui| {
+            use super::preferences::RibbonSize;
+            choice(
+                ui,
+                "settings_ribbon",
+                &mut next.ribbon,
+                &[
+                    (RibbonSize::Large, text(T::RibbonLarge)),
+                    (RibbonSize::Normal, text(T::RibbonNormal)),
+                    (RibbonSize::Compact, text(T::RibbonCompact)),
                 ],
             )
         });

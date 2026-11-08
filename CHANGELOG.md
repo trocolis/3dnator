@@ -2,6 +2,14 @@
 
 ## Não lançado
 
+## 0.51.0 — 08/11/2026
+
+- O tamanho da faixa (Maior, Normal, Compacto) passa a ser escolhido só em Configurações → Aparência → **Tamanho da faixa**; o botão ao lado da busca saiu.
+- Ponto a ponto: a seta aparece só nos centros virtuais (no vazio, como o de um furo ou o de um arredondamento côncavo); pontos médios e centros sobre o material ficam só com a marca. A ponte OCCT informa se o centro cai dentro de uma face plana vizinha, e a pré-seleção diz "Centro circular" ou "Centro circular (virtual)".
+- Espelhar (montagem): campo **Linha de referência**. Um clique numa linha de rascunho de referência faz o plano escolhido passar por ela; a linha precisa ser paralela ao plano (sempre vale com o rascunho paralelo a ele), senão o painel avisa e não monta o comando.
+- Escolha de plano com planos sobrepostos: **↑/↓** percorrem os planos sob o cursor (os da origem e de trabalho, depois as faces planas do modelo, da frente para trás, inclusive atrás de outros objetos) e o clique escolhe o destacado. O rótulo mostra a posição, como "Corpo (2/3, ↑/↓)".
+- A linha do tempo abre na última alteração e a acompanha; um marcador movido para o meio do histórico é trazido à vista.
+
 ## 0.50.0 — 08/11/2026
 
 - Menus de contexto: cada item ganha fundo destacado sob o mouse, na largura toda do menu (também na busca de ferramentas e na lista de projetos recentes). Antes, os itens com ícone não reagiam ao mouse.

@@ -426,6 +426,7 @@ pub enum Text {
     RigidBadge,
     RigidMoveHint,
     RibbonSizeMenu,
+    RibbonSizeHint,
     RibbonLarge,
     RibbonNormal,
     RibbonCompact,
@@ -953,6 +954,11 @@ pub enum Text {
     MovePointHint,
     VirtualCenter,
     VirtualArcCenter,
+    CircleCenterPoint,
+    MirrorLineField,
+    MirrorLinePrompt,
+    MirrorLineNotParallel,
+    ArcCenterPoint,
     EdgeMidpoint,
     FaceCenter,
     CircleBoundaryPoint,
@@ -1545,6 +1551,7 @@ fn pt(key: Text) -> &'static str {
         Text::RigidBadge => "Rígido",
         Text::RigidMoveHint => "Grupo rígido: os outros membros se movem junto",
         Text::RibbonSizeMenu => "Tamanho da faixa",
+        Text::RibbonSizeHint => "Maior mostra o nome de cada seção; Compacto deixa só os ícones.",
         Text::RibbonLarge => "Maior (com nomes das seções)",
         Text::RibbonNormal => "Normal",
         Text::RibbonCompact => "Compacto (só ícones)",
@@ -2025,6 +2032,15 @@ fn pt(key: Text) -> &'static str {
         Text::ConvertResolveFailure => "Resolva a falha pendente do histórico antes de converter.",
         Text::VirtualCenter => "Centro circular (virtual)",
         Text::VirtualArcCenter => "Centro do arco (virtual)",
+        Text::CircleCenterPoint => "Centro circular",
+        Text::MirrorLineField => "Linha de referência",
+        Text::MirrorLinePrompt => {
+            "Clique numa linha de um rascunho de referência: o plano passa por ela."
+        }
+        Text::MirrorLineNotParallel => {
+            "A linha precisa ser paralela ao plano escolhido (por exemplo, num rascunho paralelo a ele)."
+        }
+        Text::ArcCenterPoint => "Centro do arco",
         Text::EdgeMidpoint => "Ponto médio da aresta",
         Text::FaceCenter => "Centro da face",
         Text::CircleBoundaryPoint => "Quadrante da borda circular",

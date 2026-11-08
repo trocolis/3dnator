@@ -449,6 +449,9 @@ pub fn text(key: Text) -> &'static str {
         Text::RigidBadge => "Rígido",
         Text::RigidMoveHint => "Grupo rígido: los demás miembros se mueven con él",
         Text::RibbonSizeMenu => "Tamaño de la cinta",
+        Text::RibbonSizeHint => {
+            "Grande muestra el nombre de cada sección; Compacto deja solo los iconos."
+        }
         Text::RibbonLarge => "Grande (con nombres de sección)",
         Text::RibbonNormal => "Normal",
         Text::RibbonCompact => "Compacto (solo iconos)",
@@ -1065,6 +1068,15 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::VirtualCenter => "Centro circular (virtual)",
         Text::VirtualArcCenter => "Centro del arco (virtual)",
+        Text::CircleCenterPoint => "Centro circular",
+        Text::MirrorLineField => "Línea de referencia",
+        Text::MirrorLinePrompt => {
+            "Haga clic en una línea de un boceto de referencia: el plano pasa por ella."
+        }
+        Text::MirrorLineNotParallel => {
+            "La línea debe ser paralela al plano elegido (por ejemplo, en un boceto paralelo a él)."
+        }
+        Text::ArcCenterPoint => "Centro del arco",
         Text::EdgeMidpoint => "Punto medio de la arista",
         Text::FaceCenter => "Centro de la cara",
         Text::CircleBoundaryPoint => "Cuadrante del borde circular",

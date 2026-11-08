@@ -1154,37 +1154,12 @@ impl Editor {
                             self.shell.search_open = true;
                             self.shell.search_focus = true;
                         }
-                        self.ribbon_size_menu(ui);
                     });
                 });
                 ui.add(egui::Separator::default().spacing(4.));
                 self.ribbon_scroller(ui);
             });
         self.timeline(ui);
-    }
-    /// Botão do tamanho da faixa: Maior, Normal ou Compacto, gravado nas preferências.
-    fn ribbon_size_menu(&mut self, ui: &mut egui::Ui) {
-        let response = icons::button(ui, Icon::Restore, text(T::RibbonSizeMenu), false, false);
-        let mut chosen = None;
-        egui::Popup::menu(&response).show(|ui| {
-            for (size, label) in [
-                (preferences::RibbonSize::Large, T::RibbonLarge),
-                (preferences::RibbonSize::Normal, T::RibbonNormal),
-                (preferences::RibbonSize::Compact, T::RibbonCompact),
-            ] {
-                let current = self.preferences.ribbon == size;
-                if icons::menu_choice(ui, current, text(label)).clicked() {
-                    chosen = Some(size);
-                    ui.close();
-                }
-            }
-        });
-        if let Some(size) = chosen
-            && size != self.preferences.ribbon
-        {
-            self.preferences.ribbon = size;
-            self.save_preferences(ui.ctx());
-        }
     }
     fn document_tabs(&mut self, ui: &mut egui::Ui) {
         let mut switch = None;
