@@ -111,9 +111,24 @@ impl Editor {
             }
         }
         let settings = self.settings();
-        // Os rótulos são posicionados no fim, descendo até não cobrir outro já colocado.
-        let labels = std::cell::RefCell::new(Vec::<(egui::Pos2, String)>::new());
-        let label = |at: egui::Pos2, text: String| labels.borrow_mut().push((at, text));
+        // Os rótulos são posicionados no fim, sem cobrir outro já colocado nem as linhas.
+        let labels = std::cell::RefCell::new(Vec::<Label>::new());
+        let label = |at: egui::Pos2, text: String| {
+            labels.borrow_mut().push(Label {
+                at,
+                text,
+                color: None,
+                outward: None,
+            })
+        };
+        let lines = std::cell::RefCell::new(Vec::<[egui::Pos2; 2]>::new());
+        // Decomposição nos eixos: o contorno (origem, cantos, destino) define o "dentro".
+        let outline = |from: Point3, to: Point3| -> Vec<egui::Pos2> {
+            axis_corners(from, to)
+                .into_iter()
+                .filter_map(&screen)
+                .collect()
+        };
         for reading in readings(first, second, self.measure_tool.axes) {
             match reading {
                 Reading::Point { at } => {
@@ -160,11 +175,23 @@ impl Editor {
                         painter.line_segment([a, b], egui::Stroke::new(1.5, theme::green()));
                         painter.circle_filled(a, 3., theme::green());
                         painter.circle_filled(b, 3., theme::green());
-                        label(a.lerp(b, 0.5), self.length(mm));
+                        if self.measure_tool.axes {
+                            lines.borrow_mut().push([a, b]);
+                            labels.borrow_mut().push(Label {
+                                at: a.lerp(b, 0.5),
+                                text: self.length(mm),
+                                color: Some(theme::green()),
+                                outward: Some(outward(a, b, &outline(from, to))),
+                            });
+                        } else {
+                            label(a.lerp(b, 0.5), self.length(mm));
+                        }
                     }
                 }
                 Reading::Axes { from, to } => {
-                    // Um trecho por eixo, em X, Y e Z, com o valor absoluto de cada um.
+                    // Um trecho por eixo, em X, Y e Z, com o valor absoluto de cada um. A cota
+                    // fica no meio do trecho, do lado de fora do contorno, na cor do eixo.
+                    let contour = outline(from, to);
                     let mut corner = from;
                     for (axis, color) in AXES.iter().enumerate() {
                         let mut next = corner;
@@ -174,10 +201,17 @@ impl Editor {
                             && norm(sub(next, corner)) > 1e-9
                         {
                             painter.line_segment([a, b], egui::Stroke::new(1.5, *color));
-                            label(
-                                a.lerp(b, 0.5) + egui::vec2(0., 28.),
-                                format!("{} {}", ["ΔX", "ΔY", "ΔZ"][axis], self.length(delta)),
-                            );
+                            lines.borrow_mut().push([a, b]);
+                            labels.borrow_mut().push(Label {
+                                at: a.lerp(b, 0.5),
+                                text: format!(
+                                    "{} {}",
+                                    ["ΔX", "ΔY", "ΔZ"][axis],
+                                    self.length(delta)
+                                ),
+                                color: Some(*color),
+                                outward: Some(outward(a, b, &contour)),
+                            });
                         }
                         corner = next;
                     }
@@ -196,24 +230,162 @@ impl Editor {
                 }
             }
         }
+        let lines = lines.into_inner();
         let mut placed: Vec<egui::Rect> = Vec::new();
-        for (at, text) in labels.into_inner() {
+        for label in labels.into_inner() {
             let galley =
-                painter.layout_no_wrap(text, egui::FontId::proportional(13.), theme::ink());
+                painter.layout_no_wrap(label.text, egui::FontId::proportional(13.), theme::ink());
             let size = galley.size() + egui::vec2(10., 6.);
-            let mut place = egui::Rect::from_center_size(at - egui::vec2(0., 14.), size);
-            while placed.iter().any(|r| r.expand(2.).intersects(place)) {
-                place = place.translate(egui::vec2(0., size.y + 3.));
-            }
+            let place = match label.outward {
+                Some(n) => place_outside(label.at, n, size, &placed, &lines),
+                None => {
+                    let mut place =
+                        egui::Rect::from_center_size(label.at - egui::vec2(0., 14.), size);
+                    while placed.iter().any(|r| r.expand(2.).intersects(place)) {
+                        place = place.translate(egui::vec2(0., size.y + 3.));
+                    }
+                    place
+                }
+            };
             placed.push(place);
+            let border = match label.color {
+                Some(color) => {
+                    // Linha de chamada do meio do trecho até a cota.
+                    let end = nearest_on_rect(place, label.at);
+                    painter.line_segment([label.at, end], egui::Stroke::new(1., color));
+                    painter.circle_filled(label.at, 2.5, color);
+                    egui::Stroke::new(2., color)
+                }
+                None => egui::Stroke::new(1., theme::border()),
+            };
             painter.rect_filled(place, 4., theme::panel());
-            painter.rect_stroke(
-                place,
-                4.,
-                egui::Stroke::new(1., theme::border()),
-                egui::StrokeKind::Inside,
-            );
+            painter.rect_stroke(place, 4., border, egui::StrokeKind::Inside);
             painter.galley(place.center() - galley.size() / 2., galley, theme::ink());
         }
+    }
+}
+
+/// Cota a desenhar: ponto de referência, texto e, nas decomposições, a cor do trecho e o
+/// lado de fora (vetor unitário na tela) em que ela deve ficar.
+struct Label {
+    at: egui::Pos2,
+    text: String,
+    color: Option<egui::Color32>,
+    outward: Option<egui::Vec2>,
+}
+
+/// Origem, cantos intermediários (X, depois Y) e destino da decomposição nos eixos.
+fn axis_corners(from: Point3, to: Point3) -> Vec<Point3> {
+    let mut corner = from;
+    let mut points = vec![from];
+    for axis in 0..3 {
+        corner[axis] = to[axis];
+        points.push(corner);
+    }
+    points
+}
+
+/// Normal do trecho `a`–`b` na tela, apontando para longe do centro do contorno.
+fn outward(a: egui::Pos2, b: egui::Pos2, contour: &[egui::Pos2]) -> egui::Vec2 {
+    let center = (!contour.is_empty()).then(|| {
+        contour
+            .iter()
+            .fold(egui::Vec2::ZERO, |sum, p| sum + p.to_vec2())
+            / contour.len() as f32
+    });
+    let away = center.map(|c| a.lerp(b, 0.5).to_vec2() - c);
+    // Trecho visto de topo (quase um ponto na tela): só resta fugir do centro, ou subir.
+    if (b - a).length() < 1e-3 {
+        return away
+            .filter(|v| v.length() > 1e-3)
+            .map_or(egui::vec2(0., -1.), egui::Vec2::normalized);
+    }
+    let direction = (b - a).normalized();
+    let normal = egui::vec2(-direction.y, direction.x);
+    match away {
+        Some(v) if normal.dot(v) < 0. => -normal,
+        _ => normal,
+    }
+}
+
+/// Retângulo da cota encostado no lado `normal` do ponto, afastado até não cobrir outra cota
+/// nem atravessar nenhuma das linhas medidas.
+fn place_outside(
+    at: egui::Pos2,
+    normal: egui::Vec2,
+    size: egui::Vec2,
+    placed: &[egui::Rect],
+    lines: &[[egui::Pos2; 2]],
+) -> egui::Rect {
+    // Distância do centro até a borda do retângulo na direção da normal, mais a folga.
+    let extent = normal.x.abs() * size.x / 2. + normal.y.abs() * size.y / 2.;
+    let step = extent * 2. + 3.;
+    let mut place = egui::Rect::from_center_size(at + normal * (extent + 10.), size);
+    for _ in 0..12 {
+        let blocked = placed.iter().any(|r| r.expand(2.).intersects(place))
+            || lines.iter().any(|line| crosses(place.expand(2.), *line));
+        if !blocked {
+            break;
+        }
+        place = place.translate(normal * step);
+    }
+    place
+}
+
+/// O trecho passa por dentro do retângulo (amostrado ao longo do comprimento).
+fn crosses(rect: egui::Rect, [a, b]: [egui::Pos2; 2]) -> bool {
+    let samples = ((b - a).length() / 2.).clamp(2., 400.) as usize;
+    (0..=samples).any(|i| rect.contains(a.lerp(b, i as f32 / samples as f32)))
+}
+
+/// Ponto da borda do retângulo mais próximo de `p`.
+fn nearest_on_rect(rect: egui::Rect, p: egui::Pos2) -> egui::Pos2 {
+    egui::pos2(
+        p.x.clamp(rect.left(), rect.right()),
+        p.y.clamp(rect.top(), rect.bottom()),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Triângulo retângulo na tela: catetos horizontal e vertical e a hipotenusa.
+    fn triangle() -> [egui::Pos2; 3] {
+        [
+            egui::pos2(100., 300.),
+            egui::pos2(300., 300.),
+            egui::pos2(300., 100.),
+        ]
+    }
+
+    #[test]
+    fn each_leg_label_goes_outside_the_triangle_without_crossing_any_line() {
+        let [a, b, c] = triangle();
+        let lines = [[a, b], [b, c], [a, c]];
+        let size = egui::vec2(90., 20.);
+        let mut placed = Vec::new();
+        for [p, q] in lines {
+            let n = outward(p, q, &[a, b, c]);
+            let rect = place_outside(p.lerp(q, 0.5), n, size, &placed, &lines);
+            // Fora: o centro da cota está mais longe do centroide que o meio do trecho.
+            let centroid = (a.to_vec2() + b.to_vec2() + c.to_vec2()) / 3.;
+            let middle = p.lerp(q, 0.5).to_vec2();
+            assert!((rect.center().to_vec2() - centroid).length() > (middle - centroid).length());
+            assert!(lines.iter().all(|line| !crosses(rect, *line)), "{rect:?}");
+            assert!(placed.iter().all(|r: &egui::Rect| !r.intersects(rect)));
+            placed.push(rect);
+        }
+        // Cateto de baixo: cota abaixo dele; cateto da direita: cota à direita.
+        assert!(placed[0].top() > 300.);
+        assert!(placed[1].left() > 300.);
+    }
+
+    #[test]
+    fn a_leg_seen_end_on_still_gets_a_finite_direction() {
+        let [a, _, c] = triangle();
+        let n = outward(a, a, &[a, c]);
+        assert!(n.x.is_finite() && n.y.is_finite());
+        assert!((n.length() - 1.).abs() < 1e-4);
     }
 }

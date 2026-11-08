@@ -528,14 +528,17 @@ pub(super) fn entry_with_hint(
     );
     job.wrap.max_rows = 1;
     let galley = ui.painter().layout_job(job);
-    ui.painter().galley(
-        egui::pos2(
-            response.rect.left() + 28.,
-            response.rect.center().y - galley.size().y / 2.,
-        ),
-        galley,
-        ink,
+    let at = egui::pos2(
+        response.rect.left() + 28.,
+        response.rect.center().y - galley.size().y / 2.,
     );
+    let elided = galley.elided;
+    ui.painter().galley(at, galley, ink);
+    // Nome abreviado: sob o mouse ou selecionado, aparece inteiro numa camada acima da
+    // árvore, mesmo passando da borda dela.
+    if elided && ui.is_enabled() && (response.hovered() || selected) {
+        full_name_overlay(ui, response.id, at, label, ink);
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(
             response.rect,
@@ -545,6 +548,24 @@ pub(super) fn entry_with_hint(
         );
     }
     response.on_hover_text(hint)
+}
+
+/// Nome completo de uma linha abreviada, sobre um fundo opaco na camada de dicas.
+fn full_name_overlay(ui: &egui::Ui, id: egui::Id, at: egui::Pos2, label: &str, ink: egui::Color32) {
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        id.with("full_name"),
+    ));
+    let galley = painter.layout_no_wrap(label.to_owned(), egui::FontId::proportional(13.), ink);
+    let rect = egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(4., 2.));
+    painter.rect_filled(rect, 4, theme::surface());
+    painter.rect_stroke(
+        rect,
+        4,
+        egui::Stroke::new(1., theme::border()),
+        egui::StrokeKind::Outside,
+    );
+    painter.galley(at, galley, ink);
 }
 
 #[cfg(test)]
@@ -611,6 +632,45 @@ mod tests {
                         == Some("Extrusão"))
                 );
             }
+        }
+        Ok(())
+    }
+    /// Uma linha estreita abrevia o nome; selecionada (ou sob o mouse), mostra o nome inteiro
+    /// sem abreviar, por cima da borda. Nomes que cabem não ganham a cópia.
+    #[test]
+    fn truncated_tree_entry_shows_the_full_name_when_selected() -> TestResult<()> {
+        let long = "Suporte do motor com furação para parafusos M3 e encaixe lateral";
+        for (label, selected, expect) in [
+            (long, true, true),
+            (long, false, false),
+            ("Curto", true, false),
+        ] {
+            let context = egui::Context::default();
+            theme::apply(&context, theme::Choice::Light);
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(420., 240.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.allocate_ui(egui::vec2(140., 22.), |ui| {
+                        entry_with_hint(ui, Icon::Part, label, selected, false, label)
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            let full = output.shapes.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::Text(t) => {
+                    t.galley.job.text == label
+                        && !t.galley.elided
+                        && t.galley.job.wrap.max_rows == usize::MAX
+                }
+                _ => false,
+            });
+            assert_eq!(full, expect, "{label} selecionado={selected}");
         }
         Ok(())
     }

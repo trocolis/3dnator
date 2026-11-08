@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.49.0 — 08/11/2026
+
+- Árvore: um nome abreviado aparece inteiro enquanto a linha está sob o mouse ou selecionada, sobre fundo opaco e mesmo além da borda da árvore.
+- Medir: na decomposição ΔX, ΔY e ΔZ, cada cota fica no meio do seu trecho e do lado de fora do triângulo, com borda e linha de chamada na cor do eixo (a distância total, em verde), afastada até não cobrir outra cota nem as linhas medidas. Antes, as cotas ficavam deslocadas para baixo, longe dos trechos e misturadas entre si.
+- Ponto a ponto: entre as marcas do corpo mapeado, centros de círculos e arcos (no material ou virtuais) ganham uma seta diagonal, e pontos médios de aresta, uma seta vinda de cima.
+- Cenário de captura `align-points` (`--render-ui-scenario`): ponto a ponto com o corpo já mapeado.
+
 ## 0.48.0 — 08/11/2026
 
 - **Grupo rígido:** o menu do grupo na árvore ganha **Tornar grupo rígido** / **Tornar grupo organizacional**. Num grupo rígido, mover qualquer membro (Mover, alinhamentos, ponto a ponto, arraste) move os demais pelo mesmo deslocamento, numa só ação de desfazer, e a prévia já mostra o grupo inteiro. O grupo ganha a marca **Rígido** na árvore e os painéis de mover e alinhar avisam quantos membros vão junto. Os membros continuam com posições próprias, sem origem nova. Clicar num membro seleciona só ele; copiar, padrão e espelhar atuam só sobre a escolha. Um componente pertence a no máximo um grupo rígido. Mover um grupo organizacional também leva os parceiros rígidos dos membros, cada um uma vez. Clonar ou importar um conjunto preserva a rigidez dos grupos internos. Formato 53: `groups[].rigid`.

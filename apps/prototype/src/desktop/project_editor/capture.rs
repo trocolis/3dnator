@@ -67,6 +67,7 @@ pub(crate) fn render_ui_scenario(
         | "assembly-select"
         | "move"
         | "align"
+        | "align-points"
         | "assembly-ribbon"
         | "section"
         | "section-contact"
@@ -134,7 +135,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: cursor-extrude, cursor-hole, cursor-measure, cursor-pan, cursor-select, timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-shortcuts, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, align-points, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-shortcuts, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
         }
@@ -1367,7 +1368,7 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 [-60., 30., 0.],
             );
         }
-        "move" | "align" | "assembly-ribbon" | "copy-beside" => {
+        "move" | "align" | "align-points" | "assembly-ribbon" | "copy-beside" => {
             editor.current_mut().active_part = None;
             let document = editor.current().session.document();
             // Uma instância com corpos visíveis, a mais interna disponível.
@@ -1388,6 +1389,33 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                     editor.set_move_for_capture([25., 0., 10.], [0., 0., 30.]);
                 }
                 "align" => editor.open_align(navigation::PickMode::Vertex),
+                "align-points" => {
+                    // Ponto a ponto com o primeiro corpo mapeado: marcas, setas nos centros
+                    // e pontos médios, sem esperar o clique de escolha do corpo.
+                    editor.current_mut().select(None);
+                    editor.open_align(navigation::PickMode::Vertex);
+                    let document = editor.current().session.document().clone();
+                    let body = document
+                        .instance(instance)
+                        .and_then(|i| document.part(i.part))
+                        .and_then(|p| p.shown_bodies().next())
+                        .map(|b| b.id)
+                        .ok_or("Peça sem corpo visível.")?;
+                    editor.focus_for_capture(assembly_tools::PointFocus {
+                        path: vec![instance],
+                        body,
+                        name: String::new(),
+                    });
+                    let context = egui::Context::default();
+                    let revision = (editor.current().id, editor.current().session.revision());
+                    for _ in 0..500 {
+                        editor.prepare_points(&document, &context);
+                        if editor.point_cache.anchors(revision, body).is_some() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
                 "copy-beside" => {
                     // Nova instância e cópia independente: ambas ao lado da original.
                     editor.execute(Command::DuplicateInstance { id: instance });

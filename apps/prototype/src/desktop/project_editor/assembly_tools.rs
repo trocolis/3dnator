@@ -1176,6 +1176,13 @@ impl Editor {
             d.field = None;
         }
     }
+    /// Corpo mapeado no ponto a ponto, para capturas de ensaio.
+    pub(super) fn focus_for_capture(&mut self, focus: PointFocus) {
+        if let Some(Panel::Align(d)) = &mut self.assembly_panel {
+            d.focus = Some(focus);
+            d.field = Some(AlignField::From);
+        }
+    }
     /// Mover por alinhamento (face a face, aresta a aresta ou ponto a ponto). O modo de
     /// seleção acompanha o tipo, para a pré-seleção realçar o elemento certo.
     pub(super) fn open_align(&mut self, kind: navigation::PickMode) {
@@ -2106,6 +2113,9 @@ impl Editor {
                     }
                     if let Some(p) = project(point) {
                         painter.circle(p, 2.5, egui::Color32::WHITE, egui::Stroke::new(1.2, color));
+                        if let Some(from) = anchor_arrow(anchor.kind) {
+                            pointer_arrow(&painter, p, from, color);
+                        }
                     }
                 }
             }
@@ -2130,6 +2140,41 @@ impl Editor {
             );
         }
     }
+}
+
+/// Direção (na tela, do ponto para a cauda) da seta que destaca um apoio: centros de
+/// círculos e arcos, reais ou virtuais, pela diagonal superior esquerda; pontos médios de
+/// aresta, de cima. Os demais apoios ficam só com a marca redonda.
+fn anchor_arrow(kind: nator_commands::point_snap::PointKind) -> Option<egui::Vec2> {
+    use nator_commands::point_snap::PointKind;
+    match kind {
+        PointKind::CircleCenter | PointKind::ArcCenter => Some(egui::vec2(-1., -1.).normalized()),
+        PointKind::EdgeMidpoint => Some(egui::vec2(0., -1.)),
+        PointKind::Vertex | PointKind::CircleBoundary | PointKind::FaceCenter => None,
+    }
+}
+
+/// Seta curta que termina junto da marca do apoio, vinda da direção `from`.
+fn pointer_arrow(
+    painter: &egui::Painter,
+    point: egui::Pos2,
+    from: egui::Vec2,
+    color: egui::Color32,
+) {
+    let tip = point + from * 4.;
+    let tail = point + from * 16.;
+    let stroke = egui::Stroke::new(1.4, color);
+    painter.line_segment([tail, tip], stroke);
+    let side = egui::vec2(-from.y, from.x);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            tip,
+            tip + from * 5. + side * 3.,
+            tip + from * 5. - side * 3.,
+        ],
+        color,
+        egui::Stroke::NONE,
+    ));
 }
 
 /// Rótulo de um elemento para os campos de seleção.
