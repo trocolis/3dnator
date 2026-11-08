@@ -193,11 +193,14 @@ impl Editor {
                     } else {
                         candidate.label.clone()
                     };
+                    let mut overlay = candidate.overlay.clone();
+                    // Faces atrás da primeira continuam visíveis através do corpo.
+                    overlay.through = index.is_some_and(|i| i > 0);
                     self.hover = Some(highlight::Hover::fixed(
                         key.scene.tab,
                         key.scene.revision,
                         position,
-                        candidate.overlay.clone(),
+                        overlay,
                         label,
                     ));
                 }

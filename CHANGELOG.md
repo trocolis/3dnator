@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.52.1 — 08/11/2026
+
+- A face de trás escolhida com ↑/↓ (nas ferramentas que esperam face e na escolha de plano) aparece realçada através do corpo. Antes, a face oposta de um cubo, de costas para a câmera, era descartada pelo desenho do realce e nada aparecia.
+
 ## 0.52.0 — 08/11/2026
 
 - Extrusão: as faces planas aptas se destacam sob o cursor também em cenas grandes (STEP importados, antes sem pré-seleção acima de 400 mil triângulos) e quando a divisão da face em células falha (a face inteira aparece em vez de nada).

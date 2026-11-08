@@ -29,6 +29,9 @@ pub(super) struct Overlay {
     pub points: Vec<Point3>,
     /// Contornos com furos de perfis livres, no referencial da montagem.
     pub contours: Vec<Vec<Point3>>,
+    /// Desenhar mesmo de costas para a câmera e por cima do que estiver na frente: a face
+    /// de trás escolhida com ↑/↓ continua visível através do corpo.
+    pub through: bool,
 }
 impl Overlay {
     pub fn is_empty(&self) -> bool {
@@ -42,6 +45,7 @@ impl Overlay {
         self.triangles.extend(other.triangles);
         self.points.extend(other.points);
         self.contours.extend(other.contours);
+        self.through |= other.through;
     }
 }
 
@@ -255,7 +259,7 @@ pub(super) fn draw(
     });
     for triangle in &overlay.triangles {
         let normal = cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0]));
-        if dot(normal, toward) <= 0. {
+        if !overlay.through && dot(normal, toward) <= 0. {
             continue;
         }
         let Some(points) = triangle
@@ -294,7 +298,7 @@ pub(super) fn draw(
         }
     }
     for (segment, normal) in &overlay.segments {
-        if normal.is_some_and(|n| norm(n) > 0. && dot(n, toward) <= 0.) {
+        if !overlay.through && normal.is_some_and(|n| norm(n) > 0. && dot(n, toward) <= 0.) {
             continue;
         }
         if let (Some(a), Some(b)) = (project(segment[0]), project(segment[1])) {
@@ -583,10 +587,11 @@ impl Editor {
                 .ok()
                 .and_then(|picks| section::first_visible(picks, self.current().section))
         };
-        let (overlay, label) = match pick {
+        let (mut overlay, label) = match pick {
             Some(pick) => self.pick_overlay(&document, &pick),
             None => (Overlay::default(), String::new()),
         };
+        overlay.through = face_await && self.face_layers.layer > 0;
         let label = if face_await && !label.is_empty() {
             self.face_layers.label(&label)
         } else {
@@ -881,7 +886,7 @@ impl Editor {
             .as_ref()
             .filter(|h| h.tab == self.current().id && !h.overlay.is_empty())
         {
-            if self.current().section_plane().is_some() {
+            if self.current().section_plane().is_some() && !hover.overlay.through {
                 let mut segments: Vec<_> = hover
                     .overlay
                     .segments
@@ -937,5 +942,50 @@ impl Editor {
                 painter.galley(at + egui::vec2(5., 3.), galley, egui::Color32::WHITE);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A face de baixo de um cubo, vista de cima, está de costas para a câmera: o realce
+    /// comum a descarta, mas o realce "através" (face escolhida com ↑/↓) a desenha.
+    #[test]
+    fn back_faces_are_drawn_only_when_the_overlay_goes_through() {
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let bounds = nator_geometry::Bounds {
+            min: [0., 0., 0.],
+            max: [20., 20., 20.],
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400., 300.));
+        // Normal −Z: de costas para quem olha de cima.
+        let bottom = [[0., 0., 0.], [0., 20., 0.], [20., 0., 0.]];
+        let shapes = |through: bool| {
+            let context = egui::Context::default();
+            let mut count = 0;
+            let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+                let overlay = Overlay {
+                    triangles: vec![bottom],
+                    segments: vec![([bottom[0], bottom[1]], Some([0., 0., -1.]))],
+                    through,
+                    ..Default::default()
+                };
+                draw(ui.painter(), &camera, bounds, rect, &overlay, Look::Hover);
+            });
+            output.textures_delta.clear();
+            for clipped in &output.shapes {
+                if matches!(
+                    clipped.shape,
+                    egui::Shape::Mesh(_) | egui::Shape::LineSegment { .. }
+                ) {
+                    count += 1;
+                }
+            }
+            count
+        };
+        assert_eq!(shapes(false), 0);
+        assert!(shapes(true) >= 2);
     }
 }

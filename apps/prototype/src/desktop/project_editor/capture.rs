@@ -4752,6 +4752,8 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
+        // A face de baixo, de costas para a câmera, aparece através do bloco.
+        assert!(editor.hover.as_ref().is_some_and(|h| h.overlay.through));
         click(&mut editor, &context, target)?;
         settle(&mut editor, &context)?;
         let chosen = editor

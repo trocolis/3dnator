@@ -516,8 +516,10 @@ impl Editor {
         };
         // A contagem vem da resposta recém-recolhida, para as setas valerem já no quadro
         // seguinte ao realce.
+        let mut overlay = overlay;
         let label = if area {
             self.face_layers.count = self.cell_hover.layers();
+            overlay.through = self.face_layers.layer > 0;
             self.face_layers.label(&label)
         } else {
             label
