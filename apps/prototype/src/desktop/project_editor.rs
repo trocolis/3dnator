@@ -549,6 +549,8 @@ pub struct Editor {
     allow_exit: bool,
     recoveries: Vec<PathBuf>,
     show_recovery: bool,
+    /// Cópia de recuperação aguardando a confirmação de exclusão no painel.
+    recovery_delete: Option<PathBuf>,
     parameters_edit: Option<parameter_editor::Draft>,
     print_profile_edit: Option<print_profile::Draft>,
     print_check: Option<print_check::Draft>,
@@ -796,6 +798,7 @@ impl Editor {
             allow_exit: false,
             show_recovery: !recoveries.is_empty(),
             recoveries,
+            recovery_delete: None,
             parameters_edit: None,
             print_profile_edit: None,
             print_check: None,

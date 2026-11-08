@@ -1412,7 +1412,7 @@ impl Editor {
                 self.ribbon_group(ui, &[Action::NewEmptyPart]);
                 self.ribbon_group(ui, &[Action::ImportReference]);
                 self.ribbon_group(ui, &[Action::MoveCopy]);
-                self.ribbon_group(ui, &[Action::NewInstance]);
+                self.ribbon_group(ui, &[Action::NewInstance, Action::InstanceMirror]);
                 self.ribbon_group(ui, &[Action::Group, Action::Ungroup]);
                 self.ribbon_group(ui, &[Action::Drawing, Action::Section, Action::ExportStep]);
             }

@@ -86,6 +86,7 @@ pub(super) fn context(command: &Command, doc: &Document) -> C {
         | Command::DuplicateInstance { .. }
         | Command::CopyInstanceAt { .. }
         | Command::CloneInstance { .. }
+        | Command::MakeInstanceIndependent { .. }
         | Command::AddInstance { .. }
         | Command::RemoveInstance { .. }
         | Command::ReparentInstance { .. }
@@ -223,6 +224,7 @@ pub(super) fn intent(command: &Command, doc: &Document) -> Option<Intent> {
         Command::CopyBody { .. } | Command::TransferBody { .. } => (K::Copy, None),
         Command::DuplicateInstance { .. }
         | Command::CloneInstance { .. }
+        | Command::MakeInstanceIndependent { .. }
         | Command::CopyInstanceAt { .. } => (K::Copy, None),
         Command::MoveGroup { id, .. } => (K::Move, Some(T::Group(*id))),
         Command::CreateGroup { .. } => (K::Group, None),

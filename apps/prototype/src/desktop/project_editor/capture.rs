@@ -5500,6 +5500,41 @@ mod tests {
         Ok(())
     }
 
+    /// O painel de recuperação exclui uma cópia só depois da confirmação, e nunca apaga um
+    /// projeto comum que esteja na lista.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn recovery_panel_deletes_a_copy_after_confirmation() -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let directory = tempfile::tempdir()?;
+        let document = Document::new("Recuperação")?;
+        let copy = directory.path().join("copia.3dnator");
+        nator_project_io::write_recovery(&copy, &document)?;
+        let project = directory.path().join("projeto.3dnator");
+        nator_project_io::write_project(&project, &document)?;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries = vec![copy.clone()];
+        editor.show_recovery = true;
+        settle(&mut editor, &context)?;
+        let delete = label_position(&mut editor, &context, text(T::DeleteRecovery))?;
+        click(&mut editor, &context, delete)?;
+        assert_eq!(editor.recovery_delete.as_ref(), Some(&copy));
+        assert!(copy.exists(), "O primeiro clique só pede confirmação");
+        let confirm = label_position(&mut editor, &context, text(T::DeleteRecoveryConfirm))?;
+        click(&mut editor, &context, confirm)?;
+        assert!(!copy.exists());
+        assert!(editor.recoveries.is_empty());
+        assert!(!editor.show_recovery);
+        // Um projeto comum na lista não é apagado.
+        editor.recoveries = vec![project.clone()];
+        editor.show_recovery = true;
+        editor.delete_recovery(&project);
+        assert!(project.exists());
+        assert_eq!(editor.recoveries, vec![project]);
+        Ok(())
+    }
+
     /// Exercita os comandos promovidos da nova faixa, incluindo expressão, confirmação,
     /// cancelamento e desfazer. O rascunho continua no mesmo viewport durante todo o fluxo.
     #[test]

@@ -824,6 +824,7 @@ impl Editor {
         if self.show_recovery {
             let mut open = self.show_recovery;
             let mut recover = None;
+            let mut delete = None;
             egui::Window::new(text(T::Recovery))
                 .open(&mut open)
                 .show(context, |ui| {
@@ -845,25 +846,70 @@ impl Editor {
                                         ui.small(
                                             path.file_name().unwrap_or_default().to_string_lossy(),
                                         );
-                                        if ui
-                                            .add_enabled(
-                                                !self.busy(),
-                                                egui::Button::new(text(T::Recover)),
-                                            )
-                                            .clicked()
-                                        {
-                                            recover = Some(path.clone());
-                                        }
+                                        ui.horizontal(|ui| {
+                                            if ui
+                                                .add_enabled(
+                                                    !self.busy(),
+                                                    egui::Button::new(text(T::Recover)),
+                                                )
+                                                .clicked()
+                                            {
+                                                recover = Some(path.clone());
+                                            }
+                                            // Excluir é definitivo: pede um segundo clique.
+                                            if self.recovery_delete.as_ref() == Some(&path) {
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new(text(
+                                                            T::DeleteRecoveryConfirm,
+                                                        ))
+                                                        .color(theme::danger()),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    delete = Some(path.clone());
+                                                }
+                                                if ui.button(text(T::Cancel)).clicked() {
+                                                    self.recovery_delete = None;
+                                                }
+                                            } else if ui.button(text(T::DeleteRecovery)).clicked() {
+                                                self.recovery_delete = Some(path.clone());
+                                            }
+                                        });
                                     });
                                 });
                             }
                         });
                 });
             self.show_recovery = open;
+            if let Some(path) = delete {
+                self.delete_recovery(&path);
+            }
             if let Some(path) = recover {
                 self.show_recovery = false;
                 self.open(context, Some(path));
             }
+        }
+    }
+}
+
+impl Editor {
+    /// Exclui uma cópia de recuperação do painel. Só apaga arquivos marcados como
+    /// recuperação (`remove_recovery` confere o manifesto); sem cópias, o painel fecha.
+    pub(super) fn delete_recovery(&mut self, path: &std::path::Path) {
+        self.recovery_delete = None;
+        match nator_project_io::remove_recovery(path) {
+            Ok(()) if !path.exists() => {
+                self.recoveries.retain(|p| p != path);
+                self.status.set(text(T::RecoveryDeleted));
+            }
+            Ok(()) => self.status.error(text(T::RecoveryDeleteFailed)),
+            Err(error) => self
+                .status
+                .error(format!("{}: {error}", text(T::RecoveryDeleteFailed))),
+        }
+        if self.recoveries.is_empty() {
+            self.show_recovery = false;
         }
     }
 }

@@ -116,7 +116,7 @@ As folhas técnicas de contextos exclusivamente sólidos usam remoção de linha
 
 **Salvar** e **Salvar como…** usam diálogos nativos. O arquivo `.3dnator` contém definições, corpos de malha e sólidos com B-rep, nomes de faces, rascunhos, parâmetros, histórico, montagem, grupos e folhas técnicas. O arquivo importado de origem pode ser movido ou apagado após o salvamento. A versão interna é 19, independente da versão do aplicativo, com migração de projetos anteriores.
 
-A gravação temporária é validada antes de substituir o projeto anterior. A recuperação é gravada separadamente, após dois segundos de inatividade e disponibilidade da thread de trabalho, e é oferecida ao iniciar a aplicação. Uma cópia recuperada precisa ser salva explicitamente. `NATOR_RECOVERY_DIR` permite escolher o diretório das cópias.
+A gravação temporária é validada antes de substituir o projeto anterior. A recuperação é gravada separadamente, após dois segundos de inatividade e disponibilidade da thread de trabalho, e é oferecida ao iniciar a aplicação. Uma cópia recuperada precisa ser salva explicitamente; cópias que não interessam podem ser excluídas na própria janela, com confirmação. `NATOR_RECOVERY_DIR` permite escolher o diretório das cópias.
 
 Detalhes e limites estão em [PROJECT_FORMAT.md](PROJECT_FORMAT.md). O arquivo inclui uma miniatura isométrica, mostrada na janela de recuperação, e as casas decimais de exibição do documento. A câmera persistida ainda não faz parte do arquivo. A câmera, incluindo a projeção, é mantida por aba durante a sessão. Desfazer/refazer começa vazio ao reabrir.
 

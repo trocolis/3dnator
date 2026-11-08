@@ -53,6 +53,34 @@ pub(super) struct MenuContext {
     pub locked: HashSet<InstanceId>,
     pub parts: Vec<(PartId, String)>,
     pub selected_instances: usize,
+    /// Definições usadas por mais de uma instância (cópias compartilhadas).
+    pub shared_parts: HashSet<PartId>,
+}
+
+/// Item "Tornar independente" para uma cópia compartilhada; nada para peças únicas.
+pub(super) fn independent_item(
+    ui: &mut egui::Ui,
+    context: &MenuContext,
+    instance: &Instance,
+) -> Option<MenuAction> {
+    if !context.shared_parts.contains(&instance.part) {
+        return None;
+    }
+    let clicked = ui
+        .horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(16.), egui::Sense::hover());
+            icons::paint(ui.painter(), rect, Icon::Copy, ui.is_enabled());
+            ui.add(egui::Button::new(text(T::MakeIndependent)).frame(false))
+                .on_hover_text(text(T::MakeIndependentHint))
+                .clicked()
+        })
+        .inner;
+    clicked.then(|| {
+        MenuAction::Command(Box::new(Command::MakeInstanceIndependent {
+            id: instance.id,
+            name: instance.name.clone(),
+        }))
+    })
 }
 
 fn item(ui: &mut egui::Ui, icon: Icon, label: T) -> bool {
@@ -105,6 +133,9 @@ pub(super) fn instance_menu(
     }
     if item(ui, Icon::Copy, T::CopyMenu) {
         action = Some(MenuAction::Copy(vec![target], false));
+    }
+    if let Some(independent) = independent_item(ui, context, instance) {
+        action = Some(independent);
     }
     if item(ui, Icon::Pattern, T::RectangularInstancePattern) {
         action = Some(MenuAction::Pattern(instance.id, false));
@@ -357,6 +388,16 @@ impl Editor {
                 .iter()
                 .filter(|s| matches!(s, Selection::Instance(_)))
                 .count(),
+            shared_parts: {
+                let mut seen = HashSet::new();
+                tab.session
+                    .document()
+                    .instances()
+                    .iter()
+                    .filter(|i| !seen.insert(i.part))
+                    .map(|i| i.part)
+                    .collect()
+            },
         }
     }
 

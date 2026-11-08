@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.46.0 — 08/11/2026
+
+- Janela de recuperação: cada cópia ganha **Excluir**, ao lado de **Recuperar**, com confirmação em **Excluir definitivamente**. Só arquivos marcados como cópia de recuperação são apagados; sem cópias restantes, a janela fecha.
+- Aba Montagem: **Espelhar** ao lado de **Copiar**, abrindo o painel de espelhar componente (antes só no menu da árvore).
+- Menu de contexto de cópias compartilhadas (peças e referências) ganha **Tornar independente**: a instância passa a usar uma definição própria, no mesmo lugar e com o nome dela, numa só ação de desfazer. O item só aparece quando outra instância usa a mesma definição.
+
 ## 0.45.2 — 08/11/2026
 
 - Alinhamentos (ponto a ponto, face a face e aresta a aresta) movem a referência da peça em edição: o painel descartava o movimento sempre que a origem não era um corpo da peça ativa, mesmo com a seleção da referência já aceita.

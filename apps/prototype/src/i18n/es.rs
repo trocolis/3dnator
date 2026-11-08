@@ -1014,6 +1014,14 @@ pub fn text(key: Text) -> &'static str {
         Text::PointBodyPrompt => "Haga clic en un cuerpo para mapear sus puntos.",
         Text::PointBody => "Puntos de",
         Text::PointBodyChange => "Cambiar cuerpo",
+        Text::DeleteRecovery => "Eliminar",
+        Text::DeleteRecoveryConfirm => "Eliminar definitivamente",
+        Text::RecoveryDeleted => "Copia de recuperación eliminada.",
+        Text::RecoveryDeleteFailed => "No se pudo eliminar la copia de recuperación",
+        Text::MakeIndependent => "Hacer independiente",
+        Text::MakeIndependentHint => {
+            "Esta copia comparte la definición con otras instancias. Pasa a tener una definición propia, en el mismo lugar: editar una ya no cambia las demás."
+        }
         Text::PickForeignReference => {
             "Esta referencia pertenece al proyecto o a otra pieza. Muévala en Ensamblaje o arrástrela, en el árbol, a las Referencias de esta pieza."
         }

@@ -982,6 +982,14 @@ pub fn text(key: Text) -> &'static str {
         Text::PointBodyPrompt => "Click a body to map its points.",
         Text::PointBody => "Points of",
         Text::PointBodyChange => "Change body",
+        Text::DeleteRecovery => "Delete",
+        Text::DeleteRecoveryConfirm => "Delete permanently",
+        Text::RecoveryDeleted => "Recovery copy deleted.",
+        Text::RecoveryDeleteFailed => "Could not delete the recovery copy",
+        Text::MakeIndependent => "Make independent",
+        Text::MakeIndependentHint => {
+            "This copy shares its definition with other instances. It gets its own definition, in the same place: editing one no longer changes the others."
+        }
         Text::PickForeignReference => {
             "This reference belongs to the project or to another part. Move it in Assembly or drag it, in the tree, into this part's References."
         }

@@ -893,6 +893,12 @@ pub enum Text {
     PointBodyChange,
     ConvertWaitWork,
     PickForeignReference,
+    MakeIndependent,
+    DeleteRecovery,
+    DeleteRecoveryConfirm,
+    RecoveryDeleted,
+    RecoveryDeleteFailed,
+    MakeIndependentHint,
     ConvertFinishSketch,
     ConvertResolveFailure,
     ReferenceNotEditable,
@@ -1939,6 +1945,14 @@ fn pt(key: Text) -> &'static str {
         Text::PointBodyPrompt => "Clique num corpo para mapear os pontos dele.",
         Text::PointBody => "Pontos de",
         Text::PointBodyChange => "Trocar corpo",
+        Text::DeleteRecovery => "Excluir",
+        Text::DeleteRecoveryConfirm => "Excluir definitivamente",
+        Text::RecoveryDeleted => "Cópia de recuperação excluída.",
+        Text::RecoveryDeleteFailed => "Não foi possível excluir a cópia de recuperação",
+        Text::MakeIndependent => "Tornar independente",
+        Text::MakeIndependentHint => {
+            "Esta cópia compartilha a definição com outras instâncias. Ela passa a ter uma definição própria, no mesmo lugar: editar uma deixa de mudar as outras."
+        }
         Text::PickForeignReference => {
             "Esta referência pertence ao projeto ou a outra peça. Mova-a na Montagem ou arraste-a, na árvore, para as Referências desta peça."
         }

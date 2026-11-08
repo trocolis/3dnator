@@ -157,6 +157,12 @@ pub enum Command {
         id: InstanceId,
         name: String,
     },
+    /// A instância passa a usar uma cópia própria da definição que compartilhava com outras
+    /// (cópias compartilhadas), no mesmo lugar. Editar uma deixa de mudar as demais.
+    MakeInstanceIndependent {
+        id: InstanceId,
+        name: String,
+    },
     /// Nova instância da mesma definição, posicionada ao lado da original.
     DuplicateInstance {
         id: InstanceId,
@@ -459,6 +465,7 @@ impl Command {
             Self::PatternInstance { .. } => "Padrão de instâncias",
             Self::MirrorInstance { .. } => "Espelhar instância como nova peça",
             Self::CloneInstance { .. } => "Clonar peça independente",
+            Self::MakeInstanceIndependent { .. } => "Tornar independente",
             Self::DuplicateInstance { .. } => "Nova instância",
             Self::CopyInstanceAt { .. } => "Copiar componente",
             Self::ReparentInstance { .. } => "Organizar subpeça",
@@ -785,6 +792,22 @@ impl Command {
                 let copy = doc.add_instance(part, source.parent, source.placement)?;
                 doc.instance_mut(copy)?.color = source.color;
                 doc.place_beside(&[copy])?;
+            }
+            Self::MakeInstanceIndependent { id, name } => {
+                let part = doc
+                    .instance(id)
+                    .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+                    .part;
+                if doc.instances().iter().filter(|i| i.part == part).count() < 2 {
+                    return Err(DocumentError(
+                        "Esta peça já é independente: nenhuma outra instância a compartilha."
+                            .into(),
+                    )
+                    .into());
+                }
+                let copy = doc.clone_part(part, name)?;
+                doc.instance_mut(id)?.part = copy;
+                doc.validate()?;
             }
             Self::DuplicateInstance { id } => {
                 let source = doc
@@ -1729,6 +1752,76 @@ mod tests {
         assert_eq!(
             session.document().body(body).ok_or("Corpo ausente")?.color,
             Some(color)
+        );
+        Ok(())
+    }
+    #[test]
+    fn shared_copy_becomes_independent_in_place() -> Result<(), Box<dyn Error>> {
+        let mut document = Document::new("Cópias")?;
+        let (part, body) = document.add_mesh(
+            None,
+            "Barra".into(),
+            Arc::new(MeshAsset::new(nator_geometry::reference_bracket()?)),
+        )?;
+        let original = document.instances()[0].id;
+        let mut session = Session::new(document)?;
+        let placement = Placement::new([40., 0., 0.], [0., 0., 0.3])?;
+        session.execute(Command::CopyInstanceAt {
+            id: original,
+            placement,
+            independent: false,
+            name: "Barra (cópia)".into(),
+        })?;
+        let copy = session
+            .document()
+            .instances()
+            .last()
+            .ok_or("Cópia ausente")?
+            .id;
+        assert_eq!(
+            session
+                .document()
+                .instance(copy)
+                .ok_or("Cópia ausente")?
+                .part,
+            part
+        );
+        session.execute(Command::MakeInstanceIndependent {
+            id: copy,
+            name: "Barra 2".into(),
+        })?;
+        let document = session.document();
+        let record = document.instance(copy).ok_or("Cópia ausente")?;
+        assert_ne!(record.part, part);
+        assert_eq!(record.placement, placement);
+        let independent = document.part(record.part).ok_or("Peça ausente")?;
+        assert_eq!(independent.name, "Barra 2");
+        assert_eq!(independent.bodies.len(), 1);
+        assert_ne!(independent.bodies[0].id, body);
+        // A original segue com a definição antiga, agora sem ninguém a compartilhar.
+        assert_eq!(
+            document.instance(original).ok_or("Original ausente")?.part,
+            part
+        );
+        // Sem outra instância compartilhando, recusa sem alterar nada.
+        let revision = session.revision();
+        assert!(
+            session
+                .execute(Command::MakeInstanceIndependent {
+                    id: original,
+                    name: "Outra".into(),
+                })
+                .is_err()
+        );
+        assert_eq!(session.revision(), revision);
+        assert!(session.undo());
+        assert_eq!(
+            session
+                .document()
+                .instance(copy)
+                .ok_or("Cópia ausente")?
+                .part,
+            part
         );
         Ok(())
     }

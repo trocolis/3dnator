@@ -551,6 +551,10 @@ impl<'a> Tree<'a> {
                             )));
                         ui.close();
                     }
+                    if let Some(action) = browser::independent_item(ui, tree.menu, instance) {
+                        tree.intents.push(Intent::Menu(action));
+                        ui.close();
+                    }
                     if ui.button(text(T::DeleteFeature)).clicked() {
                         tree.intents
                             .push(Intent::Command(Box::new(Command::RemoveInstance {
