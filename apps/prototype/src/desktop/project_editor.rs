@@ -141,6 +141,9 @@ pub(super) struct ViewState {
     /// corpos selecionados na peça em construção.
     selected_instances: HashSet<InstanceId>,
     selected_bodies: HashSet<BodyId>,
+    /// Corpo escolhido por uma face ou aresta na peça em construção: só o elemento fica
+    /// realçado, não o corpo inteiro.
+    topology_only: Option<BodyId>,
     /// Cores de Verificar para impressão, enquanto o painel está aberto.
     inspection: Option<Arc<nator_document::Inspection>>,
     version: u64,
@@ -189,7 +192,7 @@ impl ViewState {
         body: BodyId,
         style: nator_document::Style,
     ) -> nator_document::Style {
-        let chosen = self.selected_bodies.contains(&body)
+        let chosen = (self.selected_bodies.contains(&body) && self.topology_only != Some(body))
             || occurrence
                 .path
                 .iter()
@@ -198,6 +201,13 @@ impl ViewState {
             nator_document::Style::Selected
         } else {
             style
+        }
+    }
+    /// Realce só da face/aresta escolhida no corpo, ou do corpo inteiro (`None`).
+    fn set_topology_only(&mut self, body: Option<BodyId>) {
+        if self.topology_only != body {
+            self.topology_only = body;
+            self.touched();
         }
     }
     /// Atualiza o destaque a partir da seleção da aba; só invalida a cena se mudar.
@@ -312,6 +322,7 @@ impl Tab {
     fn select(&mut self, selection: Option<Selection>) {
         self.selected = selection.into_iter().collect();
         self.selection = selection;
+        self.view.set_topology_only(None);
         self.refresh_selection();
     }
     /// Ctrl+clique: acrescenta ou retira um elemento, que passa a ser o principal.
@@ -323,6 +334,7 @@ impl Tab {
             self.selected.push(item);
             self.selection = Some(item);
         }
+        self.view.set_topology_only(None);
         self.refresh_selection();
     }
     /// Seleção por janela: substitui ou, com Ctrl, acrescenta.
@@ -336,6 +348,7 @@ impl Tab {
             }
         }
         self.selection = self.selected.last().copied();
+        self.view.set_topology_only(None);
         self.refresh_selection();
     }
     fn is_selected(&self, item: Selection) -> bool {
@@ -583,6 +596,8 @@ pub struct Editor {
     /// Pré-seleção sob o cursor e dados de realce por geometria.
     hover: Option<highlight::Hover>,
     cell_hover: cell_hover::Cache,
+    /// Camada de face escolhida com ↑/↓ nas ferramentas que esperam uma face.
+    face_layers: navigation::FaceLayers,
     highlight_cache: highlight::Cache,
     profile_cache: profile_pick::Cache,
     point_cache: point_snap::Cache,
@@ -824,6 +839,7 @@ impl Editor {
             canvas_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 820.)),
             hover: None,
             cell_hover: Default::default(),
+            face_layers: Default::default(),
             highlight_cache: highlight::Cache::default(),
             point_cache: point_snap::Cache::default(),
             profile_cache: profile_pick::Cache::default(),
@@ -1056,6 +1072,13 @@ impl Editor {
                             target.toggle(item);
                         } else {
                             target.select(Some(item));
+                            // Face ou aresta na peça em construção: o realce fica nela.
+                            if mode != navigation::PickMode::Vertex
+                                && target.active_part == Some(p.part)
+                                && matches!(item, Selection::Body { .. })
+                            {
+                                target.view.set_topology_only(Some(p.body));
+                            }
                         }
                         target.picked = Some(p);
                     } else if !additive {

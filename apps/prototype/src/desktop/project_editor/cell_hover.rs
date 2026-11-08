@@ -18,6 +18,8 @@ struct Key {
     view_rays: [(Point3, Point3); 2],
     rect: egui::Rect,
     placement: Placement,
+    /// Camada escolhida com ↑/↓ entre as faces planas sob o cursor (só na extrusão).
+    layer: usize,
 }
 impl Key {
     fn same_context(&self, other: &Self) -> bool {
@@ -53,6 +55,8 @@ struct Computed {
     key: Key,
     answer: Answer,
     cached: Option<Cell>,
+    /// Camadas de faces sob o cursor (extrusão), para limitar as setas.
+    layers: usize,
 }
 #[derive(Default)]
 pub(super) struct Cache {
@@ -178,6 +182,38 @@ fn compute(
         origin: key.origin,
         direction: key.direction,
     };
+    // Extrusão: as faces planas sólidas da peça sob o cursor, da frente para trás.
+    let layers = if key.area {
+        navigation::face_layers(document, view, section, ray, |pick| {
+            pick.part == part
+                && document.body(pick.body).is_some_and(|b| b.brep.is_some())
+                && nator_commands::measure::sketch_plane(document, pick).is_ok()
+        })
+    } else {
+        Vec::new()
+    };
+    let count = layers.len();
+    if key.layer > 0 {
+        let answer = match layers.get(key.layer).cloned().flatten() {
+            Some(pick) => match nator_commands::painting::highlight(document, &pick) {
+                Ok(Some(mesh)) => {
+                    let label = document
+                        .body(pick.body)
+                        .map(|b| b.name.clone())
+                        .unwrap_or_default();
+                    Answer::Cell(mesh_overlay(&mesh), label)
+                }
+                _ => Answer::Face(pick),
+            },
+            None => Answer::Empty,
+        };
+        return Computed {
+            key,
+            answer,
+            cached: None,
+            layers: count,
+        };
+    }
     let query = document
         .pick_clipped_with(ray, |o| view.pickable(o), section::clip(section))
         .ok();
@@ -198,6 +234,7 @@ fn compute(
             key,
             answer: Answer::Cell(overlay.clone(), label.clone()),
             cached,
+            layers: count,
         };
     }
     let Some(pick) = pick else {
@@ -207,6 +244,7 @@ fn compute(
                 .map(|(o, l, _)| Answer::Cell(o, l))
                 .unwrap_or(Answer::Empty),
             cached,
+            layers: count,
         };
     };
     if pick.part == part
@@ -232,6 +270,7 @@ fn compute(
                 key,
                 answer: Answer::Cell(mesh_overlay(&cell.mesh), label),
                 cached,
+                layers: count,
             };
         }
         match nator_commands::painting::highlight(document, &pick) {
@@ -247,6 +286,16 @@ fn compute(
                     key,
                     answer: Answer::Cell(overlay, label),
                     cached,
+                    layers: count,
+                };
+            }
+            // Na extrusão a face inteira continua sendo um perfil válido: realçá-la.
+            Err(_) if key.area => {
+                return Computed {
+                    key,
+                    answer: Answer::Face(pick),
+                    cached: None,
+                    layers: count,
                 };
             }
             // Não mostrar a face inteira como substituta de uma célula inválida.
@@ -255,6 +304,7 @@ fn compute(
                     key,
                     answer: Answer::Empty,
                     cached: None,
+                    layers: count,
                 };
             }
             Ok(None) => {
@@ -265,6 +315,7 @@ fn compute(
                         key,
                         answer: Answer::Cell(overlay, label),
                         cached,
+                        layers: count,
                     };
                 }
             }
@@ -276,6 +327,7 @@ fn compute(
             key,
             answer: Answer::Cell(overlay, label),
             cached,
+            layers: count,
         };
     }
     // Curvas, malhas e outras peças não são áreas de extrusão.
@@ -288,12 +340,14 @@ fn compute(
             key,
             answer: Answer::Empty,
             cached,
+            layers: count,
         };
     }
     Computed {
         key,
         answer: Answer::Face(pick),
         cached,
+        layers: count,
     }
 }
 impl Cache {
@@ -328,6 +382,10 @@ impl Cache {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+    }
+    /// Camadas de faces da última resposta pronta.
+    fn layers(&self) -> usize {
+        self.ready.as_ref().map_or(0, |r| r.layers)
     }
     fn query(&mut self, query: Query, context: &egui::Context) -> Option<&Answer> {
         self.poll(&query.key);
@@ -382,10 +440,14 @@ impl Editor {
         if self.profile_hovered {
             return;
         }
-        if self
-            .scene
-            .as_ref()
-            .is_some_and(|s| s.triangles().len() > highlight::HOVER_TRIANGLES)
+        let area = self.feature_edit.is_some();
+        // A consulta roda fora da interface; na extrusão ela continua em cenas grandes
+        // (STEP importados), para as faces aptas sempre se destacarem.
+        if !area
+            && self
+                .scene
+                .as_ref()
+                .is_some_and(|s| s.triangles().len() > highlight::HOVER_TRIANGLES)
         {
             return;
         }
@@ -426,6 +488,12 @@ impl Editor {
             }),
             rect,
             placement,
+            layer: if area {
+                self.face_layers.update(ui.ctx(), position);
+                self.face_layers.layer
+            } else {
+                0
+            },
         };
         let query = Query {
             key: key.clone(),
@@ -445,6 +513,14 @@ impl Editor {
             }
             Some(Answer::Empty) => (Default::default(), String::new()),
             None => return,
+        };
+        // A contagem vem da resposta recém-recolhida, para as setas valerem já no quadro
+        // seguinte ao realce.
+        let label = if area {
+            self.face_layers.count = self.cell_hover.layers();
+            self.face_layers.label(&label)
+        } else {
+            label
         };
         self.hover = Some(highlight::Hover::fixed(
             key.scene.tab,
@@ -481,6 +557,7 @@ mod tests {
             ],
             rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.)),
             placement: Placement::default(),
+            layer: 0,
         }
     }
     fn computed(key: Key, label: &str) -> Computed {
@@ -494,6 +571,7 @@ mod tests {
                 label.into(),
             ),
             cached: None,
+            layers: 0,
         }
     }
     fn query(key: Key) -> Result<Query, Box<dyn Error>> {
@@ -557,6 +635,7 @@ mod tests {
             key: next.clone(),
             answer: Answer::Empty,
             cached: None,
+            layers: 0,
         })?;
         assert!(matches!(
             cache.query(query(next)?, &context),

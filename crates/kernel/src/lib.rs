@@ -181,6 +181,8 @@ pub struct CircleAnchor {
     /// O centro cai sobre o material (dentro de uma face plana vizinha). Falso no vazio de
     /// um furo ou no canto de um arredondamento côncavo: centro virtual.
     pub on_material: bool,
+    /// Normal que sai do material pela face plana que contém o círculo, se houver.
+    pub outward: Option<[f64; 3]>,
 }
 
 /// Nomes posicionais (`{dono}:f{i}`) para sólidos importados, que nunca são recalculados.

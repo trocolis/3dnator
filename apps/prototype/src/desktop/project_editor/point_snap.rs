@@ -229,9 +229,6 @@ struct Query<'a> {
     view: &'a ViewState,
     section: Option<section::Section>,
     focus: &'a super::assembly_tools::PointFocus,
-    /// Conferir também se outras peças escondem o ponto; desligado em cenas grandes, onde
-    /// cada raio na cena inteira pesa demais para o movimento do cursor.
-    scene_occlusion: bool,
 }
 
 impl Query<'_> {
@@ -247,7 +244,6 @@ impl Query<'_> {
             view,
             section,
             focus,
-            scene_occlusion,
         } = self;
         let occurrence = document
             .occurrences()
@@ -330,25 +326,9 @@ impl Query<'_> {
                 .then(a.depth.total_cmp(&b.depth))
                 .then(a.distance.total_cmp(&b.distance))
         });
-        // Primeiro a oclusão pelo próprio corpo, barata; depois, para poucos candidatos,
-        // pelas demais peças visíveis.
-        let visible = |target: &Target, allowed: &dyn Fn(&Occurrence) -> bool| {
-            unobstructed(
-                document,
-                camera,
-                bounds,
-                rect,
-                allowed,
-                section,
-                target.pick.point,
-            )
-        };
-        candidates
-            .into_iter()
-            .map(|c| c.target)
-            .filter(|target| visible(target, &same))
-            .take(if scene_occlusion { 3 } else { 1 })
-            .find(|target| !scene_occlusion || visible(target, &|o| view.pickable(o)))
+        // Apoios atrás do material continuam capturáveis (as marcas deles também aparecem):
+        // o mais próximo do cursor ganha e, empatados na tela, o da frente.
+        candidates.into_iter().map(|c| c.target).next()
     }
 }
 
@@ -383,10 +363,6 @@ impl Editor {
             view: &self.current().view,
             section: self.current().section.filter(|s| s.visible),
             focus: &focus,
-            scene_occlusion: self
-                .scene
-                .as_ref()
-                .is_some_and(|s| s.triangles().len() <= super::highlight::HOVER_TRIANGLES),
         }
         .target(anchors)
     }
@@ -446,7 +422,6 @@ mod mesh_tests {
                 view: &ViewState::default(),
                 section: None,
                 focus: &focus,
-                scene_occlusion: true,
             };
             let target = query.target(&anchors).ok_or("Vértice ausente")?;
             assert_eq!(target.pick.point, point);
@@ -463,7 +438,6 @@ mod mesh_tests {
             view: &ViewState::default(),
             section: None,
             focus: &focus,
-            scene_occlusion: true,
         }
         .target(&anchors)
         .ok_or("Pré-seleção distante ausente")?;
@@ -520,7 +494,6 @@ mod mesh_tests {
                 view: &ViewState::default(),
                 section: None,
                 focus: &focus,
-                scene_occlusion: true,
             }
             .target(&anchors)
         };
@@ -647,7 +620,6 @@ mod tests {
                 view: &self.view,
                 section,
                 focus: &focus,
-                scene_occlusion: true,
             }
             .target(anchors)
         }
@@ -851,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn centers_behind_material_or_removed_by_section_are_not_offered() -> Result<()> {
+    fn centers_behind_material_are_offered_but_not_those_removed_by_section() -> Result<()> {
         let mut f = Fixture::new(true)?;
         let center = [0., 0., 6.];
         let cut = section::Section {
@@ -864,8 +836,8 @@ mod tests {
             visible: true,
         };
         assert!(f.at(center, egui::Vec2::ZERO, Some(cut), None).is_none());
-        // Tampa opaca sobre o furo: ela não tem apoios no cache, mas oculta os
-        // centros da arruela. A seleção não deve atravessar material visível.
+        // Tampa opaca sobre o furo: ela não tem apoios no cache e oculta os centros da
+        // arruela, mas eles continuam capturáveis através dela (as marcas aparecem).
         let mut lid = Solid::cuboid([-25., -25., 10.], [50., 50., 2.])?;
         let (mesh, faces) = lid.tessellate_with_faces(0.1, 0.2)?;
         let mut session = Session::new(f.document)?;
@@ -881,7 +853,10 @@ mod tests {
         // A importação posiciona peças novas ao lado; aqui queremos sobreposição.
         f.document.instance_mut(lid_instance)?.placement = Placement::default();
         f.bounds = f.document.scene_mesh()?.ok_or("Cena ausente")?.bounds();
-        assert!(f.at(center, egui::Vec2::ZERO, None, None).is_none());
+        let behind = f
+            .at(center, egui::Vec2::ZERO, None, None)
+            .ok_or("Centro atrás da tampa não oferecido")?;
+        assert!(behind.captured && norm(sub(behind.pick.point, center)) < 1e-9);
         Ok(())
     }
 }

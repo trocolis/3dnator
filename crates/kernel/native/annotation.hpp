@@ -90,10 +90,11 @@ bool nator_face_nearest(const Shape* body,std::size_t index,const double* point,
 bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         const auto edge=edge_at(body,index);
-        // Vinte e oito doubles: extremos, centro, indicador circular, normal,
+        // Trinta e um doubles: extremos, centro, indicador circular, normal,
         // raio, fechamento, costura, ponto médio, direção radial, intervalo angular, a
-        // soma das normais externas das faces vizinhas no ponto médio e o centro no material.
-        std::fill(output,output+28,0.);
+        // soma das normais externas das faces vizinhas no ponto médio, o centro no material
+        // e a normal externa da face plana que contém o círculo (zero sem face plana).
+        std::fill(output,output+31,0.);
         // Polos de esferas/cones podem ter uma aresta sem curva 3D. Ela não
         // oferece captura, mas continua fornecendo um apoio finito para cotas.
         if (BRep_Tool::Degenerated(edge)) {
@@ -142,6 +143,12 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
                     if (surface.GetType()!=GeomAbs_Plane) continue;
                     const auto plane=surface.Plane();
                     if (plane.Distance(center)>1e-7) continue;
+                    // Normal que sai do material pela face: a seta vem de fora até o centro.
+                    if (output[28]==0. && output[29]==0. && output[30]==0.) {
+                        auto outward=plane.Axis().Direction();
+                        if (face.Orientation()==TopAbs_REVERSED) outward.Reverse();
+                        output[28]=outward.X();output[29]=outward.Y();output[30]=outward.Z();
+                    }
                     double u=0.,v=0.;
                     ElSLib::Parameters(plane,center,u,v);
                     const BRepClass_FaceClassifier inside(face,gp_Pnt2d(u,v),1e-7);

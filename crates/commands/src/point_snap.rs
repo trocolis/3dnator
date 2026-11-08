@@ -95,7 +95,8 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                             PointKind::ArcCenter
                         },
                         circle: Some(circle),
-                        normal: Some(circle.normal),
+                        // De fora do material para o centro; sem face plana, o eixo.
+                        normal: Some(circle.outward.unwrap_or(circle.normal)),
                     });
                     if circle.closed {
                         // Os quadrantes pertencem ao plano do círculo, acompanhando

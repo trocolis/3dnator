@@ -283,5 +283,13 @@ fn circle_centers_know_whether_they_lie_on_material() -> Result<()> {
     let washer = disk.cut(&Solid::cylinder([0., 0., -1.], 10., 6.)?)?;
     let flags = centers(&washer)?;
     assert!(!flags.is_empty() && flags.iter().all(|on| !on), "{flags:?}");
+    // A normal externa da face que contém cada círculo: +Z em cima, −Z embaixo.
+    for edge in 0..washer.edge_count()? {
+        if let Some(circle) = washer.edge_anchors(edge)?.circle {
+            let outward = circle.outward.ok_or("Círculo sem face plana")?;
+            let expected = if circle.center[2] > 2. { 1. } else { -1. };
+            assert!((outward[2] - expected).abs() < 1e-9, "{circle:?}");
+        }
+    }
     Ok(())
 }

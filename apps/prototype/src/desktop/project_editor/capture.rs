@@ -4635,6 +4635,152 @@ mod tests {
         Ok(())
     }
 
+    /// Clicar numa face no modo Face seleciona o corpo para os comandos, mas o realce fica
+    /// só na face; no modo de vértice (ou pela árvore), o corpo inteiro continua realçado.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn clicking_a_face_highlights_only_the_face_not_the_whole_body() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part) = navigation_editor(&context)?;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        editor.pick_mode = navigation::PickMode::Face;
+        frame(&mut editor, &context, vec![])?;
+        let target = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [30., 30., 10.],
+        )
+        .ok_or("Face sem projeção")?;
+        click(&mut editor, &context, target)?;
+        settle(&mut editor, &context)?;
+        let document = editor.current().session.document();
+        let body = document.part(part).ok_or("Peça")?.bodies[0].id;
+        let occurrence = document
+            .occurrences()?
+            .into_iter()
+            .next()
+            .ok_or("Ocorrência")?;
+        assert!(
+            editor
+                .current()
+                .is_selected(Selection::Body { part, id: body })
+        );
+        let style = |editor: &Editor| {
+            editor
+                .current()
+                .view
+                .highlight(&occurrence, body, nator_document::Style::Normal)
+        };
+        assert!(matches!(style(&editor), nator_document::Style::Normal));
+        // Selecionado pela árvore (sem face), o corpo inteiro é realçado.
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        assert!(matches!(style(&editor), nator_document::Style::Selected));
+        Ok(())
+    }
+
+    /// Extrusão: passar o mouse numa face plana de um corpo a realça; ↓ troca pela face
+    /// oposta (vista por trás) e o clique escolhe a face realçada como perfil.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn extrude_highlights_faces_and_arrow_down_reaches_the_opposite_one()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, _) = navigation_editor(&context)?;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        frame(&mut editor, &context, vec![])?;
+        let target = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [30., 30., 10.],
+        )
+        .ok_or("Face sem projeção")?;
+        let height = |editor: &Editor| {
+            editor
+                .hover
+                .as_ref()
+                .and_then(|h| h.overlay.triangles.first().map(|t| t[0][2]))
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while height(&editor).is_none() {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(target)],
+            )?;
+            if Instant::now() > deadline {
+                return Err("Face da extrusão não foi realçada".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(height(&editor).is_some_and(|z| (z - 10.).abs() < 1e-8));
+        frame(
+            &mut editor,
+            &context,
+            vec![
+                egui::Event::PointerMoved(target),
+                egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        )?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !height(&editor).is_some_and(|z| z.abs() < 1e-8) {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(target)],
+            )?;
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "Face oposta não realçada: {:?}; camadas {:?}; foco {:?}",
+                    height(&editor),
+                    editor.face_layers,
+                    context.memory(|m| m.focused())
+                )
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        click(&mut editor, &context, target)?;
+        settle(&mut editor, &context)?;
+        let chosen = editor
+            .feature_edit
+            .as_ref()
+            .and_then(|d| d.face_area().cloned())
+            .ok_or_else(|| format!("Face não escolhida: {}", editor.status))?;
+        let document = editor.current().session.document();
+        let body = document.body(chosen.body).ok_or("Corpo")?;
+        let solid = nator_kernel::Solid::from_brep(
+            body.brep.as_ref().ok_or("B-rep")?,
+            Some(&body.face_names),
+        )?;
+        let nator_document::features::FaceRef::Named(name) = &chosen.face else {
+            return Err(format!("Face sem nome: {:?}", chosen.face).into());
+        };
+        let index = solid.face_named(name)?;
+        let nator_kernel::FaceKind::Plane { normal, offset } = solid.face_measure(index)?.kind
+        else {
+            return Err("Face não plana".into());
+        };
+        // A face de baixo (z = 0): normal −Z.
+        assert!(
+            normal[2] < -0.99 && offset.abs() < 1e-8,
+            "{normal:?} {offset}"
+        );
+        Ok(())
+    }
+
     /// Com mais operações do que cabem no rodapé, a linha do tempo abre na última.
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
@@ -4764,30 +4910,33 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(highlighted(&editor).is_some_and(|z| (z - 15.).abs() < 1e-8));
-        frame(
-            &mut editor,
-            &context,
-            vec![
-                egui::Event::PointerMoved(target),
-                egui::Event::Key {
-                    key: egui::Key::ArrowDown,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-        )?;
-        frame(
-            &mut editor,
-            &context,
-            vec![egui::Event::PointerMoved(target)],
-        )?;
-        assert!(
-            highlighted(&editor).is_some_and(|z| (z - 5.).abs() < 1e-8),
-            "{:?}",
-            highlighted(&editor)
-        );
+        // ↓ passa pela face de baixo da placa de cima (z = 10) e chega ao topo da de baixo.
+        for expected in [10., 5.] {
+            frame(
+                &mut editor,
+                &context,
+                vec![
+                    egui::Event::PointerMoved(target),
+                    egui::Event::Key {
+                        key: egui::Key::ArrowDown,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )?;
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(target)],
+            )?;
+            assert!(
+                highlighted(&editor).is_some_and(|z| (z - expected).abs() < 1e-8),
+                "{expected}: {:?}",
+                highlighted(&editor)
+            );
+        }
         click(&mut editor, &context, target)?;
         settle(&mut editor, &context)?;
         let document = editor.current().session.document();

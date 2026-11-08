@@ -20,47 +20,64 @@ impl Mesh {
     /// Primeiro triângulo cujo ponto de interseção pertence à parte visível.
     /// Filtrar só a primeira interseção perde as superfícies expostas pelo corte.
     pub fn ray_hit_where(&self, ray: Ray, keeps: impl Fn(Point3) -> bool) -> Option<Hit> {
-        let mut hit = None;
-        let mut nearest = f64::INFINITY;
+        let mut hit: Option<Hit> = None;
         for (index, t) in self.triangles.iter().enumerate() {
-            let [a, b, c] = self.triangle_points(*t);
-            let e1 = sub(b, a);
-            let e2 = sub(c, a);
-            let p = cross(ray.direction, e2);
-            let determinant = dot(e1, p);
-            if determinant.abs() < 1e-12 * norm(e1) * norm(e2) {
-                continue;
+            if let Some(candidate) = triangle_hit(self.triangle_points(*t), index, ray)
+                && hit.is_none_or(|h| candidate.distance < h.distance)
+                && keeps(candidate.point)
+            {
+                hit = Some(candidate);
             }
-            let inverse = 1. / determinant;
-            let s = sub(ray.origin, a);
-            let u = dot(s, p) * inverse;
-            if !(0.0..=1.0).contains(&u) {
-                continue;
-            }
-            let q = cross(s, e1);
-            let v = dot(ray.direction, q) * inverse;
-            if v < 0. || u + v > 1. {
-                continue;
-            }
-            let d = dot(e2, q) * inverse;
-            if d < 0. || d >= nearest {
-                continue;
-            }
-            let point = std::array::from_fn(|i| ray.origin[i] + d * ray.direction[i]);
-            if !keeps(point) {
-                continue;
-            }
-            nearest = d;
-            let n = cross(e1, e2);
-            hit = Some(Hit {
-                point,
-                normal: n.map(|v| v / norm(n)),
-                triangle: index,
-                distance: d,
-            });
         }
         hit
     }
+
+    /// Todas as interseções do raio, da mais próxima para a mais distante, inclusive as de
+    /// triângulos vistos por trás (a face oposta de um sólido).
+    pub fn ray_hits_where(&self, ray: Ray, keeps: impl Fn(Point3) -> bool) -> Vec<Hit> {
+        let mut hits = self
+            .triangles
+            .iter()
+            .enumerate()
+            .filter_map(|(index, t)| triangle_hit(self.triangle_points(*t), index, ray))
+            .filter(|hit| keeps(hit.point))
+            .collect::<Vec<_>>();
+        hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+        hits
+    }
+}
+
+/// Interseção de Möller–Trumbore, à frente da origem do raio.
+fn triangle_hit([a, b, c]: [Point3; 3], index: usize, ray: Ray) -> Option<Hit> {
+    let e1 = sub(b, a);
+    let e2 = sub(c, a);
+    let p = cross(ray.direction, e2);
+    let determinant = dot(e1, p);
+    if determinant.abs() < 1e-12 * norm(e1) * norm(e2) {
+        return None;
+    }
+    let inverse = 1. / determinant;
+    let s = sub(ray.origin, a);
+    let u = dot(s, p) * inverse;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = cross(s, e1);
+    let v = dot(ray.direction, q) * inverse;
+    if v < 0. || u + v > 1. {
+        return None;
+    }
+    let d = dot(e2, q) * inverse;
+    if d < 0. {
+        return None;
+    }
+    let n = cross(e1, e2);
+    Some(Hit {
+        point: std::array::from_fn(|i| ray.origin[i] + d * ray.direction[i]),
+        normal: n.map(|v| v / norm(n)),
+        triangle: index,
+        distance: d,
+    })
 }
 /// Ângulo menor entre vetores, em radianos.
 pub fn angle_between(a: Point3, b: Point3) -> Result<f64, GeometryError> {

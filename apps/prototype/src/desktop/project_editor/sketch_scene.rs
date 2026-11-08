@@ -6,6 +6,7 @@ use nator_document::{WorkPlaneId, assembly::Pick};
 use nator_geometry::{Bounds, dot, sub};
 use nator_sketch::{Plane, Point2, Sketch, profiles};
 mod plane_hover;
+pub(in crate::desktop::project_editor) use plane_hover::step_layer;
 
 pub(super) const EMPTY_BOUNDS: Bounds = Bounds {
     min: [-50.; 3],

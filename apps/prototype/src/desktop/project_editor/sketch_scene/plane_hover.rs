@@ -22,37 +22,16 @@ struct Candidate {
 /// não ser atravessada sem querer. As setas ↑/↓ percorrem as camadas.
 type Answer = Arc<Vec<Option<Arc<Candidate>>>>;
 
-/// Faces sob o raio, na ordem das camadas oferecidas, com o acerto de cada suporte.
+/// Faces planas sob o raio, na ordem das camadas oferecidas (ver `navigation::face_layers`).
 pub(super) fn plane_layers(
     document: &Document,
     view: &ViewState,
     section: Option<section::Section>,
     ray: Ray,
 ) -> Vec<Option<Pick>> {
-    let Ok(picks) =
-        document.pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(section))
-    else {
-        return Vec::new();
-    };
-    let visible = section.filter(|s| s.visible);
-    let mut seen = std::collections::HashSet::new();
-    let mut layers = Vec::new();
-    for pick in picks
-        .into_iter()
-        .filter(|p| visible.is_none_or(|s| s.keeps(p.point)))
-    {
-        let planar = nator_commands::measure::sketch_plane(document, &pick).is_ok();
-        let face = document.face_index_at(&pick).ok();
-        if planar {
-            // A mesma face atingida duas vezes (ou por triângulos vizinhos) conta uma vez.
-            if face.is_some_and(|f| seen.insert((pick.instance, pick.body, f))) {
-                layers.push(Some(pick));
-            }
-        } else if layers.is_empty() {
-            layers.push(None);
-        }
-    }
-    layers
+    navigation::face_layers(document, view, section, ray, |pick| {
+        nator_commands::measure::sketch_plane(document, pick).is_ok()
+    })
 }
 
 #[derive(Default)]
@@ -137,7 +116,11 @@ impl Cache {
 }
 
 /// Muda a camada escolhida com ↑/↓ entre `total` camadas; devolve se mudou.
-pub(super) fn step_layer(context: &egui::Context, layer: &mut usize, total: usize) -> bool {
+pub(in crate::desktop::project_editor) fn step_layer(
+    context: &egui::Context,
+    layer: &mut usize,
+    total: usize,
+) -> bool {
     if total < 2 {
         return false;
     }
@@ -303,9 +286,9 @@ mod tests {
         Ok(())
     }
 
-    /// Dois blocos empilhados sob o cursor: o topo de cada um, da frente para trás (faces
-    /// vistas por trás não são suportes); uma malha na frente ocupa a primeira camada, sem
-    /// suporte, e as faces atrás continuam alcançáveis pelas setas.
+    /// Dois blocos empilhados sob o cursor: topo e base de cada um, da frente para trás
+    /// (a base é a face oposta, vista por trás); uma malha na frente ocupa a primeira
+    /// camada, sem suporte, e as faces atrás continuam alcançáveis pelas setas.
     #[test]
     fn overlapping_planes_are_layered_front_to_back() -> Result<(), Box<dyn std::error::Error>> {
         let mut document = Document::new("Planos sobrepostos")?;
@@ -323,7 +306,7 @@ mod tests {
                 .collect()
         };
         let layers = candidates(&document, &view, ray);
-        assert_eq!(heights(&layers), [Some(15.), Some(5.)]);
+        assert_eq!(heights(&layers), [Some(15.), Some(10.), Some(5.), Some(0.)]);
         document.add_mesh(
             None,
             "Malha na frente".into(),
@@ -333,7 +316,10 @@ mod tests {
             )?)),
         )?;
         let layers = candidates(&document, &view, ray);
-        assert_eq!(heights(&layers), [None, Some(15.), Some(5.)]);
+        assert_eq!(
+            heights(&layers),
+            [None, Some(15.), Some(10.), Some(5.), Some(0.)]
+        );
         // As setas percorrem as camadas em volta.
         let context = egui::Context::default();
         let mut layer = 0;

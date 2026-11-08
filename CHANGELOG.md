@@ -2,6 +2,14 @@
 
 ## Não lançado
 
+## 0.52.0 — 08/11/2026
+
+- Extrusão: as faces planas aptas se destacam sob o cursor também em cenas grandes (STEP importados, antes sem pré-seleção acima de 400 mil triângulos) e quando a divisão da face em células falha (a face inteira aparece em vez de nada).
+- Ferramentas que esperam face (Extrusão, Casca, Remover faces, Dividir etc.): **↑/↓** percorrem as faces sob o cursor, da frente para trás, inclusive as vistas por trás, como a face oposta de um cubo; o rótulo mostra a posição e o clique escolhe a face realçada. A escolha de plano do rascunho passa a oferecer também essas faces. Nova consulta `Document::pick_layers_clipped_with`, com todos os acertos do raio em cada corpo.
+- Clicar numa face ou aresta da peça em construção realça só a face ou aresta, não o corpo inteiro (que continua selecionado para os comandos).
+- Ponto a ponto: pontos atrás do material, cujas marcas já apareciam, agora podem ser capturados (o corte de seção continua excluindo os removidos); empatados na tela, ganha o da frente.
+- Ponto a ponto: a seta dos centros virtuais vem de fora do material, pela normal externa da face plana que contém o círculo (informada pela ponte OCCT); um centro do outro lado do corpo recebe a seta de lá.
+
 ## 0.51.0 — 08/11/2026
 
 - O tamanho da faixa (Maior, Normal, Compacto) passa a ser escolhido só em Configurações → Aparência → **Tamanho da faixa**; o botão ao lado da busca saiu.

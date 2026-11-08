@@ -532,6 +532,14 @@ impl Editor {
                 return;
             }
         }
+        // Ferramenta esperando uma face: ↑/↓ percorrem as faces sob o cursor.
+        let face_await = self
+            .feature_edit
+            .as_ref()
+            .is_some_and(|d| d.awaiting() == Some(feature_editor::Awaiting::Face));
+        if face_await && self.face_layers.update(ui.ctx(), position) {
+            self.hover = None;
+        }
         if let Some(hover) = &self.hover
             && hover.tab == tab
             && hover.revision == revision
@@ -558,17 +566,31 @@ impl Editor {
         );
         let document = self.picking_document();
         let view = self.current().view.clone();
-        let pick = document
-            .pick_all_clipped_with(
-                ray,
-                |occurrence| view.pickable(occurrence),
-                section::clip(self.current().section),
-            )
-            .ok()
-            .and_then(|picks| section::first_visible(picks, self.current().section));
+        let pick = if face_await {
+            let layers =
+                navigation::face_layers(&document, &view, self.current().section, ray, |p| {
+                    document.face_at(p).is_ok()
+                });
+            self.face_layers.count = layers.len();
+            layers.get(self.face_layers.layer).cloned().flatten()
+        } else {
+            document
+                .pick_all_clipped_with(
+                    ray,
+                    |occurrence| view.pickable(occurrence),
+                    section::clip(self.current().section),
+                )
+                .ok()
+                .and_then(|picks| section::first_visible(picks, self.current().section))
+        };
         let (overlay, label) = match pick {
             Some(pick) => self.pick_overlay(&document, &pick),
             None => (Overlay::default(), String::new()),
+        };
+        let label = if face_await && !label.is_empty() {
+            self.face_layers.label(&label)
+        } else {
+            label
         };
         self.hover = Some(Hover {
             tab,

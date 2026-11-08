@@ -2231,10 +2231,13 @@ impl Editor {
                         anchor_mark(&painter, p, style);
                         continue;
                     }
-                    // Seta perpendicular ao plano do ponto, vinda do lado do observador.
+                    // Seta perpendicular ao plano do ponto, vinda de fora do material: um
+                    // centro do outro lado do corpo recebe a seta de lá. Sem a face externa,
+                    // vem do lado do observador.
+                    let outward = anchor.circle.and_then(|c| c.outward);
                     let normal = anchor.normal.map(|n| {
                         let n = pose.apply_vector(n);
-                        if nator_geometry::dot(n, toward_viewer) < 0. {
+                        if outward.is_none() && nator_geometry::dot(n, toward_viewer) < 0. {
                             n.map(|v| -v)
                         } else {
                             n

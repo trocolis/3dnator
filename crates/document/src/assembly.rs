@@ -1135,6 +1135,68 @@ impl Document {
         Ok(self.pick_clipped_with(ray, allowed, clip)?.picks)
     }
 
+    /// Todos os acertos do raio, em todos os corpos e em cada um (inclusive faces vistas
+    /// por trás, como a oposta de um cubo), do mais próximo ao mais distante. Serve para
+    /// percorrer superfícies sobrepostas; a parte cortada pela seção fica de fora.
+    pub fn pick_layers_clipped_with(
+        &self,
+        ray: nator_geometry::query::Ray,
+        allowed: impl Fn(&Occurrence) -> bool,
+        clip: Option<(nator_geometry::Point3, nator_geometry::Point3)>,
+    ) -> Result<Vec<Pick>, DocumentError> {
+        use nator_geometry::{dot, sub};
+        let mut hits = Vec::new();
+        for occurrence in self.occurrences()?.into_iter().filter(|o| allowed(o)) {
+            let instance = self
+                .instance(occurrence.instance)
+                .ok_or_else(|| DocumentError("Instância inexistente.".into()))?;
+            let part = self
+                .part(instance.part)
+                .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+            for body in part.shown_bodies() {
+                let pose = occurrence
+                    .placement
+                    .compose(body.placement)
+                    .map_err(|e| DocumentError(e.to_string()))?;
+                let origin = pose.inverse_apply(ray.origin);
+                let end =
+                    pose.inverse_apply(std::array::from_fn(|i| ray.origin[i] + ray.direction[i]));
+                let local = nator_geometry::query::Ray {
+                    origin,
+                    direction: sub(end, origin),
+                };
+                let zero = pose.apply([0.; 3]);
+                let mesh = body.geometry.mesh();
+                for hit in mesh.ray_hits_where(local, |point| {
+                    clip.is_none_or(|(origin, normal)| {
+                        dot(sub(pose.apply(point), origin), normal) <= 1e-6
+                    })
+                }) {
+                    let point = pose.apply(hit.point);
+                    let distance = dot(sub(point, ray.origin), ray.direction)
+                        / dot(ray.direction, ray.direction).max(f64::MIN_POSITIVE);
+                    hits.push((
+                        distance,
+                        Pick {
+                            instance: instance.id,
+                            part: part.id,
+                            body: body.id,
+                            triangle: hit.triangle,
+                            point,
+                            normal: sub(pose.apply(hit.normal), zero),
+                            vertices: mesh
+                                .triangle_points(mesh.triangles()[hit.triangle])
+                                .map(|p| pose.apply(p)),
+                            placement: occurrence.placement,
+                        },
+                    ));
+                }
+            }
+        }
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Ok(hits.into_iter().map(|(_, pick)| pick).collect())
+    }
+
     pub fn pick_clipped_with(
         &self,
         ray: nator_geometry::query::Ray,
