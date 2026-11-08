@@ -1675,8 +1675,14 @@ impl Editor {
                 )
             }
             Panel::Align(d) => {
+                // Na construção, a origem é geometria da peça ativa ou de uma referência dela.
                 if let Some(from) = &d.from
-                    && tab.active_part.is_some_and(|p| p != from.part)
+                    && super::selection_tools::movable_in_construction(
+                        tab.session.document(),
+                        tab.active_part,
+                        from,
+                    )
+                    .is_err()
                 {
                     return None;
                 }

@@ -5407,6 +5407,99 @@ mod tests {
         Ok(())
     }
 
+    /// Na edição de uma peça, o ponto a ponto move a referência dela inteira; uma referência
+    /// do projeto continua parada.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn point_to_point_moves_the_active_parts_reference_in_construction()
+    -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut document = Document::new("Referência na edição")?;
+        let mut add = |name: &str, at: Point3| -> Result<(PartId, InstanceId), Box<dyn Error>> {
+            let (part, _) = document.add_mesh(
+                None,
+                name.into(),
+                Arc::new(MeshAsset::new(reference_bracket()?)),
+            )?;
+            let instance = document
+                .instances()
+                .iter()
+                .find(|i| i.part == part)
+                .ok_or("Instância ausente")?
+                .id;
+            document.instance_mut(instance)?.placement = Placement::new(at, [0.; 3])?;
+            Ok((part, instance))
+        };
+        let (part, _) = add("Base", [0.; 3])?;
+        let (motor, motor_instance) = add("Motor", [0., 200., 0.])?;
+        let (foreign, foreign_instance) = add("Fonte", [600., 0., 0.])?;
+        document.reparent(motor_instance, Some(part))?;
+        document.part_mut(motor)?.reference = true;
+        document.part_mut(foreign)?.reference = true;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        let enter = || egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let hit = |editor: &Editor, x: f64, y: f64| {
+            editor
+                .current()
+                .session
+                .document()
+                .pick(nator_geometry::query::Ray {
+                    origin: [x, y, 100.],
+                    direction: [0., 0., -1.],
+                })
+        };
+        editor.open_align(navigation::PickMode::Vertex);
+        let mut from = hit(&editor, 10., 210.)?.ok_or("Motor não atingido")?;
+        assert_eq!(from.part, motor);
+        navigation::snap_pick(&mut from, navigation::PickMode::Vertex);
+        let target = std::array::from_fn(|i| from.point[i] + [5., 6., 7.][i]);
+        editor.set_align_for_capture(from.clone(), target);
+        frame(&mut editor, &context, vec![enter()])?;
+        settle(&mut editor, &context)?;
+        let document = editor.current().session.document();
+        let moved = document.instance(motor_instance).ok_or("Motor ausente")?;
+        assert_eq!(moved.parent, Some(part));
+        assert!(
+            nator_geometry::norm(nator_geometry::sub(
+                moved.placement.translation_mm(),
+                [5., 206., 7.]
+            )) < 1e-8
+        );
+        // Referência do projeto: recusada, nada muda.
+        editor.open_align(navigation::PickMode::Vertex);
+        let mut outside = hit(&editor, 610., 10.)?.ok_or("Fonte não atingida")?;
+        assert_eq!(outside.part, foreign);
+        navigation::snap_pick(&mut outside, navigation::PickMode::Vertex);
+        let revision = editor.current().session.revision();
+        editor.set_align_for_capture(outside, [0.; 3]);
+        frame(&mut editor, &context, vec![enter()])?;
+        assert_eq!(editor.current().session.revision(), revision);
+        assert_eq!(
+            editor
+                .current()
+                .session
+                .document()
+                .instance(foreign_instance)
+                .ok_or("Fonte ausente")?
+                .placement
+                .translation_mm(),
+            [600., 0., 0.]
+        );
+        Ok(())
+    }
+
     /// Exercita os comandos promovidos da nova faixa, incluindo expressão, confirmação,
     /// cancelamento e desfazer. O rascunho continua no mesmo viewport durante todo o fluxo.
     #[test]

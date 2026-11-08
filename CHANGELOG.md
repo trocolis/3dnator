@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.45.2 — 08/11/2026
+
+- Alinhamentos (ponto a ponto, face a face e aresta a aresta) movem a referência da peça em edição: o painel descartava o movimento sempre que a origem não era um corpo da peça ativa, mesmo com a seleção da referência já aceita.
+
 ## 0.45.1 — 08/11/2026
 
 - **Renomear** uma peça na árvore leva junto o nome da definição (exibido na edição e usado nas cópias) quando só essa instância a usa ou quando ela ainda tem o nome automático, numa só ação de desfazer. Cópias compartilhadas (nova instância, copiar componente) herdam o nome da instância copiada em vez do nome da definição.
