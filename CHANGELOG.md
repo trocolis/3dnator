@@ -2,6 +2,15 @@
 
 ## Não lançado
 
+## 0.50.0 — 08/11/2026
+
+- Menus de contexto: cada item ganha fundo destacado sob o mouse, na largura toda do menu (também na busca de ferramentas e na lista de projetos recentes). Antes, os itens com ícone não reagiam ao mouse.
+- Árvore do projeto: a mesma largura recolhida e expandida, ajustável arrastando a borda direita (200 a 640 pontos, até 60% da área de edição) e guardada nas preferências.
+- Ponto a ponto: passar o mouse sobre um centro, ou escolhê-lo como origem ou destino, realça também o perímetro do círculo ou arco. Centros aparecem como losango verde com ponto (como no rascunho) e pontos médios de aresta como triângulo âmbar, com setas maiores na cor da marca, perpendiculares ao plano do ponto: o eixo do círculo nos centros e a bissetriz das faces nos pontos médios (a ponte OCCT passa a informar essa normal), sempre vindas do lado do observador.
+- Faixa de ferramentas em três tamanhos, escolhidos no botão ao lado da busca e guardados nas preferências: **Maior**, com o nome de cada seção sob os botões; **Normal**, como antes; **Compacto**, uma linha só de ícones.
+- A linha do tempo do histórico aparece só nas abas Construção e Rascunho; na Montagem e na Impressão, o rodapé mantém desfazer/refazer e o estado.
+- Cenários de captura `ribbon-large` e `ribbon-compact`.
+
 ## 0.49.0 — 08/11/2026
 
 - Árvore: um nome abreviado aparece inteiro enquanto a linha está sob o mouse ou selecionada, sobre fundo opaco e mesmo além da borda da árvore.

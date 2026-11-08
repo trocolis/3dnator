@@ -550,6 +550,77 @@ pub(super) fn entry_with_hint(
     response.on_hover_text(hint)
 }
 
+/// Item de menu: ícone opcional e rótulo numa linha que ocupa toda a largura do menu e
+/// ganha fundo destacado sob o mouse, como as linhas da árvore.
+pub(super) fn menu_item(
+    ui: &mut egui::Ui,
+    icon: Option<Icon>,
+    label: &str,
+    height: f32,
+) -> egui::Response {
+    menu_row(ui, icon, icon.is_some(), label, height)
+}
+
+/// Opção de escolha num menu: a marca aparece só na opção atual, e a coluna dela fica
+/// reservada nas demais, para os rótulos alinharem.
+pub(super) fn menu_choice(ui: &mut egui::Ui, current: bool, label: &str) -> egui::Response {
+    menu_row(ui, current.then_some(Icon::Check), true, label, 24.)
+}
+
+fn menu_row(
+    ui: &mut egui::Ui,
+    icon: Option<Icon>,
+    reserve: bool,
+    label: &str,
+    height: f32,
+) -> egui::Response {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let enabled = ui.is_enabled();
+    let ink = if enabled {
+        theme::ink()
+    } else {
+        theme::muted()
+    };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, ink);
+    let icon_width = if reserve { 24. } else { 0. };
+    let needed = 6. + icon_width + galley.size().x + 12.;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(needed.max(ui.available_width()), height),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        let row = egui::Rect::from_x_y_ranges(
+            ui.max_rect().left()..=ui.max_rect().right().max(rect.right()),
+            rect.y_range(),
+        );
+        if enabled && (response.hovered() || response.has_focus()) {
+            ui.painter().rect_filled(row, 4, theme::blue_fill());
+            ui.painter().rect_stroke(
+                row,
+                4,
+                egui::Stroke::new(1., theme::accent().gamma_multiply(0.35)),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let mut x = rect.left() + 6.;
+        if let Some(icon) = icon {
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(x + 9., rect.center().y),
+                egui::Vec2::splat(16.),
+            );
+            paint(ui.painter(), icon_rect, icon, enabled);
+        }
+        x += icon_width;
+        ui.painter().galley(
+            egui::pos2(x, rect.center().y - galley.size().y / 2.),
+            galley,
+            ink,
+        );
+    }
+    response
+}
+
 /// Nome completo de uma linha abreviada, sobre um fundo opaco na camada de dicas.
 fn full_name_overlay(ui: &egui::Ui, id: egui::Id, at: egui::Pos2, label: &str, ink: egui::Color32) {
     let painter = ui.ctx().layer_painter(egui::LayerId::new(
@@ -635,6 +706,45 @@ mod tests {
         }
         Ok(())
     }
+    /// Item de menu: sem o mouse, nenhum fundo; com o mouse em qualquer ponto da linha
+    /// (inclusive sobre o ícone), o fundo de destaque cobre a largura toda.
+    #[test]
+    fn menu_item_highlights_the_whole_row_under_the_pointer() -> TestResult<()> {
+        let context = egui::Context::default();
+        theme::apply(&context, theme::Choice::Light);
+        let run = |events: Vec<egui::Event>| {
+            let mut rect = egui::Rect::NOTHING;
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(420., 240.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.allocate_ui(egui::vec2(200., 30.), |ui| {
+                        rect = menu_item(ui, Some(Icon::Copy), "Copiar", 24.).rect;
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            let highlighted = output.shapes.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::Rect(r) => r.fill == theme::blue_fill() && r.rect.width() >= 190.,
+                _ => false,
+            });
+            (rect, highlighted)
+        };
+        let (rect, idle) = run(vec![]);
+        assert!(!idle);
+        let icon = egui::pos2(rect.left() + 12., rect.center().y);
+        run(vec![egui::Event::PointerMoved(icon)]);
+        let (_, hovered) = run(vec![egui::Event::PointerMoved(icon)]);
+        assert!(hovered);
+        Ok(())
+    }
+
     /// Uma linha estreita abrevia o nome; selecionada (ou sob o mouse), mostra o nome inteiro
     /// sem abreviar, por cima da borda. Nomes que cabem não ganham a cópia.
     #[test]

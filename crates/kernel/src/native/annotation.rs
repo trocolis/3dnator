@@ -70,8 +70,8 @@ impl Solid {
         })
     }
     pub fn edge_anchors(&self, index: usize) -> Result<EdgeAnchors, KernelError> {
-        let mut values = [0.; 24];
-        // SAFETY: sólido vivo e buffer de vinte e quatro doubles, conforme o ABI da ponte.
+        let mut values = [0.; 27];
+        // SAFETY: sólido vivo e buffer de vinte e sete doubles, conforme o ABI da ponte.
         if !unsafe { nator_edge_anchors(self.pointer.as_ptr(), index, values.as_mut_ptr()) } {
             return Err(last_error());
         }
@@ -92,6 +92,11 @@ impl Solid {
                 closed: values[14] > 0.5,
             }),
             seam: values[15] > 0.5,
+            normal: {
+                let sum = [values[24], values[25], values[26]];
+                let length = nator_geometry::norm(sum);
+                (length > 1e-9).then(|| sum.map(|v| v / length))
+            },
         })
     }
 }

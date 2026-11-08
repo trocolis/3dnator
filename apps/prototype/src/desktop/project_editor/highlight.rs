@@ -492,6 +492,12 @@ impl Editor {
                     (
                         Overlay {
                             points: vec![target.pick.point],
+                            // O centro realça também o perímetro do círculo ou arco.
+                            segments: target
+                                .outline
+                                .windows(2)
+                                .map(|w| ([w[0], w[1]], None))
+                                .collect(),
                             ..Default::default()
                         },
                         label,

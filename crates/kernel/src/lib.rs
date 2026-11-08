@@ -160,6 +160,8 @@ pub struct EdgeAnchors {
     pub circle: Option<CircleAnchor>,
     /// Costura da parametrização ou polo degenerado, sem canto capturável.
     pub seam: bool,
+    /// Direção unitária que sai do sólido no ponto médio (bissetriz das faces vizinhas).
+    pub normal: Option<[f64; 3]>,
 }
 
 /// Círculo de apoio no referencial local do sólido, em mm. O centro fica no

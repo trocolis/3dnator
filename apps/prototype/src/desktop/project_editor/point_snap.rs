@@ -117,6 +117,29 @@ pub(super) struct Target {
     pub kind: PointKind,
     /// Distância em pontos de tela entre o cursor e o apoio.
     pub distance: f32,
+    /// Centros de círculos e arcos: o contorno da curva no mundo, para realçá-lo junto.
+    pub outline: Vec<Point3>,
+}
+
+/// Contorno de um círculo ou arco do corpo, em coordenadas do mundo (pela pose dada).
+pub(super) fn circle_outline(circle: nator_kernel::CircleAnchor, pose: Placement) -> Vec<Point3> {
+    let x = circle.x_direction;
+    let y = nator_geometry::cross(circle.normal, x);
+    let (start, sweep) = if circle.closed {
+        (0., std::f64::consts::TAU)
+    } else {
+        (circle.start_angle_rad, circle.sweep_rad)
+    };
+    let steps = 64;
+    (0..=steps)
+        .map(|i| {
+            let angle = start + sweep * f64::from(i) / f64::from(steps);
+            let (sin, cos) = angle.sin_cos();
+            pose.apply(std::array::from_fn(|k| {
+                circle.center[k] + circle.radius_mm * (cos * x[k] + sin * y[k])
+            }))
+        })
+        .collect()
 }
 
 /// Verdadeiro quando nenhum material visível (nem a tampa do corte) fica entre a câmera e
@@ -281,6 +304,13 @@ impl Query<'_> {
                     captured,
                     kind: anchor.kind,
                     distance,
+                    outline: match anchor.kind {
+                        PointKind::CircleCenter | PointKind::ArcCenter => anchor
+                            .circle
+                            .map(|c| circle_outline(c, pose))
+                            .unwrap_or_default(),
+                        _ => Vec::new(),
+                    },
                 },
                 distance,
                 depth: dot(sub(point, target_ray.origin), target_ray.direction),
@@ -508,6 +538,7 @@ mod mesh_tests {
                     point: [99.; 3],
                     kind: PointKind::Vertex,
                     circle: None,
+                    normal: None,
                 }],
             )]),
             HashMap::new(),
@@ -652,6 +683,22 @@ mod tests {
             .ok_or("Centro não capturado")?;
         assert!(captured.captured);
         assert!(norm(sub(captured.pick.point, center)) < 1e-9);
+        // O centro traz o perímetro do círculo (furo ou borda externa, concêntricos), fechado
+        // e no plano da face.
+        let outline = &captured.outline;
+        assert!(outline.len() > 32);
+        let radius = norm(sub(outline[0], center));
+        assert!(
+            (radius - 10.).abs() < 1e-6 || (radius - 20.).abs() < 1e-6,
+            "{radius}"
+        );
+        assert!(
+            outline
+                .iter()
+                .all(|p| (norm(sub(*p, center)) - radius).abs() < 1e-6)
+        );
+        assert!(outline.iter().all(|p| (p[2] - center[2]).abs() < 1e-9));
+        assert!(norm(sub(outline[0], outline[outline.len() - 1])) < 1e-6);
         // Olhar por baixo deve oferecer o outro plano da arruela, jamais z=4.
         let mut f = f;
         f.camera.set_direction([0., 0., -1.]);

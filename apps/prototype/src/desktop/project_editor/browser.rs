@@ -66,15 +66,9 @@ pub(super) fn independent_item(
     if !context.shared_parts.contains(&instance.part) {
         return None;
     }
-    let clicked = ui
-        .horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(16.), egui::Sense::hover());
-            icons::paint(ui.painter(), rect, Icon::Copy, ui.is_enabled());
-            ui.add(egui::Button::new(text(T::MakeIndependent)).frame(false))
-                .on_hover_text(text(T::MakeIndependentHint))
-                .clicked()
-        })
-        .inner;
+    let clicked = icons::menu_item(ui, Some(Icon::Copy), text(T::MakeIndependent), 24.)
+        .on_hover_text(text(T::MakeIndependentHint))
+        .clicked();
     clicked.then(|| {
         MenuAction::Command(Box::new(Command::MakeInstanceIndependent {
             id: instance.id,
@@ -84,13 +78,7 @@ pub(super) fn independent_item(
 }
 
 fn item(ui: &mut egui::Ui, icon: Icon, label: T) -> bool {
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(16.), egui::Sense::hover());
-        icons::paint(ui.painter(), rect, icon, ui.is_enabled());
-        ui.add(egui::Button::new(text(label)).frame(false))
-            .clicked()
-    })
-    .inner
+    icons::menu_item(ui, Some(icon), text(label), 24.).clicked()
 }
 
 /// Menu de uma instância (componente).

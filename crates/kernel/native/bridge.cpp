@@ -31,6 +31,8 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepAdaptor_Curve2d.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>

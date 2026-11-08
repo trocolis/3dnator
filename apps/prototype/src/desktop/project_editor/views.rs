@@ -1,10 +1,6 @@
 //! Composição visual. Alterações do documento são encaminhadas ao editor e aos comandos.
 use super::*;
 
-/// Largura da árvore sobre a área de edição.
-const TREE_WIDTH: f32 = 270.;
-/// Largura da barra de título da árvore recolhida.
-const COLLAPSED_TREE_WIDTH: f32 = 200.;
 /// Ícone, botão e espaçamentos que dividem o balão com o nome da peça ou do rascunho.
 const BALLOON_CONTROLS_WIDTH: f32 = 96.;
 /// Largura reservada ao balão dos graus de liberdade.
@@ -78,6 +74,26 @@ fn named_balloon(
     ui.add_enabled_ui(enabled, |ui| icons::button(ui, action, hint, false, false))
         .inner
         .clicked()
+}
+
+/// Alça na borda direita da árvore: arrastar muda a largura. Uma linha de destaque
+/// aparece sob o mouse e durante o arraste.
+fn resize_handle(ui: &mut egui::Ui, area: egui::Rect) -> egui::Response {
+    let rect = egui::Rect::from_x_y_ranges(area.right() - 6.0..=area.right(), area.y_range());
+    let response = ui
+        .interact(rect, ui.id().with("tree_resize"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        ui.painter().line_segment(
+            [
+                egui::pos2(area.right() - 1., area.top() + 4.),
+                egui::pos2(area.right() - 1., area.bottom() - 4.),
+            ],
+            egui::Stroke::new(2., theme::accent()),
+        );
+    }
+    response
 }
 
 /// Barra de título da árvore: mostra o nome do projeto na dica e devolve o clique no botão
@@ -280,6 +296,8 @@ impl Editor {
         let busy = self.busy();
         let mut intents = Vec::new();
         let canvas = self.canvas_rect;
+        let width = self.tree_width_for(canvas);
+        let mut resize = None;
         let shown = egui::Area::new(egui::Id::new("floating_tree"))
             .order(egui::Order::Middle)
             .fade_in(false)
@@ -287,7 +305,7 @@ impl Editor {
             .constrain(false)
             .fixed_pos(canvas.left_top() + egui::vec2(8., 8.))
             .show(context, |ui| {
-                ui.set_width(TREE_WIDTH);
+                ui.set_width(width);
                 // A área não herda a altura inicial de janela flutuante do egui.
                 // Cabeçalho e margens são descontados pelo layout antes da rolagem.
                 ui.set_height((canvas.height() - 16.).max(0.));
@@ -317,10 +335,35 @@ impl Editor {
                 for intent in intents {
                     self.apply_tree_intent(ui, intent);
                 }
+                resize = Some(resize_handle(ui, ui.min_rect()));
                 collapse
             });
         if shown.inner {
             self.shell.browser_visible = false;
+        }
+        self.resize_tree(context, resize);
+    }
+    /// Largura da árvore, sem passar de 60% da área de edição.
+    pub(super) fn tree_width_for(&self, canvas: egui::Rect) -> f32 {
+        self.preferences
+            .tree_width()
+            .min((canvas.width() * 0.6).max(*preferences::TREE_WIDTH_RANGE.start()))
+    }
+    /// Aplica o arraste da borda da árvore; ao soltar, grava a largura nas preferências.
+    fn resize_tree(&mut self, context: &egui::Context, handle: Option<egui::Response>) {
+        let Some(handle) = handle else {
+            return;
+        };
+        if handle.dragged() {
+            let width = (self.tree_width_for(self.canvas_rect) + handle.drag_delta().x).clamp(
+                *preferences::TREE_WIDTH_RANGE.start(),
+                *preferences::TREE_WIDTH_RANGE.end(),
+            );
+            self.preferences.tree_width = Some(width);
+            context.request_repaint();
+        }
+        if handle.drag_stopped() {
+            self.save_preferences(context);
         }
     }
     /// Árvore recolhida: resta a barra de título, no canto superior da área de edição.
@@ -329,23 +372,25 @@ impl Editor {
             return;
         }
         let name = self.current().session.document().name().to_owned();
-        let expand = egui::Area::new(egui::Id::new("collapsed_tree"))
+        let width = self.tree_width_for(self.canvas_rect);
+        let (expand, handle) = egui::Area::new(egui::Id::new("collapsed_tree"))
             .order(egui::Order::Middle)
             .fade_in(false)
             .constrain(false)
             .fixed_pos(self.canvas_rect.left_top() + egui::vec2(8., 8.))
             .show(context, |ui| {
-                theme::floating_frame()
-                    .show(ui, |ui| {
-                        ui.set_width(COLLAPSED_TREE_WIDTH);
-                        tree_title(ui, &name, false, 8)
-                    })
-                    .inner
+                // Mesma largura da árvore expandida: só o corpo some.
+                ui.set_width(width);
+                let expand = theme::floating_frame()
+                    .show(ui, |ui| tree_title(ui, &name, false, 8))
+                    .inner;
+                (expand, resize_handle(ui, ui.min_rect()))
             })
             .inner;
         if expand {
             self.shell.browser_visible = true;
         }
+        self.resize_tree(context, Some(handle));
     }
     /// Balões de edição numa fila no canto, junto da árvore: a peça em edição (Salvar
     /// conclui e volta à montagem), o rascunho em edição com Concluir e os graus de
@@ -381,12 +426,7 @@ impl Editor {
         let canvas = self.canvas_rect;
         let busy = self.busy() || self.pending_close.is_some();
         // A árvore ocupa o canto nos dois estados: a fila vem depois do cabeçalho.
-        let mut left = canvas.left()
-            + if self.shell.browser_visible {
-                TREE_WIDTH + 18.
-            } else {
-                COLLAPSED_TREE_WIDTH + 18.
-            };
+        let mut left = canvas.left() + self.tree_width_for(canvas) + 18.;
         // Os nomes dividem o espaço até o cubo; nomes longos ficam abreviados.
         let room = canvas.right() - view_cube::rect(canvas).width() - 16. - left;
         let names = usize::from(part.is_some())

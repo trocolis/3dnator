@@ -90,9 +90,10 @@ bool nator_face_nearest(const Shape* body,std::size_t index,const double* point,
 bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noexcept {
     return guarded([&] {
         const auto edge=edge_at(body,index);
-        // Vinte e quatro doubles: extremos, centro, indicador circular, normal,
-        // raio, fechamento, costura, ponto médio, direção radial e intervalo angular.
-        std::fill(output,output+24,0.);
+        // Vinte e sete doubles: extremos, centro, indicador circular, normal,
+        // raio, fechamento, costura, ponto médio, direção radial, intervalo angular e a
+        // soma das normais externas das faces vizinhas no ponto médio.
+        std::fill(output,output+27,0.);
         // Polos de esferas/cones podem ter uma aresta sem curva 3D. Ela não
         // oferece captura, mas continua fornecendo um apoio finito para cotas.
         if (BRep_Tool::Degenerated(edge)) {
@@ -138,6 +139,22 @@ bool nator_edge_anchors(const Shape* body,std::size_t index,double* output) noex
             for (const auto& shape:ancestors.FindFromKey(edge)) {
                 if (BRep_Tool::IsClosed(edge,TopoDS::Face(shape))) {output[15]=1.;break;}
             }
+            // Bissetriz das faces da aresta, para a seta perpendicular ao plano do ponto.
+            // A normal de BRepGProp_Face já considera a orientação da face (sai do sólido).
+            gp_Vec sum(0.,0.,0.);
+            for (const auto& shape:ancestors.FindFromKey(edge)) {
+                const auto face=TopoDS::Face(shape);
+                try {
+                    const BRepAdaptor_Curve2d pcurve(edge,face);
+                    const auto uv=pcurve.Value(middle);
+                    gp_Pnt point; gp_Vec normal;
+                    BRepGProp_Face(face).Normal(uv.X(),uv.Y(),point,normal);
+                    if (normal.Magnitude()>1e-12) sum+=normal.Normalized();
+                } catch (const Standard_Failure&) {
+                    // Sem curva paramétrica nesta face: a outra face ainda orienta a seta.
+                }
+            }
+            output[24]=sum.X();output[25]=sum.Y();output[26]=sum.Z();
         }
     });
 }

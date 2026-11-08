@@ -23,6 +23,9 @@ pub struct PointAnchor {
     pub kind: PointKind,
     /// Presente somente no centro, para descobrir o apoio no disco e no vazio do furo.
     pub circle: Option<CircleAnchor>,
+    /// Direção perpendicular ao plano do ponto, em coordenadas locais: o eixo do círculo nos
+    /// centros (sem sentido garantido) e a saída do sólido nos pontos médios de aresta.
+    pub normal: Option<Point3>,
 }
 
 /// Apoios fixos de um rascunho de referência, no plano local e em mm. A projeção
@@ -77,6 +80,7 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                         point,
                         kind: PointKind::FaceCenter,
                         circle: None,
+                        normal: None,
                     });
                 }
             }
@@ -91,6 +95,7 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                             PointKind::ArcCenter
                         },
                         circle: Some(circle),
+                        normal: Some(circle.normal),
                     });
                     if circle.closed {
                         // Os quadrantes pertencem ao plano do círculo, acompanhando
@@ -108,6 +113,7 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                                 }),
                                 kind: PointKind::CircleBoundary,
                                 circle: None,
+                                normal: None,
                             });
                         }
                     }
@@ -120,6 +126,7 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                         point: supports.midpoint,
                         kind: PointKind::EdgeMidpoint,
                         circle: None,
+                        normal: supports.normal,
                     });
                 }
             }
@@ -135,6 +142,7 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                 point,
                 kind: PointKind::Vertex,
                 circle: None,
+                normal: None,
             }));
             Ok(anchors)
         };
@@ -149,6 +157,7 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
             point: *point,
             kind: PointKind::Vertex,
             circle: None,
+            normal: None,
         })
         .collect::<Vec<_>>();
     let mesh = body.geometry.mesh();
@@ -159,11 +168,23 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
                 point,
                 kind: PointKind::FaceCenter,
                 circle: None,
+                normal: None,
             }),
     );
-    let mut midpoints = std::collections::HashSet::new();
+    // Ponto médio → posição na lista e soma das normais dos triângulos da aresta.
+    let mut midpoints = std::collections::HashMap::<[u64; 3], (usize, Point3)>::new();
     for (triangle, mask) in mesh.triangles().iter().zip(body.geometry.creases()) {
         let points = mesh.triangle_points(*triangle);
+        let face = nator_geometry::cross(
+            nator_geometry::sub(points[1], points[0]),
+            nator_geometry::sub(points[2], points[0]),
+        );
+        let length = nator_geometry::norm(face);
+        let face = if length > 0. {
+            face.map(|v| v / length)
+        } else {
+            [0.; 3]
+        };
         for corner in 0..3 {
             if mask & (1 << corner) == 0 {
                 continue;
@@ -174,13 +195,27 @@ pub fn body_anchors(body: &Body) -> Result<Vec<PointAnchor>, DocumentError> {
             // STL pode repetir os vértices de cada triângulo. A chave geométrica
             // evita duplicar o apoio dos dois lados, normalizando também −0.
             let key = point.map(|v| if v == 0. { 0 } else { v.to_bits() });
-            if midpoints.insert(key) {
-                anchors.push(PointAnchor {
-                    point,
-                    kind: PointKind::EdgeMidpoint,
-                    circle: None,
-                });
+            match midpoints.entry(key) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let sum = &mut entry.get_mut().1;
+                    *sum = std::array::from_fn(|i| sum[i] + face[i]);
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert((anchors.len(), face));
+                    anchors.push(PointAnchor {
+                        point,
+                        kind: PointKind::EdgeMidpoint,
+                        circle: None,
+                        normal: None,
+                    });
+                }
             }
+        }
+    }
+    for (index, sum) in midpoints.into_values() {
+        let length = nator_geometry::norm(sum);
+        if length > 1e-9 {
+            anchors[index].normal = Some(sum.map(|v| v / length));
         }
     }
     Ok(anchors)

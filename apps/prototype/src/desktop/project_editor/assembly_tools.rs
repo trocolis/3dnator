@@ -257,6 +257,8 @@ pub(super) struct AlignDraft {
     /// Ponto a ponto: corpo cujos apoios estão mapeados para o campo em edição. Escolhido
     /// com um clique antes dos pontos; só os apoios dele são calculados e oferecidos.
     focus: Option<PointFocus>,
+    /// Perímetro do círculo ou arco quando a origem é o centro dele.
+    from_outline: Vec<Point3>,
 }
 
 /// Corpo escolhido no ponto a ponto, identificado pela ocorrência na montagem.
@@ -288,6 +290,8 @@ pub(super) struct Anchor {
     label: String,
     /// Veio de um rascunho de referência (desenhado na cor das referências).
     reference: bool,
+    /// Perímetro do círculo ou arco quando o destino é o centro dele.
+    outline: Vec<Point3>,
 }
 impl Anchor {
     fn from_pick(pick: &Pick, label: String) -> Self {
@@ -297,6 +301,7 @@ impl Anchor {
             edge: [pick.vertices[0], pick.vertices[1]],
             label,
             reference: false,
+            outline: Vec::new(),
         }
     }
 }
@@ -400,6 +405,7 @@ fn reference_anchor(
                                     edge: [world; 2],
                                     label: sketch.name.clone(),
                                     reference: true,
+                                    outline: Vec::new(),
                                 },
                                 occludable,
                             ));
@@ -428,6 +434,7 @@ fn reference_anchor(
                                 edge: [wa, wb],
                                 label: sketch.name.clone(),
                                 reference: true,
+                                outline: Vec::new(),
                             },
                             occludable,
                         ));
@@ -456,6 +463,7 @@ fn reference_anchor(
                             edge: [world; 2],
                             label: sketch.name.clone(),
                             reference: true,
+                            outline: Vec::new(),
                         },
                         false,
                     ));
@@ -480,6 +488,7 @@ fn reference_anchor(
                         edge: [point; 2],
                         label,
                         reference: true,
+                        outline: Vec::new(),
                     },
                     true,
                 ));
@@ -976,6 +985,7 @@ impl Editor {
                 independent,
                 carried,
                 focus: None,
+                from_outline: Vec::new(),
             }))
         } else {
             let mut draft = MoveDraft::new(tab, targets);
@@ -1166,12 +1176,14 @@ impl Editor {
     pub(super) fn set_align_for_capture(&mut self, from: Pick, to: Point3) {
         if let Some(Panel::Align(d)) = &mut self.assembly_panel {
             d.from = Some(from);
+            d.from_outline.clear();
             d.to = Some(Anchor {
                 point: to,
                 normal: [0., 0., 1.],
                 edge: [to, [to[0] + 1., to[1], to[2]]],
                 label: text(T::ReferenceSketch).into(),
                 reference: true,
+                outline: Vec::new(),
             });
             d.field = None;
         }
@@ -1220,6 +1232,7 @@ impl Editor {
             independent: false,
             carried: Placement::default(),
             focus,
+            from_outline: Vec::new(),
         })));
     }
     pub(super) fn open_instance_pattern(&mut self, circular: bool) {
@@ -1400,6 +1413,7 @@ impl Editor {
         // Distância em tela do ponto do modelo capturado; sem captura, um apoio de
         // rascunho ou origem próximo do cursor tem a preferência.
         let mut captured_distance = None;
+        let mut outline = Vec::new();
         let vertex = self.alignment_pick_mode() == Some(navigation::PickMode::Vertex);
         let model = if vertex {
             if self.alignment_awaits_body() {
@@ -1408,6 +1422,7 @@ impl Editor {
                 self.point_target(&document, rect, position, &response.ctx)
                     .map(|target| {
                         captured_distance = target.captured.then_some(target.distance);
+                        outline = target.outline;
                         target.pick
                     })
             }
@@ -1478,7 +1493,10 @@ impl Editor {
                         .instance(pick.instance)
                         .map(|i| i.name.clone())
                         .unwrap_or_default();
-                    Some(Anchor::from_pick(&pick, label))
+                    Some(Anchor {
+                        outline: std::mem::take(&mut outline),
+                        ..Anchor::from_pick(&pick, label)
+                    })
                 }
                 (_, Some(reference), _) => Some(reference),
                 (_, None, None) => None,
@@ -1532,6 +1550,7 @@ impl Editor {
                             d.targets = vec![item];
                         }
                         d.from = Some(pick);
+                        d.from_outline = outline;
                         d.field = d.to.is_none().then_some(AlignField::To);
                         // O destino costuma estar noutro corpo: escolhe-se de novo.
                         d.focus = None;
@@ -2081,16 +2100,25 @@ impl Editor {
         let camera = &self.viewport.camera;
         let project = |p: Point3| sketch_scene::project(camera, bounds, rect, p);
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-        let mark = |point: Point3, edge: Option<[Point3; 2]>, color: egui::Color32| {
-            if let Some([a, b]) = edge
-                && let (Some(a), Some(b)) = (project(a), project(b))
-            {
-                painter.line_segment([a, b], egui::Stroke::new(3.5, color));
-            }
-            if let Some(p) = project(point) {
-                painter.circle(p, 6., egui::Color32::WHITE, egui::Stroke::new(2.5, color));
-            }
-        };
+        let mark =
+            |point: Point3, edge: Option<[Point3; 2]>, outline: &[Point3], color: egui::Color32| {
+                if let Some([a, b]) = edge
+                    && let (Some(a), Some(b)) = (project(a), project(b))
+                {
+                    painter.line_segment([a, b], egui::Stroke::new(3.5, color));
+                }
+                // Centro escolhido: o perímetro do círculo ou arco fica realçado junto.
+                let perimeter = outline
+                    .iter()
+                    .filter_map(|p| project(*p))
+                    .collect::<Vec<_>>();
+                if perimeter.len() == outline.len() && perimeter.len() > 1 {
+                    painter.add(egui::Shape::line(perimeter, egui::Stroke::new(2.5, color)));
+                }
+                if let Some(p) = project(point) {
+                    painter.circle(p, 6., egui::Color32::WHITE, egui::Stroke::new(2.5, color));
+                }
+            };
         // Pontos mapeados do corpo escolhido no ponto a ponto, discretos: o realce forte
         // fica para o ponto sob o cursor.
         if let Some(focus) = self.alignment_point_focus() {
@@ -2106,17 +2134,38 @@ impl Editor {
             {
                 let color = theme::accent().gamma_multiply(0.8);
                 let section = self.current().section.filter(|s| s.visible);
+                let toward_viewer = camera.direction();
+                // Passo no mundo para projetar a normal: pequeno diante da cena.
+                let step = nator_geometry::norm(sub(bounds.max, bounds.min)).max(1.) * 0.01;
                 for anchor in anchors {
                     let point = pose.apply(anchor.point);
                     if section.is_some_and(|s| !s.keeps(point)) {
                         continue;
                     }
-                    if let Some(p) = project(point) {
+                    let Some(p) = project(point) else {
+                        continue;
+                    };
+                    let Some(style) = anchor_style(anchor.kind) else {
                         painter.circle(p, 2.5, egui::Color32::WHITE, egui::Stroke::new(1.2, color));
-                        if let Some(from) = anchor_arrow(anchor.kind) {
-                            pointer_arrow(&painter, p, from, color);
+                        continue;
+                    };
+                    // Seta perpendicular ao plano do ponto, vinda do lado do observador.
+                    let normal = anchor.normal.map(|n| {
+                        let n = pose.apply_vector(n);
+                        if nator_geometry::dot(n, toward_viewer) < 0. {
+                            n.map(|v| -v)
+                        } else {
+                            n
                         }
-                    }
+                    });
+                    let screen_normal = normal
+                        .and_then(|n| project(std::array::from_fn(|i| point[i] + n[i] * step)))
+                        .map(|q| q - p)
+                        .filter(|v| v.length() > 0.5)
+                        .map(egui::Vec2::normalized);
+                    let from = screen_normal.unwrap_or(egui::vec2(-1., -1.).normalized());
+                    pointer_arrow(&painter, p, from, style.color);
+                    anchor_mark(&painter, p, style);
                 }
             }
         }
@@ -2125,6 +2174,7 @@ impl Editor {
             mark(
                 from.point,
                 edge.then_some([from.vertices[0], from.vertices[1]]),
+                &d.from_outline,
                 theme::accent(),
             );
         }
@@ -2132,6 +2182,7 @@ impl Editor {
             mark(
                 to.point,
                 edge.then_some(to.edge),
+                &to.outline,
                 if to.reference {
                     theme::reference()
                 } else {
@@ -2142,35 +2193,74 @@ impl Editor {
     }
 }
 
-/// Direção (na tela, do ponto para a cauda) da seta que destaca um apoio: centros de
-/// círculos e arcos, reais ou virtuais, pela diagonal superior esquerda; pontos médios de
-/// aresta, de cima. Os demais apoios ficam só com a marca redonda.
-fn anchor_arrow(kind: nator_commands::point_snap::PointKind) -> Option<egui::Vec2> {
+/// Marca de destaque de um apoio, como no rascunho: centros de círculos e arcos (reais ou
+/// virtuais) em losango verde com ponto; pontos médios de aresta em triângulo âmbar.
+#[derive(Clone, Copy)]
+enum AnchorShape {
+    Diamond,
+    Triangle,
+}
+#[derive(Clone, Copy)]
+struct AnchorStyle {
+    shape: AnchorShape,
+    color: egui::Color32,
+}
+
+/// Estilo destacado do apoio; vértices, quadrantes e centros de face ficam com a marca
+/// redonda discreta.
+fn anchor_style(kind: nator_commands::point_snap::PointKind) -> Option<AnchorStyle> {
     use nator_commands::point_snap::PointKind;
     match kind {
-        PointKind::CircleCenter | PointKind::ArcCenter => Some(egui::vec2(-1., -1.).normalized()),
-        PointKind::EdgeMidpoint => Some(egui::vec2(0., -1.)),
+        PointKind::CircleCenter | PointKind::ArcCenter => Some(AnchorStyle {
+            shape: AnchorShape::Diamond,
+            color: theme::green(),
+        }),
+        PointKind::EdgeMidpoint => Some(AnchorStyle {
+            shape: AnchorShape::Triangle,
+            color: theme::warning(),
+        }),
         PointKind::Vertex | PointKind::CircleBoundary | PointKind::FaceCenter => None,
     }
 }
 
-/// Seta curta que termina junto da marca do apoio, vinda da direção `from`.
+fn anchor_mark(painter: &egui::Painter, at: egui::Pos2, style: AnchorStyle) {
+    let outline = match style.shape {
+        AnchorShape::Diamond => vec![
+            at + egui::vec2(0., -6.),
+            at + egui::vec2(6., 0.),
+            at + egui::vec2(0., 6.),
+            at + egui::vec2(-6., 0.),
+        ],
+        AnchorShape::Triangle => vec![
+            at + egui::vec2(0., -6.),
+            at + egui::vec2(6., 4.5),
+            at + egui::vec2(-6., 4.5),
+        ],
+    };
+    painter.add(egui::Shape::convex_polygon(
+        outline,
+        egui::Color32::WHITE,
+        egui::Stroke::new(1.6, style.color),
+    ));
+    painter.circle_filled(at, 1.8, egui::Color32::BLACK);
+}
+
+/// Seta que termina junto da marca do apoio, vinda da direção `from` (na tela).
 fn pointer_arrow(
     painter: &egui::Painter,
     point: egui::Pos2,
     from: egui::Vec2,
     color: egui::Color32,
 ) {
-    let tip = point + from * 4.;
-    let tail = point + from * 16.;
-    let stroke = egui::Stroke::new(1.4, color);
-    painter.line_segment([tail, tip], stroke);
+    let tip = point + from * 8.;
+    let tail = point + from * 34.;
+    painter.line_segment([tail, tip], egui::Stroke::new(2., color));
     let side = egui::vec2(-from.y, from.x);
     painter.add(egui::Shape::convex_polygon(
         vec![
             tip,
-            tip + from * 5. + side * 3.,
-            tip + from * 5. - side * 3.,
+            tip + from * 8. + side * 4.5,
+            tip + from * 8. - side * 4.5,
         ],
         color,
         egui::Stroke::NONE,
@@ -2764,6 +2854,7 @@ mod tests {
             independent: false,
             carried: Placement::default(),
             focus: None,
+            from_outline: Vec::new(),
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
         // O ponto de origem vai ao destino e a normal fica oposta à do destino.

@@ -449,6 +449,15 @@ fn group_width(count: usize) -> f32 {
         + count.saturating_sub(1) as f32 * GROUP_HORIZONTAL_GAP
 }
 
+/// Lado do botão só com ícone da faixa compacta.
+const COMPACT_BUTTON: f32 = 30.;
+/// Faixa do nome da seção sob os botões, no tamanho Maior.
+const SECTION_CAPTION_HEIGHT: f32 = 15.;
+
+fn compact_group_width(count: usize) -> f32 {
+    count as f32 * COMPACT_BUTTON + count.saturating_sub(1) as f32 * GROUP_HORIZONTAL_GAP
+}
+
 impl Editor {
     fn action_enabled(&self, action: Action) -> bool {
         let editable = !self.busy() && self.pending_close.is_none();
@@ -1008,8 +1017,7 @@ impl Editor {
                                     .file_name()
                                     .map(|name| name.to_string_lossy().into_owned())
                                     .unwrap_or_else(|| path.display().to_string());
-                                if ui
-                                    .add(egui::Button::new(name).frame(false))
+                                if icons::menu_item(ui, None, &name, 24.)
                                     .on_hover_text(path.display().to_string())
                                     .clicked()
                                 {
@@ -1146,12 +1154,37 @@ impl Editor {
                             self.shell.search_open = true;
                             self.shell.search_focus = true;
                         }
+                        self.ribbon_size_menu(ui);
                     });
                 });
                 ui.add(egui::Separator::default().spacing(4.));
                 self.ribbon_scroller(ui);
             });
         self.timeline(ui);
+    }
+    /// Botão do tamanho da faixa: Maior, Normal ou Compacto, gravado nas preferências.
+    fn ribbon_size_menu(&mut self, ui: &mut egui::Ui) {
+        let response = icons::button(ui, Icon::Restore, text(T::RibbonSizeMenu), false, false);
+        let mut chosen = None;
+        egui::Popup::menu(&response).show(|ui| {
+            for (size, label) in [
+                (preferences::RibbonSize::Large, T::RibbonLarge),
+                (preferences::RibbonSize::Normal, T::RibbonNormal),
+                (preferences::RibbonSize::Compact, T::RibbonCompact),
+            ] {
+                let current = self.preferences.ribbon == size;
+                if icons::menu_choice(ui, current, text(label)).clicked() {
+                    chosen = Some(size);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(size) = chosen
+            && size != self.preferences.ribbon
+        {
+            self.preferences.ribbon = size;
+            self.save_preferences(ui.ctx());
+        }
     }
     fn document_tabs(&mut self, ui: &mut egui::Ui) {
         let mut switch = None;
@@ -1228,14 +1261,20 @@ impl Editor {
         });
     }
 
-    fn sketch_section(&mut self, ui: &mut egui::Ui, promoted: &[Action], secondary: &[Action]) {
+    fn sketch_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        label: Option<T>,
+        promoted: &[Action],
+        secondary: &[Action],
+    ) {
         let mut actions = promoted.to_vec();
         for action in secondary {
             if !actions.contains(action) {
                 actions.push(*action);
             }
         }
-        self.ribbon_group(ui, &actions);
+        self.ribbon_group(ui, label, &actions);
     }
 
     /// Seção Restringir: Dimencionar em destaque, as seis restrições mais usadas e, sob elas,
@@ -1243,8 +1282,52 @@ impl Editor {
     fn restrict_group(&mut self, ui: &mut egui::Ui) {
         let enabled =
             !self.busy() && self.pending_close.is_none() && self.current().sketch_edit.is_some();
+        if self.preferences.ribbon == preferences::RibbonSize::Compact {
+            // Compacto: as três ferramentas e um ícone que abre a lista de restrições.
+            self.ribbon_group_layout(
+                ui,
+                compact_group_width(4),
+                None,
+                |editor: &mut Self, ui: &mut egui::Ui| {
+                    editor.action_button(
+                        ui,
+                        Action::SketchTool(sketch_editor::Tool::Dimension),
+                        false,
+                    );
+                    editor.action_button(
+                        ui,
+                        Action::SketchTool(sketch_editor::Tool::Select),
+                        false,
+                    );
+                    editor.action_button(ui, Action::SketchEdit(SketchEdit::Construction), false);
+                    let response = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            icons::button(
+                                ui,
+                                Icon::ConstraintPerpendicular,
+                                text(T::Restrict),
+                                false,
+                                false,
+                            )
+                        })
+                        .inner;
+                    editor.shell.menu_rects.push(response.rect);
+                    let mut chosen = None;
+                    egui::Popup::menu(&response).show(|ui| {
+                        if let Some(choice) = editor.restriction_menu(ui) {
+                            chosen = Some(choice);
+                        }
+                    });
+                    if let Some(choice) = chosen {
+                        editor.apply_restriction(ui.ctx(), choice);
+                    }
+                },
+            );
+            return;
+        }
         let width = group_width(3) + GROUP_HORIZONTAL_GAP + RESTRICT_COLUMN_WIDTH;
-        self.ribbon_group_layout(ui, width, |editor, ui| {
+        // A seção já tem a própria legenda ("Restringir ▾"), também no tamanho Maior.
+        self.ribbon_group_layout(ui, width, None, |editor: &mut Self, ui: &mut egui::Ui| {
             editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Dimension), true);
             // Diagnóstico ao lado de Dimensionar, do tamanho das demais ferramentas.
             editor.action_button(ui, Action::SketchTool(sketch_editor::Tool::Select), true);
@@ -1336,30 +1419,71 @@ impl Editor {
             }
         });
     }
-    fn ribbon_group(&mut self, ui: &mut egui::Ui, actions: &[Action]) {
-        self.ribbon_group_layout(ui, group_width(actions.len()), |editor, ui| {
+    fn ribbon_group(&mut self, ui: &mut egui::Ui, label: Option<T>, actions: &[Action]) {
+        let compact = self.preferences.ribbon == preferences::RibbonSize::Compact;
+        let width = if compact {
+            compact_group_width(actions.len())
+        } else {
+            group_width(actions.len())
+        };
+        self.ribbon_group_layout(ui, width, label, |editor, ui| {
             for action in actions {
-                editor.action_button(ui, *action, true);
+                editor.action_button(ui, *action, !compact);
             }
         });
     }
-    /// Corpo do grupo: somente os botões, sem o antigo rodapé com o nome da seção.
+    /// Corpo do grupo conforme o tamanho da faixa: no Maior, o nome da seção fica centrado
+    /// sob os botões; no Compacto, a altura cai para a dos ícones pequenos.
     fn ribbon_group_layout(
         &mut self,
         ui: &mut egui::Ui,
         width: f32,
+        label: Option<T>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) {
-        ui.allocate_ui(egui::vec2(width, icons::RIBBON_BUTTON_SIZE.y), |ui| {
+        let size = self.preferences.ribbon;
+        let buttons = match size {
+            preferences::RibbonSize::Compact => COMPACT_BUTTON,
+            _ => icons::RIBBON_BUTTON_SIZE.y,
+        };
+        let caption = match (size, label) {
+            (preferences::RibbonSize::Large, Some(label)) => Some(label),
+            _ => None,
+        };
+        let height = buttons
+            + if size == preferences::RibbonSize::Large {
+                SECTION_CAPTION_HEIGHT
+            } else {
+                0.
+            };
+        ui.allocate_ui(egui::vec2(width, height), |ui| {
             ui.set_width(width);
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, icons::RIBBON_BUTTON_SIZE.y),
-                egui::Layout::left_to_right(egui::Align::Min),
-                |ui| {
-                    ui.set_min_height(icons::RIBBON_BUTTON_SIZE.y);
-                    body(self, ui);
-                },
-            );
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, buttons),
+                    egui::Layout::left_to_right(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_height(buttons);
+                        body(self, ui);
+                    },
+                );
+                if size == preferences::RibbonSize::Large {
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(width, SECTION_CAPTION_HEIGHT),
+                        egui::Sense::hover(),
+                    );
+                    if let Some(label) = caption {
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            text(label),
+                            egui::FontId::proportional(10.5),
+                            theme::muted(),
+                        );
+                    }
+                }
+            });
         });
         ui.separator();
     }
@@ -1367,9 +1491,10 @@ impl Editor {
         self.shell.menu_rects.clear();
         match self.shell.tab {
             RibbonTab::Model => {
-                self.ribbon_group(ui, &[Action::NewSketch]);
+                self.ribbon_group(ui, Some(T::SectionSketch), &[Action::NewSketch]);
                 self.ribbon_group(
                     ui,
+                    Some(T::SectionCreate),
                     &[
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
@@ -1381,6 +1506,7 @@ impl Editor {
                 );
                 self.ribbon_group(
                     ui,
+                    Some(T::SectionModify),
                     &[
                         Action::Solid(SolidTool::Shell),
                         Action::Solid(SolidTool::Fillet),
@@ -1391,6 +1517,7 @@ impl Editor {
                 );
                 self.ribbon_group(
                     ui,
+                    Some(T::SectionArrange),
                     &[
                         Action::MoveBody,
                         Action::CopyBody,
@@ -1404,6 +1531,7 @@ impl Editor {
                 );
                 self.sketch_section(
                     ui,
+                    Some(T::SectionInspect),
                     &[Action::Solid(SolidTool::CheckSolid), Action::OffsetPlane],
                     &[Action::Parameters, Action::Section],
                 );
@@ -1411,38 +1539,61 @@ impl Editor {
             // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
             // posicionamento, cópias e organização.
             RibbonTab::Assembly => {
-                self.ribbon_group(ui, &[Action::ReferenceSketch]);
-                self.ribbon_group(ui, &[Action::NewEmptyPart]);
-                self.ribbon_group(ui, &[Action::ImportReference]);
-                self.ribbon_group(ui, &[Action::MoveCopy]);
-                self.ribbon_group(ui, &[Action::NewInstance, Action::InstanceMirror]);
-                self.ribbon_group(ui, &[Action::Group, Action::Ungroup]);
-                self.ribbon_group(ui, &[Action::Drawing, Action::Section, Action::ExportStep]);
-            }
-            RibbonTab::Print => {
-                self.ribbon_group(ui, &[Action::PrintProfile, Action::Calibrate]);
-                self.ribbon_group(ui, &[Action::Solid(SolidTool::BedFace), Action::PrintCheck]);
+                self.ribbon_group(ui, Some(T::SectionReference), &[Action::ReferenceSketch]);
+                self.ribbon_group(ui, Some(T::SectionPart), &[Action::NewEmptyPart]);
+                self.ribbon_group(ui, Some(T::SectionImport), &[Action::ImportReference]);
+                self.ribbon_group(ui, Some(T::SectionPlace), &[Action::MoveCopy]);
                 self.ribbon_group(
                     ui,
+                    Some(T::SectionCopy),
+                    &[Action::NewInstance, Action::InstanceMirror],
+                );
+                self.ribbon_group(
+                    ui,
+                    Some(T::SectionGroups),
+                    &[Action::Group, Action::Ungroup],
+                );
+                self.ribbon_group(
+                    ui,
+                    Some(T::SectionDocument),
+                    &[Action::Drawing, Action::Section, Action::ExportStep],
+                );
+            }
+            RibbonTab::Print => {
+                self.ribbon_group(
+                    ui,
+                    Some(T::SectionPrinter),
+                    &[Action::PrintProfile, Action::Calibrate],
+                );
+                self.ribbon_group(
+                    ui,
+                    Some(T::SectionPrepare),
+                    &[Action::Solid(SolidTool::BedFace), Action::PrintCheck],
+                );
+                self.ribbon_group(
+                    ui,
+                    Some(T::SectionFit),
                     &[Action::Solid(SolidTool::ComponentCut), Action::FitCheck],
                 );
                 self.ribbon_group(
                     ui,
+                    Some(T::SectionFastening),
                     &[
                         Action::Solid(SolidTool::Lip),
                         Action::Solid(SolidTool::ScrewBoss),
                         Action::Solid(SolidTool::SnapFit),
                     ],
                 );
-                self.ribbon_group(ui, &[Action::ExportPrint]);
+                self.ribbon_group(ui, Some(T::SectionExport), &[Action::ExportPrint]);
             }
             RibbonTab::Sketch => {
                 // A aba Rascunho mantém o ferramental completo visível fora da edição;
                 // os botões ficam desativados até existir um rascunho em edição.
-                self.ribbon_group(ui, &[Action::NewSketch]);
+                self.ribbon_group(ui, Some(T::SectionSketch), &[Action::NewSketch]);
                 // Todas as ferramentas ficam expostas; os grupos quebram linha.
                 self.sketch_section(
                     ui,
+                    Some(T::SectionCreate),
                     &[
                         Action::SketchTool(sketch_editor::Tool::Line),
                         Action::SketchTool(sketch_editor::Tool::Rectangle),
@@ -1463,6 +1614,7 @@ impl Editor {
                 );
                 self.sketch_section(
                     ui,
+                    Some(T::SectionModify),
                     &[
                         Action::SketchTool(sketch_editor::Tool::Trim),
                         Action::SketchEdit(SketchEdit::Offset),
@@ -1482,7 +1634,7 @@ impl Editor {
                 );
                 self.restrict_group(ui);
                 let exit = [Action::FinishSketch, Action::CancelSketch];
-                self.sketch_section(ui, &exit, &[]);
+                self.sketch_section(ui, Some(T::SectionFinish), &exit, &[]);
             }
         }
     }
@@ -1536,11 +1688,16 @@ impl Editor {
                         .layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
                 controls.spacing_mut().item_spacing.x = 4.;
-                controls.label(
-                    egui::RichText::new(text(T::ParametricHistory))
-                        .strong()
-                        .size(12.),
-                );
+                // O histórico paramétrico pertence às peças: a montagem e a impressão não o
+                // mostram; desfazer, refazer e o estado continuam no rodapé.
+                let history = matches!(self.shell.tab, RibbonTab::Model | RibbonTab::Sketch);
+                if history {
+                    controls.label(
+                        egui::RichText::new(text(T::ParametricHistory))
+                            .strong()
+                            .size(12.),
+                    );
+                }
                 self.action_button(&mut controls, Action::Undo, false);
                 self.action_button(&mut controls, Action::Redo, false);
                 ui.painter().line_segment(
@@ -1550,7 +1707,7 @@ impl Editor {
                     ],
                     egui::Stroke::new(1., theme::border()),
                 );
-                if middle.is_positive() {
+                if history && middle.is_positive() {
                     let mut strip = ui.new_child(
                         egui::UiBuilder::new()
                             .max_rect(middle)
@@ -1628,27 +1785,16 @@ impl Editor {
                     .show(ui, |ui| {
                         for action in matches {
                             ui.add_enabled_ui(self.action_enabled(action), |ui| {
-                                ui.horizontal(|ui| {
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::Vec2::splat(22.),
-                                        egui::Sense::hover(),
-                                    );
-                                    icons::paint(
-                                        ui.painter(),
-                                        rect,
-                                        action.icon(),
-                                        ui.is_enabled(),
-                                    );
-                                    if ui
-                                        .add_sized(
-                                            [ui.available_width(), 28.],
-                                            egui::Button::new(text(action.label())).frame(false),
-                                        )
-                                        .clicked()
-                                    {
-                                        chosen = Some(action);
-                                    }
-                                });
+                                if icons::menu_item(
+                                    ui,
+                                    Some(action.icon()),
+                                    text(action.label()),
+                                    28.,
+                                )
+                                .clicked()
+                                {
+                                    chosen = Some(action);
+                                }
                             });
                         }
                     });

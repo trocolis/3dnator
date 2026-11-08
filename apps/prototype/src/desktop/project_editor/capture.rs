@@ -68,6 +68,8 @@ pub(crate) fn render_ui_scenario(
         | "move"
         | "align"
         | "align-points"
+        | "ribbon-large"
+        | "ribbon-compact"
         | "assembly-ribbon"
         | "section"
         | "section-contact"
@@ -135,7 +137,7 @@ pub(crate) fn render_ui_scenario(
         _ => {
             return Err(
                 "Cenários: cursor-extrude, cursor-hole, cursor-measure, cursor-pan, cursor-select, timeline, timeline-menu, extrude, edit-last, failure, hover-face, \
-                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, align-points, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-shortcuts, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
+                 hover-edge, sketch-plane-hover, select-body, window, assembly-select, move, align, align-points, ribbon-large, ribbon-compact, assembly-ribbon, section, section-contact, section-contact-perspective, section-contact-hover, offset-plane, work-plane-pick, offset-plane-edit, sketch-dimension, sketch-mirror, sketch-offset, sketch-fillet, sketch-chamfer, sketch-image, paint, repair, recovery, settings, settings-shortcuts, settings-about, insert, mesh-import, menu-new-part, menu-move, menu-copy, reference-align, reference-sketch, copy-beside, tree-folders, tree-collapsed, navigation-pan, restriction-marks, restrict-menu, part-menu-move, measure, sketch-line-input, sketch-construction-input, sketch-infinite-input, sketch-circle-input, sketch-rectangle-input, extrude-face, extrude-cut, extrude-zero, check-solid, print-profile, bed-face, print-check, fit-check, component-cut, lip, screw-boss, snap-fit, calibrate, pipe, pipe-circle, hole-preset, print-export, status-dialog, icons, rascunho-tab, sketch-line-panel, sketch-project-panel."
                     .into(),
             );
         }
@@ -1367,6 +1369,14 @@ fn scenario_setup(editor: &mut Editor, scenario: &str) -> Result<(), Box<dyn Err
                 },
                 [-60., 30., 0.],
             );
+        }
+        "ribbon-large" | "ribbon-compact" => {
+            editor.preferences.ribbon = if scenario == "ribbon-large" {
+                preferences::RibbonSize::Large
+            } else {
+                preferences::RibbonSize::Compact
+            };
+            editor.shell.tab = shell::RibbonTab::Model;
         }
         "move" | "align" | "align-points" | "assembly-ribbon" | "copy-beside" => {
             editor.current_mut().active_part = None;
@@ -3550,6 +3560,16 @@ mod tests {
             );
             assert!(editor.canvas_rect.top() < 210.);
             assert!(!labels.iter().any(|(label, _)| label == text(T::Project)));
+            // A linha do tempo pertence à Construção (e ao Rascunho), não à Montagem.
+            assert!(
+                !labels
+                    .iter()
+                    .any(|(label, _)| label == text(T::ParametricHistory))
+            );
+            let tab = editor.shell.tab;
+            editor.shell.tab = shell::RibbonTab::Model;
+            let labels = draw(&mut editor, &context, width, vec![]);
+            editor.shell.tab = tab;
             let history = labels
                 .iter()
                 .find(|(label, _)| label == text(T::ParametricHistory))
@@ -7832,6 +7852,84 @@ mod tests {
                 .translation_mm()[1];
             assert!((y - 25.).abs() < 1e-6, "{id:?} em y = {y}");
         }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn tree_keeps_its_width_when_collapsed_and_resizes_by_its_right_edge()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, _) = grouped_blocks_editor(&context)?;
+        frame(&mut editor, &context, vec![])?;
+        let expanded = area_rect(&context, "floating_tree")?;
+        editor.shell.browser_visible = false;
+        frame(&mut editor, &context, vec![])?;
+        frame(&mut editor, &context, vec![])?;
+        let collapsed = area_rect(&context, "collapsed_tree")?;
+        assert!(
+            (expanded.width() - collapsed.width()).abs() < 1.,
+            "{expanded:?} × {collapsed:?}"
+        );
+        // Arrastar a borda direita da barra recolhida alarga as duas.
+        let edge = egui::pos2(collapsed.right() - 3., collapsed.center().y);
+        drag(&mut editor, &context, edge, edge + egui::vec2(80., 0.))?;
+        frame(&mut editor, &context, vec![])?;
+        let wider = area_rect(&context, "collapsed_tree")?;
+        assert!(
+            (wider.width() - collapsed.width() - 80.).abs() < 2.,
+            "{wider:?}"
+        );
+        editor.shell.browser_visible = true;
+        frame(&mut editor, &context, vec![])?;
+        frame(&mut editor, &context, vec![])?;
+        let reopened = area_rect(&context, "floating_tree")?;
+        assert!(
+            (reopened.width() - wider.width()).abs() < 1.,
+            "{reopened:?}"
+        );
+        // E a borda da árvore expandida estreita até o limite mínimo.
+        let edge = egui::pos2(reopened.right() - 3., reopened.center().y);
+        drag(&mut editor, &context, edge, edge - egui::vec2(400., 0.))?;
+        frame(&mut editor, &context, vec![])?;
+        let narrow = area_rect(&context, "floating_tree")?;
+        assert!(
+            (narrow.width() - preferences::TREE_WIDTH_RANGE.start()).abs() < 1.,
+            "{narrow:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn ribbon_sizes_change_height_and_section_names_and_assembly_has_no_timeline()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, _) = grouped_blocks_editor(&context)?;
+        // Montagem: sem a linha do tempo; Construção: com ela.
+        editor.shell.tab = shell::RibbonTab::Assembly;
+        assert!(label_position(&mut editor, &context, text(T::ParametricHistory)).is_err());
+        editor.shell.tab = shell::RibbonTab::Model;
+        label_position(&mut editor, &context, text(T::ParametricHistory))?;
+        let mut heights = Vec::new();
+        for size in [
+            preferences::RibbonSize::Compact,
+            preferences::RibbonSize::Normal,
+            preferences::RibbonSize::Large,
+        ] {
+            editor.preferences.ribbon = size;
+            frame(&mut editor, &context, vec![])?;
+            frame(&mut editor, &context, vec![])?;
+            let canvas = editor.canvas_rect;
+            heights.push(canvas.top());
+            let named = label_position(&mut editor, &context, text(T::SectionInspect)).is_ok();
+            assert_eq!(named, size == preferences::RibbonSize::Large, "{size:?}");
+        }
+        // A área de edição começa mais acima quanto menor a faixa.
+        assert!(
+            heights[0] < heights[1] && heights[1] < heights[2],
+            "{heights:?}"
+        );
         Ok(())
     }
 
