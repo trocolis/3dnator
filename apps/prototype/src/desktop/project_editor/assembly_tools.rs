@@ -2201,6 +2201,14 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         d.targets.clear();
         d.picking = true;
     }
+    rigid_hint(
+        ui,
+        document,
+        d.targets.iter().filter_map(|t| match t {
+            Selection::Instance(id) => Some(*id),
+            Selection::Body { .. } => None,
+        }),
+    );
     number_row(
         ui,
         text(T::TranslationField),
@@ -2272,6 +2280,19 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
     );
 }
 
+/// Aviso de que o movimento leva junto membros de grupo rígido que não estão na escolha.
+fn rigid_hint(ui: &mut egui::Ui, document: &Document, chosen: impl Iterator<Item = InstanceId>) {
+    let chosen = chosen.collect::<Vec<_>>();
+    let partners = document.with_rigid_partners(&chosen).len() - chosen.len();
+    if partners > 0 {
+        ui.label(
+            egui::RichText::new(format!("{} (+{partners})", text(T::RigidMoveHint)))
+                .small()
+                .color(theme::accent()),
+        );
+    }
+}
+
 fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
     for (field, label) in [
         (AlignField::From, T::AlignFrom),
@@ -2312,6 +2333,21 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
             d.focus = None;
         }
     }
+    let moved = d
+        .targets
+        .iter()
+        .filter_map(|t| match t {
+            Selection::Instance(id) => Some(*id),
+            Selection::Body { .. } => None,
+        })
+        .chain(
+            d.targets
+                .is_empty()
+                .then(|| d.from.as_ref().map(|p| p.instance))
+                .flatten(),
+        )
+        .collect::<Vec<_>>();
+    rigid_hint(ui, document, moved.into_iter());
     // Ponto a ponto: primeiro o corpo, depois os pontos dele.
     if d.kind == navigation::PickMode::Vertex && d.field.is_some() {
         match &d.focus {

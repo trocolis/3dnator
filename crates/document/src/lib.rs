@@ -1355,6 +1355,7 @@ impl Document {
                 }
             }
         }
+        self.validate_rigid_groups()?;
         self.validate_assembly()?;
         // Instâncias também amplificam vértices não utilizados: limitar ambos os custos.
         let mut scene_triangles = 0_usize;

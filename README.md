@@ -47,7 +47,7 @@ As seções seguintes descrevem o escopo completo aprovado.
 - Cada peça possui origem local; suas instâncias possuem transformações em relação à montagem ou ao conjunto que as contém.
 - Instâncias compartilham uma definição; clones independentes permitem variações com histórico próprio.
 - Referências entre peças capturam a geometria no momento de uso e não propagam mudanças posteriores. Dependências paramétricas ficam dentro da peça.
-- Grupos permitem organizar e movimentar membros juntos sem criar vínculos fortes, nova peça ou origem persistente própria.
+- Grupos permitem organizar e movimentar membros juntos sem criar vínculos fortes, nova peça ou origem persistente própria. Um grupo rígido mantém as posições relativas: mover qualquer membro move todos pelo mesmo deslocamento; cada componente pertence a no máximo um grupo rígido.
 - STEP importado entra como peça; preservar cores sólidas quando disponíveis e permitir operações posteriores sobre a geometria importada.
 
 ## Modelagem

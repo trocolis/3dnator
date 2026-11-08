@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 52
+# Formato de projeto — versão interna 53
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 52; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 53; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -17,6 +17,10 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 53, cada grupo pode ter `rigid: true` (omitido quando falso). Membros de um
+grupo rígido se movem juntos; um componente pertence a no máximo um grupo rígido, e um
+arquivo que viole isso é recusado. Projetos anteriores abrem com grupos organizacionais.
 
 Desde a versão 52, `RemoveFaces { base, faces }` remove de 1 a 1000 faces do corpo base
 (arredondamentos, chanfros, furos, ressaltos) e estende as faces vizinhas até fecharem o

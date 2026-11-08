@@ -92,6 +92,7 @@ pub(super) fn context(command: &Command, doc: &Document) -> C {
         | Command::ReparentInstance { .. }
         | Command::RenameInstance { .. }
         | Command::RenameGroup { .. }
+        | Command::SetGroupRigid { .. }
         | Command::PatternInstance { .. }
         | Command::MirrorInstance { .. }
         | Command::InsertPart { .. } => C::Assembly,

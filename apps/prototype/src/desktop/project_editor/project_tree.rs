@@ -235,37 +235,15 @@ impl<'a> Tree<'a> {
 
     /// Marca de isolamento na ponta direita da linha da instância isolada.
     fn isolation_badge(&self, ui: &egui::Ui, response: &egui::Response, instance: InstanceId) {
-        if !self
+        if self
             .tab
             .view
             .isolated
             .as_ref()
             .is_some_and(|set| set.contains(&instance))
         {
-            return;
+            badge(ui, response, T::IsolatedBadge);
         }
-        let galley = ui.painter().layout_no_wrap(
-            text(T::IsolatedBadge).to_owned(),
-            egui::FontId::proportional(11.),
-            theme::accent(),
-        );
-        let size = galley.size() + egui::vec2(10., 4.);
-        let rect = egui::Rect::from_min_size(
-            egui::pos2(
-                response.rect.right() - size.x - 4.,
-                response.rect.center().y - size.y / 2.,
-            ),
-            size,
-        );
-        ui.painter().rect_filled(rect, 6, theme::blue_fill());
-        ui.painter().rect_stroke(
-            rect,
-            6,
-            egui::Stroke::new(1., theme::accent()),
-            egui::StrokeKind::Inside,
-        );
-        ui.painter()
-            .galley(rect.min + egui::vec2(5., 2.), galley, theme::accent());
     }
 
     /// Nó recolhível: a seta e o clique no rótulo (quando `header` devolve verdadeiro)
@@ -1019,14 +997,18 @@ impl<'a> Tree<'a> {
                             !visible,
                         ))));
                     }
-                    icons::entry_with_hint(
+                    let response = icons::entry_with_hint(
                         ui,
                         Icon::Group,
                         &group.name,
                         chosen,
                         !visible,
                         &format!("{} {}", group.members.len(), text(T::SelectedCount)),
-                    )
+                    );
+                    if group.rigid {
+                        badge(ui, &response, T::RigidBadge);
+                    }
+                    response
                 })
                 .inner;
             if response.clicked() {
@@ -1098,6 +1080,32 @@ impl<'a> Tree<'a> {
             }
         }
     }
+}
+
+/// Etiqueta em destaque na ponta direita de uma linha da árvore (isolado, rígido).
+fn badge(ui: &egui::Ui, response: &egui::Response, label: T) {
+    let galley = ui.painter().layout_no_wrap(
+        text(label).to_owned(),
+        egui::FontId::proportional(11.),
+        theme::accent(),
+    );
+    let size = galley.size() + egui::vec2(10., 4.);
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(
+            response.rect.right() - size.x - 4.,
+            response.rect.center().y - size.y / 2.,
+        ),
+        size,
+    );
+    ui.painter().rect_filled(rect, 6, theme::blue_fill());
+    ui.painter().rect_stroke(
+        rect,
+        6,
+        egui::Stroke::new(1., theme::accent()),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter()
+        .galley(rect.min + egui::vec2(5., 2.), galley, theme::accent());
 }
 
 /// Mostra ou oculta todos os membros de um grupo numa só ação de desfazer. Membros que já

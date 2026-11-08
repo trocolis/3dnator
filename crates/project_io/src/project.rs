@@ -67,7 +67,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// Versão 51: pasta Referências em cada peça (`folders.references`), para os modelos de
 /// referência filhos dela. Ausente, a pasta fica visível.
 /// Versão 52: operação `RemoveFaces` (remover arredondamentos, chanfros e outras faces).
-pub const FORMAT_VERSION: u32 = 52;
+/// Versão 53: grupos rígidos (`groups[].rigid`); ausente, o grupo é organizacional.
+pub const FORMAT_VERSION: u32 = 53;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -233,6 +234,9 @@ struct GroupRecord {
     id: u64,
     name: String,
     members: Vec<u64>,
+    /// Desde a versão 53. Ausente, o grupo é organizacional.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    rigid: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -705,6 +709,7 @@ pub fn read_project(path: &Path) -> Result<Document, ImportError> {
                     id: nator_document::GroupId(g.id),
                     name: g.name,
                     members: g.members.into_iter().map(InstanceId).collect(),
+                    rigid: g.rigid,
                 })
                 .collect(),
         )
@@ -986,6 +991,7 @@ fn write_archive(path: &Path, document: &Document, recovery: bool) -> Result<(),
                 id: g.id.0,
                 name: g.name.clone(),
                 members: g.members.iter().map(|i| i.0).collect(),
+                rigid: g.rigid,
             })
             .collect(),
         instances: document
@@ -1359,6 +1365,24 @@ mod tests {
         let (_, second) = doc.add_mesh(Some(part), "Tampa".into(), asset)?;
         doc.body_mut(second)?.placement = Placement::new([3., 4., 5.], [0., 0., 0.25])?;
         Ok(doc)
+    }
+    #[test]
+    fn rigid_groups_round_trip_and_organizational_ones_omit_the_field() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("grupos.3dnator");
+        let mut doc = document()?;
+        let part = doc.parts()[0].id;
+        let first = doc.instances()[0].id;
+        let second = doc.add_instance(part, None, Placement::default())?;
+        let rigid = doc.add_group("Rígido".into(), vec![first, second])?;
+        doc.set_group_rigid(rigid, true)?;
+        doc.add_group("Solto".into(), vec![first])?;
+        write_project(&path, &doc)?;
+        let loaded = read_project(&path)?;
+        let flags = loaded.groups().iter().map(|g| g.rigid).collect::<Vec<_>>();
+        assert_eq!(flags, [true, false]);
+        Ok(())
     }
     #[test]
     fn round_trip_is_self_contained_and_replaces_existing_project() -> Result<(), Box<dyn Error>> {

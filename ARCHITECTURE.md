@@ -72,6 +72,7 @@ A câmera de apresentação oferece projeção ortográfica (padrão) e perspect
 ## Limites e dependências
 
 - A interface solicita alterações por comandos, em vez de modificar diretamente o documento.
+- Grupos rígidos não têm origem própria: `Document::move_instance` calcula o deslocamento do membro no sistema do pai comum (os membros de um grupo estão sempre no mesmo nível) e o aplica aos demais; `move_group` desloca cada parceiro rígido uma vez. Todo reposicionamento de instância passa por `Command::MoveInstance`, então Mover, alinhamentos, ponto a ponto e a prévia seguem a regra sem código próprio. Lotes que movem vários membros pelo mesmo deslocamento não o aplicam duas vezes.
 - O espelhamento de montagem clona a hierarquia e seus grupos internos. Cada definição descendente é refletida uma única vez no plano local X = 0; posições de ocorrências compensam essa reflexão com duas inversões, preservando transformações rígidas e o compartilhamento entre componentes repetidos. A raiz conserva sua posição e usa o plano escolhido convertido para suas coordenadas. Sólidos ganham operações finais no histórico; malhas são refletidas com a orientação corrigida. O comando inteiro é atômico.
 - As regras geométricas e de negócio não dependem da interface ou do renderizador. Geometria, histórico e persistência devem poder ser verificados sem abrir uma janela.
 - `geometry` permanece independente dos módulos superiores. `sketch` e `kernel` não dependem de `document`, `commands`, `ui` ou `app`.

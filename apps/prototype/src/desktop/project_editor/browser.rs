@@ -343,6 +343,17 @@ pub(super) fn group_menu(
             group.name.clone(),
         ));
     }
+    let (icon, label) = if group.rigid {
+        (Icon::LockOpen, T::MakeGroupOrganizational)
+    } else {
+        (Icon::Group, T::MakeGroupRigid)
+    };
+    if item(ui, icon, label) {
+        action = Some(MenuAction::Command(Box::new(Command::SetGroupRigid {
+            id: group.id,
+            rigid: !group.rigid,
+        })));
+    }
     if item(ui, Icon::Group, T::UngroupTool) {
         action = Some(MenuAction::Command(Box::new(Command::RemoveGroup {
             id: group.id,

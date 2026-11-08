@@ -7771,6 +7771,44 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn rigid_group_is_marked_and_moving_one_member_carries_the_other() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let (mut editor, [a, b]) = grouped_blocks_editor(&context)?;
+        assert!(label_position(&mut editor, &context, text(T::RigidBadge)).is_err());
+        let group = editor.current().session.document().groups()[0].id;
+        editor.execute(Command::SetGroupRigid {
+            id: group,
+            rigid: true,
+        });
+        settle(&mut editor, &context)?;
+        label_position(&mut editor, &context, text(T::RigidBadge))?;
+        editor.current_mut().select(Some(Selection::Instance(a)));
+        editor.open_move();
+        editor.set_move_for_capture([0., 25., 0.], [0.; 3]);
+        settle(&mut editor, &context)?;
+        label_position(
+            &mut editor,
+            &context,
+            &format!("{} (+1)", text(T::RigidMoveHint)),
+        )?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let document = editor.current().session.document();
+        for id in [a, b] {
+            let y = document
+                .instance(id)
+                .ok_or("Instância")?
+                .placement
+                .translation_mm()[1];
+            assert!((y - 25.).abs() < 1e-6, "{id:?} em y = {y}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn group_eye_hides_and_shows_every_member_in_one_undo() -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();
         let (mut editor, members) = grouped_blocks_editor(&context)?;

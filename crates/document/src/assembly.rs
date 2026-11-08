@@ -1,4 +1,6 @@
-//! Hierarquia de definições, ocorrências e grupos organizacionais sem vínculos geométricos.
+//! Hierarquia de definições, ocorrências e grupos. Grupos organizacionais não criam vínculos
+//! geométricos; grupos rígidos mantêm as posições relativas dos membros: mover um deles
+//! move todos pelo mesmo deslocamento, sem origem própria.
 use super::*;
 use nator_geometry::{Bounds, Point3};
 use std::collections::{HashMap, HashSet};
@@ -8,6 +10,8 @@ pub struct Group {
     pub id: GroupId,
     pub name: String,
     pub members: Vec<InstanceId>,
+    /// Membros se movem juntos. Um componente pertence a no máximo um grupo rígido.
+    pub rigid: bool,
 }
 #[derive(Debug, Clone)]
 pub struct Occurrence {
@@ -101,9 +105,91 @@ impl Document {
             return Err(DocumentError("Selecione elementos para o grupo.".into()));
         }
         let id = GroupId(self.allocate_id()?);
-        self.groups.push(Group { id, name, members });
+        self.groups.push(Group {
+            id,
+            name,
+            members,
+            rigid: false,
+        });
         Ok(id)
     }
+    /// Torna o grupo rígido ou organizacional. Nenhum membro pode estar em outro grupo
+    /// rígido: a rigidez não se propaga de um grupo a outro.
+    pub fn set_group_rigid(&mut self, id: GroupId, rigid: bool) -> Result<(), DocumentError> {
+        let mut candidate = self.clone();
+        candidate
+            .groups
+            .iter_mut()
+            .find(|g| g.id == id)
+            .ok_or_else(|| DocumentError("Grupo inexistente.".into()))?
+            .rigid = rigid;
+        candidate.validate_rigid_groups()?;
+        *self = candidate;
+        Ok(())
+    }
+    /// Grupo rígido de que a instância participa, se houver.
+    pub fn rigid_group_of(&self, id: InstanceId) -> Option<&Group> {
+        self.groups
+            .iter()
+            .find(|g| g.rigid && g.members.contains(&id))
+    }
+    /// As instâncias dadas e os demais membros dos grupos rígidos delas, sem repetição e na
+    /// ordem de chegada.
+    pub fn with_rigid_partners(&self, ids: &[InstanceId]) -> Vec<InstanceId> {
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for id in ids {
+            let partners = self
+                .rigid_group_of(*id)
+                .map_or_else(|| vec![*id], |g| g.members.clone());
+            for member in std::iter::once(*id).chain(partners) {
+                if seen.insert(member) {
+                    out.push(member);
+                }
+            }
+        }
+        out
+    }
+    pub(super) fn validate_rigid_groups(&self) -> Result<(), DocumentError> {
+        let mut owner = HashSet::new();
+        for group in self.groups.iter().filter(|g| g.rigid) {
+            for member in &group.members {
+                if !owner.insert(*member) {
+                    return Err(DocumentError(
+                        "Um componente só pode pertencer a um grupo rígido.".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Posiciona a instância (posição local, no pai) e leva junto os membros do grupo
+    /// rígido dela, pelo mesmo deslocamento no sistema do pai comum.
+    pub fn move_instance(
+        &mut self,
+        id: InstanceId,
+        placement: Placement,
+    ) -> Result<(), DocumentError> {
+        let current = self
+            .instance(id)
+            .ok_or_else(|| DocumentError("Instância inexistente.".into()))?
+            .placement;
+        let error = |e: nator_geometry::GeometryError| DocumentError(e.to_string());
+        let delta = placement
+            .compose(current.inverse().map_err(error)?)
+            .map_err(error)?;
+        let partners = self
+            .rigid_group_of(id)
+            .map(|g| g.members.clone())
+            .unwrap_or_default();
+        self.instance_mut(id)?.placement = placement;
+        for member in partners.into_iter().filter(|m| *m != id) {
+            let i = self.instance_mut(member)?;
+            i.placement = delta.compose(i.placement).map_err(error)?;
+        }
+        Ok(())
+    }
+    /// Desloca os membros do grupo (e os parceiros rígidos deles) uma única vez cada.
     pub fn move_group(&mut self, id: GroupId, delta: Placement) -> Result<(), DocumentError> {
         let members = self
             .groups
@@ -112,7 +198,7 @@ impl Document {
             .ok_or_else(|| DocumentError("Grupo inexistente.".into()))?
             .members
             .clone();
-        for member in members {
+        for member in self.with_rigid_partners(&members) {
             let i = self.instance_mut(member)?;
             i.placement = delta
                 .compose(i.placement)
@@ -221,11 +307,14 @@ impl Document {
                     .iter()
                     .map(|id| instances.get(id).copied())
                     .collect::<Option<Vec<_>>>()?;
-                Some((g.name.clone(), members))
+                Some((g.name.clone(), members, g.rigid))
             })
             .collect::<Vec<_>>();
-        for (name, members) in groups {
-            self.add_group(name, members)?;
+        for (name, members, rigid) in groups {
+            let id = self.add_group(name, members)?;
+            if rigid {
+                self.set_group_rigid(id, true)?;
+            }
         }
         Ok(id)
     }
@@ -378,11 +467,14 @@ impl Document {
                     .iter()
                     .map(|id| instances.get(id).copied())
                     .collect::<Option<Vec<_>>>()?;
-                Some((g.name.clone(), members))
+                Some((g.name.clone(), members, g.rigid))
             })
             .collect::<Vec<_>>();
-        for (name, members) in groups {
-            self.add_group(name, members)?;
+        for (name, members, rigid) in groups {
+            let id = self.add_group(name, members)?;
+            if rigid {
+                self.set_group_rigid(id, true)?;
+            }
         }
         Ok(id)
     }

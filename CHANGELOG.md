@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.48.0 — 08/11/2026
+
+- **Grupo rígido:** o menu do grupo na árvore ganha **Tornar grupo rígido** / **Tornar grupo organizacional**. Num grupo rígido, mover qualquer membro (Mover, alinhamentos, ponto a ponto, arraste) move os demais pelo mesmo deslocamento, numa só ação de desfazer, e a prévia já mostra o grupo inteiro. O grupo ganha a marca **Rígido** na árvore e os painéis de mover e alinhar avisam quantos membros vão junto. Os membros continuam com posições próprias, sem origem nova. Clicar num membro seleciona só ele; copiar, padrão e espelhar atuam só sobre a escolha. Um componente pertence a no máximo um grupo rígido. Mover um grupo organizacional também leva os parceiros rígidos dos membros, cada um uma vez. Clonar ou importar um conjunto preserva a rigidez dos grupos internos. Formato 53: `groups[].rigid`.
+
 ## 0.47.0 — 08/11/2026
 
 - Nova ferramenta **Remover faces** (faixa Sólido, ao lado de Arredondar e Chanfrar), no estilo da exclusão de faces do Fusion: escolha as faces de arredondamentos, chanfros, furos ou ressaltos e as faces vizinhas se estendem até fecharem o sólido. Serve sobretudo para STEP importado, em que o arredondamento não está no histórico. A operação usa o `BRepAlgoAPI_Defeaturing` do OCCT, entra no histórico como as demais (editável e recalculada ao mudar parâmetros) e as faces estendidas conservam o nome, então operações posteriores continuam achando a mesma face. Se alguma face não puder ser removida (por exemplo, a tampa de um prisma), a operação falha inteira, sem sólido removido só em parte. Formato 52: operação `RemoveFaces`.

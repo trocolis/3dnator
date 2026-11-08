@@ -274,6 +274,11 @@ pub enum Command {
         id: nator_document::GroupId,
         name: String,
     },
+    /// Liga ou desliga a rigidez do grupo: rígido, mover um membro move todos.
+    SetGroupRigid {
+        id: nator_document::GroupId,
+        rigid: bool,
+    },
     /// Rascunho de referência da montagem, no plano dado em coordenadas da montagem.
     AddReferenceSketch {
         sketch: nator_sketch::Sketch,
@@ -493,6 +498,8 @@ impl Command {
             Self::TransferBody { .. } => "Mover corpo para outra peça",
             Self::RenameInstance { .. } => "Renomear instância",
             Self::RenameGroup { .. } => "Renomear grupo",
+            Self::SetGroupRigid { rigid: true, .. } => "Tornar grupo rígido",
+            Self::SetGroupRigid { rigid: false, .. } => "Tornar grupo organizacional",
             Self::SetPrintProfile { .. } => "Alterar perfil de impressão",
             Self::SetPrintFace { .. } => "Escolher face na mesa",
             Self::SetSettings { .. } => "Alterar configurações do documento",
@@ -993,7 +1000,7 @@ impl Command {
                     .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
                 rebuilds.request(doc, part)?;
             }
-            Self::MoveInstance { id, placement } => doc.instance_mut(id)?.placement = placement,
+            Self::MoveInstance { id, placement } => doc.move_instance(id, placement)?,
             Self::RemoveBody { id } => {
                 let part = doc
                     .parts()
@@ -1091,6 +1098,7 @@ impl Command {
                 doc.instance_mut(id)?.name = name;
             }
             Self::RenameGroup { id, name } => doc.rename_group(id, name)?,
+            Self::SetGroupRigid { id, rigid } => doc.set_group_rigid(id, rigid)?,
             Self::SetSettings { settings } => doc.set_settings(settings)?,
             Self::AddReferenceSketch { sketch } => {
                 if nator_sketch::solver::max_error(&sketch)
@@ -1983,6 +1991,138 @@ mod tests {
         let (a, b) = (world(0)?, world(1)?);
         assert!((a.min[0] + b.max[0]).abs() < 1e-9 && (a.max[0] + b.min[0]).abs() < 1e-9);
         assert!((a.min[1] - b.min[1]).abs() < 1e-9);
+        Ok(())
+    }
+
+    /// Três instâncias da mesma peça, em x = 0, 100 e 200.
+    fn three_in_a_row() -> Result<(Session, [InstanceId; 3]), Box<dyn Error>> {
+        let mut session = Session::new(Document::new("Rígido")?)?;
+        session.execute(import()?)?;
+        let part = session.document().parts()[0].id;
+        for x in [100., 200.] {
+            session.execute(Command::AddInstance {
+                part,
+                parent: None,
+                placement: Placement::new([x, 0., 0.], [0.; 3])?,
+            })?;
+        }
+        let ids = session
+            .document()
+            .instances()
+            .iter()
+            .map(|i| i.id)
+            .collect::<Vec<_>>();
+        let [a, b, c] = ids[..] else {
+            return Err("Instâncias inesperadas".into());
+        };
+        Ok((session, [a, b, c]))
+    }
+
+    fn x_of(session: &Session, id: InstanceId) -> Result<f64, Box<dyn Error>> {
+        Ok(session
+            .document()
+            .instance(id)
+            .ok_or("Instância ausente")?
+            .placement
+            .translation_mm()[0])
+    }
+
+    #[test]
+    fn rigid_group_moves_every_member_by_the_same_delta() -> Result<(), Box<dyn Error>> {
+        let (mut session, [a, b, c]) = three_in_a_row()?;
+        session.execute(Command::CreateGroup {
+            name: "Par".into(),
+            members: vec![a, b],
+        })?;
+        let group = session.document().groups()[0].id;
+        // Organizacional: mover um membro não leva o outro.
+        session.execute(Command::MoveInstance {
+            id: a,
+            placement: Placement::new([10., 0., 0.], [0.; 3])?,
+        })?;
+        assert!((x_of(&session, b)? - 100.).abs() < 1e-9);
+        session.execute(Command::SetGroupRigid {
+            id: group,
+            rigid: true,
+        })?;
+        // Rígido: mover A desloca B igual, inclusive com rotação, e C fica.
+        session.execute(Command::MoveInstance {
+            id: a,
+            placement: Placement::new([60., 0., 0.], [0., 0., std::f64::consts::FRAC_PI_2])?,
+        })?;
+        let b_now = session.document().instance(b).ok_or("B")?.placement;
+        // B estava 90 mm à direita de A; após girar 90° em Z, fica 90 mm acima.
+        let expected = Placement::new([60., 90., 0.], [0., 0., std::f64::consts::FRAC_PI_2])?;
+        assert!(
+            (0..3).all(|k| (b_now.translation_mm()[k] - expected.translation_mm()[k]).abs() < 1e-9)
+        );
+        assert!((x_of(&session, c)? - 200.).abs() < 1e-9);
+        // Uma só ação de desfazer devolve os dois.
+        assert!(session.undo());
+        assert!((x_of(&session, a)? - 10.).abs() < 1e-9);
+        assert!((x_of(&session, b)? - 100.).abs() < 1e-9);
+        // Mover os dois membros num lote, como o painel Mover faz, não aplica o
+        // deslocamento duas vezes.
+        session.execute(Command::Batch {
+            label: "Mover",
+            commands: vec![
+                Command::MoveInstance {
+                    id: a,
+                    placement: Placement::new([15., 0., 0.], [0.; 3])?,
+                },
+                Command::MoveInstance {
+                    id: b,
+                    placement: Placement::new([105., 0., 0.], [0.; 3])?,
+                },
+            ],
+        })?;
+        assert!((x_of(&session, a)? - 15.).abs() < 1e-9);
+        assert!((x_of(&session, b)? - 105.).abs() < 1e-9);
+        // Um grupo organizacional com A e C leva B junto, uma vez só.
+        session.execute(Command::CreateGroup {
+            name: "Organização".into(),
+            members: vec![a, c],
+        })?;
+        let organization = session.document().groups()[1].id;
+        session.execute(Command::MoveGroup {
+            id: organization,
+            delta: Placement::new([0., 0., 5.], [0.; 3])?,
+        })?;
+        for id in [a, b, c] {
+            let z = session
+                .document()
+                .instance(id)
+                .ok_or("I")?
+                .placement
+                .translation_mm()[2];
+            assert!((z - 5.).abs() < 1e-9);
+        }
+        // Um componente não entra em dois grupos rígidos.
+        session.execute(Command::CreateGroup {
+            name: "Outro".into(),
+            members: vec![b, c],
+        })?;
+        let other = session.document().groups()[2].id;
+        let revision = session.revision();
+        assert!(
+            session
+                .execute(Command::SetGroupRigid {
+                    id: other,
+                    rigid: true
+                })
+                .is_err()
+        );
+        assert_eq!(session.revision(), revision);
+        // De volta a organizacional, os membros voltam a se mover sozinhos.
+        session.execute(Command::SetGroupRigid {
+            id: group,
+            rigid: false,
+        })?;
+        session.execute(Command::MoveInstance {
+            id: a,
+            placement: Placement::default(),
+        })?;
+        assert!((x_of(&session, b)? - 105.).abs() < 1e-9);
         Ok(())
     }
 
