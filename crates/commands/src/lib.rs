@@ -409,16 +409,23 @@ fn resolve_part_sketches(part: &mut nator_document::Part) -> Result<(), Document
     Ok(())
 }
 
+/// Contexto de aplicação de um comando: recálculos pendentes e corpos STEP aceitos
+/// sem passar no BRepCheck, que a interface informa depois de publicar a edição.
 struct Rebuilds {
     deferred: Option<Vec<PartId>>,
+    unverified: Vec<String>,
 }
 impl Rebuilds {
     fn immediate() -> Self {
-        Self { deferred: None }
+        Self {
+            deferred: None,
+            unverified: Vec::new(),
+        }
     }
     fn deferred() -> Self {
         Self {
             deferred: Some(Vec::new()),
+            unverified: Vec::new(),
         }
     }
     fn request(&mut self, doc: &mut Document, part: PartId) -> Result<(), CommandError> {
@@ -558,7 +565,8 @@ impl Command {
             } => {
                 // As raízes importadas vão juntas para o lado das ocorrências existentes.
                 let before = doc.instances().iter().map(|i| i.id).collect::<Vec<_>>();
-                let effect = assembly::import_step(doc, &path, destination, name)?;
+                let effect =
+                    assembly::import_step(doc, &path, destination, name, &mut rebuilds.unverified)?;
                 let roots = doc
                     .instances()
                     .iter()
@@ -778,6 +786,7 @@ impl Command {
                 for command in commands {
                     effect = command.apply(doc, &mut inner)?;
                 }
+                rebuilds.unverified.append(&mut inner.unverified);
                 for part in inner.into_parts() {
                     rebuilds.request(doc, part)?;
                 }
@@ -1331,6 +1340,7 @@ pub struct PreparedCommand {
     revision: u64,
     effect: Effect,
     label: String,
+    unverified: Vec<String>,
 }
 impl PreparedCommand {
     pub fn new(
@@ -1340,7 +1350,8 @@ impl PreparedCommand {
     ) -> Result<Self, CommandError> {
         let context = history::context(&command, &document);
         let label = command.label().to_owned();
-        let effect = command.apply(&mut document, &mut Rebuilds::immediate())?;
+        let mut rebuilds = Rebuilds::immediate();
+        let effect = command.apply(&mut document, &mut rebuilds)?;
         document.validate()?;
         Ok(Self {
             context: history::created_context(context, effect),
@@ -1348,7 +1359,14 @@ impl PreparedCommand {
             revision,
             effect,
             label,
+            unverified: rebuilds.unverified,
         })
+    }
+    /// Nomes dos corpos STEP importados que seguem reprovados pelo BRepCheck do OCCT,
+    /// mesmo após o reparo conservador. Entram como lidos; operações sobre eles validam
+    /// o próprio resultado e falham com erro explícito se ele não for válido.
+    pub fn unverified_bodies(&self) -> &[String] {
+        &self.unverified
     }
     /// Documento candidato, para pré-visualizar o resultado antes de publicá-lo.
     pub fn document(&self) -> &Document {

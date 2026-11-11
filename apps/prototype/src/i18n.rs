@@ -637,6 +637,7 @@ pub enum Text {
     /// Reservado do antigo painel Propriedades.
     FileAlreadyOpen,
     StaleResult,
+    StepUnverifiedBodies,
     Sketch,
     AutomaticExtrusion,
     ExtrusionProfileHint,
@@ -1766,6 +1767,9 @@ fn pt(key: Text) -> &'static str {
         }
         Text::FileAlreadyOpen => "Este arquivo já está aberto em outra aba.",
         Text::StaleResult => "Resultado ignorado: o projeto foi alterado durante a operação.",
+        Text::StepUnverifiedBodies => {
+            "STEP importado, mas estes sólidos não passaram na verificação do OCCT e entraram como lidos (operações sobre eles podem falhar)"
+        }
         Text::TimelineFirst => "Ir para o início do histórico",
         Text::TimelinePrevious => "Recuar uma operação",
         Text::TimelineNext => "Avançar uma operação",

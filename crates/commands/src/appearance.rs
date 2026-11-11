@@ -192,6 +192,7 @@ pub(super) fn step_body(
     };
     Ok(nator_kernel::StepBody {
         surface: false,
+        verified: true,
         name: record.name.clone(),
         solid,
         color: base_color.or(record.color),

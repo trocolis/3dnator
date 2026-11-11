@@ -2168,6 +2168,7 @@ mod tests {
                     name: "Placa".into(),
                     bodies: vec![StepBody {
                         surface: false,
+                        verified: true,
                         name: "Corpo".into(),
                         solid: Solid::cuboid([0.; 3], [10.; 3])?,
                         color: None,

@@ -199,6 +199,7 @@ fn step_partitions_curved_faces_and_preserves_internal_cavity_shells() -> Result
                 name: "Peça".into(),
                 bodies: vec![nator_kernel::StepBody {
                     surface: false,
+                    verified: true,
                     name: "Corpo".into(),
                     solid: painted,
                     color: Some(BLUE),

@@ -169,10 +169,37 @@ Shape* build(Function function) noexcept {
     return success ? result.release() : nullptr;
 }
 
+// Isometrias (posição rígida e reflexão) preservam a validade: o resultado é tão válido
+// quanto a entrada. Dispensar o BRepCheck aqui permite posicionar sólidos STEP aceitos
+// sem verificação para medir, exportar e desenhar, e evita repetir a análise a cada uso.
+template <typename Function>
+Shape* build_isometry(Function function) noexcept {
+    std::unique_ptr<Shape> result = std::make_unique<Shape>();
+    const bool success = guarded([&] {
+        function(*result);
+        if (result->value.IsNull()) throw std::runtime_error("Geometria B-rep ausente.");
+    });
+    return success ? result.release() : nullptr;
+}
+
 // Forma simples, sem histórico: as faces ficam com origem desconhecida.
 template <typename Function>
 Shape* make_shape(Function function) noexcept {
     return build([&](Shape& shape) { shape.value = function(); });
+}
+
+// Entrega uma forma já existente sem repetir o BRepCheck. Serve só para geometria que
+// não é construída aqui: sólidos STEP aceitos sem verificação (veja `step_scene.hpp`) e
+// B-reps reabertos do projeto, que já passaram pela regra de origem quando foram criados.
+// Operações sobre eles continuam validando o próprio resultado em `build`.
+template <typename Function>
+Shape* adopt_shape(Function function) noexcept {
+    std::unique_ptr<Shape> result = std::make_unique<Shape>();
+    const bool success = guarded([&] {
+        result->value = function();
+        if (result->value.IsNull()) throw std::runtime_error("Geometria B-rep ausente.");
+    });
+    return success ? result.release() : nullptr;
 }
 
 TopTools_IndexedMapOfShape map_of(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
@@ -642,7 +669,7 @@ Shape* nator_shell(const Shape* body, const std::size_t* faces, std::size_t coun
 
 // Matriz 3×4 por linhas (rotação | translação), em milímetros.
 Shape* nator_transform(const Shape* body, const double* m) noexcept {
-    return build([&](Shape& shape) {
+    return build_isometry([&](Shape& shape) {
         gp_Trsf transformation;
         transformation.SetValues(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10],
                                  m[11]);
@@ -655,7 +682,7 @@ Shape* nator_transform(const Shape* body, const double* m) noexcept {
 // Espelhamento pelo plano (origem, normal). A reflexão inverte a orientação; o
 // BRepBuilderAPI_Transform corrige as faces, e o histórico preserva os nomes.
 Shape* nator_mirror(const Shape* body, const double* origin, const double* normal) noexcept {
-    return build([&](Shape& shape) {
+    return build_isometry([&](Shape& shape) {
         gp_Trsf reflection;
         reflection.SetMirror(gp_Ax2(gp_Pnt(origin[0], origin[1], origin[2]),
                                     gp_Dir(normal[0], normal[1], normal[2])));
@@ -1318,7 +1345,7 @@ bool nator_brep_copy(const Shape* body, char* target, std::size_t size) noexcept
 }
 
 Shape* nator_brep_read(const char* data, std::size_t size) noexcept {
-    return make_shape([&] {
+    return adopt_shape([&] {
         if (!size || size > max_brep_bytes) {
             throw std::runtime_error("B-rep vazio ou excessivo.");
         }

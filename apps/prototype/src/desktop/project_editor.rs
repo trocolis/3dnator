@@ -1412,6 +1412,7 @@ impl Editor {
         let mut consumed = false;
         let mut left_reference = false;
         let active_tab = self.current().id;
+        let unverified = command.unverified_bodies().to_vec();
         if let Some(target) = self.find_tab(tab) {
             let imported_roots = if matches!(command.effect(), Effect::Imported { .. }) {
                 let new_parts = command
@@ -1497,6 +1498,13 @@ impl Editor {
                     left_reference = active.is_some() && target.active_part.is_none();
                     self.requested = None;
                     self.resolve_pending_failure(tab);
+                    if !unverified.is_empty() {
+                        self.status.warning(format!(
+                            "{}: {}",
+                            text(T::StepUnverifiedBodies),
+                            unverified.join(", ")
+                        ));
+                    }
                 }
                 Err(error) => self.status.error(error.to_string()),
             }

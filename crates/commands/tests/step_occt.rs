@@ -2,7 +2,7 @@
 //! posições e preservação autocontida após salvar, reabrir e exportar novamente.
 #![cfg(feature = "occt")]
 use nator_commands::{
-    Command, Session,
+    Command, PreparedCommand, Session,
     export::{StepScope, step_scene},
     measure,
 };
@@ -35,7 +35,19 @@ fn external_step_preserves_all_solids_after_import_save_and_reopen() -> Result<(
         .map(|b| (!b.surface).then(|| b.solid.volume()).transpose())
         .collect::<std::result::Result<Vec<_>, _>>()?;
     drop(raw);
-    let mut session = import(&path)?;
+    let mut session = Session::new(Document::new("STEP")?)?;
+    let prepared = PreparedCommand::new(
+        session.document().clone(),
+        session.revision(),
+        Command::ImportStep {
+            path: path.clone(),
+            destination: None,
+            name: "Arquivo de ensaio".into(),
+        },
+    )?;
+    // Sólidos reprovados pelo BRepCheck entram como lidos e são informados à interface.
+    eprintln!("Corpos não verificados: {:?}", prepared.unverified_bodies());
+    session.commit(prepared)?;
     let document = session.document();
     assert_eq!(document.parts().len(), expected_parts);
     assert_eq!(document.instances().len(), expected_instances);
@@ -125,6 +137,7 @@ fn fixture() -> Result<StepAssembly> {
                     color: Some(BLUE),
                     face_colors: Vec::new(),
                     surface: false,
+                    verified: true,
                 }],
             },
         ],
@@ -366,6 +379,7 @@ fn surface_step(path: &Path) -> Result<()> {
             color: None,
             face_colors: Vec::new(),
             surface: false,
+            verified: true,
         }],
     };
     let root = |index, name: &str| -> Result<StepOccurrence> {

@@ -11,6 +11,8 @@
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <Quantity_Color.hxx>
+#include <ShapeFix_Shape.hxx>
+#include <ShapeBuild_ReShape.hxx>
 #include <map>
 #include <set>
 #include <functional>
@@ -23,6 +25,8 @@ struct StepBody {
     std::vector<std::array<int,3>> face_colors;
     // Superfícies abertas, fora de qualquer sólido: não têm volume e viram malha.
     bool surface = false;
+    // Falso quando o sólido segue reprovado pelo BRepCheck mesmo após o reparo.
+    bool verified = true;
 };
 struct StepPart { std::string name; std::vector<StepBody> bodies; };
 struct StepOccurrence {
@@ -35,6 +39,32 @@ struct StepOccurrence {
 struct StepScene { std::vector<StepPart> parts; std::vector<StepOccurrence> instances; };
 constexpr std::size_t max_step_elements = 10000;
 
+double solid_volume(const TopoDS_Shape& shape) {
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(shape, properties);
+    return properties.Mass();
+}
+// O STEP não guarda tolerâncias por aresta. Uma face cujas curvas paramétricas só se
+// cruzavam dentro da tolerância de origem (comum em B-splines vindas de outro CAD)
+// pode voltar reprovada pelo BRepCheck depois que o leitor recalcula curvas e encolhe
+// tolerâncias. O reparo só é aceito se deixar o sólido válido com as mesmas faces, na
+// mesma ordem, e o mesmo volume; senão o sólido lido segue intacto e não verificado.
+// Retorna nulo quando o reparo não serve.
+TopoDS_Shape repaired_step_solid(const TopoDS_Shape& solid) {
+    ShapeFix_Shape fix(solid);
+    fix.Perform();
+    const TopoDS_Shape result = fix.Shape();
+    if (result.IsNull() || result.ShapeType() != TopAbs_SOLID || !BRepCheck_Analyzer(result).IsValid())
+        return {};
+    const auto before = map_of(solid, TopAbs_FACE);
+    const auto after = map_of(result, TopAbs_FACE);
+    if (before.Extent() != after.Extent()) return {};
+    for (int f = 1; f <= before.Extent(); ++f)
+        if (!fix.Context()->Value(before(f)).IsSame(after(f))) return {};
+    const double original = solid_volume(solid);
+    if (std::abs(solid_volume(result) - original) > 1e-6 * std::max(std::abs(original), 1.)) return {};
+    return result;
+}
 std::string step_name(const TDF_Label& label) {
     Handle(TDataStd_Name) attr;
     if (!label.FindAttribute(TDataStd_Name::GetID(), attr)) return "Peça STEP";
@@ -126,15 +156,24 @@ StepScene* nator_step_scene_read(const char* path) noexcept {
                 std::vector<StepBody> bodies;
                 for (TopExp_Explorer it(shape, TopAbs_SOLID); it.More(); it.Next()) {
                     if (++body_count > max_step_elements) throw std::runtime_error("STEP excede dez mil corpos.");
-                    auto solid = it.Current();
-                    if (!BRepCheck_Analyzer(solid).IsValid()) throw std::runtime_error("Sólido STEP inválido.");
+                    const auto solid = it.Current();
                     auto color = step_color(colors,label);
                     const auto specific = shape_color(colors, solid);
                     if (specific[0] >= 0) color = specific;
+                    // Cores das faces lidas antes do reparo, que preserva a ordem das faces.
                     std::vector<std::array<int,3>> face_colors;
                     const auto faces=map_of(solid,TopAbs_FACE);
                     for (int f=1;f<=faces.Extent();++f) face_colors.push_back(shape_color(colors,faces(f)));
-                    bodies.push_back({step_name(label), solid, color, std::move(face_colors), false});
+                    TopoDS_Shape accepted = solid;
+                    bool verified = BRepCheck_Analyzer(solid).IsValid();
+                    if (!verified) {
+                        const auto repaired = repaired_step_solid(solid);
+                        if (!repaired.IsNull()) {
+                            accepted = repaired;
+                            verified = true;
+                        }
+                    }
+                    bodies.push_back({step_name(label), accepted, color, std::move(face_colors), false, verified});
                 }
                 // Cascas e faces fora de sólidos, como a serigrafia exportada pelo KiCad.
                 // Juntas formam um corpo por definição, para não multiplicar itens na árvore.
@@ -183,12 +222,19 @@ const char* nator_step_name(const StepScene* scene, std::size_t part, std::size_
     if (kind == 2 && part < scene->instances.size()) return scene->instances[part].name.c_str();
     return nullptr;
 }
+// A forma é entregue como foi aceita na leitura, sem novo BRepCheck: sólidos não
+// verificados são informados por `nator_step_body_verified`.
 Shape* nator_step_body(const StepScene* scene, std::size_t part, std::size_t body, int* color) noexcept {
-    return make_shape([&] {
+    return adopt_shape([&] {
         const auto& b = scene->parts.at(part).bodies.at(body);
         std::copy(b.color.begin(), b.color.end(), color);
         return b.shape;
     });
+}
+bool nator_step_body_verified(const StepScene* scene, std::size_t part, std::size_t body) noexcept {
+    bool verified = false;
+    guarded([&] { verified = scene->parts.at(part).bodies.at(body).verified; });
+    return verified;
 }
 bool nator_step_body_surface(const StepScene* scene, std::size_t part, std::size_t body) noexcept {
     bool surface = false;

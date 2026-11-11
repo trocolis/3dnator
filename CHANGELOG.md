@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.53.0 — 11/11/2026
+
+- Importação STEP: um sólido reprovado pela verificação do OCCT não recusa mais o arquivo inteiro (antes: "Sólido STEP inválido."). O STEP não guarda tolerâncias por aresta; numa face B-spline cujas curvas paramétricas só se cruzavam dentro da tolerância de origem, a releitura encolhe as tolerâncias e o fio passa a se cruzar, como num STEP exportado pelo próprio 3dnator com peças vindas do Fusion. A ponte tenta um reparo e só o aceita se o sólido ficar válido com as mesmas faces e o mesmo volume; senão o sólido entra como lido, e a barra de estado lista os corpos não verificados. Operações sobre eles continuam validando o resultado.
+- Posicionar e espelhar sólidos (medição, exportação, folhas, entradas de operações) e reabrir B-reps do projeto não repetem a verificação do OCCT: isometrias preservam a validade e os B-reps salvos já passaram por ela na origem.
+- `PreparedCommand::unverified_bodies` informa os corpos STEP aceitos sem verificação; o ensaio externo (`NATOR_STEP_PATH`) os lista.
+
 ## 0.52.1 — 08/11/2026
 
 - A face de trás escolhida com ↑/↓ (nas ferramentas que esperam face e na escolha de plano) aparece realçada através do corpo. Antes, a face oposta de um cubo, de costas para a câmera, era descartada pelo desenho do realce e nada aparecia.

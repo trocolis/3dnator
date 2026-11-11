@@ -648,6 +648,9 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::FileAlreadyOpen => "This file is already open in another tab.",
         Text::StaleResult => "Result ignored: the project changed during the operation.",
+        Text::StepUnverifiedBodies => {
+            "STEP imported, but these solids failed the OCCT check and were kept as read (operations on them may fail)"
+        }
         Text::Sketch => "Sketch",
         Text::AutomaticExtrusion => "Automatic operation",
         Text::ExtrusionProfileHint => {

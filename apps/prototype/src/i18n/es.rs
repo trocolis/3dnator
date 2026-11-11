@@ -666,6 +666,9 @@ pub fn text(key: Text) -> &'static str {
         }
         Text::FileAlreadyOpen => "Este archivo ya está abierto en otra pestaña.",
         Text::StaleResult => "Resultado ignorado: el proyecto cambió durante la operación.",
+        Text::StepUnverifiedBodies => {
+            "STEP importado, pero estos sólidos no pasaron la verificación de OCCT y entraron tal como se leyeron (las operaciones sobre ellos pueden fallar)"
+        }
         Text::Sketch => "Boceto",
         Text::AutomaticExtrusion => "Operación automática",
         Text::ExtrusionProfileHint => {

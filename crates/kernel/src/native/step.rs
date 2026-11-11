@@ -16,6 +16,10 @@ pub struct StepBody {
     pub face_colors: Vec<Option<RgbColor>>,
     /// Superfícies abertas, sem volume. A leitura as entrega assim; a escrita só aceita sólidos.
     pub surface: bool,
+    /// Falso quando o sólido lido segue reprovado pelo BRepCheck mesmo após o reparo
+    /// conservador da ponte. Ele é entregue intacto; operações sobre ele validam o
+    /// próprio resultado. Ignorado na escrita.
+    pub verified: bool,
 }
 pub struct StepPart {
     pub name: String,
@@ -64,6 +68,7 @@ unsafe extern "C" {
         color: *mut i32,
     ) -> bool;
     fn nator_step_body_surface(scene: *const c_void, part: usize, body: usize) -> bool;
+    fn nator_step_body_verified(scene: *const c_void, part: usize, body: usize) -> bool;
     fn nator_step_add_part(scene: *mut c_void, name: *const c_char) -> bool;
     fn nator_step_add_body(
         scene: *mut c_void,
@@ -242,6 +247,8 @@ impl StepAssembly {
                 solid.faces = vec![String::new(); solid.face_count()?];
                 // SAFETY: índices dentro das contagens validadas; cena viva.
                 let surface = unsafe { nator_step_body_surface(scene.pointer(), part, body) };
+                // SAFETY: índices dentro das contagens validadas; cena viva.
+                let verified = unsafe { nator_step_body_verified(scene.pointer(), part, body) };
                 if !surface {
                     solid.volume()?;
                 }
@@ -263,6 +270,7 @@ impl StepAssembly {
                     .collect::<Result<Vec<_>, _>>()?;
                 bodies.push(StepBody {
                     surface,
+                    verified,
                     name: scene.name(part, body, 1)?,
                     solid,
                     color: color(rgb)?,

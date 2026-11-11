@@ -61,6 +61,7 @@ pub(super) fn import_step(
     path: &std::path::Path,
     destination: Option<PartId>,
     name: String,
+    unverified: &mut Vec<String>,
 ) -> Result<super::Effect, DocumentError> {
     nator_document::validate_name(&name)?;
     if destination.is_some_and(|id| doc.part(id).is_none()) {
@@ -68,7 +69,7 @@ pub(super) fn import_step(
     }
     #[cfg(not(feature = "occt"))]
     {
-        let _ = path;
+        let _ = (path, unverified);
         nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
         Err(DocumentError("Importação STEP indisponível.".into()))
     }
@@ -137,6 +138,9 @@ pub(super) fn import_step(
                     faces,
                 ));
                 record.color = body.color;
+                if !body.verified {
+                    unverified.push(format!("{} / {}", part.name, body.name));
+                }
                 first_body.get_or_insert((id, b));
             }
             parts.push(id);
