@@ -17,6 +17,13 @@ pub(super) enum Choice {
     Dark,
 }
 
+/// Destaque de seleção nos dois temas. Ensaios rodam em paralelo e o tema é global: um
+/// ensaio que aplica o escuro pode trocar a cor no meio de outro.
+#[cfg(test)]
+pub(super) fn blue_fills() -> [egui::Color32; 2] {
+    [rgb(225, 239, 252), rgb(32, 55, 84)]
+}
+
 pub(super) fn is_dark() -> bool {
     DARK.load(Ordering::Relaxed)
 }

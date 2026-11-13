@@ -715,7 +715,9 @@ mod tests {
             );
             output.textures_delta.clear();
             let highlighted = output.shapes.iter().any(|clipped| match &clipped.shape {
-                egui::Shape::Rect(r) => r.fill == theme::blue_fill() && r.rect.width() >= 190.,
+                egui::Shape::Rect(r) => {
+                    theme::blue_fills().contains(&r.fill) && r.rect.width() >= 190.
+                }
                 _ => false,
             });
             (rect, highlighted)

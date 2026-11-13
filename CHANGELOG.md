@@ -9,6 +9,7 @@
   - Acompanham mudanças de interface anteriores: o ponto a ponto pede o clique no corpo antes dos apoios (0.50.0); a árvore flutuante, mais larga, cobre a borda esquerda da área de edição; Selecionar, na barra de navegação, só sai dos modos de câmera; o Rótulo não é mais criado pela faixa.
   - Esperam os resultados em segundo plano: apoios do corpo escolhido, leiaute depois da chegada da fonte do texto, limites da cena antes de clicar na linha de referência.
   - O ensaio de subpeça STEP às Referências gera a própria montagem e deixa de exigir `NATOR_STEP_PATH`; a variável continua trocando a montagem por um arquivo real.
+- CI: o ensaio do realce de item de menu falhava às vezes (falhou no push da 0.53.0). O tema é global e outro ensaio, em paralelo, podia trocar para o escuro no meio dele; agora ele aceita o destaque de qualquer um dos dois temas.
 
 ## 0.59.0 — 13/11/2026
 
