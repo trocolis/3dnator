@@ -2087,21 +2087,30 @@ pub(super) fn separate(_doc: &mut Document, _part: PartId) -> Result<Vec<BodyId>
     Ok(Vec::new())
 }
 
-/// Remover faces: faces da mesma concordância das escolhidas (realçadas para incluir de uma
-/// vez). Um arredondamento ou chanfro curvo em cadeia só sai inteiro; o núcleo recusa um
-/// trecho isolado. A cadeia segue as arestas tangentes por faces de concordância do mesmo
-/// raio (cilindros, toros pelo raio do tubo e esferas) e pelos remendos de canto entre elas
-/// (superfícies livres pequenas para esse raio). Faces de outro raio, como um furo tangente,
-/// ficam de fora. É só topologia e geometria das faces, sem remoções de teste: responde na
-/// hora mesmo em sólidos de STEP com centenas de faces, nos quais uma única remoção pode
-/// levar minutos.
+/// Remover faces: o que a busca das faces necessárias precisa, sem tipos do OCCT, para
+/// rodar em outra thread (ou outro processo): o B-rep do corpo, a assinatura dos índices, as
+/// faces escolhidas e as candidatas da mesma concordância em camadas a partir delas.
+#[derive(Debug, Clone)]
+pub struct RemovalPlan {
+    pub bytes: Arc<Vec<u8>>,
+    pub signature: u64,
+    pub chosen: Vec<usize>,
+    /// Candidatas por distância às escolhidas (camada 0: vizinhas tangentes diretas).
+    pub layers: Vec<Vec<usize>>,
+}
+
+/// Monta o plano: a cadeia segue as arestas tangentes por faces de concordância do mesmo
+/// raio (cilindros, toros pelo raio do tubo e esferas) e pelos remendos de canto entre elas.
+/// É só topologia, em milissegundos; quais candidatas são de fato necessárias, só o núcleo
+/// diz (`necessary_faces`): um canal pode ter o raio dos arredondamentos externos, ligar-se a
+/// eles por tangência e ainda assim sair sozinho.
 #[cfg(feature = "occt")]
-pub fn removal_dependents(
+pub fn removal_plan(
     doc: &Document,
     part: PartId,
     base: BodyId,
     faces: &[FaceRef],
-) -> Result<Vec<FaceRef>, DocumentError> {
+) -> Result<RemovalPlan, DocumentError> {
     let (solid, bytes) = source(doc, part, base)?;
     let chosen = faces
         .iter()
@@ -2124,21 +2133,183 @@ pub fn removal_dependents(
             }
         });
     }
-    let signature = signature(&bytes);
-    Ok(blend_chain(&chosen, &pairs, &shapes)
-        .difference(&chosen)
-        .map(|&index| FaceRef::Index { index, signature })
-        .collect())
+    Ok(RemovalPlan {
+        signature: signature(&bytes),
+        layers: blend_layers(&chosen, &pairs, &shapes),
+        chosen: chosen.into_iter().collect(),
+        bytes,
+    })
 }
+
 #[cfg(not(feature = "occt"))]
-pub fn removal_dependents(
+pub fn removal_plan(
     _doc: &Document,
     _part: PartId,
     _base: BodyId,
     _faces: &[nator_document::features::FaceRef],
-) -> Result<Vec<nator_document::features::FaceRef>, DocumentError> {
+) -> Result<RemovalPlan, DocumentError> {
     nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
-    Ok(Vec::new())
+    Err(DocumentError("Núcleo CAD indisponível.".into()))
+}
+
+/// Resposta da busca das faces necessárias.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Necessary {
+    /// As escolhidas saem sozinhas.
+    Alone,
+    /// Com estas faces junto, a remoção funciona (o menor conjunto achado).
+    With(Vec<nator_document::features::FaceRef>),
+    /// Nem com a concordância inteira a remoção funciona (ou não há concordância).
+    NotFound,
+    /// A busca passou do prazo total antes de reduzir o conjunto ao necessário: nada é
+    /// sugerido, porque uma lista com faces dispensáveis confundiria.
+    Undetermined,
+}
+
+/// Quais candidatas precisam sair junto com as escolhidas. `probe(faces, prazo)` remove de
+/// fato no núcleo e diz se funcionou; `None` quando passa do prazo (no aplicativo, cada
+/// sondagem roda num processo próprio, encerrado ao esgotar o prazo, porque o OCCT não
+/// interrompe uma remoção em andamento). Primeiro as escolhidas sozinhas, com prazo curto;
+/// depois a concordância inteira, que dá a medida de tempo; por fim o menor número de
+/// camadas que resolve (busca binária), reduzido uma face de cada vez. Tudo dentro de um
+/// prazo total: passou dele, a resposta é `Undetermined`.
+pub fn necessary_faces(
+    plan: &RemovalPlan,
+    probe: &(dyn Fn(&[usize], std::time::Duration) -> Option<bool> + Sync),
+    cancelled: &(dyn Fn() -> bool + Sync),
+    parallel: usize,
+) -> Necessary {
+    use std::time::{Duration, Instant};
+    const FIRST: Duration = Duration::from_secs(30);
+    const QUICK: Duration = Duration::from_secs(3);
+    const BUDGET: Duration = Duration::from_secs(45);
+    let with = |faces: &mut dyn Iterator<Item = usize>| {
+        plan.chosen.iter().copied().chain(faces).collect::<Vec<_>>()
+    };
+    let upto = |count: usize| with(&mut plan.layers[..count].iter().flatten().copied());
+    let total = plan.layers.len();
+    let started = Instant::now();
+    // As escolhidas sozinhas, primeiro e com prazo curto: é o caso comum (um canal que sai
+    // inteiro) e a resposta deve ser imediata.
+    let alone = probe(&plan.chosen, QUICK);
+    if alone == Some(true) {
+        return Necessary::Alone;
+    }
+    if total == 0 || cancelled() {
+        return Necessary::NotFound;
+    }
+    let measured = Instant::now();
+    let whole = probe(&upto(total), FIRST) == Some(true);
+    // Um conjunto que funciona sai em pouco tempo; as tentativas que travam são as que
+    // falham. O prazo das seguintes acompanha o tempo da concordância inteira.
+    let limit = if whole {
+        (measured.elapsed() * 5).max(Duration::from_secs(2))
+    } else {
+        FIRST
+    };
+    // Sem resposta no prazo curto: num sólido lento, uma remoção que funciona também pode
+    // passar dele. Tenta-se de novo com o prazo medido.
+    if alone.is_none() && limit > QUICK && !cancelled() && probe(&plan.chosen, limit) == Some(true)
+    {
+        return Necessary::Alone;
+    }
+    if !whole || cancelled() {
+        return Necessary::NotFound;
+    }
+    let late = || started.elapsed() > BUDGET;
+    // A camada 0 sozinha (só as escolhidas) já falhou; todas as camadas funcionam.
+    let (mut low, mut high) = (0, total);
+    while high - low > 1 {
+        if cancelled() {
+            return Necessary::NotFound;
+        }
+        if late() {
+            return Necessary::Undetermined;
+        }
+        let middle = (low + high) / 2;
+        if probe(&upto(middle), limit) == Some(true) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    // O conjunto achado ainda pode ter faces dispensáveis (num corpo todo arredondado, as
+    // camadas crescem em todas as direções). Primeiro, em paralelo, cada face é testada fora
+    // do conjunto; depois as que pareceram dispensáveis saem uma a uma, das mais distantes
+    // para as mais próximas, conferindo de novo. Sem qualquer uma das que sobram, a remoção
+    // falha.
+    let mut kept = plan.layers[..high]
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    let spare = {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let found = std::sync::Mutex::new(Vec::new());
+        std::thread::scope(|scope| {
+            for _ in 0..parallel.clamp(1, kept.len().max(1)) {
+                scope.spawn(|| {
+                    loop {
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some(&face) = kept.get(index) else {
+                            break;
+                        };
+                        if cancelled() || late() {
+                            break;
+                        }
+                        let attempt = with(&mut kept.iter().copied().filter(|f| *f != face));
+                        if probe(&attempt, limit) == Some(true)
+                            && let Ok(mut found) = found.lock()
+                        {
+                            found.push((index, face));
+                        }
+                    }
+                });
+            }
+        });
+        let mut spare = found.into_inner().unwrap_or_default();
+        spare.sort_unstable_by_key(|(index, _)| std::cmp::Reverse(*index));
+        spare
+    };
+    for (position, (_, face)) in spare.iter().enumerate() {
+        if cancelled() || late() {
+            return Necessary::Undetermined;
+        }
+        // A primeira já foi confirmada sozinha; as seguintes, junto com as que já saíram.
+        if position == 0
+            || probe(
+                &with(&mut kept.iter().copied().filter(|f| f != face)),
+                limit,
+            ) == Some(true)
+        {
+            kept.retain(|f| f != face);
+        }
+    }
+    if late() {
+        return Necessary::Undetermined;
+    }
+    Necessary::With(
+        kept.into_iter()
+            .map(|index| nator_document::features::FaceRef::Index {
+                index,
+                signature: plan.signature,
+            })
+            .collect(),
+    )
+}
+
+/// Sondagem no próprio processo, sem prazo: para ensaios e para quem não pode abrir outro
+/// processo. Funciona quando o núcleo remove as faces sem resultado parcial.
+#[cfg(feature = "occt")]
+pub fn probe_in_process(bytes: &[u8], faces: &[usize]) -> bool {
+    Solid::from_brep(bytes, None)
+        .and_then(|solid| solid.remove_faces(faces, "b0"))
+        .is_ok()
+}
+
+#[cfg(not(feature = "occt"))]
+pub fn probe_in_process(_bytes: &[u8], _faces: &[usize]) -> bool {
+    false
 }
 
 /// Papel de uma face numa concordância.
@@ -2153,12 +2324,24 @@ pub enum BlendShape {
 }
 
 /// Faces da mesma concordância das escolhidas (incluídas), seguindo os pares tangentes.
-/// Sem raio entre as escolhidas (só remendos livres), valem os raios das vizinhas tangentes.
 pub fn blend_chain(
     chosen: &std::collections::BTreeSet<usize>,
     pairs: &[[usize; 2]],
     shapes: &[BlendShape],
 ) -> std::collections::BTreeSet<usize> {
+    let mut chain = chosen.clone();
+    chain.extend(blend_layers(chosen, pairs, shapes).into_iter().flatten());
+    chain
+}
+
+/// Candidatas da mesma concordância, em camadas pela distância às escolhidas (sem elas).
+/// Sem raio entre as escolhidas (só remendos livres), vale o raio mais frequente entre as
+/// vizinhas tangentes.
+pub fn blend_layers(
+    chosen: &std::collections::BTreeSet<usize>,
+    pairs: &[[usize; 2]],
+    shapes: &[BlendShape],
+) -> Vec<Vec<usize>> {
     let round = |face: usize| match shapes.get(face) {
         Some(BlendShape::Round(radius)) => Some(*radius),
         _ => None,
@@ -2198,31 +2381,39 @@ pub fn blend_chain(
             radii.push(best);
         }
     }
-    let mut chain = chosen.clone();
     let Some(largest) = radii.iter().copied().reduce(f64::max) else {
-        return chain;
+        return Vec::new();
     };
     let same = |radius: f64| radii.iter().any(|r| close(radius, *r));
     // Um remendo de canto cabe numa esfera do raio da concordância.
     let patch = 4. * std::f64::consts::PI * largest * largest;
-    let mut frontier = chain.iter().copied().collect::<Vec<_>>();
-    while let Some(face) = frontier.pop() {
-        for next in neighbors(face) {
-            if chain.contains(&next) || chain.len() >= 2000 {
-                continue;
-            }
-            let joins = match shapes.get(next) {
-                Some(BlendShape::Round(radius)) => same(*radius),
-                Some(BlendShape::Free(area)) => *area <= patch,
-                _ => false,
-            };
-            if joins {
-                chain.insert(next);
-                frontier.push(next);
+    let mut seen = chosen.clone();
+    let mut frontier = chosen.iter().copied().collect::<Vec<_>>();
+    let mut layers = Vec::new();
+    while !frontier.is_empty() && seen.len() < 2000 {
+        let mut next = std::collections::BTreeSet::new();
+        for face in frontier {
+            for neighbor in neighbors(face) {
+                if seen.contains(&neighbor) {
+                    continue;
+                }
+                let joins = match shapes.get(neighbor) {
+                    Some(BlendShape::Round(radius)) => same(*radius),
+                    Some(BlendShape::Free(area)) => *area <= patch,
+                    _ => false,
+                };
+                if joins {
+                    next.insert(neighbor);
+                }
             }
         }
+        seen.extend(next.iter().copied());
+        frontier = next.iter().copied().collect();
+        if !next.is_empty() {
+            layers.push(next.into_iter().collect());
+        }
     }
-    chain
+    layers
 }
 
 /// Excluir uma operação nunca deixa referências silenciosamente apontando para outra geometria:

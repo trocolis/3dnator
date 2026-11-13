@@ -54,6 +54,20 @@ fn run() -> Result<(), Box<dyn Error>> {
             );
             Ok(())
         }
+        // Uso interno do Remover faces: uma sondagem por processo, que o editor encerra ao
+        // passar do prazo (o OCCT não interrompe uma remoção em andamento). Código 0: as
+        // faces saem; 3: não saem.
+        [command, path, faces] if command == "--probe-removal" => {
+            let bytes = std::fs::read(path)?;
+            let faces = faces
+                .to_str()
+                .ok_or("Faces inválidas.")?
+                .split(',')
+                .map(str::parse)
+                .collect::<Result<Vec<usize>, _>>()?;
+            let removed = nator_commands::features::probe_in_process(&bytes, &faces);
+            std::process::exit(if removed { 0 } else { 3 });
+        }
         [command] if command == "--version" => {
             println!(
                 "3dnator {} | OCCT: {}",

@@ -111,7 +111,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeAreas => "Merge areas",
         Text::RemoveFaces => "Remove faces",
         Text::RemoveFacesHint => {
-            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid. The other faces of the same fillet show in red; double-click a face to include them right away."
+            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid. If the selection does not come off alone, the faces that must go too show in red; double-click a face to include them right away."
         }
         Text::UnlinkedEnds => "Unlinked ends. Click to link.",
         Text::FixElement => "Fix element",
@@ -998,10 +998,15 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportMenu => "Import",
         Text::ImportReference => "Import STEP, STL or 3MF as a reference",
         Text::ImportIntoPart => "Import STEP, STL or 3MF into the part",
-        Text::DependentFaces => {
-            "face(s) of the same blend, in red: if the selection does not come off alone, include them"
+        Text::DependentFaces => "face(s) in red must come off with the selection",
+        Text::IncludeDependentFaces => "Include the needed ones",
+        Text::NoDependentFaces => {
+            "Not even with the neighboring faces of the same fillet does the selection come off; pick the faces manually."
         }
-        Text::IncludeDependentFaces => "Include blend",
+        Text::SearchingDependentFaces => "Looking for the faces that must come off too…",
+        Text::DependentFacesTooSlow => {
+            "Finding the needed faces took over 45 s on this solid; pick them manually."
+        }
         Text::MovementMode => "Movement mode",
         Text::MoveMenu => "Move",
         Text::MoveFree => "Free",

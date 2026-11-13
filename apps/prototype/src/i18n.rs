@@ -941,6 +941,9 @@ pub enum Text {
     ImportIntoPart,
     DependentFaces,
     IncludeDependentFaces,
+    NoDependentFaces,
+    SearchingDependentFaces,
+    DependentFacesTooSlow,
     MovementMode,
     MoveMenu,
     MoveFree,
@@ -1441,7 +1444,7 @@ fn pt(key: Text) -> &'static str {
         Text::MergeAreas => "Unir áreas",
         Text::RemoveFaces => "Remover faces",
         Text::RemoveFacesHint => {
-            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido. As outras faces do mesmo arredondamento aparecem em vermelho; duplo clique numa face já as inclui."
+            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido. Se a seleção não sair sozinha, as faces que precisam sair junto aparecem em vermelho; duplo clique numa face já as inclui."
         }
         Text::UnlinkedEnds => "Pontas sem ligação. Clique para ligar.",
         Text::FixElement => "Fixar elemento",
@@ -2006,10 +2009,15 @@ fn pt(key: Text) -> &'static str {
         Text::ImportMenu => "Importar",
         Text::ImportReference => "Importar STEP, STL ou 3MF como referência",
         Text::ImportIntoPart => "Importar STEP, STL ou 3MF para a peça",
-        Text::DependentFaces => {
-            "face(s) da mesma concordância, em vermelho: se a seleção não sair sozinha, inclua-as"
+        Text::DependentFaces => "face(s) em vermelho precisam sair junto com a seleção",
+        Text::IncludeDependentFaces => "Incluir as necessárias",
+        Text::NoDependentFaces => {
+            "Nem com as faces vizinhas do mesmo arredondamento a seleção sai; escolha as faces manualmente."
         }
-        Text::IncludeDependentFaces => "Incluir concordância",
+        Text::SearchingDependentFaces => "Procurando as faces que precisam sair junto…",
+        Text::DependentFacesTooSlow => {
+            "A busca das faces necessárias passou de 45 s neste sólido; escolha-as manualmente."
+        }
         Text::MovementMode => "Modo de movimento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Livre",

@@ -153,17 +153,110 @@ const PLANES: [(&str, [f64; 3]); 3] = [
 pub(super) struct DependentsJob {
     pub tab: u64,
     pub receiver: std::sync::mpsc::Receiver<Dependents>,
+    /// Corpo e seleção consultados: outra seleção encerra esta busca.
+    pub body: BodyId,
+    pub faces: Vec<FaceRef>,
+    /// Pedido de encerramento: a sondagem em andamento é morta e a busca para.
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Drop for DependentsJob {
+    fn drop(&mut self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
-/// Faces da mesma concordância das escolhidas no Remover faces, para uma seleção.
+/// Uma remoção de teste num processo próprio, morto ao passar do prazo ou ao cancelar a
+/// busca. `None`: sem resposta a tempo.
+#[cfg(not(test))]
+fn probe_in_child(
+    path: &std::path::Path,
+    faces: &[usize],
+    limit: std::time::Duration,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Option<bool> {
+    let list = faces
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut child = std::process::Command::new(std::env::current_exe().ok()?)
+        .arg("--probe-removal")
+        .arg(path)
+        .arg(list)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status.success()),
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        if started.elapsed() > limit || cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Busca das faces necessárias. No aplicativo, cada sondagem roda num processo próprio, com
+/// o B-rep num arquivo temporário; nos ensaios, no próprio processo.
+fn search_necessary(
+    plan: &nator_commands::features::RemovalPlan,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<nator_commands::features::Necessary, String> {
+    let cancelled = || cancel.load(std::sync::atomic::Ordering::SeqCst);
+    #[cfg(test)]
+    {
+        Ok(nator_commands::features::necessary_faces(
+            plan,
+            &|faces, _| {
+                Some(nator_commands::features::probe_in_process(
+                    &plan.bytes,
+                    faces,
+                ))
+            },
+            &cancelled,
+            1,
+        ))
+    }
+    #[cfg(not(test))]
+    {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "3dnator-remocao-{}-{}.brep",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ));
+        std::fs::write(&path, plan.bytes.as_slice()).map_err(|e| e.to_string())?;
+        // Sondagens em processos paralelos: cada uma também usa várias threads do OCCT.
+        let parallel = std::thread::available_parallelism()
+            .map_or(2, |n| n.get() / 2)
+            .clamp(1, 4);
+        let found = nator_commands::features::necessary_faces(
+            plan,
+            &|faces, limit| probe_in_child(&path, faces, limit, cancel),
+            &cancelled,
+            parallel,
+        );
+        let _ = std::fs::remove_file(&path);
+        Ok(found)
+    }
+}
+
+/// Faces que precisam sair junto com as escolhidas no Remover faces, para uma seleção.
 #[derive(Debug, Clone)]
 pub(super) struct Dependents {
     pub revision: u64,
     pub body: BodyId,
     /// Seleção consultada, na ordem do painel.
     pub faces: Vec<FaceRef>,
-    /// Faces da cadeia ainda não escolhidas (vazia quando a seleção não é concordância).
-    pub result: Result<Vec<FaceRef>, String>,
+    pub result: Result<nator_commands::features::Necessary, String>,
 }
 
 /// Referência escolhida na área 3D ou gravada na operação em edição.
@@ -505,6 +598,8 @@ pub(super) struct Draft {
     /// A prévia da seleção atual ficou pronta: ela sai sozinha e a concordância deixa de
     /// ser sugerida (um canal pode ter o raio dos arredondamentos externos e sair só).
     removes_alone: bool,
+    /// A busca das faces necessárias para a seleção atual está em andamento.
+    searching_dependents: bool,
     /// Campo de seleção que recebe os próximos cliques no modelo.
     field: Option<Field>,
     /// Chanfro por distância e ângulo, com o ângulo em expressão.
@@ -583,6 +678,7 @@ impl Draft {
             dependents: None,
             include_dependents: false,
             removes_alone: false,
+            searching_dependents: false,
             field: Some(tool.first_field()),
             chamfer_angle: None,
             outward: false,
@@ -1138,7 +1234,7 @@ impl Draft {
         match &self.dependents {
             Some(Dependents {
                 faces,
-                result: Ok(found),
+                result: Ok(nator_commands::features::Necessary::With(found)),
                 ..
             }) if *faces == chosen => found
                 .iter()
@@ -1149,6 +1245,21 @@ impl Draft {
         }
     }
     /// Falha da busca (por exemplo, prazo esgotado num sólido grande) para a seleção atual.
+    /// Busca concluída sem faces a sugerir: o texto que explica por quê.
+    fn dependents_unresolved(&self) -> Option<T> {
+        match &self.dependents {
+            Some(Dependents {
+                faces,
+                result: Ok(necessary),
+                ..
+            }) if *faces == self.chosen_faces() => match necessary {
+                nator_commands::features::Necessary::NotFound => Some(T::NoDependentFaces),
+                nator_commands::features::Necessary::Undetermined => Some(T::DependentFacesTooSlow),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
     fn dependents_error(&self) -> Option<&str> {
         match &self.dependents {
             Some(Dependents {
@@ -2376,6 +2487,15 @@ impl Editor {
         {
             self.check_solid(ctx, d.tab, d.part, body);
         }
+        // Outra seleção (ou outra ferramenta) encerra a busca anterior: a sondagem em
+        // andamento é morta e a nova começa sem esperar.
+        if self.dependents_job.as_ref().is_some_and(|job| {
+            job.tab != d.tab
+                || d.pending_dependents(revision)
+                    .is_none_or(|(body, faces)| body != job.body || faces != job.faces)
+        }) {
+            self.dependents_job = None;
+        }
         if let Some(job) = &self.dependents_job {
             match job.receiver.try_recv() {
                 Ok(dependents) => {
@@ -2388,6 +2508,7 @@ impl Editor {
                 }
             }
         }
+        d.searching_dependents = d.pending_dependents(revision).is_some();
         // Uma busca de cada vez: a seguinte espera a atual, que tem prazo no núcleo.
         if self.dependents_job.is_none()
             && let Some((body, faces)) = d.pending_dependents(revision)
@@ -2562,12 +2683,18 @@ impl Editor {
         let revision = target.session.revision();
         let (sender, receiver) = std::sync::mpsc::channel();
         let context = context.clone();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = cancel.clone();
+        let asked = faces.clone();
         let spawned = std::thread::Builder::new()
             .name("removal-dependents".into())
             .spawn(move || {
-                let result =
-                    nator_commands::features::removal_dependents(&document, part, body, &faces)
-                        .map_err(|e| e.to_string());
+                let result = nator_commands::features::removal_plan(&document, part, body, &faces)
+                    .map_err(|e| e.to_string())
+                    .and_then(|plan| search_necessary(&plan, &stop));
+                if stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
                 let _ = sender.send(Dependents {
                     revision,
                     body,
@@ -2577,7 +2704,13 @@ impl Editor {
                 context.request_repaint();
             });
         if spawned.is_ok() {
-            self.dependents_job = Some(DependentsJob { tab, receiver });
+            self.dependents_job = Some(DependentsJob {
+                tab,
+                receiver,
+                body,
+                faces: asked,
+                cancel,
+            });
         }
     }
     /// A análise lê os B-reps do histórico: fica no trabalhador, como as medições.
@@ -3198,8 +3331,20 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
                 if ui.button(text(T::IncludeDependentFaces)).clicked() {
                     d.include_dependent_faces();
                 }
+            } else if let Some(reason) = d.dependents_unresolved() {
+                ui.label(
+                    egui::RichText::new(text(reason))
+                        .small()
+                        .color(theme::muted()),
+                );
             } else if let Some(error) = d.dependents_error() {
                 ui.label(egui::RichText::new(error).small().color(theme::muted()));
+            } else if d.searching_dependents {
+                ui.label(
+                    egui::RichText::new(text(T::SearchingDependentFaces))
+                        .small()
+                        .color(theme::muted()),
+                );
             }
             ui.label(
                 egui::RichText::new(text(T::RemoveFacesHint))

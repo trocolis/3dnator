@@ -113,7 +113,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeAreas => "Unir áreas",
         Text::RemoveFaces => "Eliminar caras",
         Text::RemoveFacesHint => {
-            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido. Las demás caras del mismo redondeo aparecen en rojo; doble clic en una cara ya las incluye."
+            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido. Si la selección no sale sola, las caras que deben salir también aparecen en rojo; doble clic en una cara ya las incluye."
         }
         Text::UnlinkedEnds => "Extremos sin unir. Haga clic para unir.",
         Text::FixElement => "Fijar elemento",
@@ -1030,10 +1030,15 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportMenu => "Importar",
         Text::ImportReference => "Importar STEP, STL o 3MF como referencia",
         Text::ImportIntoPart => "Importar STEP, STL o 3MF a la pieza",
-        Text::DependentFaces => {
-            "cara(s) del mismo redondeo, en rojo: si la selección no sale sola, inclúyalas"
+        Text::DependentFaces => "cara(s) en rojo deben salir junto con la selección",
+        Text::IncludeDependentFaces => "Incluir las necesarias",
+        Text::NoDependentFaces => {
+            "Ni con las caras vecinas del mismo redondeo sale la selección; elija las caras manualmente."
         }
-        Text::IncludeDependentFaces => "Incluir redondeo",
+        Text::SearchingDependentFaces => "Buscando las caras que deben salir también…",
+        Text::DependentFacesTooSlow => {
+            "La búsqueda de las caras necesarias pasó de 45 s en este sólido; elíjalas manualmente."
+        }
         Text::MovementMode => "Modo de movimiento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Libre",

@@ -2,6 +2,14 @@
 
 ## Não lançado
 
+## 0.61.0 — 13/11/2026
+
+- Remover faces: só ficam vermelhas as faces que **precisam** sair junto, confirmadas no núcleo. Se a seleção sai sozinha, nada é marcado. Na 0.60 a sugestão era a concordância inteira de mesmo raio; num corpo todo arredondado com r = 1,7 mm (o carro Y do projeto da impressora), um canal que sai sozinho marcava todo o contorno externo.
+- Como a busca funciona: a cadeia tangente de mesmo raio dá as candidatas, em camadas a partir da seleção. O OCCT testa, nesta ordem, a seleção sozinha (prazo curto), a cadeia inteira (que dá a medida de tempo), o menor número de camadas que resolve (busca binária) e, por fim, cada face fora do conjunto, em até quatro processos paralelos. Só fica o que, sem ele, impede a remoção. No anel do mancal, a sugestão caiu de 7 para as 6 faces de fato necessárias.
+- Cada remoção de teste roda num **processo próprio** (`3dnator --probe-removal`), que é morto ao passar do prazo ou quando a seleção muda: o OCCT não interrompe uma remoção em andamento, e na 0.58 uma sondagem travada prendia a busca por minutos. Tempos medidos no projeto real: um canal que sai sozinho, 0,14 s; um anel do mancal, 9 s. O painel mostra "Procurando…" durante a busca.
+- A busca tem prazo total de 45 s. Passou dele (uma face isolada num corpo todo arredondado, por exemplo), nada é sugerido e o painel avisa para escolher as faces manualmente, em vez de mostrar uma lista com faces dispensáveis.
+- `features::removal_plan`, `necessary_faces` (sondagem injetável) e `probe_in_process` substituem `removal_dependents`.
+
 ## 0.60.1 — 13/11/2026
 
 - Remover faces: a concordância em vermelho volta a ser só sugestão. A 0.60.0 suspendia a prévia enquanto houvesse faces vermelhas fora da seleção, e o painel ficava em "Calculando a prévia…" sem calcular nada. Num corpo em que um canal tem o mesmo raio dos arredondamentos externos e se liga a eles por tangência, a cadeia marcava todo o contorno, embora o canal saia sozinho. Agora a prévia roda sempre; quando ela fica pronta, a seleção sai sozinha e o vermelho some. Se a remoção falha (um trecho de anel, por exemplo), o vermelho continua como sugestão do que incluir.
