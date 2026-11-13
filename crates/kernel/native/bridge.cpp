@@ -1133,6 +1133,9 @@ static bool append_apex_fan(const TopoDS_Face& face, const Handle(Poly_Triangula
     return true;
 }
 
+}  // extern "C"
+
+// Fora do bloco C: devolve um tipo C++, o que o MSVC recusa com ligação C (C2526).
 // Faces de STEP reais (cones e B-splines vindos do Fusion, por exemplo) às vezes fazem o
 // BRepMesh falhar na tesselação conjunta, embora sejam válidas. Tenta-se primeiro remalhar a
 // própria face com ângulo mais folgado, o que reaproveita a discretização das arestas
@@ -1178,6 +1181,8 @@ static std::optional<TopoDS_Face> triangulated_face(const TopoDS_Face& face, dou
     }
     throw std::runtime_error("Uma face não possui triangulação.");
 }
+
+extern "C" {
 
 bool nator_tessellate(Shape* body, double linear, double angular) noexcept {
     return guarded([&] {
