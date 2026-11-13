@@ -497,11 +497,14 @@ pub(super) struct Draft {
     kept_topology: Option<Kept>,
     /// Arestas/faces adicionais da mesma operação (arredondamento, chanfro, casca).
     extra_topology: Vec<Kept>,
-    /// Remover faces: faces que precisam sair junto com as escolhidas, calculadas no
-    /// trabalhador para a revisão e a seleção indicadas.
+    /// Remover faces: faces da mesma concordância das escolhidas, calculadas numa thread
+    /// própria para a revisão e a seleção indicadas.
     dependents: Option<Dependents>,
     /// Duplo clique numa face: inclui as dependentes assim que forem conhecidas.
     include_dependents: bool,
+    /// A prévia da seleção atual ficou pronta: ela sai sozinha e a concordância deixa de
+    /// ser sugerida (um canal pode ter o raio dos arredondamentos externos e sair só).
+    removes_alone: bool,
     /// Campo de seleção que recebe os próximos cliques no modelo.
     field: Option<Field>,
     /// Chanfro por distância e ângulo, com o ângulo em expressão.
@@ -579,6 +582,7 @@ impl Draft {
             extra_topology: Vec::new(),
             dependents: None,
             include_dependents: false,
+            removes_alone: false,
             field: Some(tool.first_field()),
             chamfer_angle: None,
             outward: false,
@@ -1124,17 +1128,12 @@ impl Draft {
             self.include_dependent_faces();
         }
     }
-    /// Remover faces só pede prévia com a concordância conhecida e completa. Remover um
-    /// trecho isolado de uma cadeia é o que leva minutos no OCCT (o anel inteiro sai em
-    /// décimos de segundo), e esse cálculo não pode ser interrompido depois de começar.
-    pub(super) fn preview_allowed(&self, revision: u64) -> bool {
-        self.tool != Tool::RemoveFaces
-            || (self.pending_dependents(revision).is_none()
-                && self.dependents_error().is_none()
-                && self.dependent_faces().is_empty())
-    }
     /// Faces da mesma concordância da seleção atual, ainda não escolhidas (realce vermelho).
+    /// Somem quando a prévia mostra que a seleção sai sozinha.
     pub(super) fn dependent_faces(&self) -> Vec<FaceRef> {
+        if self.removes_alone {
+            return Vec::new();
+        }
         let chosen = self.chosen_faces();
         match &self.dependents {
             Some(Dependents {
@@ -1150,7 +1149,7 @@ impl Draft {
         }
     }
     /// Falha da busca (por exemplo, prazo esgotado num sólido grande) para a seleção atual.
-    pub(super) fn dependents_error(&self) -> Option<&str> {
+    fn dependents_error(&self) -> Option<&str> {
         match &self.dependents {
             Some(Dependents {
                 faces,
@@ -2430,6 +2429,9 @@ impl Editor {
             self.label_fonts.poll(ctx);
         }
         let complete = d.complete() && nator_kernel::is_available();
+        d.removes_alone = d.tool == Tool::RemoveFaces
+            && complete
+            && matches!(self.preview_status(&command), PreviewStatus::Ready);
         let footer_error;
         let footer = if !complete {
             Footer::None
@@ -2532,7 +2534,7 @@ impl Editor {
             self.close_feature_panel(&d);
             return;
         }
-        if complete && d.preview_allowed(revision) {
+        if complete {
             // Ao editar, a prévia mostra o histórico até a operação, como no recuo da linha
             // do tempo durante a edição.
             let rollback = d.output.map(|output| (d.part, output));
@@ -3196,11 +3198,6 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
                 if ui.button(text(T::IncludeDependentFaces)).clicked() {
                     d.include_dependent_faces();
                 }
-                ui.label(
-                    egui::RichText::new(text(T::RemovalPreviewWaits))
-                        .small()
-                        .color(theme::muted()),
-                );
             } else if let Some(error) = d.dependents_error() {
                 ui.label(egui::RichText::new(error).small().color(theme::muted()));
             }

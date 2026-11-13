@@ -999,7 +999,7 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportReference => "Import STEP, STL or 3MF as a reference",
         Text::ImportIntoPart => "Import STEP, STL or 3MF into the part",
         Text::DependentFaces => {
-            "face(s) of the same blend, in red: a chained fillet only comes off whole"
+            "face(s) of the same blend, in red: if the selection does not come off alone, include them"
         }
         Text::IncludeDependentFaces => "Include blend",
         Text::MovementMode => "Movement mode",
@@ -1019,9 +1019,6 @@ pub fn text(key: Text) -> &'static str {
             "Finishing the operation in the background; the app stays usable."
         }
         Text::FinishingFailed => "The operation's computation ended without a result.",
-        Text::RemovalPreviewWaits => {
-            "The preview shows once the blend is included. A lone stretch of a chain can take minutes and almost always fails; OK tries anyway, in the background."
-        }
         Text::LockAxisHint => "Lock the axis: movement happens only along the free axes.",
         Text::MovedField => "Displacement",
         Text::ClearAdjustment => "Clear adjustment",

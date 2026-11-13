@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.60.1 — 13/11/2026
+
+- Remover faces: a concordância em vermelho volta a ser só sugestão. A 0.60.0 suspendia a prévia enquanto houvesse faces vermelhas fora da seleção, e o painel ficava em "Calculando a prévia…" sem calcular nada. Num corpo em que um canal tem o mesmo raio dos arredondamentos externos e se liga a eles por tangência, a cadeia marcava todo o contorno, embora o canal saia sozinho. Agora a prévia roda sempre; quando ela fica pronta, a seleção sai sozinha e o vermelho some. Se a remoção falha (um trecho de anel, por exemplo), o vermelho continua como sugestão do que incluir.
+
 ## 0.60.0 — 13/11/2026
 
 - Remover faces: as outras faces da mesma concordância aparecem **em vermelho** (antes amarelo) assim que uma face é escolhida, e entram pelo botão **Incluir concordância** ou pelo duplo clique. Na 0.58 a busca removia de fato no OCCT para confirmar; em corpos de STEP reais cada remoção de teste levava de segundos a minutos, o prazo de 20 s não era respeitado (o OCCT não consulta a interrupção na interseção aresta-face) e o realce nunca aparecia. Agora a cadeia sai da topologia, em cerca de 30 ms num corpo de 144 faces: segue as arestas tangentes por cilindros, toros (pelo raio do tubo) e esferas do mesmo raio da face escolhida, mais os remendos de canto pequenos para esse raio; partindo de um remendo, vale o raio mais frequente em volta dele. Faces de outro raio (um furo ou um arredondamento vertical tangentes) ficam de fora. No mancal de um projeto real, a cadeia de cada face coincide com os anéis que foram escolhidos à mão.

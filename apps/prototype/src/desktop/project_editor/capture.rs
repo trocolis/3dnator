@@ -8717,13 +8717,6 @@ mod tests {
             .as_ref()
             .map_or(0, |d| d.dependent_faces().len());
         assert_eq!(chosen(&editor), 1);
-        // Com a concordância incompleta, nenhuma prévia começa: remover um trecho isolado é
-        // o cálculo que leva minutos num STEP grande.
-        for _ in 0..30 {
-            frame(&mut editor, &context, vec![])?;
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(editor.preview_threads_for_test(), (false, false));
         let include = label_position(&mut editor, &context, text(T::IncludeDependentFaces))?;
         click(&mut editor, &context, include)?;
         assert_eq!(chosen(&editor), 1 + dependents);

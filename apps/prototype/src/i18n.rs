@@ -956,7 +956,6 @@ pub enum Text {
     LockAxis,
     FinishingInBackground,
     FinishingFailed,
-    RemovalPreviewWaits,
     LockAxisHint,
     MovedField,
     ClearAdjustment,
@@ -2008,7 +2007,7 @@ fn pt(key: Text) -> &'static str {
         Text::ImportReference => "Importar STEP, STL ou 3MF como referência",
         Text::ImportIntoPart => "Importar STEP, STL ou 3MF para a peça",
         Text::DependentFaces => {
-            "face(s) da mesma concordância, em vermelho: um arredondamento em cadeia só sai inteiro"
+            "face(s) da mesma concordância, em vermelho: se a seleção não sair sozinha, inclua-as"
         }
         Text::IncludeDependentFaces => "Incluir concordância",
         Text::MovementMode => "Modo de movimento",
@@ -2028,9 +2027,6 @@ fn pt(key: Text) -> &'static str {
             "Concluindo a operação em segundo plano; o aplicativo continua livre."
         }
         Text::FinishingFailed => "O cálculo da operação terminou sem resultado.",
-        Text::RemovalPreviewWaits => {
-            "A prévia aparece com a concordância incluída. Um trecho sozinho de uma cadeia pode levar minutos e quase sempre falha; OK tenta assim mesmo, em segundo plano."
-        }
         Text::LockAxisHint => "Travar o eixo: o movimento ocorre só nos eixos livres.",
         Text::MovedField => "Deslocamento",
         Text::ClearAdjustment => "Limpar ajuste",
