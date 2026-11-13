@@ -531,6 +531,10 @@ enum Outcome {
         body: BodyId,
         report: Result<nator_commands::solid_check::Report, String>,
     },
+    RemovalDependents {
+        tab: u64,
+        dependents: feature_editor::Dependents,
+    },
     Cancelled,
 }
 struct Worker {
@@ -1359,6 +1363,11 @@ impl Editor {
             }) => {
                 self.receive_print_check(tab, revision, body, report);
                 self.status.set(text(T::Ready));
+            }
+            Ok(Outcome::RemovalDependents { tab, dependents }) => {
+                if let Some(draft) = self.feature_edit.as_mut() {
+                    draft.receive_dependents(tab, dependents);
+                }
             }
             Ok(Outcome::SolidChecked {
                 tab,

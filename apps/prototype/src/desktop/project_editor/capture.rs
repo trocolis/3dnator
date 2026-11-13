@@ -8293,6 +8293,186 @@ mod tests {
         Ok(())
     }
 
+    /// Remover faces numa cadeia tangente (canto vertical arredondado e contorno de cima
+    /// arredondado): a face clicada não sai sozinha; as que precisam sair junto aparecem em
+    /// amarelo e entram pelo botão do painel ou pelo duplo clique.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn remove_faces_highlights_dependents_and_includes_them_by_button_or_double_click()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut session = Session::new(Document::new("Dependentes")?)?;
+        let mut plate = Sketch::new("Base", Plane::xy());
+        let lines = plate.add_rectangle([0., 0.], [20., 20.], false)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch: plate,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let Effect::Imported { body: block, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Bloco".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Corpo ausente".into());
+        };
+        let owner = nator_document::features::body_owner(block);
+        let Effect::Imported { body: corner, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Canto".into(),
+            operation: Operation::Fillet {
+                base: block,
+                edge: EdgeRef::Between([
+                    format!("{owner}:e{}", lines[0]),
+                    format!("{owner}:e{}", lines[1]),
+                ]),
+                radius: "5 mm".into(),
+                additional_edges: vec![],
+            },
+        })?
+        else {
+            return Err("Canto ausente".into());
+        };
+        let Effect::Imported { body: top, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Contorno".into(),
+            operation: Operation::Fillet {
+                base: corner,
+                edge: EdgeRef::Between([format!("{owner}:end"), format!("{owner}:e{}", lines[0])]),
+                radius: "2 mm".into(),
+                additional_edges: vec![],
+            },
+        })?
+        else {
+            return Err("Contorno ausente".into());
+        };
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        // Um ponto visível de uma face curva do contorno: o centro de um triângulo dela
+        // que o raio da câmera atinge primeiro.
+        let document = editor.current().session.document().clone();
+        let body = document.body(top).ok_or("Corpo")?;
+        let rounds = body
+            .face_names
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.ends_with(":round"))
+            .map(|(i, _)| i as u32)
+            .collect::<Vec<_>>();
+        let mesh = body.geometry.mesh();
+        let faces = body.geometry.triangle_faces().ok_or("Faces da malha")?;
+        let bounds = editor.display_bounds();
+        let rect = editor.canvas_rect;
+        let mut target = None;
+        for (triangle, face) in mesh.triangles().iter().zip(faces) {
+            if !rounds.contains(face) {
+                continue;
+            }
+            let [a, b, c] = mesh.triangle_points(*triangle);
+            let center = std::array::from_fn(|i| (a[i] + b[i] + c[i]) / 3.);
+            let Some(at) = sketch_scene::project(&editor.viewport.camera, bounds, rect, center)
+            else {
+                continue;
+            };
+            let ray = editor.viewport.camera.world_ray(
+                [
+                    f64::from((at.x - rect.center().x) / rect.width() * 2.),
+                    f64::from((rect.center().y - at.y) / rect.height() * 2.),
+                ],
+                bounds,
+                f64::from(rect.aspect_ratio()),
+            );
+            if let Some(hit) = document.pick(ray)?
+                && hit.body == top
+                && faces.get(hit.triangle) == Some(face)
+            {
+                target = Some(at);
+                break;
+            }
+        }
+        let at = target.ok_or("Nenhuma face curva visível")?;
+        let chosen = |editor: &Editor| {
+            editor
+                .feature_edit
+                .as_ref()
+                .map_or(0, |d| d.references().count())
+        };
+        let wait = |editor: &mut Editor, done: &dyn Fn(&Editor) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !done(editor) {
+                if Instant::now() > deadline {
+                    return Err::<(), Box<dyn Error>>(
+                        format!("Tempo esgotado: {}", editor.status).into(),
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                frame(editor, &context, vec![])?;
+            }
+            Ok(())
+        };
+        // Botão do painel.
+        editor.open_feature_tool(feature_editor::Tool::RemoveFaces);
+        frame(&mut editor, &context, vec![])?;
+        click(&mut editor, &context, at)?;
+        wait(&mut editor, &|e| {
+            e.feature_edit
+                .as_ref()
+                .is_some_and(|d| !d.dependent_faces().is_empty())
+        })?;
+        let dependents = editor
+            .feature_edit
+            .as_ref()
+            .map_or(0, |d| d.dependent_faces().len());
+        assert_eq!(chosen(&editor), 1);
+        let include = label_position(&mut editor, &context, text(T::IncludeDependentFaces))?;
+        click(&mut editor, &context, include)?;
+        assert_eq!(chosen(&editor), 1 + dependents);
+        wait(&mut editor, &|e| !e.busy())?;
+        wait_feature_preview(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.feature_edit.is_none(), "{}", editor.status);
+        let feature = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .and_then(|p| p.features.last())
+            .cloned()
+            .ok_or("Operação")?;
+        let Operation::RemoveFaces { faces, .. } = &feature.operation else {
+            return Err(format!("Operação inesperada: {:?}", feature.operation).into());
+        };
+        assert_eq!(faces.len(), 1 + dependents);
+        assert!(editor.current_mut().session.undo());
+        editor.current_mut().changed();
+        editor.invalidate_scene();
+        settle(&mut editor, &context)?;
+        // Duplo clique: a face continua escolhida e as dependentes entram sozinhas.
+        editor.open_feature_tool(feature_editor::Tool::RemoveFaces);
+        frame(&mut editor, &context, vec![])?;
+        click(&mut editor, &context, at)?;
+        click(&mut editor, &context, at)?;
+        wait(&mut editor, &|e| chosen(e) == 1 + dependents)?;
+        Ok(())
+    }
+
     /// Dois blocos, cada um na sua peça, reunidos no grupo "Conjunto".
     fn grouped_blocks_editor(
         context: &egui::Context,

@@ -110,6 +110,7 @@ unsafe extern "C" {
     fn nator_face_count(body: *const c_void) -> usize;
     fn nator_edge_count(body: *const c_void) -> usize;
     fn nator_edge_faces(body: *const c_void, output: *mut i32, length: usize) -> bool;
+    fn nator_smooth_edges(body: *const c_void, output: *mut u8, length: usize) -> bool;
     fn nator_origins_size(body: *const c_void) -> usize;
     fn nator_origins_copy(body: *const c_void, output: *mut i32, length: usize) -> bool;
     fn nator_mirror(body: *const c_void, origin: *const f64, normal: *const f64) -> *mut c_void;
@@ -295,6 +296,25 @@ impl Solid {
             return Err(last_error());
         }
         Ok(flat.as_chunks::<2>().0.to_vec())
+    }
+
+    /// Pares de faces vizinhas que se encontram sem quina (tangentes ao longo da aresta),
+    /// como um arredondamento e as faces que ele concorda. Índices transitórios deste sólido.
+    pub fn smooth_neighbors(&self) -> Result<Vec<[usize; 2]>, KernelError> {
+        let count = self.edge_count()?;
+        let mut smooth = vec![0_u8; count];
+        // SAFETY: buffer exclusivo com uma posição por aresta, conferida pela ponte.
+        if !unsafe { nator_smooth_edges(self.pointer.as_ptr(), smooth.as_mut_ptr(), count) } {
+            return Err(last_error());
+        }
+        Ok(self
+            .adjacency()?
+            .into_iter()
+            .zip(smooth)
+            .filter(|(faces, smooth)| *smooth == 1 && faces[0] >= 0 && faces[1] >= 0)
+            .map(|(faces, _)| [faces[0] as usize, faces[1] as usize])
+            .filter(|[a, b]| a != b)
+            .collect())
     }
 
     /// Arestas de todos os contornos da face, incluindo os furos. Os índices são

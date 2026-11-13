@@ -50,10 +50,15 @@ impl Overlay {
 }
 
 /// Aparência do realce.
+/// Faces que precisam sair junto com as escolhidas no Remover faces.
+pub(super) const DEPENDENT: egui::Color32 = egui::Color32::from_rgb(222, 170, 20);
+
 #[derive(Clone, Copy)]
 pub(super) enum Look {
     Hover,
     Selected,
+    /// Faces dependentes das escolhidas (Remover faces), em amarelo.
+    Dependent,
     /// Esqueleto do objeto na posição original, durante a movimentação.
     Ghost,
 }
@@ -63,6 +68,12 @@ impl Look {
             Self::Ghost => egui::Color32::from_rgba_unmultiplied(70, 80, 96, alpha),
             Self::Hover => egui::Color32::from_rgba_unmultiplied(64, 156, 236, alpha),
             Self::Selected => egui::Color32::from_rgba_unmultiplied(28, 104, 196, alpha),
+            Self::Dependent => egui::Color32::from_rgba_unmultiplied(
+                DEPENDENT.r(),
+                DEPENDENT.g(),
+                DEPENDENT.b(),
+                alpha,
+            ),
         }
     }
 }
@@ -254,7 +265,7 @@ pub(super) fn draw(
     let mut mesh = egui::Mesh::default();
     let fill = look.color(match look {
         Look::Hover => 70,
-        Look::Selected => 95,
+        Look::Selected | Look::Dependent => 95,
         Look::Ghost => 0,
     });
     for triangle in &overlay.triangles {
@@ -281,7 +292,7 @@ pub(super) fn draw(
     let stroke = egui::Stroke::new(
         match look {
             Look::Hover => 2.5,
-            Look::Selected => 3.,
+            Look::Selected | Look::Dependent => 3.,
             Look::Ghost => 1.2,
         },
         look.color(255),
@@ -773,6 +784,7 @@ impl Editor {
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         let camera = self.viewport.camera.clone();
         let mut selected = Overlay::default();
+        let mut dependent = Overlay::default();
         // Referências escolhidas no painel de comando, sobre o corpo base.
         if let Some(draft) = self
             .feature_edit
@@ -797,6 +809,14 @@ impl Editor {
                 );
                 for kept in draft.references() {
                     selected.extend(reference(&mut self.highlight_cache, &base, pose, kept));
+                }
+                for face in draft.dependent_faces() {
+                    dependent.extend(reference(
+                        &mut self.highlight_cache,
+                        &base,
+                        pose,
+                        &feature_editor::Kept::Face(face),
+                    ));
                 }
                 selected
                     .points
@@ -905,6 +925,9 @@ impl Editor {
         }
         if let Some(ghost) = self.move_ghost() {
             draw(&painter, &camera, bounds, rect, &ghost, Look::Ghost);
+        }
+        if !dependent.is_empty() {
+            draw(&painter, &camera, bounds, rect, &dependent, Look::Dependent);
         }
         if !selected.is_empty() {
             draw(&painter, &camera, bounds, rect, &selected, Look::Selected);

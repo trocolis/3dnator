@@ -111,7 +111,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeAreas => "Merge areas",
         Text::RemoveFaces => "Remove faces",
         Text::RemoveFacesHint => {
-            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid."
+            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid. Double-click a face to include the ones that must go with it."
         }
         Text::UnlinkedEnds => "Unlinked ends. Click to link.",
         Text::FixElement => "Fix element",
@@ -998,6 +998,11 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportMenu => "Import",
         Text::ImportReference => "Import STEP, STL or 3MF as a reference",
         Text::ImportIntoPart => "Import STEP, STL or 3MF into the part",
+        Text::DependentFaces => "dependent face(s), in yellow, must be removed too",
+        Text::IncludeDependentFaces => "Include dependents",
+        Text::NoDependentFaces => {
+            "No combination with the neighboring curved faces allows removing the selection."
+        }
         Text::MovementMode => "Movement mode",
         Text::MoveMenu => "Move",
         Text::MoveFree => "Free",

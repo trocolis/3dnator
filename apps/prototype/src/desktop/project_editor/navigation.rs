@@ -156,8 +156,20 @@ impl Editor {
         if measuring && repeated {
             self.measure_tool.expand(self.busy());
         }
+        // Remover faces: o duplo clique numa face mantém a escolha do primeiro clique e traz
+        // as faces dependentes dela; o segundo clique não a retira.
+        let dependents = repeated
+            && !measuring
+            && self
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.accepts_dependents_double_click());
+        if dependents && let Some(draft) = self.feature_edit.as_mut() {
+            draft.include_dependent_faces();
+        }
         if response.clicked()
             && !(measuring && repeated)
+            && !dependents
             && !starts_on_cube
             && !response
                 .interact_pointer_pos()

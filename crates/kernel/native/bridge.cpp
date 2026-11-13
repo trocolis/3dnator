@@ -45,6 +45,7 @@
 #include <ElSLib.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <Geom2d_Curve.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
@@ -1347,6 +1348,63 @@ std::size_t nator_edge_count(const Shape* body) noexcept {
 
 // Para cada aresta, as duas faces adjacentes (índices base 0). Uma aresta de costura de
 // superfície fechada repete a mesma face; aresta livre usa -1 no segundo índice.
+// Para cada aresta, 1 quando as duas faces vizinhas se encontram sem quina (normais
+// externas iguais no meio da aresta, a menos de 1°), como entre um arredondamento e as faces
+// que ele concorda ou entre arredondamentos em cadeia; 0 para quinas, costuras e bordas.
+bool nator_smooth_edges(const Shape* body, std::uint8_t* output, std::size_t length) noexcept {
+    return guarded([&] {
+        const auto& edges = edges_of(body);
+        if (length != static_cast<std::size_t>(edges.Extent())) {
+            throw std::runtime_error("Destino das arestas suaves inválido.");
+        }
+        const auto& ancestors = ancestors_of(body);
+        const double limit = std::cos(std::acos(-1.0) / 180.0);
+        for (int i = 1; i <= edges.Extent(); ++i) {
+            output[i - 1] = 0;
+            const TopoDS_Edge edge = TopoDS::Edge(edges(i));
+            const auto* list = ancestors.Seek(edge);
+            if (list == nullptr || BRep_Tool::Degenerated(edge)) {
+                continue;
+            }
+            std::vector<TopoDS_Face> faces;
+            for (const auto& face : *list) {
+                if (std::none_of(faces.begin(), faces.end(),
+                                 [&](const TopoDS_Face& f) { return f.IsSame(face); })) {
+                    faces.push_back(TopoDS::Face(face));
+                }
+            }
+            if (faces.size() != 2) {
+                continue;
+            }
+            gp_Vec normals[2];
+            bool valid = true;
+            for (int k = 0; k < 2 && valid; ++k) {
+                double first = 0.0;
+                double last = 0.0;
+                const Handle(Geom2d_Curve) curve =
+                    BRep_Tool::CurveOnSurface(edge, faces[k], first, last);
+                if (curve.IsNull()) {
+                    valid = false;
+                    break;
+                }
+                const gp_Pnt2d uv = curve->Value((first + last) / 2.0);
+                gp_Pnt point;
+                gp_Vec normal;
+                BRepGProp_Face surface(faces[k]);
+                surface.Normal(uv.X(), uv.Y(), point, normal);
+                if (normal.Magnitude() < 1e-12) {
+                    valid = false;
+                    break;
+                }
+                normals[k] = normal.Normalized();
+            }
+            if (valid && normals[0].Dot(normals[1]) > limit) {
+                output[i - 1] = 1;
+            }
+        }
+    });
+}
+
 bool nator_edge_faces(const Shape* body, std::int32_t* output, std::size_t length) noexcept {
     return guarded([&] {
         const auto& edges = edges_of(body);

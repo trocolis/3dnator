@@ -2,6 +2,11 @@
 
 ## Não lançado
 
+## 0.58.0 — 13/11/2026
+
+- Remover faces: quando a face escolhida não sai sozinha (por exemplo, um trecho de arredondamento em cadeia que contorna um canto arredondado), as faces que precisam sair junto aparecem **em amarelo**, e o painel mostra quantas são, com o botão **Incluir dependentes**. O **duplo clique** numa face também a escolhe com as dependentes. Se nenhum conjunto de faces curvas vizinhas resolve, o painel avisa.
+- A busca roda no trabalhador: cresce em camadas pelas faces curvas tangentes às escolhidas (as planas são as que se estendem e nunca entram), confirma cada camada removendo de fato no núcleo e depois descarta, uma a uma, as faces que não fazem falta. Novas consultas `features::removal_dependents` e `Solid::smooth_neighbors` (ponte `nator_smooth_edges`, normais das faces vizinhas no meio de cada aresta).
+
 ## 0.57.1 — 13/11/2026
 
 - Importar para a peça (aba Construção e menu da peça) traz o STEP, STL ou 3MF como **referência filha da peça**, na pasta Referências dela, em vez de corpos. A referência pode virar subpeça com "Criar peça a partir da referência". No STEP, as raízes ficam penduradas na peça e a hierarquia do arquivo é preservada; a malha ganha uma peça de referência própria, posicionada ao lado do que a peça já tem. Uma peça de referência não recebe outra. O comando `ImportStepBodies` da 0.57.0 saiu; `ImportAsReference` passa a aceitar destino.

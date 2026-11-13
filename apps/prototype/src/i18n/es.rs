@@ -113,7 +113,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeAreas => "Unir áreas",
         Text::RemoveFaces => "Eliminar caras",
         Text::RemoveFacesHint => {
-            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido."
+            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido. Doble clic en una cara incluye las que deben salir con ella."
         }
         Text::UnlinkedEnds => "Extremos sin unir. Haga clic para unir.",
         Text::FixElement => "Fijar elemento",
@@ -1030,6 +1030,11 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportMenu => "Importar",
         Text::ImportReference => "Importar STEP, STL o 3MF como referencia",
         Text::ImportIntoPart => "Importar STEP, STL o 3MF a la pieza",
+        Text::DependentFaces => "cara(s) dependiente(s), en amarillo, deben salir también",
+        Text::IncludeDependentFaces => "Incluir dependientes",
+        Text::NoDependentFaces => {
+            "Ninguna combinación con las caras curvas vecinas permite quitar la selección."
+        }
         Text::MovementMode => "Modo de movimiento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Libre",

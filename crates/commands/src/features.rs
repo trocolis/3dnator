@@ -2087,6 +2087,98 @@ pub(super) fn separate(_doc: &mut Document, _part: PartId) -> Result<Vec<BodyId>
     Ok(Vec::new())
 }
 
+/// Faces que precisam sair junto com `faces` para que Remover faces funcione, como os outros
+/// trechos de um arredondamento em cadeia. `Some(vazio)`: as escolhidas saem sozinhas;
+/// `Some(lista)`: com elas também (referências por índice deste corpo, como as do clique);
+/// `None`: nenhum conjunto vizinho resolve. A busca cresce em camadas pelas faces curvas
+/// tangentes às já escolhidas, e cada camada é confirmada removendo de fato no núcleo.
+#[cfg(feature = "occt")]
+pub fn removal_dependents(
+    doc: &Document,
+    part: PartId,
+    base: BodyId,
+    faces: &[FaceRef],
+) -> Result<Option<Vec<FaceRef>>, DocumentError> {
+    use std::collections::BTreeSet;
+    const LAYERS: usize = 12;
+    let (solid, bytes) = source(doc, part, base)?;
+    let chosen = faces
+        .iter()
+        .map(|face| face_index(&solid, &bytes, face))
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if chosen.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let removable = |set: &BTreeSet<usize>| {
+        let indices = set.iter().copied().collect::<Vec<_>>();
+        solid.remove_faces(&indices, "probe").is_ok()
+    };
+    if removable(&chosen) {
+        return Ok(Some(Vec::new()));
+    }
+    let pairs = solid.smooth_neighbors().map_err(error)?;
+    let mut planar = std::collections::HashMap::new();
+    let mut is_planar = |face: usize| -> Result<bool, DocumentError> {
+        if let Some(known) = planar.get(&face) {
+            return Ok(*known);
+        }
+        let flat = matches!(
+            solid.face_measure(face).map_err(error)?.kind,
+            nator_kernel::FaceKind::Plane { .. }
+        );
+        planar.insert(face, flat);
+        Ok(flat)
+    };
+    let mut current = chosen.clone();
+    let mut frontier = chosen.clone();
+    for _ in 0..LAYERS {
+        let mut next = BTreeSet::new();
+        for [a, b] in &pairs {
+            for (from, to) in [(*a, *b), (*b, *a)] {
+                // As faces planas são as que se estendem para fechar o sólido: nunca
+                // dependem do arredondamento que as concorda.
+                if frontier.contains(&from) && !current.contains(&to) && !is_planar(to)? {
+                    next.insert(to);
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        current.extend(next.iter().copied());
+        frontier = next;
+        if removable(&current) {
+            // A camada inteira resolve; tira-se o que não é necessário, uma face de cada vez
+            // (das mais distantes para as mais próximas), confirmando no núcleo.
+            let added = current.difference(&chosen).copied().collect::<Vec<_>>();
+            for face in added.into_iter().rev() {
+                current.remove(&face);
+                if !removable(&current) {
+                    current.insert(face);
+                }
+            }
+            let signature = signature(&bytes);
+            return Ok(Some(
+                current
+                    .difference(&chosen)
+                    .map(|&index| FaceRef::Index { index, signature })
+                    .collect(),
+            ));
+        }
+    }
+    Ok(None)
+}
+#[cfg(not(feature = "occt"))]
+pub fn removal_dependents(
+    _doc: &Document,
+    _part: PartId,
+    _base: BodyId,
+    _faces: &[nator_document::features::FaceRef],
+) -> Result<Option<Vec<nator_document::features::FaceRef>>, DocumentError> {
+    nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
+    Ok(None)
+}
+
 /// Excluir uma operação nunca deixa referências silenciosamente apontando para outra geometria:
 /// sem `with_dependents`, a existência de dependentes é um erro que os nomeia; com ele, todas
 /// as dependentes são excluídas na mesma ação.

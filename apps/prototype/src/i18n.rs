@@ -939,6 +939,9 @@ pub enum Text {
     ImportMenu,
     ImportReference,
     ImportIntoPart,
+    DependentFaces,
+    IncludeDependentFaces,
+    NoDependentFaces,
     MovementMode,
     MoveMenu,
     MoveFree,
@@ -1433,7 +1436,7 @@ fn pt(key: Text) -> &'static str {
         Text::MergeAreas => "Unir áreas",
         Text::RemoveFaces => "Remover faces",
         Text::RemoveFacesHint => {
-            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido."
+            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido. Duplo clique numa face inclui as que precisam sair junto."
         }
         Text::UnlinkedEnds => "Pontas sem ligação. Clique para ligar.",
         Text::FixElement => "Fixar elemento",
@@ -1998,6 +2001,11 @@ fn pt(key: Text) -> &'static str {
         Text::ImportMenu => "Importar",
         Text::ImportReference => "Importar STEP, STL ou 3MF como referência",
         Text::ImportIntoPart => "Importar STEP, STL ou 3MF para a peça",
+        Text::DependentFaces => "face(s) dependente(s), em amarelo, precisam sair junto",
+        Text::IncludeDependentFaces => "Incluir dependentes",
+        Text::NoDependentFaces => {
+            "Nenhuma combinação com as faces curvas vizinhas permite remover a seleção."
+        }
         Text::MovementMode => "Modo de movimento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Livre",

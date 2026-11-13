@@ -149,6 +149,17 @@ const PLANES: [(&str, [f64; 3]); 3] = [
     ("YZ", [1., 0., 0.]),
 ];
 
+/// Faces que precisam sair junto com as escolhidas no Remover faces, para uma seleção.
+#[derive(Debug, Clone)]
+pub(super) struct Dependents {
+    pub revision: u64,
+    pub body: BodyId,
+    /// Seleção consultada, na ordem do painel.
+    pub faces: Vec<FaceRef>,
+    /// `Ok(Some(vazio))`: saem sozinhas; `Ok(None)`: nenhum conjunto vizinho resolve.
+    pub result: Result<Option<Vec<FaceRef>>, String>,
+}
+
 /// Referência escolhida na área 3D ou gravada na operação em edição.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Kept {
@@ -480,6 +491,11 @@ pub(super) struct Draft {
     kept_topology: Option<Kept>,
     /// Arestas/faces adicionais da mesma operação (arredondamento, chanfro, casca).
     extra_topology: Vec<Kept>,
+    /// Remover faces: faces que precisam sair junto com as escolhidas, calculadas no
+    /// trabalhador para a revisão e a seleção indicadas.
+    dependents: Option<Dependents>,
+    /// Duplo clique numa face: inclui as dependentes assim que forem conhecidas.
+    include_dependents: bool,
     /// Campo de seleção que recebe os próximos cliques no modelo.
     field: Option<Field>,
     /// Chanfro por distância e ângulo, com o ângulo em expressão.
@@ -555,6 +571,8 @@ impl Draft {
             index: 0,
             kept_topology: None,
             extra_topology: Vec::new(),
+            dependents: None,
+            include_dependents: false,
             field: Some(tool.first_field()),
             chamfer_angle: None,
             outward: false,
@@ -1068,6 +1086,86 @@ impl Draft {
         self.kept_topology.iter().chain(&self.extra_topology)
     }
     /// Faces escolhidas, na ordem da seleção.
+    /// Remover faces com faces escolhidas cujas dependentes ainda não foram calculadas para
+    /// esta revisão e seleção: corpo e faces a consultar.
+    pub(super) fn pending_dependents(&self, revision: u64) -> Option<(BodyId, Vec<FaceRef>)> {
+        if self.tool != Tool::RemoveFaces {
+            return None;
+        }
+        let base = self.base?;
+        let faces = self.chosen_faces();
+        if faces.is_empty()
+            || self
+                .dependents
+                .as_ref()
+                .is_some_and(|d| d.revision == revision && d.body == base && d.faces == faces)
+        {
+            return None;
+        }
+        Some((base, faces))
+    }
+    /// Resultado da consulta; vale só para a seleção atual. Com um duplo clique pendente,
+    /// as dependentes entram na seleção.
+    pub(super) fn receive_dependents(&mut self, tab: u64, dependents: Dependents) {
+        if self.tab != tab || self.base != Some(dependents.body) {
+            return;
+        }
+        if self.chosen_faces() != dependents.faces {
+            return;
+        }
+        self.dependents = Some(dependents);
+        if self.include_dependents {
+            self.include_dependent_faces();
+        }
+    }
+    /// Faces dependentes da seleção atual, ainda não escolhidas (realce amarelo).
+    pub(super) fn dependent_faces(&self) -> Vec<FaceRef> {
+        let chosen = self.chosen_faces();
+        match &self.dependents {
+            Some(Dependents {
+                faces,
+                result: Ok(Some(found)),
+                ..
+            }) if *faces == chosen => found
+                .iter()
+                .filter(|f| !chosen.contains(f))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+    /// Nenhum conjunto vizinho resolve a remoção das faces escolhidas.
+    fn dependents_unresolved(&self) -> bool {
+        matches!(
+            &self.dependents,
+            Some(Dependents { faces, result: Ok(None), .. }) if *faces == self.chosen_faces()
+        )
+    }
+    /// Acrescenta as dependentes conhecidas à seleção; sem resultado ainda, fica pendente.
+    pub(super) fn include_dependent_faces(&mut self) {
+        let known = self
+            .dependents
+            .as_ref()
+            .is_some_and(|d| d.faces == self.chosen_faces());
+        if !known {
+            self.include_dependents = true;
+            return;
+        }
+        self.include_dependents = false;
+        for face in self.dependent_faces() {
+            let kept = Kept::Face(face);
+            if self.kept_topology.is_none() {
+                self.kept_topology = Some(kept);
+            } else {
+                self.extra_topology.push(kept);
+            }
+        }
+    }
+    /// Duplo clique numa face do Remover faces: a face fica escolhida (o segundo clique não
+    /// a retira) e as dependentes entram assim que conhecidas.
+    pub(super) fn accepts_dependents_double_click(&self) -> bool {
+        self.tool == Tool::RemoveFaces && self.field == Some(Field::Faces)
+    }
     fn chosen_faces(&self) -> Vec<FaceRef> {
         self.references()
             .filter_map(|kept| match kept {
@@ -2260,6 +2358,11 @@ impl Editor {
         {
             self.check_solid(ctx, d.tab, d.part, body);
         }
+        if let Some((body, faces)) = d.pending_dependents(revision)
+            && !self.busy()
+        {
+            self.find_dependents(ctx, d.tab, d.part, body, faces);
+        }
         let mut bed = None;
         let mut fasteners = Vec::new();
         let mut max_strain_pct = 0.;
@@ -2409,6 +2512,35 @@ impl Editor {
     }
 
     /// A análise lê os B-reps do histórico: fica no trabalhador, como as medições.
+    /// Remover faces: busca no trabalhador as faces que precisam sair junto com as escolhidas.
+    fn find_dependents(
+        &mut self,
+        context: &egui::Context,
+        tab: u64,
+        part: PartId,
+        body: BodyId,
+        faces: Vec<FaceRef>,
+    ) {
+        let Some(target) = self.tabs.iter().find(|t| t.id == tab) else {
+            return;
+        };
+        let document = target.session.document().clone();
+        let revision = target.session.revision();
+        self.start(context, None, move || {
+            let result =
+                nator_commands::features::removal_dependents(&document, part, body, &faces)
+                    .map_err(|e| e.to_string());
+            Ok(Outcome::RemovalDependents {
+                tab,
+                dependents: Dependents {
+                    revision,
+                    body,
+                    faces,
+                    result,
+                },
+            })
+        });
+    }
     fn check_solid(&mut self, context: &egui::Context, tab: u64, part: PartId, body: BodyId) {
         let Some(target) = self.tabs.iter().find(|t| t.id == tab) else {
             return;
@@ -3016,6 +3148,23 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
         // Sem medidas: as faces escolhidas bastam.
         Tool::MergeFaces => {}
         Tool::RemoveFaces => {
+            let dependents = d.dependent_faces().len();
+            if dependents > 0 {
+                // Faces que só saem junto com as escolhidas, realçadas em amarelo.
+                ui.label(
+                    egui::RichText::new(format!("{dependents} {}", text(T::DependentFaces)))
+                        .color(highlight::DEPENDENT),
+                );
+                if ui.button(text(T::IncludeDependentFaces)).clicked() {
+                    d.include_dependent_faces();
+                }
+            } else if d.dependents_unresolved() {
+                ui.label(
+                    egui::RichText::new(text(T::NoDependentFaces))
+                        .small()
+                        .color(theme::muted()),
+                );
+            }
             ui.label(
                 egui::RichText::new(text(T::RemoveFacesHint))
                     .small()
