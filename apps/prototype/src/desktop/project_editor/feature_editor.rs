@@ -149,6 +149,12 @@ const PLANES: [(&str, [f64; 3]); 3] = [
     ("YZ", [1., 0., 0.]),
 ];
 
+/// Busca de dependentes em andamento, com a aba que a pediu.
+pub(super) struct DependentsJob {
+    pub tab: u64,
+    pub receiver: std::sync::mpsc::Receiver<Dependents>,
+}
+
 /// Faces que precisam sair junto com as escolhidas no Remover faces, para uma seleção.
 #[derive(Debug, Clone)]
 pub(super) struct Dependents {
@@ -1132,6 +1138,17 @@ impl Draft {
                 .cloned()
                 .collect(),
             _ => Vec::new(),
+        }
+    }
+    /// Falha da busca (por exemplo, prazo esgotado num sólido grande) para a seleção atual.
+    fn dependents_error(&self) -> Option<&str> {
+        match &self.dependents {
+            Some(Dependents {
+                faces,
+                result: Err(error),
+                ..
+            }) if *faces == self.chosen_faces() => Some(error),
+            _ => None,
         }
     }
     /// Nenhum conjunto vizinho resolve a remoção das faces escolhidas.
@@ -2358,8 +2375,21 @@ impl Editor {
         {
             self.check_solid(ctx, d.tab, d.part, body);
         }
-        if let Some((body, faces)) = d.pending_dependents(revision)
-            && !self.busy()
+        if let Some(job) = &self.dependents_job {
+            match job.receiver.try_recv() {
+                Ok(dependents) => {
+                    d.receive_dependents(job.tab, dependents);
+                    self.dependents_job = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.dependents_job = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+        // Uma busca de cada vez: a seguinte espera a atual, que tem prazo no núcleo.
+        if self.dependents_job.is_none()
+            && let Some((body, faces)) = d.pending_dependents(revision)
         {
             self.find_dependents(ctx, d.tab, d.part, body, faces);
         }
@@ -2511,8 +2541,8 @@ impl Editor {
         self.feature_edit = Some(d);
     }
 
-    /// A análise lê os B-reps do histórico: fica no trabalhador, como as medições.
-    /// Remover faces: busca no trabalhador as faces que precisam sair junto com as escolhidas.
+    /// Remover faces: busca, numa thread própria, as faces que precisam sair junto com as
+    /// escolhidas. O trabalhador do projeto continua livre para cliques e prévias.
     fn find_dependents(
         &mut self,
         context: &egui::Context,
@@ -2526,21 +2556,27 @@ impl Editor {
         };
         let document = target.session.document().clone();
         let revision = target.session.revision();
-        self.start(context, None, move || {
-            let result =
-                nator_commands::features::removal_dependents(&document, part, body, &faces)
-                    .map_err(|e| e.to_string());
-            Ok(Outcome::RemovalDependents {
-                tab,
-                dependents: Dependents {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let context = context.clone();
+        let spawned = std::thread::Builder::new()
+            .name("removal-dependents".into())
+            .spawn(move || {
+                let result =
+                    nator_commands::features::removal_dependents(&document, part, body, &faces)
+                        .map_err(|e| e.to_string());
+                let _ = sender.send(Dependents {
                     revision,
                     body,
                     faces,
                     result,
-                },
-            })
-        });
+                });
+                context.request_repaint();
+            });
+        if spawned.is_ok() {
+            self.dependents_job = Some(DependentsJob { tab, receiver });
+        }
     }
+    /// A análise lê os B-reps do histórico: fica no trabalhador, como as medições.
     fn check_solid(&mut self, context: &egui::Context, tab: u64, part: PartId, body: BodyId) {
         let Some(target) = self.tabs.iter().find(|t| t.id == tab) else {
             return;
@@ -3164,6 +3200,8 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
                         .small()
                         .color(theme::muted()),
                 );
+            } else if let Some(error) = d.dependents_error() {
+                ui.label(egui::RichText::new(error).small().color(theme::muted()));
             }
             ui.label(
                 egui::RichText::new(text(T::RemoveFacesHint))

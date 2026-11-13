@@ -68,6 +68,12 @@ unsafe extern "C" {
     fn nator_opposite_face(body: *const c_void, index: usize, output: *mut usize) -> bool;
     fn nator_merge_faces(body: *const c_void, faces: *const usize, count: usize) -> *mut c_void;
     fn nator_remove_faces(body: *const c_void, faces: *const usize, count: usize) -> *mut c_void;
+    fn nator_remove_faces_within(
+        body: *const c_void,
+        faces: *const usize,
+        count: usize,
+        seconds: f64,
+    ) -> *mut c_void;
     fn nator_shell(
         body: *const c_void,
         faces: *const usize,
@@ -778,6 +784,38 @@ impl Solid {
     /// Remove faces (arredondamentos, chanfros, furos) e estende as vizinhas para fechar o
     /// sólido. As faces estendidas mantêm o nome; a remoção que o OCCT não consegue concluir
     /// por inteiro falha, sem resultado parcial.
+    /// Confere se as faces saem juntas, desistindo ao passar de `limit` (o núcleo é
+    /// interrompido de fato). Não devolve o sólido: serve às sondagens de dependências.
+    pub fn removes_within(
+        &self,
+        faces: &[usize],
+        limit: std::time::Duration,
+    ) -> Result<bool, KernelError> {
+        if faces.is_empty() || faces.len() > 1000 {
+            return Ok(false);
+        }
+        let count = self.face_count()?;
+        // SAFETY: lista de índices viva durante a chamada; a ponte valida cada índice e
+        // devolve um sólido novo, liberado ao sair do escopo.
+        let pointer = unsafe {
+            nator_remove_faces_within(
+                self.pointer.as_ptr(),
+                faces.as_ptr(),
+                faces.len(),
+                limit.as_secs_f64().max(1e-3),
+            )
+        };
+        if pointer.is_null() {
+            let error = last_error();
+            if error.0.contains("Tempo esgotado") {
+                return Err(error);
+            }
+            return Ok(false);
+        }
+        let removed = Self::from_pointer(pointer)?;
+        Ok(removed.face_count()? < count)
+    }
+
     pub fn remove_faces(&self, faces: &[usize], owner: &str) -> Result<Self, KernelError> {
         owner_name(owner)?;
         if faces.is_empty() || faces.len() > 1000 {

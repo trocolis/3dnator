@@ -531,10 +531,6 @@ enum Outcome {
         body: BodyId,
         report: Result<nator_commands::solid_check::Report, String>,
     },
-    RemovalDependents {
-        tab: u64,
-        dependents: feature_editor::Dependents,
-    },
     Cancelled,
 }
 struct Worker {
@@ -579,6 +575,9 @@ pub struct Editor {
     paint_edit: Option<paint_editor::Draft>,
     paint_palette: paint_editor::Palette,
     label_fonts: feature_editor::label::Fonts,
+    /// Busca de faces dependentes do Remover faces, numa thread própria: pode levar segundos
+    /// num sólido grande e não ocupa o trabalhador do projeto (cliques, prévias, comandos).
+    dependents_job: Option<feature_editor::DependentsJob>,
     image_cache: image_editor::Cache,
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
@@ -829,6 +828,7 @@ impl Editor {
             paint_edit: None,
             paint_palette: Default::default(),
             label_fonts: Default::default(),
+            dependents_job: None,
             image_cache: image_editor::Cache::default(),
             drawing_edit: None,
             export_edit: None,
@@ -1363,11 +1363,6 @@ impl Editor {
             }) => {
                 self.receive_print_check(tab, revision, body, report);
                 self.status.set(text(T::Ready));
-            }
-            Ok(Outcome::RemovalDependents { tab, dependents }) => {
-                if let Some(draft) = self.feature_edit.as_mut() {
-                    draft.receive_dependents(tab, dependents);
-                }
             }
             Ok(Outcome::SolidChecked {
                 tab,

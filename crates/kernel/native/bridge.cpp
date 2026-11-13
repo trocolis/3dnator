@@ -62,6 +62,8 @@
 #include <IFSelect_ReturnStatus.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
+#include <Message_ProgressIndicator.hxx>
+#include <Message_ProgressScope.hxx>
 #include <Message_PrinterOStream.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Standard_Failure.hxx>
@@ -86,6 +88,7 @@
 #include <TopTools_DataMapOfShapeInteger.hxx>
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <array>
 #include <cmath>
@@ -658,6 +661,54 @@ Shape* nator_merge_faces(const Shape* body, const std::size_t* faces, std::size_
 // somem e as faces vizinhas se estendem até se encontrarem de novo. Um aviso do OCCT indica
 // que alguma face não pôde ser removida; nesse caso a operação falha inteira, em vez de
 // devolver um sólido removido só em parte.
+namespace {
+// Interrompe uma operação longa do OCCT ao passar do prazo: os algoritmos booleanos consultam
+// `UserBreak` entre as etapas e param com erro, sem resultado parcial.
+class Deadline : public Message_ProgressIndicator {
+public:
+    explicit Deadline(double seconds)
+        : end_(std::chrono::steady_clock::now() +
+               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                   std::chrono::duration<double>(seconds))) {}
+    Standard_Boolean UserBreak() override { return std::chrono::steady_clock::now() > end_; }
+    void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+
+private:
+    std::chrono::steady_clock::time_point end_;
+};
+}  // namespace
+
+// Remoção de faces com prazo em segundos (`seconds` <= 0: sem prazo). Usada nas sondagens,
+// que testam várias combinações e não podem prender a thread por minutos num sólido grande.
+Shape* nator_remove_faces_within(const Shape* body, const std::size_t* faces, std::size_t count,
+                                 double seconds) noexcept {
+    return build([&](Shape& shape) {
+        if (count == 0 || count > 1000) {
+            throw std::runtime_error("Selecione de 1 a 1000 faces.");
+        }
+        const auto& all = faces_of(body);
+        BRepAlgoAPI_Defeaturing operation;
+        operation.SetShape(body->value);
+        for (std::size_t i = 0; i < count; ++i) {
+            if (faces[i] >= static_cast<std::size_t>(all.Extent())) {
+                throw std::runtime_error("Face inexistente na remoção.");
+            }
+            operation.AddFaceToRemove(all(static_cast<int>(faces[i]) + 1));
+        }
+        operation.SetToFillHistory(true);
+        Handle(Deadline) deadline = new Deadline(seconds > 0.0 ? seconds : 1e9);
+        operation.Build(deadline->Start());
+        if (deadline->UserBreak()) {
+            throw std::runtime_error("Tempo esgotado na remoção de faces.");
+        }
+        if (!operation.IsDone() || operation.HasErrors() || operation.HasWarnings()) {
+            throw std::runtime_error("Não foi possível remover as faces escolhidas.");
+        }
+        shape.value = operation.Shape();
+        shape.origins = history(operation, shape.value, {&body->value});
+    });
+}
+
 Shape* nator_remove_faces(const Shape* body, const std::size_t* faces, std::size_t count) noexcept {
     return build([&](Shape& shape) {
         if (count == 0 || count > 1000) {

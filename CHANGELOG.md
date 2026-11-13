@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.58.1 — 13/11/2026
+
+- Corrige o travamento da 0.58.0 ao usar Remover faces em sólidos grandes. A busca de faces dependentes rodava no trabalhador do projeto, a cada seleção, e encadeava remoções de teste sem limite; num corpo STEP de 642 faces, uma única remoção passa de 4 minutos, e o aplicativo inteiro ficava esperando. Agora a busca roda numa thread própria (cliques, prévias e comandos continuam livres), uma de cada vez, e tem prazo total de 20 s: cada remoção de teste é interrompida no próprio OCCT ao esgotá-lo (indicador de progresso com `UserBreak`), e o painel avisa para escolher as faces manualmente. Nova chamada `Solid::removes_within` (ponte `nator_remove_faces_within`).
+
 ## 0.58.0 — 13/11/2026
 
 - Remover faces: quando a face escolhida não sai sozinha (por exemplo, um trecho de arredondamento em cadeia que contorna um canto arredondado), as faces que precisam sair junto aparecem **em amarelo**, e o painel mostra quantas são, com o botão **Incluir dependentes**. O **duplo clique** numa face também a escolhe com as dependentes. Se nenhum conjunto de faces curvas vizinhas resolve, o painel avisa.

@@ -190,3 +190,27 @@ fn faces_that_leave_alone_have_no_dependents() -> Result<()> {
     );
     Ok(())
 }
+
+/// Cada sondagem tem prazo no núcleo: num sólido grande, a busca desiste em vez de prender a
+/// thread por minutos (a 0.58.0 travava o aplicativo assim).
+#[test]
+fn probes_are_interrupted_by_the_kernel_when_the_deadline_passes() -> Result<()> {
+    let (session, _, body) = chained()?;
+    let record = session.document().body(body).ok_or("Corpo")?;
+    let solid = Solid::from_brep(
+        record.brep.as_ref().ok_or("B-rep")?,
+        Some(&record.face_names),
+    )?;
+    let round = record
+        .face_names
+        .iter()
+        .position(|n| n.ends_with(":round"))
+        .ok_or("Arredondamento")?;
+    let started = std::time::Instant::now();
+    let interrupted = solid.removes_within(&[round], std::time::Duration::from_nanos(1));
+    assert!(interrupted.is_err(), "{interrupted:?}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    // Com tempo de sobra, a mesma sondagem responde normalmente.
+    assert!(!solid.removes_within(&[round], std::time::Duration::from_secs(30))?);
+    Ok(())
+}

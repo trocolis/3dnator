@@ -2092,6 +2092,8 @@ pub(super) fn separate(_doc: &mut Document, _part: PartId) -> Result<Vec<BodyId>
 /// `Some(lista)`: com elas também (referências por índice deste corpo, como as do clique);
 /// `None`: nenhum conjunto vizinho resolve. A busca cresce em camadas pelas faces curvas
 /// tangentes às já escolhidas, e cada camada é confirmada removendo de fato no núcleo.
+/// A busca inteira tem prazo (`REMOVAL_SEARCH`): cada sondagem é interrompida no núcleo ao
+/// esgotá-lo, e o resultado é um erro que pede a escolha manual.
 #[cfg(feature = "occt")]
 pub fn removal_dependents(
     doc: &Document,
@@ -2109,11 +2111,16 @@ pub fn removal_dependents(
     if chosen.is_empty() {
         return Ok(Some(Vec::new()));
     }
-    let removable = |set: &BTreeSet<usize>| {
+    let deadline = std::time::Instant::now() + REMOVAL_SEARCH;
+    let removable = |set: &BTreeSet<usize>| -> Result<bool, DocumentError> {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
         let indices = set.iter().copied().collect::<Vec<_>>();
-        solid.remove_faces(&indices, "probe").is_ok()
+        if left.is_zero() {
+            return Err(slow());
+        }
+        solid.removes_within(&indices, left).map_err(|_| slow())
     };
-    if removable(&chosen) {
+    if removable(&chosen)? {
         return Ok(Some(Vec::new()));
     }
     let pairs = solid.smooth_neighbors().map_err(error)?;
@@ -2147,13 +2154,13 @@ pub fn removal_dependents(
         }
         current.extend(next.iter().copied());
         frontier = next;
-        if removable(&current) {
+        if removable(&current)? {
             // A camada inteira resolve; tira-se o que não é necessário, uma face de cada vez
             // (das mais distantes para as mais próximas), confirmando no núcleo.
             let added = current.difference(&chosen).copied().collect::<Vec<_>>();
             for face in added.into_iter().rev() {
                 current.remove(&face);
-                if !removable(&current) {
+                if !removable(&current)? {
                     current.insert(face);
                 }
             }
@@ -2167,6 +2174,17 @@ pub fn removal_dependents(
         }
     }
     Ok(None)
+}
+/// Prazo da busca de faces dependentes: num sólido grande, cada remoção de teste pode levar
+/// muito tempo, e a busca nunca deve prender o trabalhador.
+#[cfg(feature = "occt")]
+const REMOVAL_SEARCH: std::time::Duration = std::time::Duration::from_secs(20);
+#[cfg(feature = "occt")]
+fn slow() -> DocumentError {
+    DocumentError(
+        "A busca pelas faces dependentes passou de 20 s neste sólido; escolha-as manualmente."
+            .into(),
+    )
 }
 #[cfg(not(feature = "occt"))]
 pub fn removal_dependents(
