@@ -155,15 +155,15 @@ pub(super) struct DependentsJob {
     pub receiver: std::sync::mpsc::Receiver<Dependents>,
 }
 
-/// Faces que precisam sair junto com as escolhidas no Remover faces, para uma seleção.
+/// Faces da mesma concordância das escolhidas no Remover faces, para uma seleção.
 #[derive(Debug, Clone)]
 pub(super) struct Dependents {
     pub revision: u64,
     pub body: BodyId,
     /// Seleção consultada, na ordem do painel.
     pub faces: Vec<FaceRef>,
-    /// `Ok(Some(vazio))`: saem sozinhas; `Ok(None)`: nenhum conjunto vizinho resolve.
-    pub result: Result<Option<Vec<FaceRef>>, String>,
+    /// Faces da cadeia ainda não escolhidas (vazia quando a seleção não é concordância).
+    pub result: Result<Vec<FaceRef>, String>,
 }
 
 /// Referência escolhida na área 3D ou gravada na operação em edição.
@@ -1124,13 +1124,22 @@ impl Draft {
             self.include_dependent_faces();
         }
     }
-    /// Faces dependentes da seleção atual, ainda não escolhidas (realce amarelo).
+    /// Remover faces só pede prévia com a concordância conhecida e completa. Remover um
+    /// trecho isolado de uma cadeia é o que leva minutos no OCCT (o anel inteiro sai em
+    /// décimos de segundo), e esse cálculo não pode ser interrompido depois de começar.
+    pub(super) fn preview_allowed(&self, revision: u64) -> bool {
+        self.tool != Tool::RemoveFaces
+            || (self.pending_dependents(revision).is_none()
+                && self.dependents_error().is_none()
+                && self.dependent_faces().is_empty())
+    }
+    /// Faces da mesma concordância da seleção atual, ainda não escolhidas (realce vermelho).
     pub(super) fn dependent_faces(&self) -> Vec<FaceRef> {
         let chosen = self.chosen_faces();
         match &self.dependents {
             Some(Dependents {
                 faces,
-                result: Ok(Some(found)),
+                result: Ok(found),
                 ..
             }) if *faces == chosen => found
                 .iter()
@@ -1141,7 +1150,7 @@ impl Draft {
         }
     }
     /// Falha da busca (por exemplo, prazo esgotado num sólido grande) para a seleção atual.
-    fn dependents_error(&self) -> Option<&str> {
+    pub(super) fn dependents_error(&self) -> Option<&str> {
         match &self.dependents {
             Some(Dependents {
                 faces,
@@ -1150,13 +1159,6 @@ impl Draft {
             }) if *faces == self.chosen_faces() => Some(error),
             _ => None,
         }
-    }
-    /// Nenhum conjunto vizinho resolve a remoção das faces escolhidas.
-    fn dependents_unresolved(&self) -> bool {
-        matches!(
-            &self.dependents,
-            Some(Dependents { faces, result: Ok(None), .. }) if *faces == self.chosen_faces()
-        )
     }
     /// Acrescenta as dependentes conhecidas à seleção; sem resultado ainda, fica pendente.
     pub(super) fn include_dependent_faces(&mut self) {
@@ -2530,7 +2532,7 @@ impl Editor {
             self.close_feature_panel(&d);
             return;
         }
-        if complete {
+        if complete && d.preview_allowed(revision) {
             // Ao editar, a prévia mostra o histórico até a operação, como no recuo da linha
             // do tempo durante a edição.
             let rollback = d.output.map(|output| (d.part, output));
@@ -2620,7 +2622,7 @@ impl Editor {
             .filter(|e| e.failure.is_some())
         {
             self.reject_command(tab, command, error);
-        } else {
+        } else if !self.adopt_preview(tab, &command) && !self.adopt_removal(tab, &command) {
             self.prepare_command(context, tab, command);
         }
     }
@@ -3186,7 +3188,7 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
         Tool::RemoveFaces => {
             let dependents = d.dependent_faces().len();
             if dependents > 0 {
-                // Faces que só saem junto com as escolhidas, realçadas em amarelo.
+                // Faces da mesma concordância das escolhidas, realçadas em vermelho.
                 ui.label(
                     egui::RichText::new(format!("{dependents} {}", text(T::DependentFaces)))
                         .color(highlight::DEPENDENT),
@@ -3194,9 +3196,8 @@ fn topology_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part)
                 if ui.button(text(T::IncludeDependentFaces)).clicked() {
                     d.include_dependent_faces();
                 }
-            } else if d.dependents_unresolved() {
                 ui.label(
-                    egui::RichText::new(text(T::NoDependentFaces))
+                    egui::RichText::new(text(T::RemovalPreviewWaits))
                         .small()
                         .color(theme::muted()),
                 );

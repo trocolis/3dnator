@@ -1,4 +1,4 @@
-//! Remover faces: faces que só saem junto com outras são encontradas e confirmadas no núcleo.
+//! Remover faces: as outras faces da mesma concordância são sugeridas, e com elas a remoção sai.
 #![cfg(feature = "occt")]
 use nator_commands::{Command, Effect, Session, features::removal_dependents};
 use nator_document::{
@@ -98,8 +98,25 @@ fn chained() -> Result<(Session, PartId, BodyId)> {
     Ok((session, part, top))
 }
 
+/// Índice de cada face do corpo com o raio da concordância (cilindro, esfera, toro pelo tubo).
+fn blend_radii(solid: &Solid) -> Result<Vec<Option<f64>>> {
+    let mut radii = Vec::new();
+    for index in 0..solid.face_count()? {
+        radii.push(match solid.face_measure(index)?.kind {
+            nator_kernel::FaceKind::Cylinder { radius }
+            | nator_kernel::FaceKind::Sphere { radius }
+            | nator_kernel::FaceKind::Torus {
+                minor_radius: radius,
+                ..
+            } => Some(radius),
+            _ => None,
+        });
+    }
+    Ok(radii)
+}
+
 #[test]
-fn a_face_that_cannot_leave_alone_gets_the_dependents_that_make_removal_work() -> Result<()> {
+fn a_chained_fillet_face_brings_the_rest_of_its_blend_and_then_comes_off() -> Result<()> {
     let (mut session, part, body) = chained()?;
     let record = session.document().body(body).ok_or("Corpo")?;
     let bytes = record.brep.clone().ok_or("B-rep")?;
@@ -108,20 +125,16 @@ fn a_face_that_cannot_leave_alone_gets_the_dependents_that_make_removal_work() -
         index,
         signature: signature(&bytes),
     };
-    let mut curved = Vec::new();
-    for index in 0..solid.face_count()? {
-        if !matches!(
-            solid.face_measure(index)?.kind,
-            nator_kernel::FaceKind::Plane { .. }
-        ) {
-            curved.push(index);
-        }
-    }
-    assert!(!curved.is_empty());
-    for index in curved {
+    let radii = blend_radii(&solid)?;
+    let contour = (0..radii.len())
+        .filter(|i| radii[*i].is_some_and(|r| (r - 2.).abs() < 1e-6))
+        .collect::<Vec<_>>();
+    // O contorno de 2 mm passa pelo canto: cilindro, toro e cilindro.
+    assert!(contour.len() >= 2, "{radii:?}");
+    for &index in &contour {
         let chosen = vec![reference(index)];
         let revision = session.revision();
-        // Sozinha, a face não sai: o documento fica como estava.
+        // Sozinho, um trecho da cadeia não sai: o documento fica como estava.
         assert!(
             session
                 .execute(Command::AddFeature {
@@ -135,15 +148,20 @@ fn a_face_that_cannot_leave_alone_gets_the_dependents_that_make_removal_work() -
                 .is_err()
         );
         assert_eq!(session.revision(), revision);
-        let dependents = removal_dependents(session.document(), part, body, &chosen)?
-            .ok_or("Nenhum conjunto encontrado")?;
-        assert!(!dependents.is_empty());
-        assert!(!dependents.contains(&reference(index)));
-        // Com as dependentes, a remoção funciona e devolve as paredes planas do bloco.
-        let all = chosen.into_iter().chain(dependents).collect::<Vec<_>>();
+        // A concordância traz o resto do contorno, e nada do canto de 5 mm.
+        let mut chain = removal_dependents(session.document(), part, body, &chosen)?;
+        let mut expected = contour
+            .iter()
+            .filter(|i| **i != index)
+            .map(|i| reference(*i))
+            .collect::<Vec<_>>();
+        chain.sort_by_key(|f| format!("{f:?}"));
+        expected.sort_by_key(|f| format!("{f:?}"));
+        assert_eq!(chain, expected);
+        let all = chosen.into_iter().chain(chain).collect::<Vec<_>>();
         let sharp = imported(session.execute(Command::AddFeature {
             part,
-            name: "Com dependentes".into(),
+            name: "Com a concordância".into(),
             operation: Operation::RemoveFaces {
                 base: body,
                 faces: all,
@@ -153,6 +171,11 @@ fn a_face_that_cannot_leave_alone_gets_the_dependents_that_make_removal_work() -
         assert!(result.face_names.len() < solid.face_count()?);
         assert!(session.undo());
     }
+    // O canto de 5 mm é outra concordância: nenhuma face do contorno é sugerida.
+    let corner = (0..radii.len())
+        .find(|i| radii[*i].is_some_and(|r| (r - 5.).abs() < 1e-6))
+        .ok_or("Canto")?;
+    assert!(removal_dependents(session.document(), part, body, &[reference(corner)])?.is_empty());
     Ok(())
 }
 
@@ -170,11 +193,9 @@ fn faces_that_leave_alone_have_no_dependents() -> Result<()> {
         index,
         signature: signature(&bytes),
     }];
-    assert_eq!(
-        removal_dependents(session.document(), part, body, &chosen)?,
-        Some(Vec::new())
-    );
-    // Uma tampa nunca se resolve com vizinhas curvas: não há conjunto a sugerir.
+    // Os quatro arredondamentos se encontram em quinas vivas, sem tangência: cada um sai só.
+    assert!(removal_dependents(session.document(), part, body, &chosen)?.is_empty());
+    // Uma tampa plana não é concordância: nada a sugerir.
     let cap = record
         .face_names
         .iter()
@@ -184,33 +205,6 @@ fn faces_that_leave_alone_have_no_dependents() -> Result<()> {
         index: cap,
         signature: signature(&bytes),
     }];
-    assert_eq!(
-        removal_dependents(session.document(), part, body, &cap)?,
-        None
-    );
-    Ok(())
-}
-
-/// Cada sondagem tem prazo no núcleo: num sólido grande, a busca desiste em vez de prender a
-/// thread por minutos (a 0.58.0 travava o aplicativo assim).
-#[test]
-fn probes_are_interrupted_by_the_kernel_when_the_deadline_passes() -> Result<()> {
-    let (session, _, body) = chained()?;
-    let record = session.document().body(body).ok_or("Corpo")?;
-    let solid = Solid::from_brep(
-        record.brep.as_ref().ok_or("B-rep")?,
-        Some(&record.face_names),
-    )?;
-    let round = record
-        .face_names
-        .iter()
-        .position(|n| n.ends_with(":round"))
-        .ok_or("Arredondamento")?;
-    let started = std::time::Instant::now();
-    let interrupted = solid.removes_within(&[round], std::time::Duration::from_nanos(1));
-    assert!(interrupted.is_err(), "{interrupted:?}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(2));
-    // Com tempo de sobra, a mesma sondagem responde normalmente.
-    assert!(!solid.removes_within(&[round], std::time::Duration::from_secs(30))?);
+    assert!(removal_dependents(session.document(), part, body, &cap)?.is_empty());
     Ok(())
 }

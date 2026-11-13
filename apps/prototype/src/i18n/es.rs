@@ -113,7 +113,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeAreas => "Unir áreas",
         Text::RemoveFaces => "Eliminar caras",
         Text::RemoveFacesHint => {
-            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido. Doble clic en una cara incluye las que deben salir con ella."
+            "Elija redondeos, chaflanes o agujeros: las caras vecinas se extienden para cerrar el sólido. Las demás caras del mismo redondeo aparecen en rojo; doble clic en una cara ya las incluye."
         }
         Text::UnlinkedEnds => "Extremos sin unir. Haga clic para unir.",
         Text::FixElement => "Fijar elemento",
@@ -1030,11 +1030,10 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportMenu => "Importar",
         Text::ImportReference => "Importar STEP, STL o 3MF como referencia",
         Text::ImportIntoPart => "Importar STEP, STL o 3MF a la pieza",
-        Text::DependentFaces => "cara(s) dependiente(s), en amarillo, deben salir también",
-        Text::IncludeDependentFaces => "Incluir dependientes",
-        Text::NoDependentFaces => {
-            "Ninguna combinación con las caras curvas vecinas permite quitar la selección."
+        Text::DependentFaces => {
+            "cara(s) del mismo redondeo, en rojo: un redondeo en cadena solo sale entero"
         }
+        Text::IncludeDependentFaces => "Incluir redondeo",
         Text::MovementMode => "Modo de movimiento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Libre",
@@ -1048,6 +1047,13 @@ pub fn text(key: Text) -> &'static str {
         Text::NewPartName => "Pieza",
         Text::MoveFreeHint => "Manipulador 3D y valores de traslación y rotación.",
         Text::LockAxis => "Bloquear",
+        Text::FinishingInBackground => {
+            "Terminando la operación en segundo plano; la aplicación sigue disponible."
+        }
+        Text::FinishingFailed => "El cálculo de la operación terminó sin resultado.",
+        Text::RemovalPreviewWaits => {
+            "La vista previa aparece con el redondeo incluido. Un tramo suelto de una cadena puede tardar minutos y casi siempre falla; Aceptar lo intenta igual, en segundo plano."
+        }
         Text::LockAxisHint => "Bloquear el eje: el movimiento ocurre solo en los ejes libres.",
         Text::MovedField => "Desplazamiento",
         Text::ClearAdjustment => "Borrar ajuste",

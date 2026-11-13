@@ -100,6 +100,8 @@ pub enum FaceKind {
     },
     Torus {
         major_radius: f64,
+        /// Raio do tubo: num arredondamento, o próprio raio da concordância.
+        minor_radius: f64,
     },
     Other,
 }

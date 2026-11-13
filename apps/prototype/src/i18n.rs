@@ -941,7 +941,6 @@ pub enum Text {
     ImportIntoPart,
     DependentFaces,
     IncludeDependentFaces,
-    NoDependentFaces,
     MovementMode,
     MoveMenu,
     MoveFree,
@@ -955,6 +954,9 @@ pub enum Text {
     NewPartName,
     MoveFreeHint,
     LockAxis,
+    FinishingInBackground,
+    FinishingFailed,
+    RemovalPreviewWaits,
     LockAxisHint,
     MovedField,
     ClearAdjustment,
@@ -1440,7 +1442,7 @@ fn pt(key: Text) -> &'static str {
         Text::MergeAreas => "Unir áreas",
         Text::RemoveFaces => "Remover faces",
         Text::RemoveFacesHint => {
-            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido. Duplo clique numa face inclui as que precisam sair junto."
+            "Escolha arredondamentos, chanfros ou furos: as faces vizinhas se estendem para fechar o sólido. As outras faces do mesmo arredondamento aparecem em vermelho; duplo clique numa face já as inclui."
         }
         Text::UnlinkedEnds => "Pontas sem ligação. Clique para ligar.",
         Text::FixElement => "Fixar elemento",
@@ -2005,11 +2007,10 @@ fn pt(key: Text) -> &'static str {
         Text::ImportMenu => "Importar",
         Text::ImportReference => "Importar STEP, STL ou 3MF como referência",
         Text::ImportIntoPart => "Importar STEP, STL ou 3MF para a peça",
-        Text::DependentFaces => "face(s) dependente(s), em amarelo, precisam sair junto",
-        Text::IncludeDependentFaces => "Incluir dependentes",
-        Text::NoDependentFaces => {
-            "Nenhuma combinação com as faces curvas vizinhas permite remover a seleção."
+        Text::DependentFaces => {
+            "face(s) da mesma concordância, em vermelho: um arredondamento em cadeia só sai inteiro"
         }
+        Text::IncludeDependentFaces => "Incluir concordância",
         Text::MovementMode => "Modo de movimento",
         Text::MoveMenu => "Mover",
         Text::MoveFree => "Livre",
@@ -2023,6 +2024,13 @@ fn pt(key: Text) -> &'static str {
         Text::NewPartName => "Peça",
         Text::MoveFreeHint => "Manipulador 3D e valores de translação e rotação.",
         Text::LockAxis => "Travar",
+        Text::FinishingInBackground => {
+            "Concluindo a operação em segundo plano; o aplicativo continua livre."
+        }
+        Text::FinishingFailed => "O cálculo da operação terminou sem resultado.",
+        Text::RemovalPreviewWaits => {
+            "A prévia aparece com a concordância incluída. Um trecho sozinho de uma cadeia pode levar minutos e quase sempre falha; OK tenta assim mesmo, em segundo plano."
+        }
         Text::LockAxisHint => "Travar o eixo: o movimento ocorre só nos eixos livres.",
         Text::MovedField => "Deslocamento",
         Text::ClearAdjustment => "Limpar ajuste",

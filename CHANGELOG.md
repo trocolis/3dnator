@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.60.0 — 13/11/2026
+
+- Remover faces: as outras faces da mesma concordância aparecem **em vermelho** (antes amarelo) assim que uma face é escolhida, e entram pelo botão **Incluir concordância** ou pelo duplo clique. Na 0.58 a busca removia de fato no OCCT para confirmar; em corpos de STEP reais cada remoção de teste levava de segundos a minutos, o prazo de 20 s não era respeitado (o OCCT não consulta a interrupção na interseção aresta-face) e o realce nunca aparecia. Agora a cadeia sai da topologia, em cerca de 30 ms num corpo de 144 faces: segue as arestas tangentes por cilindros, toros (pelo raio do tubo) e esferas do mesmo raio da face escolhida, mais os remendos de canto pequenos para esse raio; partindo de um remendo, vale o raio mais frequente em volta dele. Faces de outro raio (um furo ou um arredondamento vertical tangentes) ficam de fora. No mancal de um projeto real, a cadeia de cada face coincide com os anéis que foram escolhidos à mão.
+- Com a concordância incompleta, a prévia fica suspensa: remover um trecho sozinho de uma cadeia é o que leva minutos (o anel inteiro do mancal sai em 0,2 s) e não pode ser interrompido. Confirmar assim mesmo roda o cálculo numa thread própria, sem ocupar o trabalhador nem travar o aplicativo.
+- Prévias longas não travam mais a interface: mudar o comando abandona o cálculo anterior em vez de esperar por ele (no máximo dois cálculos de prévia ao mesmo tempo), e o OK com a prévia ainda calculando adota esse cálculo, fecha o painel e publica o resultado quando ele chega. Antes, o OK refazia tudo no trabalhador do projeto, que bloqueava cliques e comandos até o fim.
+- Núcleo: `FaceKind::Torus` informa o raio do tubo (`minor_radius`). Saem `Solid::removes_within` e a ponte `nator_remove_faces_within`, cujo prazo o OCCT não garantia. Nova função pura `features::blend_chain`.
+
 ## 0.59.1 — 13/11/2026
 
 - Rascunho: os campos flutuantes de comprimento e ângulo nunca ficam sob o cursor. Em linhas curtas e quase horizontais, o campo do ângulo, afastado do de comprimento, podia parar exatamente na ponta do mouse, e o clique que conclui o traço caía no campo em vez da área de desenho. Agora o campo sobe ou desce o mínimo para deixar uma folga de 8 pt em volta do ponteiro.

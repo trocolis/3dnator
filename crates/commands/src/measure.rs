@@ -171,7 +171,7 @@ pub fn topology(doc: &Document, pick: &Pick, edge: bool) -> Result<Topology, Doc
         let (radius_mm, planar) = match measure.kind {
             FaceKind::Plane { .. } => (None, true),
             FaceKind::Cylinder { radius } | FaceKind::Sphere { radius } => (Some(radius), false),
-            FaceKind::Torus { major_radius } => (Some(major_radius), false),
+            FaceKind::Torus { major_radius, .. } => (Some(major_radius), false),
             FaceKind::Cone | FaceKind::Other => (None, false),
         };
         Ok(Topology::Face {
@@ -724,7 +724,7 @@ fn solid_target(doc: &Document, pick: &Pick, reach: f64) -> Result<Target, Docum
     let (planar, radius_mm) = match measured.kind {
         FaceKind::Plane { .. } => (true, None),
         FaceKind::Cylinder { radius } | FaceKind::Sphere { radius } => (false, Some(radius)),
-        FaceKind::Torus { major_radius } => (false, Some(major_radius)),
+        FaceKind::Torus { major_radius, .. } => (false, Some(major_radius)),
         FaceKind::Cone | FaceKind::Other => (false, None),
     };
     Ok(Target::Face {

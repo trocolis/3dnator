@@ -9,6 +9,33 @@ use nator_commands::CommandError;
 pub(super) const PREVIEW_COLOR: [u8; 3] = [86, 156, 224];
 /// Pausa após a última alteração antes de calcular, para não reconstruir a cada tecla.
 const DEBOUNCE: Duration = Duration::from_millis(220);
+/// Cálculos de prévia ao mesmo tempo, contando os abandonados que ainda não terminaram. O
+/// OCCT não interrompe uma operação longa (uma remoção de faces num STEP grande leva
+/// minutos); a prévia nova não espera por ela, mas também não empilha cálculos sem fim.
+const MAX_RUNNING: usize = 2;
+
+#[cfg(test)]
+thread_local! {
+    /// Atraso artificial das prévias pedidas por esta thread, para ensaiar cálculos longos.
+    pub(super) static PREVIEW_DELAY: std::cell::Cell<Duration> =
+        const { std::cell::Cell::new(Duration::ZERO) };
+}
+
+/// Conta as threads de prévia vivas; o guarda desconta ao terminar, inclusive em pânico.
+struct Running(Arc<std::sync::atomic::AtomicUsize>);
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// OK dado enquanto a prévia do mesmo comando ainda calculava: o resultado dela é publicado
+/// quando chegar, sem refazer o cálculo no trabalhador nem bloquear a interface.
+struct Adopted {
+    tab: u64,
+    command: Command,
+    receiver: Receiver<Computed>,
+}
 
 struct Request {
     tab: u64,
@@ -44,6 +71,11 @@ pub(super) enum PreviewStatus<'a> {
 pub(super) struct LivePreview {
     request: Option<Request>,
     receiver: Option<Receiver<Computed>>,
+    /// O que a thread de `receiver` calcula: aba, revisão e chave.
+    running: Option<(u64, u64, String)>,
+    /// Threads de prévia vivas, inclusive as abandonadas.
+    threads: Arc<std::sync::atomic::AtomicUsize>,
+    adopted: Option<Adopted>,
     ready: Option<(String, PreparedCommand)>,
     failed: Option<(String, CommandError)>,
     empty: Option<String>,
@@ -206,17 +238,168 @@ impl Editor {
             .map(|(_, e)| e.clone())
     }
 
+    /// OK com a prévia do mesmo comando ainda calculando: adota esse cálculo. Devolve falso
+    /// quando não há cálculo em andamento para este comando.
+    pub(super) fn adopt_preview(&mut self, tab: u64, command: &Command) -> bool {
+        let Some(revision) = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .map(|t| t.session.revision())
+        else {
+            return false;
+        };
+        let running = self
+            .preview
+            .running
+            .as_ref()
+            .is_some_and(|r| *r == (tab, revision, key(command)));
+        if !running || self.preview.adopted.is_some() {
+            return false;
+        }
+        let Some(receiver) = self.preview.receiver.take() else {
+            return false;
+        };
+        self.preview.running = None;
+        self.preview.adopted = Some(Adopted {
+            tab,
+            command: command.clone(),
+            receiver,
+        });
+        self.status.set(text(T::FinishingInBackground));
+        true
+    }
+
+    /// OK no Remover faces sem prévia (a concordância incompleta a suspende): o cálculo,
+    /// que pode levar minutos, roda numa thread própria e é publicado ao terminar, sem
+    /// ocupar o trabalhador do projeto nem bloquear a interface.
+    pub(super) fn adopt_removal(&mut self, tab: u64, command: &Command) -> bool {
+        let removal = matches!(
+            command,
+            Command::AddFeature {
+                operation: nator_document::features::Operation::RemoveFaces { .. },
+                ..
+            } | Command::EditFeature {
+                operation: nator_document::features::Operation::RemoveFaces { .. },
+                ..
+            }
+        );
+        if !removal || self.preview.adopted.is_some() {
+            return false;
+        }
+        let Some(target) = self.tabs.iter().find(|t| t.id == tab) else {
+            return false;
+        };
+        let document = target.session.document().clone();
+        let revision = target.session.revision();
+        let (sender, receiver) = mpsc::channel();
+        self.preview
+            .threads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let alive = Running(self.preview.threads.clone());
+        let job = command.clone();
+        let key = key(command);
+        let spawned = std::thread::Builder::new()
+            .name("removal-commit".into())
+            .spawn(move || {
+                let _alive = alive;
+                let result = PreparedCommand::new(document, revision, job)
+                    .map(|prepared| Some((prepared, None)));
+                let _ = sender.send(Computed {
+                    tab,
+                    revision,
+                    key,
+                    guide: None,
+                    choice: None,
+                    result,
+                });
+            });
+        if spawned.is_err() {
+            return false;
+        }
+        self.preview.adopted = Some(Adopted {
+            tab,
+            command: command.clone(),
+            receiver,
+        });
+        self.status.set(text(T::FinishingInBackground));
+        true
+    }
+
+    /// Cálculo de prévia em andamento e cálculo adotado por um OK, para ensaios.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn preview_threads_for_test(&self) -> (bool, bool) {
+        (
+            self.preview.running.is_some(),
+            self.preview.adopted.is_some(),
+        )
+    }
+
+    /// Publica o cálculo adotado quando ele chega.
+    fn poll_adopted(&mut self, context: &egui::Context) {
+        let Some(adopted) = &self.preview.adopted else {
+            return;
+        };
+        let computed = match adopted.receiver.try_recv() {
+            Ok(computed) => computed,
+            Err(mpsc::TryRecvError::Empty) => {
+                context.request_repaint_after(Duration::from_millis(200));
+                return;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                if let Some(adopted) = self.preview.adopted.take() {
+                    self.status.error(text(T::FinishingFailed));
+                    drop(adopted);
+                }
+                return;
+            }
+        };
+        let Some(Adopted { tab, command, .. }) = self.preview.adopted.take() else {
+            return;
+        };
+        match computed.result {
+            Ok(Some((prepared, _))) => {
+                self.commit_prepared(tab, prepared);
+                self.status.set(text(T::Ready));
+            }
+            Err(error) => self.reject_command(tab, command, error),
+            // Sem prévia para este comando: prepara pelo caminho normal.
+            Ok(None) => self.prepare_command(context, tab, command),
+        }
+    }
+
     /// Recebe resultados e inicia o cálculo pendente quando a edição para de mudar.
     pub(super) fn poll_preview(&mut self, context: &egui::Context) {
+        self.poll_adopted(context);
         if let Some(receiver) = &self.preview.receiver {
             match receiver.try_recv() {
                 Ok(computed) => {
                     self.preview.receiver = None;
+                    self.preview.running = None;
                     self.deliver_preview(computed);
                 }
-                Err(mpsc::TryRecvError::Disconnected) => self.preview.receiver = None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.preview.receiver = None;
+                    self.preview.running = None;
+                }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
+        }
+        // Um cálculo que não corresponde mais ao pedido é abandonado: termina sozinho e o
+        // resultado é descartado. A prévia nova não espera minutos por ele.
+        let stale = self
+            .preview
+            .running
+            .as_ref()
+            .is_some_and(|(tab, revision, key)| {
+                self.preview
+                    .request
+                    .as_ref()
+                    .is_none_or(|r| r.tab != *tab || r.revision != *revision || r.key != *key)
+            });
+        if stale {
+            self.preview.receiver = None;
+            self.preview.running = None;
         }
         if self.preview.receiver.is_some() {
             return;
@@ -249,6 +432,15 @@ impl Editor {
         if self.preview.empty.as_ref() == Some(&request.key) {
             return;
         }
+        if self
+            .preview
+            .threads
+            .load(std::sync::atomic::Ordering::SeqCst)
+            >= MAX_RUNNING
+        {
+            context.request_repaint_after(Duration::from_millis(200));
+            return;
+        }
         let document = tab.session.document().clone();
         let view = tab.view.clone();
         let active = tab.active_part;
@@ -262,9 +454,19 @@ impl Editor {
         );
         let (sender, receiver) = mpsc::channel();
         let context = context.clone();
+        self.preview
+            .threads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let alive = Running(self.preview.threads.clone());
+        let running = (tab, revision, key.clone());
+        #[cfg(test)]
+        let delay = PREVIEW_DELAY.with(std::cell::Cell::get);
         let spawned = std::thread::Builder::new()
             .name("preview-worker".into())
             .spawn(move || {
+                let _alive = alive;
+                #[cfg(test)]
+                std::thread::sleep(delay);
                 let extrusion = match &command {
                     Command::AddFeature {
                         part, operation, ..
@@ -378,6 +580,7 @@ impl Editor {
             });
         if spawned.is_ok() {
             self.preview.receiver = Some(receiver);
+            self.preview.running = Some(running);
         }
     }
 

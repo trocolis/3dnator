@@ -50,14 +50,14 @@ impl Overlay {
 }
 
 /// Aparência do realce.
-/// Faces que precisam sair junto com as escolhidas no Remover faces.
-pub(super) const DEPENDENT: egui::Color32 = egui::Color32::from_rgb(222, 170, 20);
+/// Faces da mesma concordância das escolhidas no Remover faces.
+pub(super) const DEPENDENT: egui::Color32 = egui::Color32::from_rgb(214, 48, 48);
 
 #[derive(Clone, Copy)]
 pub(super) enum Look {
     Hover,
     Selected,
-    /// Faces dependentes das escolhidas (Remover faces), em amarelo.
+    /// Faces da mesma concordância das escolhidas (Remover faces), em vermelho.
     Dependent,
     /// Esqueleto do objeto na posição original, durante a movimentação.
     Ghost,

@@ -111,7 +111,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeAreas => "Merge areas",
         Text::RemoveFaces => "Remove faces",
         Text::RemoveFacesHint => {
-            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid. Double-click a face to include the ones that must go with it."
+            "Pick fillets, chamfers or holes: the neighboring faces extend to close the solid. The other faces of the same fillet show in red; double-click a face to include them right away."
         }
         Text::UnlinkedEnds => "Unlinked ends. Click to link.",
         Text::FixElement => "Fix element",
@@ -998,11 +998,10 @@ pub fn text(key: Text) -> &'static str {
         Text::ImportMenu => "Import",
         Text::ImportReference => "Import STEP, STL or 3MF as a reference",
         Text::ImportIntoPart => "Import STEP, STL or 3MF into the part",
-        Text::DependentFaces => "dependent face(s), in yellow, must be removed too",
-        Text::IncludeDependentFaces => "Include dependents",
-        Text::NoDependentFaces => {
-            "No combination with the neighboring curved faces allows removing the selection."
+        Text::DependentFaces => {
+            "face(s) of the same blend, in red: a chained fillet only comes off whole"
         }
+        Text::IncludeDependentFaces => "Include blend",
         Text::MovementMode => "Movement mode",
         Text::MoveMenu => "Move",
         Text::MoveFree => "Free",
@@ -1016,6 +1015,13 @@ pub fn text(key: Text) -> &'static str {
         Text::NewPartName => "Part",
         Text::MoveFreeHint => "3D manipulator and translation and rotation values.",
         Text::LockAxis => "Lock",
+        Text::FinishingInBackground => {
+            "Finishing the operation in the background; the app stays usable."
+        }
+        Text::FinishingFailed => "The operation's computation ended without a result.",
+        Text::RemovalPreviewWaits => {
+            "The preview shows once the blend is included. A lone stretch of a chain can take minutes and almost always fails; OK tries anyway, in the background."
+        }
         Text::LockAxisHint => "Lock the axis: movement happens only along the free axes.",
         Text::MovedField => "Displacement",
         Text::ClearAdjustment => "Clear adjustment",

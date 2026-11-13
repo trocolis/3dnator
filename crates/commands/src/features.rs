@@ -2087,104 +2087,48 @@ pub(super) fn separate(_doc: &mut Document, _part: PartId) -> Result<Vec<BodyId>
     Ok(Vec::new())
 }
 
-/// Faces que precisam sair junto com `faces` para que Remover faces funcione, como os outros
-/// trechos de um arredondamento em cadeia. `Some(vazio)`: as escolhidas saem sozinhas;
-/// `Some(lista)`: com elas também (referências por índice deste corpo, como as do clique);
-/// `None`: nenhum conjunto vizinho resolve. A busca cresce em camadas pelas faces curvas
-/// tangentes às já escolhidas, e cada camada é confirmada removendo de fato no núcleo.
-/// A busca inteira tem prazo (`REMOVAL_SEARCH`): cada sondagem é interrompida no núcleo ao
-/// esgotá-lo, e o resultado é um erro que pede a escolha manual.
+/// Remover faces: faces da mesma concordância das escolhidas (realçadas para incluir de uma
+/// vez). Um arredondamento ou chanfro curvo em cadeia só sai inteiro; o núcleo recusa um
+/// trecho isolado. A cadeia segue as arestas tangentes por faces de concordância do mesmo
+/// raio (cilindros, toros pelo raio do tubo e esferas) e pelos remendos de canto entre elas
+/// (superfícies livres pequenas para esse raio). Faces de outro raio, como um furo tangente,
+/// ficam de fora. É só topologia e geometria das faces, sem remoções de teste: responde na
+/// hora mesmo em sólidos de STEP com centenas de faces, nos quais uma única remoção pode
+/// levar minutos.
 #[cfg(feature = "occt")]
 pub fn removal_dependents(
     doc: &Document,
     part: PartId,
     base: BodyId,
     faces: &[FaceRef],
-) -> Result<Option<Vec<FaceRef>>, DocumentError> {
-    use std::collections::BTreeSet;
-    const LAYERS: usize = 12;
+) -> Result<Vec<FaceRef>, DocumentError> {
     let (solid, bytes) = source(doc, part, base)?;
     let chosen = faces
         .iter()
         .map(|face| face_index(&solid, &bytes, face))
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    if chosen.is_empty() {
-        return Ok(Some(Vec::new()));
-    }
-    let deadline = std::time::Instant::now() + REMOVAL_SEARCH;
-    let removable = |set: &BTreeSet<usize>| -> Result<bool, DocumentError> {
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
-        let indices = set.iter().copied().collect::<Vec<_>>();
-        if left.is_zero() {
-            return Err(slow());
-        }
-        solid.removes_within(&indices, left).map_err(|_| slow())
-    };
-    if removable(&chosen)? {
-        return Ok(Some(Vec::new()));
-    }
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
     let pairs = solid.smooth_neighbors().map_err(error)?;
-    let mut planar = std::collections::HashMap::new();
-    let mut is_planar = |face: usize| -> Result<bool, DocumentError> {
-        if let Some(known) = planar.get(&face) {
-            return Ok(*known);
-        }
-        let flat = matches!(
-            solid.face_measure(face).map_err(error)?.kind,
-            nator_kernel::FaceKind::Plane { .. }
-        );
-        planar.insert(face, flat);
-        Ok(flat)
-    };
-    let mut current = chosen.clone();
-    let mut frontier = chosen.clone();
-    for _ in 0..LAYERS {
-        let mut next = BTreeSet::new();
-        for [a, b] in &pairs {
-            for (from, to) in [(*a, *b), (*b, *a)] {
-                // As faces planas são as que se estendem para fechar o sólido: nunca
-                // dependem do arredondamento que as concorda.
-                if frontier.contains(&from) && !current.contains(&to) && !is_planar(to)? {
-                    next.insert(to);
-                }
+    let mut shapes = Vec::new();
+    for index in 0..solid.face_count().map_err(error)? {
+        let measure = solid.face_measure(index).map_err(error)?;
+        shapes.push(match measure.kind {
+            nator_kernel::FaceKind::Cylinder { radius }
+            | nator_kernel::FaceKind::Sphere { radius }
+            | nator_kernel::FaceKind::Torus {
+                minor_radius: radius,
+                ..
+            } => BlendShape::Round(radius),
+            nator_kernel::FaceKind::Other => BlendShape::Free(measure.area),
+            nator_kernel::FaceKind::Plane { .. } | nator_kernel::FaceKind::Cone => {
+                BlendShape::Rigid
             }
-        }
-        if next.is_empty() {
-            break;
-        }
-        current.extend(next.iter().copied());
-        frontier = next;
-        if removable(&current)? {
-            // A camada inteira resolve; tira-se o que não é necessário, uma face de cada vez
-            // (das mais distantes para as mais próximas), confirmando no núcleo.
-            let added = current.difference(&chosen).copied().collect::<Vec<_>>();
-            for face in added.into_iter().rev() {
-                current.remove(&face);
-                if !removable(&current)? {
-                    current.insert(face);
-                }
-            }
-            let signature = signature(&bytes);
-            return Ok(Some(
-                current
-                    .difference(&chosen)
-                    .map(|&index| FaceRef::Index { index, signature })
-                    .collect(),
-            ));
-        }
+        });
     }
-    Ok(None)
-}
-/// Prazo da busca de faces dependentes: num sólido grande, cada remoção de teste pode levar
-/// muito tempo, e a busca nunca deve prender o trabalhador.
-#[cfg(feature = "occt")]
-const REMOVAL_SEARCH: std::time::Duration = std::time::Duration::from_secs(20);
-#[cfg(feature = "occt")]
-fn slow() -> DocumentError {
-    DocumentError(
-        "A busca pelas faces dependentes passou de 20 s neste sólido; escolha-as manualmente."
-            .into(),
-    )
+    let signature = signature(&bytes);
+    Ok(blend_chain(&chosen, &pairs, &shapes)
+        .difference(&chosen)
+        .map(|&index| FaceRef::Index { index, signature })
+        .collect())
 }
 #[cfg(not(feature = "occt"))]
 pub fn removal_dependents(
@@ -2192,9 +2136,93 @@ pub fn removal_dependents(
     _part: PartId,
     _base: BodyId,
     _faces: &[nator_document::features::FaceRef],
-) -> Result<Option<Vec<nator_document::features::FaceRef>>, DocumentError> {
+) -> Result<Vec<nator_document::features::FaceRef>, DocumentError> {
     nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
-    Ok(None)
+    Ok(Vec::new())
+}
+
+/// Papel de uma face numa concordância.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BlendShape {
+    /// Cilindro, esfera ou toro: o raio da concordância (o do tubo, no toro).
+    Round(f64),
+    /// Superfície livre, com a área: remendo de canto quando é pequena para o raio.
+    Free(f64),
+    /// Plano ou cone: nunca é concordância de arredondamento.
+    Rigid,
+}
+
+/// Faces da mesma concordância das escolhidas (incluídas), seguindo os pares tangentes.
+/// Sem raio entre as escolhidas (só remendos livres), valem os raios das vizinhas tangentes.
+pub fn blend_chain(
+    chosen: &std::collections::BTreeSet<usize>,
+    pairs: &[[usize; 2]],
+    shapes: &[BlendShape],
+) -> std::collections::BTreeSet<usize> {
+    let round = |face: usize| match shapes.get(face) {
+        Some(BlendShape::Round(radius)) => Some(*radius),
+        _ => None,
+    };
+    let neighbors = |face: usize| {
+        pairs.iter().filter_map(move |[a, b]| {
+            if *a == face {
+                Some(*b)
+            } else if *b == face {
+                Some(*a)
+            } else {
+                None
+            }
+        })
+    };
+    let close = |a: f64, b: f64| (a - b).abs() <= (b.abs() * 2e-3).max(1e-3);
+    let mut radii = chosen.iter().filter_map(|f| round(*f)).collect::<Vec<_>>();
+    if radii.is_empty()
+        && chosen
+            .iter()
+            .any(|f| matches!(shapes.get(*f), Some(BlendShape::Free(_))))
+    {
+        // Um remendo de canto pode encostar em concordâncias de raios diferentes (o anel em
+        // volta de um ressalto e um arredondamento vertical, por exemplo): vale o raio mais
+        // frequente entre as vizinhas, o do arredondamento que o remendo continua.
+        let around = chosen
+            .iter()
+            .flat_map(|f| neighbors(*f))
+            .filter_map(round)
+            .collect::<Vec<_>>();
+        let count = |r: f64| around.iter().filter(|o| close(**o, r)).count();
+        if let Some(best) = around
+            .iter()
+            .copied()
+            .max_by(|a, b| count(*a).cmp(&count(*b)).then(b.total_cmp(a)))
+        {
+            radii.push(best);
+        }
+    }
+    let mut chain = chosen.clone();
+    let Some(largest) = radii.iter().copied().reduce(f64::max) else {
+        return chain;
+    };
+    let same = |radius: f64| radii.iter().any(|r| close(radius, *r));
+    // Um remendo de canto cabe numa esfera do raio da concordância.
+    let patch = 4. * std::f64::consts::PI * largest * largest;
+    let mut frontier = chain.iter().copied().collect::<Vec<_>>();
+    while let Some(face) = frontier.pop() {
+        for next in neighbors(face) {
+            if chain.contains(&next) || chain.len() >= 2000 {
+                continue;
+            }
+            let joins = match shapes.get(next) {
+                Some(BlendShape::Round(radius)) => same(*radius),
+                Some(BlendShape::Free(area)) => *area <= patch,
+                _ => false,
+            };
+            if joins {
+                chain.insert(next);
+                frontier.push(next);
+            }
+        }
+    }
+    chain
 }
 
 /// Excluir uma operação nunca deixa referências silenciosamente apontando para outra geometria:

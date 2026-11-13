@@ -7706,6 +7706,110 @@ mod tests {
         Ok(())
     }
 
+    /// Cálculo longo (uma remoção de faces num STEP grande leva minutos e o OCCT não a
+    /// interrompe): mudar o comando não espera a prévia antiga, e o OK adota o cálculo em
+    /// andamento, fecha o painel e deixa o aplicativo livre até o resultado chegar.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn a_slow_preview_neither_blocks_a_new_one_nor_the_app_after_ok() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Placa", Plane::xy());
+        sketch.add_rectangle([0., 0.], [20., 10.], false)?;
+        let mut session = Session::new(Document::new("Prévia lenta")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Corpo ausente".into());
+        };
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        settle(&mut editor, &context)?;
+        let revision = editor.current().session.revision();
+        let start = editor
+            .current()
+            .session
+            .document()
+            .body(body)
+            .ok_or("Corpo")?
+            .placement
+            .translation_mm();
+        live_preview::PREVIEW_DELAY.with(|d| d.set(Duration::from_millis(1500)));
+        editor.open_body_move(false);
+        frame(&mut editor, &context, vec![])?;
+        let running = |editor: &mut Editor, want: bool| -> Result<(), Box<dyn Error>> {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while editor.preview_threads_for_test().0 != want {
+                if Instant::now() > deadline {
+                    return Err("Prévia não começou".into());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                frame(editor, &context, vec![])?;
+            }
+            Ok(())
+        };
+        editor.set_move_for_capture([5., 0., 0.], [0.; 3]);
+        running(&mut editor, true)?;
+        // Outro valor no meio do cálculo: a prévia nova começa sem esperar a antiga.
+        let changed = Instant::now();
+        editor.set_move_for_capture([7., 0., 0.], [0.; 3]);
+        running(&mut editor, false)?;
+        running(&mut editor, true)?;
+        assert!(changed.elapsed() < Duration::from_millis(1200));
+        // OK com a prévia ainda calculando: o painel fecha e o aplicativo fica livre.
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        assert!(editor.assembly_panel.is_none());
+        assert!(!editor.busy());
+        assert_eq!(editor.preview_threads_for_test(), (false, true));
+        assert_eq!(editor.current().session.revision(), revision);
+        // O resultado entra no histórico quando chega, com o último valor.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.current().session.revision() == revision {
+            if Instant::now() > deadline {
+                return Err(format!("Resultado não publicado: {}", editor.status).into());
+            }
+            assert!(!editor.busy());
+            std::thread::sleep(Duration::from_millis(10));
+            frame(&mut editor, &context, vec![])?;
+        }
+        live_preview::PREVIEW_DELAY.with(|d| d.set(Duration::ZERO));
+        let placed = editor
+            .current()
+            .session
+            .document()
+            .body(body)
+            .ok_or("Corpo")?
+            .placement
+            .translation_mm();
+        assert!((placed[0] - start[0] - 7.).abs() < 1e-9, "{placed:?}");
+        assert_eq!(editor.preview_threads_for_test(), (false, false));
+        Ok(())
+    }
+
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn locked_axis_holds_in_free_drag_and_point_to_point() -> Result<(), Box<dyn Error>> {
@@ -8465,8 +8569,8 @@ mod tests {
     }
 
     /// Remover faces numa cadeia tangente (canto vertical arredondado e contorno de cima
-    /// arredondado): a face clicada não sai sozinha; as que precisam sair junto aparecem em
-    /// amarelo e entram pelo botão do painel ou pelo duplo clique.
+    /// arredondado): a face clicada do contorno não sai sozinha; as outras da mesma
+    /// concordância aparecem em vermelho e entram pelo botão do painel ou pelo duplo clique.
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn remove_faces_highlights_dependents_and_includes_them_by_button_or_double_click()
@@ -8542,7 +8646,10 @@ mod tests {
             .face_names
             .iter()
             .enumerate()
-            .filter(|(_, n)| n.ends_with(":round"))
+            // Só o contorno de 2 mm: o canto de 5 mm é outra concordância, sem sugestões.
+            .filter(|(_, n)| {
+                n.starts_with(&nator_document::features::body_owner(top)) && n.ends_with(":round")
+            })
             .map(|(i, _)| i as u32)
             .collect::<Vec<_>>();
         let mesh = body.geometry.mesh();
@@ -8610,6 +8717,13 @@ mod tests {
             .as_ref()
             .map_or(0, |d| d.dependent_faces().len());
         assert_eq!(chosen(&editor), 1);
+        // Com a concordância incompleta, nenhuma prévia começa: remover um trecho isolado é
+        // o cálculo que leva minutos num STEP grande.
+        for _ in 0..30 {
+            frame(&mut editor, &context, vec![])?;
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(editor.preview_threads_for_test(), (false, false));
         let include = label_position(&mut editor, &context, text(T::IncludeDependentFaces))?;
         click(&mut editor, &context, include)?;
         assert_eq!(chosen(&editor), 1 + dependents);
