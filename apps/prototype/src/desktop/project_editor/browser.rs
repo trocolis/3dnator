@@ -948,14 +948,62 @@ mod reference_step_tests {
     use super::*;
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-    /// Ensaio optativo com um STEP de montagem real: uma subpeça vai às Referências na
-    /// mesma posição e continua exportável em STEP com seus corpos.
+    /// Montagem STEP mínima: uma raiz vazia com uma subpeça deslocada e girada.
+    fn assembly_step(path: &std::path::Path) -> Result<()> {
+        use nator_kernel::{Solid, StepAssembly, StepBody, StepOccurrence, StepPart};
+        StepAssembly {
+            parts: vec![
+                StepPart {
+                    name: "Montagem".into(),
+                    bodies: vec![],
+                },
+                StepPart {
+                    name: "Suporte".into(),
+                    bodies: vec![StepBody {
+                        name: "Bloco".into(),
+                        solid: Solid::cuboid([0.; 3], [10., 20., 30.])?,
+                        color: None,
+                        face_colors: Vec::new(),
+                        surface: false,
+                        verified: true,
+                    }],
+                },
+            ],
+            instances: vec![
+                StepOccurrence {
+                    part: 0,
+                    parent: None,
+                    name: "Raiz".into(),
+                    placement: Placement::new([100., -50., 20.], [0.2, -0.3, 0.4])?,
+                    color: None,
+                },
+                StepOccurrence {
+                    part: 1,
+                    parent: Some(0),
+                    name: "Suporte posicionado".into(),
+                    placement: Placement::new([40., 5., -10.], [0.3, 0.1, -0.2])?,
+                    color: None,
+                },
+            ],
+        }
+        .write(path)?;
+        Ok(())
+    }
+
+    /// Uma subpeça de um STEP de montagem vai às Referências na mesma posição e continua
+    /// exportável em STEP com seus corpos. `NATOR_STEP_PATH` troca a montagem gerada por
+    /// um arquivo real.
     #[test]
-    #[ignore = "Requer um STEP externo indicado por NATOR_STEP_PATH."]
     fn external_step_subpart_moves_to_references_and_exports_step() -> Result<()> {
-        let path = std::path::PathBuf::from(
-            std::env::var_os("NATOR_STEP_PATH").ok_or("Informe NATOR_STEP_PATH.")?,
-        );
+        let directory = tempfile::tempdir()?;
+        let path = match std::env::var_os("NATOR_STEP_PATH") {
+            Some(path) => std::path::PathBuf::from(path),
+            None => {
+                let path = directory.path().join("montagem.step");
+                assembly_step(&path)?;
+                path
+            }
+        };
         let mut session = Session::new(Document::new("STEP")?)?;
         session.execute(Command::ImportStep {
             path,

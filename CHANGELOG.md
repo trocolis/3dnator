@@ -2,6 +2,14 @@
 
 ## Não lançado
 
+## 0.59.1 — 13/11/2026
+
+- Rascunho: os campos flutuantes de comprimento e ângulo nunca ficam sob o cursor. Em linhas curtas e quase horizontais, o campo do ângulo, afastado do de comprimento, podia parar exatamente na ponta do mouse, e o clique que conclui o traço caía no campo em vez da área de desenho. Agora o campo sobe ou desce o mínimo para deixar uma folga de 8 pt em volta do ponteiro.
+- Ensaios gráficos: os 8 que falhavam voltaram a passar, e a suíte inteira passou 5 vezes seguidas.
+  - Acompanham mudanças de interface anteriores: o ponto a ponto pede o clique no corpo antes dos apoios (0.50.0); a árvore flutuante, mais larga, cobre a borda esquerda da área de edição; Selecionar, na barra de navegação, só sai dos modos de câmera; o Rótulo não é mais criado pela faixa.
+  - Esperam os resultados em segundo plano: apoios do corpo escolhido, leiaute depois da chegada da fonte do texto, limites da cena antes de clicar na linha de referência.
+  - O ensaio de subpeça STEP às Referências gera a própria montagem e deixa de exigir `NATOR_STEP_PATH`; a variável continua trocando a montagem por um arquivo real.
+
 ## 0.59.0 — 13/11/2026
 
 - Mover: a translação aparece em lista vertical (X, Y, Z, um eixo por linha) e cada linha termina numa caixa **Travar**. Com o eixo travado, o movimento só acontece nos eixos livres: o campo fica fixo, a seta do manipulador fica apagada e não responde, e o arraste livre pelo centro não altera aquele eixo.

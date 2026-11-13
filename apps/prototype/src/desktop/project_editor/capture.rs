@@ -2844,8 +2844,10 @@ mod tests {
         editor.current_mut().active_part = Some(part);
         editor.shell.tab = shell::RibbonTab::Model;
         settle(&mut editor, &context)?;
-        let tool = label_position(&mut editor, &context, text(T::Label))?;
-        click(&mut editor, &context, tool)?;
+        // A faixa não cria mais rótulos (só a edição pelo histórico continua); a
+        // ferramenta é aberta direto para exercitar a escolha da face e o arraste.
+        editor.open_feature_tool(feature_editor::Tool::Label);
+        frame(&mut editor, &context, vec![])?;
         let at = sketch_scene::project(
             &editor.viewport.camera,
             editor.display_bounds(),
@@ -3855,10 +3857,20 @@ mod tests {
             let bounds = editor.current().scene_bounds.ok_or("Limites ausentes")?;
             let source_world = instances[from].1.apply(source);
             let target_world = instances[to].1.apply(destination);
-            for (point, label) in [
-                (source_world, source_label),
-                (target_world, destination_label),
+            // Ponto a ponto: um clique escolhe o corpo, e só então os apoios dele aparecem.
+            let inside = [[10., 10., 4.], [0., 0., 8.], [6., 6., 2.]];
+            for (point, label, body) in [
+                (source_world, source_label, from),
+                (target_world, destination_label, to),
             ] {
+                let pick = sketch_scene::project(
+                    &editor.viewport.camera,
+                    bounds,
+                    editor.canvas_rect,
+                    instances[body].1.apply(inside[body]),
+                )
+                .ok_or("Corpo fora da tela")?;
+                click(&mut editor, &context, pick)?;
                 let position = sketch_scene::project(
                     &editor.viewport.camera,
                     bounds,
@@ -3976,6 +3988,12 @@ mod tests {
         let source_screen =
             sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, from)
                 .ok_or("Origem fora da tela")?;
+        // Ponto a ponto: um clique no anel escolhe a arruela; só então os apoios dela
+        // aparecem.
+        let ring = document_point(&editor, from_instance, [15., 0., 4.])?;
+        let ring = sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, ring)
+            .ok_or("Arruela fora da tela")?;
+        click(&mut editor, &context, ring)?;
         // Fora do raio do centro e dos quadrantes da borda interna: aqui
         // exercitamos a descoberta distante, antes da atração de um apoio.
         let discovery = source_screen + egui::vec2(16., 16.);
@@ -4022,18 +4040,31 @@ mod tests {
             sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, to)
                 .ok_or("Destino fora da tela")?;
         let target_capture = target_screen + egui::vec2(-8., 0.);
-        frame(
-            &mut editor,
-            &context,
-            vec![egui::Event::PointerMoved(target_capture)],
-        )?;
-        assert!(
-            editor.hover.as_ref().is_some_and(|h| h
-                .overlay
-                .points
-                .iter()
-                .any(|p| norm(sub(*p, to)) < 1e-9))
-        );
+        // O destino está noutro corpo: escolhe-se o disco antes do ponto.
+        let disk = document_point(&editor, to_instance, [5., 5., 8.])?;
+        let disk = sketch_scene::project(&editor.viewport.camera, bounds, editor.canvas_rect, disk)
+            .ok_or("Disco fora da tela")?;
+        click(&mut editor, &context, disk)?;
+        // Os apoios do disco são calculados em segundo plano depois do clique.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(target_capture)],
+            )?;
+            if editor
+                .hover
+                .as_ref()
+                .is_some_and(|h| h.overlay.points.iter().any(|p| norm(sub(*p, to)) < 1e-9))
+            {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err("Centro do disco não realçado".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         click(&mut editor, &context, target_capture)?;
         assert_eq!(editor.current().session.revision(), revision);
         frame(
@@ -7195,6 +7226,8 @@ mod tests {
         let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
         editor.recoveries.clear();
         editor.show_recovery = false;
+        // A árvore flutua sobre a borda esquerda, onde o ensaio desenha.
+        editor.shell.browser_visible = false;
         editor.begin_sketch(part, id);
         editor.align_sketch_camera(true, false);
         settle(&mut editor, &context)?;
@@ -8810,17 +8843,17 @@ mod tests {
         // Plano YZ (normal X) e o campo da linha ativo.
         editor.await_mirror_line_for_capture();
         settle(&mut editor, &context)?;
-        let on_line = sketch_scene::project(
-            &editor.viewport.camera,
-            editor.display_bounds(),
-            editor.canvas_rect,
-            [150., 20., 0.],
-        )
-        .ok_or("Linha sem projeção")?;
-        // A cena de referência é preparada em segundo plano: o campo continua aguardando
-        // a linha até o clique encontrá-la.
+        // A cena de referência é preparada em segundo plano e os limites da vista podem
+        // mudar com ela: a posição da linha na tela é refeita a cada tentativa.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
+            let on_line = sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                [150., 20., 0.],
+            )
+            .ok_or("Linha sem projeção")?;
             click(&mut editor, &context, on_line)?;
             settle(&mut editor, &context)?;
             if editor.mirror_line_for_capture().is_some() {
@@ -9407,6 +9440,23 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
+    /// Retângulo guardado por um campo, depois de dois quadros seguidos iguais.
+    fn stable_rect(
+        editor: &mut Editor,
+        context: &egui::Context,
+        id: egui::Id,
+    ) -> Result<egui::Rect, Box<dyn Error>> {
+        let mut last = None;
+        for _ in 0..60 {
+            frame(editor, context, vec![])?;
+            let rect = context.data(|d| d.get_temp::<egui::Rect>(id));
+            if rect.is_some() && rect == last {
+                return rect.ok_or_else(|| "Campo ausente".into());
+            }
+            last = rect;
+        }
+        Err(format!("Campo instável: {id:?}").into())
+    }
     fn replace_text_number(
         editor: &mut Editor,
         context: &egui::Context,
@@ -9452,15 +9502,18 @@ mod tests {
         let first = wait_text_preview(&mut editor, &context)?;
         let entities = first.texts[0].entities.clone();
         let revision = editor.current().session.revision();
-        let x = context
-            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("text_position_rect", 0usize))))
-            .ok_or("Campo X")?;
+        // A fonte chega com a primeira prévia e muda o leiaute no quadro seguinte: o
+        // campo só é clicado depois que a posição dele para de mudar.
+        let x = stable_rect(
+            &mut editor,
+            &context,
+            egui::Id::new(("text_position_rect", 0usize)),
+        )?;
         replace_text_number(&mut editor, &context, x, "14")?;
         let moved = wait_text_preview(&mut editor, &context)?;
-        assert!((moved.point(moved.texts[0].anchor)?[0] - 14.).abs() < 1e-6);
-        let size = context
-            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("text_size_rect")))
-            .ok_or("Tamanho")?;
+        let anchor = moved.point(moved.texts[0].anchor)?;
+        assert!((anchor[0] - 14.).abs() < 1e-6, "{anchor:?}");
+        let size = stable_rect(&mut editor, &context, egui::Id::new("text_size_rect"))?;
         replace_text_number(&mut editor, &context, size, "18")?;
         let changed = wait_text_preview(&mut editor, &context)?;
         assert!((changed.texts[0].size - 18.).abs() < 1e-6);
@@ -12412,8 +12465,9 @@ mod tests {
                 ) < 1e-4
             );
         }
-        let select = action_rect(&context, T::Select)?.center();
-        click(&mut editor, &context, select)?;
+        // Selecionar, na barra de navegação, só sai dos modos de câmera; Esc fecha o
+        // painel da imagem e volta à seleção.
+        frame(&mut editor, &context, escape())?;
         assert!(editor.image_edit.is_none());
         assert!(editor.selection_active());
         editor.finish_sketch();
@@ -13960,6 +14014,21 @@ mod tests {
         settle(&mut editor, context)?;
         frame(&mut editor, context, vec![])?;
         Ok((editor, part))
+    }
+    /// Ponto local de uma instância no mundo, na posição gravada.
+    fn document_point(
+        editor: &Editor,
+        instance: InstanceId,
+        local: [f64; 3],
+    ) -> Result<[f64; 3], Box<dyn Error>> {
+        Ok(editor
+            .current()
+            .session
+            .document()
+            .instance(instance)
+            .ok_or("Instância ausente")?
+            .placement
+            .apply(local))
     }
     fn action_rect(context: &egui::Context, label: T) -> Result<egui::Rect, Box<dyn Error>> {
         context

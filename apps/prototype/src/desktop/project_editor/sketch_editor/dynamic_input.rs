@@ -38,6 +38,9 @@ pub(in crate::desktop::project_editor) fn primitive(tool: Tool) -> Option<Primit
     }
 }
 
+/// Folga mínima entre um campo flutuante e o cursor, em pontos.
+const CURSOR_GAP: f32 = 8.;
+
 impl Input {
     pub(in crate::desktop::project_editor) fn start(&mut self, cursor: Point2) {
         // Medidas podem ser informadas no painel antes de escolher a origem.
@@ -364,6 +367,11 @@ impl Input {
             position
         };
         positions = positions.map(clamp);
+        let covers = |position: egui::Pos2| {
+            egui::Rect::from_min_size(position, egui::vec2(118., 24.))
+                .expand(CURSOR_GAP)
+                .contains(mouse)
+        };
         if indices.len() == 2 {
             // Em linhas curtas ou próximas da borda, os dois apoios podem
             // coincidir na tela. Conservar o comprimento junto ao mouse e
@@ -379,10 +387,42 @@ impl Input {
                 .into_iter()
                 .map(clamp)
                 .filter(|p| !length.intersects(egui::Rect::from_min_size(*p, size)))
+                .filter(|p| !covers(*p))
                 .min_by(|a, b| a.distance_sq(desired).total_cmp(&b.distance_sq(desired)))
                 {
                     positions[1] = next;
                 }
+            }
+        }
+        // Nenhum campo fica sob o cursor: o clique que conclui o traço é da área de
+        // desenho. Sobe ou desce o campo o mínimo, sem encostar nos outros.
+        for index in indices.iter().copied() {
+            if !covers(positions[index]) {
+                continue;
+            }
+            let size = egui::vec2(118., 24.);
+            let others = indices
+                .iter()
+                .filter(|i| **i != index)
+                .map(|i| egui::Rect::from_min_size(positions[*i], size).expand(6.))
+                .collect::<Vec<_>>();
+            let desired = positions[index];
+            if let Some(next) = [
+                egui::pos2(desired.x, mouse.y - CURSOR_GAP - size.y),
+                egui::pos2(desired.x, mouse.y + CURSOR_GAP),
+                egui::pos2(mouse.x + CURSOR_GAP, desired.y),
+                egui::pos2(mouse.x - CURSOR_GAP - size.x, desired.y),
+            ]
+            .into_iter()
+            .map(clamp)
+            .filter(|p| !covers(*p))
+            .filter(|p| {
+                let rect = egui::Rect::from_min_size(*p, size);
+                others.iter().all(|o| !o.intersects(rect))
+            })
+            .min_by(|a, b| a.distance_sq(desired).total_cmp(&b.distance_sq(desired)))
+            {
+                positions[index] = next;
             }
         }
         for &index in indices {
