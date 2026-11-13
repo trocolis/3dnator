@@ -630,8 +630,6 @@ pub struct Editor {
 pub(super) enum ImportSource {
     Reference,
     Any,
-    /// STEP, STL ou 3MF cujos sólidos viram corpos da peça de destino, sem subpeças.
-    Bodies,
 }
 
 /// Cena estilizada e dados de GPU. As arestas vivas já foram analisadas uma vez por geometria.
@@ -1682,15 +1680,10 @@ impl Editor {
                 }) {
                     #[cfg(feature = "occt")]
                     {
-                        let import = match (source, destination) {
-                            (ImportSource::Bodies, Some(part)) => {
-                                Command::ImportStepBodies { path, part }
-                            }
-                            _ => Command::ImportStep {
-                                path,
-                                destination,
-                                name,
-                            },
+                        let import = Command::ImportStep {
+                            path,
+                            destination,
+                            name,
                         };
                         let command = PreparedCommand::new(
                             document,

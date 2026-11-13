@@ -43,7 +43,7 @@ pub(super) enum MenuAction {
     Group,
     Export(Selection),
     ExportStep(nator_commands::export::StepScope),
-    /// STEP, STL ou 3MF para dentro da peça, como corpos dela.
+    /// STEP, STL ou 3MF como referência filha da peça.
     ImportInto(PartId),
 }
 
@@ -537,7 +537,7 @@ impl Editor {
                 {
                     self.status.warning(text(T::ReferenceNotEditable));
                 } else {
-                    self.import(context, super::ImportSource::Bodies, Some(part), false);
+                    self.import(context, super::ImportSource::Any, Some(part), true);
                 }
             }
         }

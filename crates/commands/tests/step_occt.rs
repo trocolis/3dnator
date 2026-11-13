@@ -513,100 +513,43 @@ fn step_export_rejects_visible_meshes_and_cycles_before_writing() -> Result<()> 
     );
     Ok(())
 }
-/// Importar para a peça em edição achata a hierarquia: cada ocorrência vira um corpo da
-/// peça, na posição do mundo, sem subpeças; a cor da ocorrência vale sobre a do sólido.
+/// STEP importado para dentro de uma peça: as raízes ficam penduradas nela como referências,
+/// com a hierarquia do arquivo preservada; a peça não ganha corpos.
 #[test]
-fn step_bodies_enter_the_edited_part_in_world_position_without_subparts() -> Result<()> {
+fn step_imported_into_a_part_arrives_as_child_references() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let source = temp.path().join("montagem.step");
-    let fixture = fixture()?;
-    fixture.write(&source)?;
+    fixture()?.write(&source)?;
     let mut doc = Document::new("Peça")?;
     let part = doc.create_part("Destino".into())?;
     let mut session = Session::new(doc)?;
-    session.execute(Command::ImportStepBodies {
-        path: source.clone(),
-        part,
-    })?;
+    session.execute(Command::ImportAsReference(Box::new(Command::ImportStep {
+        path: source,
+        destination: Some(part),
+        name: "Arquivo".into(),
+    })))?;
     let doc = session.document();
-    assert_eq!(doc.parts().len(), 1);
-    assert_eq!(doc.instances().len(), 1);
-    let bodies = &doc.part(part).ok_or("Peça")?.bodies;
-    assert_eq!(bodies.len(), 3);
-    let mut actual = Vec::new();
-    for body in bodies {
-        assert!(body.brep.is_some());
-        let p = measure::body_properties(doc, body.id)?;
-        assert!((p.volume_mm3 - 6000.).abs() < 1e-6);
-        actual.push((p.center_mm, body.color, body.name.clone()));
-    }
-    actual.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
-    let p = &fixture.instances;
-    let parent = p[0].placement.compose(p[1].placement)?;
-    let mut expected = [
-        parent.compose(p[2].placement)?.apply([5., 10., 15.]),
-        parent.compose(p[3].placement)?.apply([5., 10., 15.]),
-        p[4].placement.apply([5., 10., 15.]),
-    ];
-    expected.sort_by(|a, b| a[0].total_cmp(&b[0]));
-    for (p, (q, ..)) in expected.iter().zip(&actual) {
-        assert!(norm(sub(*p, *q)) < 1e-7, "{p:?} != {q:?}");
-    }
-    let red = actual
+    assert!(doc.part(part).ok_or("Peça")?.bodies.is_empty());
+    assert!(
+        doc.parts()
+            .iter()
+            .filter(|p| p.id != part)
+            .all(|p| p.reference)
+    );
+    let roots = doc
+        .instances()
         .iter()
-        .filter(|(_, c, _)| *c == Some(RED))
+        .filter(|i| i.parent == Some(part))
         .collect::<Vec<_>>();
-    assert_eq!(red.len(), 1);
-    assert_eq!(red[0].2, "Ocorrência vermelha");
-    // Operações usam a posição do corpo: dividir no centro deixa metade do volume.
-    let (center, _, _) = actual[0];
-    let base = bodies
-        .iter()
-        .find(|b| {
-            measure::body_properties(doc, b.id).is_ok_and(|p| norm(sub(p.center_mm, center)) < 1e-7)
-        })
-        .ok_or("Corpo")?
-        .id;
-    session.execute(Command::SplitBody {
-        part,
-        name: "Metade".into(),
-        operation: nator_document::features::Operation::Split {
-            base,
-            origin: center,
-            normal: [0., 0., 1.],
-            cutting_plane: None,
-            reverse: false,
-        },
-    })?;
-    let half = session
-        .document()
-        .part(part)
-        .ok_or("Peça")?
-        .features
-        .first()
-        .ok_or("Divisão")?
-        .output;
-    let volume = measure::body_properties(session.document(), half)?.volume_mm3;
-    assert!((volume - 3000.).abs() < 1e-6, "{volume}");
-    assert!(session.undo());
-    assert!(session.undo());
+    assert_eq!(roots.len(), 2);
     assert!(
-        session
-            .document()
-            .part(part)
-            .ok_or("Peça")?
-            .bodies
-            .is_empty()
+        doc.instances()
+            .iter()
+            .all(|i| i.part == part || i.parent.is_some())
     );
-    // Uma peça de referência não recebe corpos.
-    session.execute(Command::SetPartReference {
-        part,
-        reference: true,
-    })?;
-    assert!(
-        session
-            .execute(Command::ImportStepBodies { path: source, part })
-            .is_err()
-    );
+    // Os três blocos continuam na cena, cada um com o volume do arquivo.
+    assert_eq!(properties(doc)?.len(), 3);
+    assert!(session.undo());
+    assert_eq!(session.document().parts().len(), 1);
     Ok(())
 }

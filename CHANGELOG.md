@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.57.1 — 13/11/2026
+
+- Importar para a peça (aba Construção e menu da peça) traz o STEP, STL ou 3MF como **referência filha da peça**, na pasta Referências dela, em vez de corpos. A referência pode virar subpeça com "Criar peça a partir da referência". No STEP, as raízes ficam penduradas na peça e a hierarquia do arquivo é preservada; a malha ganha uma peça de referência própria, posicionada ao lado do que a peça já tem. Uma peça de referência não recebe outra. O comando `ImportStepBodies` da 0.57.0 saiu; `ImportAsReference` passa a aceitar destino.
+
 ## 0.57.0 — 13/11/2026
 
 - Aba Construção, grupo **Importar**: traz um STEP, STL ou 3MF para dentro da peça em edição. O mesmo item aparece no menu de contexto da peça na árvore ("Importar STEP, STL ou 3MF para a peça"). Peças de referência não recebem corpos.

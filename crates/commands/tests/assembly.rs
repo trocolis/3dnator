@@ -460,3 +460,57 @@ fn converting_a_part_to_reference_preserves_shared_instances_and_round_trips() -
     );
     Ok(())
 }
+
+/// Importar para dentro de uma peça traz o modelo como referência filha dela (pasta
+/// Referências), nunca como corpo; depois a referência pode virar subpeça.
+#[test]
+fn mesh_imported_into_a_part_is_a_child_reference_that_can_become_a_subpart() -> Result<()> {
+    let mut doc = Document::new("Peça com referência")?;
+    let part = doc.create_part("Suporte".into())?;
+    let mut session = Session::new(doc)?;
+    session.execute(Command::ImportAsReference(Box::new(Command::ImportMesh {
+        destination: Some(part),
+        name: "Motor".into(),
+        geometry: Arc::new(MeshAsset::new(reference_bracket()?)),
+    })))?;
+    let doc = session.document();
+    assert!(doc.part(part).ok_or("Peça")?.bodies.is_empty());
+    let reference = doc
+        .parts()
+        .iter()
+        .find(|p| p.id != part)
+        .ok_or("Referência ausente")?;
+    assert!(reference.reference);
+    assert_eq!(reference.bodies.len(), 1);
+    let id = reference.id;
+    let children = doc
+        .instances()
+        .iter()
+        .filter(|i| i.part == id)
+        .collect::<Vec<_>>();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].parent, Some(part));
+    // Converter: a referência vira subpeça editável, no mesmo lugar.
+    session.execute(Command::SetPartReference {
+        part: id,
+        reference: false,
+    })?;
+    assert!(!session.document().part(id).ok_or("Subpeça")?.reference);
+    // Uma referência não recebe outra dentro dela.
+    session.execute(Command::SetPartReference {
+        part: id,
+        reference: true,
+    })?;
+    let before = session.document().parts().len();
+    assert!(
+        session
+            .execute(Command::ImportAsReference(Box::new(Command::ImportMesh {
+                destination: Some(id),
+                name: "Outro".into(),
+                geometry: Arc::new(MeshAsset::new(reference_bracket()?)),
+            })))
+            .is_err()
+    );
+    assert_eq!(session.document().parts().len(), before);
+    Ok(())
+}

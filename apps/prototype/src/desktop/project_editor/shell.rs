@@ -100,7 +100,8 @@ enum Action {
     ReferenceSketch,
     NewEmptyPart,
     ImportReference,
-    /// STEP, STL ou 3MF para dentro da peça em edição, como corpos dela.
+    /// STEP, STL ou 3MF como referência filha da peça em edição (pasta Referências dela),
+    /// que depois pode virar subpeça.
     ImportIntoPart,
     MoveFace,
     MoveEdge,
@@ -792,12 +793,9 @@ impl Editor {
             }
             // Abre direto o seletor com STEP, STL e 3MF; o modelo entra só como referência.
             Action::ImportReference => self.import(context, ImportSource::Any, None, true),
-            Action::ImportIntoPart => self.import(
-                context,
-                ImportSource::Bodies,
-                self.current().active_part,
-                false,
-            ),
+            Action::ImportIntoPart => {
+                self.import(context, ImportSource::Any, self.current().active_part, true)
+            }
             Action::MoveFace => self.open_align(navigation::PickMode::Face),
             Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
             Action::MovePoint => self.open_align(navigation::PickMode::Vertex),

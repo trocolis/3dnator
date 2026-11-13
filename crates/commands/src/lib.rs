@@ -65,12 +65,6 @@ pub enum Command {
         destination: Option<PartId>,
         name: String,
     },
-    /// Todos os sólidos do STEP viram corpos da peça `part`, na posição de cada ocorrência,
-    /// sem criar subpeças: a hierarquia do arquivo é achatada.
-    ImportStepBodies {
-        path: std::path::PathBuf,
-        part: PartId,
-    },
     SetSheet {
         id: Option<nator_document::SheetId>,
         target: Option<PartId>,
@@ -458,7 +452,6 @@ impl Command {
             Self::UpdateReferenceImage { .. } => "Editar imagem de referência",
             Self::RemoveReferenceImage { .. } => "Excluir imagem de referência",
             Self::ImportStep { .. } => "Importar montagem STEP",
-            Self::ImportStepBodies { .. } => "Importar STEP para a peça",
             Self::SetSheet { .. } => "Salvar folha técnica associada",
             Self::ImportSolid { .. } => "Importar sólido CAD",
             Self::SplitBody { .. } => "Dividir corpo em dois lados",
@@ -591,14 +584,6 @@ impl Command {
             } => {
                 let id = doc.set_sheet(id, target, specification, annotations)?;
                 return Ok(Effect::SheetSaved { id });
-            }
-            Self::ImportStepBodies { path, part } => {
-                return Ok(assembly::import_step_bodies(
-                    doc,
-                    &path,
-                    part,
-                    &mut rebuilds.unverified,
-                )?);
             }
             Self::ImportSolid {
                 destination,
@@ -782,6 +767,38 @@ impl Command {
                     )
                     .into());
                 }
+                // Com destino, o modelo entra como referência filha da peça (pasta
+                // Referências dela), nunca como corpo dela; depois pode virar subpeça.
+                let destination = match &*command {
+                    Self::ImportStep { destination, .. } | Self::ImportMesh { destination, .. } => {
+                        *destination
+                    }
+                    _ => None,
+                };
+                if let Some(parent) = destination {
+                    let target = doc
+                        .part(parent)
+                        .ok_or_else(|| DocumentError("Peça de destino inexistente.".into()))?;
+                    if target.reference {
+                        return Err(DocumentError(
+                            "Referências não recebem outros elementos.".into(),
+                        )
+                        .into());
+                    }
+                }
+                // A malha com destino viraria corpo da peça: cria-se uma peça própria.
+                let command = match *command {
+                    Self::ImportMesh {
+                        destination: Some(_),
+                        name,
+                        geometry,
+                    } => Self::ImportMesh {
+                        destination: None,
+                        name,
+                        geometry,
+                    },
+                    other => other,
+                };
                 let before = doc.parts().iter().map(|p| p.id).collect::<Vec<_>>();
                 let effect = command.apply_inner(doc, rebuilds)?;
                 let created = doc
@@ -790,8 +807,25 @@ impl Command {
                     .map(|p| p.id)
                     .filter(|id| !before.contains(id))
                     .collect::<Vec<_>>();
-                for part in created {
-                    doc.part_mut(part)?.reference = true;
+                for part in &created {
+                    doc.part_mut(*part)?.reference = true;
+                }
+                if let Some(parent) = destination {
+                    // O STEP já pendura as raízes no destino; a malha nasce na raiz da
+                    // montagem e passa para dentro da peça, ao lado do que ela já tem.
+                    let loose = doc
+                        .instances()
+                        .iter()
+                        .filter(|i| i.parent.is_none() && created.contains(&i.part))
+                        .map(|i| i.id)
+                        .collect::<Vec<_>>();
+                    for id in &loose {
+                        doc.reparent(*id, Some(parent))?;
+                        doc.instance_mut(*id)?.placement = Placement::default();
+                    }
+                    if !loose.is_empty() {
+                        doc.place_beside(&loose)?;
+                    }
                 }
                 return Ok(effect);
             }
