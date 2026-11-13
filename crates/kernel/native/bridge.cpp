@@ -71,6 +71,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Vertex.hxx>
@@ -81,6 +82,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_MapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <TopTools_DataMapOfShapeInteger.hxx>
 
 #include <algorithm>
 #include <optional>
@@ -90,6 +92,7 @@
 #include <exception>
 #include <initializer_list>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -425,6 +428,50 @@ std::vector<std::int32_t> sweep_history(Sweep& sweep, const Shape* profile,
         match_planar_revolution_faces(table, profile, *revolution_axis);
     }
     return table.take();
+}
+
+// Partes conexas do resultado: sólidos que compartilham ao menos um vértice ficam juntos
+// (contatos em linha continuam no mesmo corpo). Ordem pelo primeiro sólido de cada parte em
+// `MapShapes`, determinística para a mesma topologia. Sem sólidos, a forma é uma parte só.
+std::vector<std::vector<TopoDS_Shape>> connected_pieces(const TopoDS_Shape& value) {
+    const auto solids = map_of(value, TopAbs_SOLID);
+    const int count = solids.Extent();
+    if (count <= 1) {
+        return {{value}};
+    }
+    std::vector<int> parent(static_cast<std::size_t>(count));
+    std::iota(parent.begin(), parent.end(), 0);
+    const auto root = [&](int i) {
+        while (parent[i] != i) {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        return i;
+    };
+    TopTools_DataMapOfShapeInteger owners;
+    for (int i = 0; i < count; ++i) {
+        const auto vertices = map_of(solids(i + 1), TopAbs_VERTEX);
+        for (int v = 1; v <= vertices.Extent(); ++v) {
+            if (owners.IsBound(vertices(v))) {
+                const int a = root(owners.Find(vertices(v)));
+                const int b = root(i);
+                parent[std::max(a, b)] = std::min(a, b);
+            } else {
+                owners.Bind(vertices(v), i);
+            }
+        }
+    }
+    std::vector<std::vector<TopoDS_Shape>> pieces;
+    std::vector<int> slot(static_cast<std::size_t>(count), -1);
+    for (int i = 0; i < count; ++i) {
+        const int r = root(i);
+        if (slot[r] < 0) {
+            slot[r] = static_cast<int>(pieces.size());
+            pieces.emplace_back();
+        }
+        pieces[slot[r]].push_back(solids(i + 1));
+    }
+    return pieces;
 }
 
 void require_profile(const Shape* face) {
@@ -870,6 +917,42 @@ bool nator_distance(const Shape* a, const Shape* b, double* output) noexcept {
         output[4] = q.X();
         output[5] = q.Y();
         output[6] = q.Z();
+    });
+}
+
+// Quantidade de partes conexas (veja `connected_pieces`).
+bool nator_piece_count(const Shape* body, std::size_t* count) noexcept {
+    return guarded([&] { *count = connected_pieces(body->value).size(); });
+}
+
+// Parte conexa `index`. Cada face é a mesma face da entrada (origem Same), então os nomes
+// estáveis passam inalterados. Subformas de um B-rep aceito dispensam nova verificação.
+Shape* nator_piece(const Shape* body, std::size_t index) noexcept {
+    return build_isometry([&](Shape& shape) {
+        const auto pieces = connected_pieces(body->value);
+        if (index >= pieces.size()) {
+            throw std::runtime_error("Parte inexistente no resultado.");
+        }
+        const auto& solids = pieces[index];
+        if (solids.size() == 1) {
+            shape.value = solids.front();
+        } else {
+            TopoDS_Compound compound;
+            BRep_Builder builder;
+            builder.MakeCompound(compound);
+            for (const auto& solid : solids) {
+                builder.Add(compound, solid);
+            }
+            shape.value = compound;
+        }
+        const auto& source = faces_of(body);
+        const auto faces = map_of(shape.value, TopAbs_FACE);
+        shape.origins.reserve(static_cast<std::size_t>(faces.Extent()) * 3);
+        for (int i = 1; i <= faces.Extent(); ++i) {
+            const int found = source.FindIndex(faces(i));
+            shape.origins.insert(shape.origins.end(),
+                                 {found > 0 ? Same : Unknown, 0, found > 0 ? found - 1 : 0});
+        }
     });
 }
 

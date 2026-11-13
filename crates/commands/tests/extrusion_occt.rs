@@ -16,6 +16,32 @@ fn created(effect: Effect) -> Result<BodyId> {
         Err("Corpo ausente".into())
     }
 }
+/// Resultado inteiro da operação: partes soltas viram corpos próprios e o conjunto fica
+/// oculto como etapa intermediária.
+fn whole(s: &Session, part: PartId, body: BodyId) -> Result<BodyId> {
+    let feature = s
+        .document()
+        .part(part)
+        .ok_or("Peça")?
+        .features
+        .iter()
+        .find(|f| f.output == body)
+        .ok_or("Operação")?;
+    Ok(match feature.operation {
+        Operation::Piece { base, .. } => base,
+        _ => body,
+    })
+}
+/// Corpos separados do resultado `base`.
+fn piece_count(s: &Session, part: PartId, base: BodyId) -> Result<usize> {
+    Ok(s.document()
+        .part(part)
+        .ok_or("Peça")?
+        .features
+        .iter()
+        .filter(|f| matches!(f.operation, Operation::Piece { base: b, .. } if b == base))
+        .count())
+}
 fn add_sketch(s: &mut Session, part: Option<PartId>, sketch: Sketch) -> Result<(PartId, SketchId)> {
     if let Effect::SketchCreated { part, sketch } = s.execute(Command::AddSketch {
         destination: part,
@@ -1480,15 +1506,19 @@ fn multiple_coplanar_faces_join_and_cut_both_bodies_with_exact_previews() -> Res
         .ok_or("Prévia")?;
         assert!((preview.signed_volume().abs() - (expected - 8000_f64).abs()).abs() < 1e-4);
         let count = s.document().part(part).ok_or("Peça")?.features.len();
-        let output = created(s.execute(Command::AddFeature {
+        let piece = created(s.execute(Command::AddFeature {
             part,
             name: "Extrusão conjunta".into(),
             operation,
         })?)?;
+        let output = whole(&s, part, piece)?;
         assert!((volume(&s, output)? - expected).abs() < 1e-4);
+        // Os dois corpos continuam separados: cada um é um corpo próprio.
+        assert_eq!(piece_count(&s, part, output)?, 2);
+        assert!(!s.document().body(output).ok_or("Corpo")?.visible);
         assert_eq!(
             s.document().part(part).ok_or("Peça")?.features.len(),
-            count + 1
+            count + 3
         );
         for source in &sources {
             assert!(!s.document().body(*source).ok_or("Corpo")?.visible);
@@ -1507,12 +1537,14 @@ fn multiple_coplanar_faces_join_and_cut_both_bodies_with_exact_previews() -> Res
 fn mixed_extrusion_keeps_opposite_normals_and_names_when_reordered_saved_and_cloned() -> Result<()>
 {
     let (mut s, part, profiles) = multiple_fixture()?;
-    let output = created(s.execute(Command::AddFeature {
+    let piece = created(s.execute(Command::AddFeature {
         part,
         name: "Quatro perfis".into(),
         operation: multiple_operation(profiles, "5 mm", None),
     })?)?;
+    let output = whole(&s, part, piece)?;
     assert!((volume(&s, output)? - 5000.).abs() < 1e-4);
+    assert_eq!(piece_count(&s, part, output)?, 4);
     let bounds = s
         .document()
         .body(output)
@@ -1534,7 +1566,8 @@ fn mixed_extrusion_keeps_opposite_normals_and_names_when_reordered_saved_and_clo
         .part(part)
         .ok_or("Peça")?
         .features
-        .last()
+        .iter()
+        .find(|f| f.output == output)
         .ok_or("Operação")?
         .operation
         .clone();
@@ -1584,13 +1617,18 @@ fn mixed_extrusion_keeps_opposite_normals_and_names_when_reordered_saved_and_clo
         .find(|p| p.id != part)
         .ok_or("Clone")?;
     let copy = clone.id;
-    let copied_output = clone.features.last().ok_or("Operação")?.output;
+    let many = |f: &&nator_document::features::Feature| {
+        matches!(f.operation, Operation::ExtrudeMany { .. })
+    };
+    let copied = clone.features.iter().rfind(many).ok_or("Operação")?;
+    let copied_output = copied.output;
     let original_keys = match &s
         .document()
         .part(part)
         .ok_or("Peça")?
         .features
-        .last()
+        .iter()
+        .rfind(many)
         .ok_or("Operação")?
         .operation
     {
@@ -1598,7 +1636,7 @@ fn mixed_extrusion_keeps_opposite_normals_and_names_when_reordered_saved_and_clo
         _ => return Err("Operação".into()),
     };
     assert!(
-        matches!(&clone.features.last().ok_or("Operação")?.operation,Operation::ExtrudeMany {profile_keys,..} if *profile_keys==original_keys)
+        matches!(&copied.operation,Operation::ExtrudeMany {profile_keys,..} if *profile_keys==original_keys)
     );
     s.execute(Command::SetParameter {
         part: copy,
@@ -1688,11 +1726,13 @@ fn multiple_extrusion_respects_face_cells_and_shared_associative_limit() -> Resu
     if let Operation::ExtrudeMany { until, .. } = &mut operation {
         *until = Some(ExtrusionLimit::Sketch { sketch: limit });
     }
-    let output = created(s.execute(Command::AddFeature {
+    let piece = created(s.execute(Command::AddFeature {
         part,
         name: "Célula e região".into(),
         operation,
     })?)?;
+    let output = whole(&s, part, piece)?;
+    assert_eq!(piece_count(&s, part, output)?, 2);
     assert!((volume(&s, output)? - 400. * 7.).abs() < 1e-4);
     assert!(!s.document().sketch(sketch).ok_or("Perfil")?.visible);
     assert!(s.document().sketch(limit).ok_or("Limite")?.visible);

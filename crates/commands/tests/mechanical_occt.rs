@@ -46,11 +46,24 @@ fn feature(
     name: &str,
     operation: Operation,
 ) -> Result<BodyId> {
-    created(session.execute(Command::AddFeature {
+    let body = created(session.execute(Command::AddFeature {
         part,
         name: name.into(),
         operation,
-    })?)
+    })?)?;
+    // Partes soltas viram corpos próprios; os ensaios medem o resultado inteiro da operação.
+    let feature = session
+        .document()
+        .part(part)
+        .ok_or("Peça ausente")?
+        .features
+        .iter()
+        .find(|f| f.output == body)
+        .ok_or("Operação ausente")?;
+    Ok(match feature.operation {
+        Operation::Piece { base, .. } => base,
+        _ => body,
+    })
 }
 
 /// Placa 60 × 40 com espessura `espessura`, extrudada de z = 0 para z = espessura.
@@ -170,18 +183,38 @@ fn pattern_mirror_split_and_revolve_about_a_sketch_line() -> Result<()> {
         },
     )?;
     assert!((volume(&session, row)? - 3. * plate_volume).abs() < 1e-3);
+    // Cópias soltas: cada uma vira um corpo, e a fileira inteira fica como etapa oculta.
+    let pieces = |session: &Session, base: BodyId| -> Result<Vec<BodyId>> {
+        Ok(session
+            .document()
+            .part(part)
+            .ok_or("Peça ausente")?
+            .features
+            .iter()
+            .filter(|f| matches!(f.operation, Operation::Piece { base: b, .. } if b == base))
+            .map(|f| f.output)
+            .collect())
+    };
+    let copies = pieces(&session, row)?;
+    assert_eq!(copies.len(), 3);
+    assert!(!session.document().body(row).ok_or("Corpo ausente")?.visible);
+    for copy in &copies {
+        assert!((volume(&session, *copy)? - plate_volume).abs() < 1e-3);
+    }
     let symmetric = feature(
         &mut session,
         part,
         "Simetria",
         Operation::Mirror {
-            base: row,
+            base: copies[0],
             origin: [-5., 0., 0.],
             normal: [1., 0., 0.],
             keep_original: true,
         },
     )?;
-    assert!((volume(&session, symmetric)? - 6. * plate_volume).abs() < 1e-3);
+    assert!((volume(&session, symmetric)? - 2. * plate_volume).abs() < 1e-3);
+    // A cópia e sua imagem não se tocam: também viram dois corpos.
+    assert_eq!(pieces(&session, symmetric)?.len(), 2);
     let half = feature(
         &mut session,
         part,
@@ -202,7 +235,10 @@ fn pattern_mirror_split_and_revolve_about_a_sketch_line() -> Result<()> {
         expression: Some("10 mm".into()),
         dimension: Dimension::Length,
     })?;
-    assert!((volume(&session, symmetric)? - 6. * 60. * 40. * 10.).abs() < 1e-3);
+    assert!((volume(&session, symmetric)? - 2. * 60. * 40. * 10.).abs() < 1e-3);
+    for copy in pieces(&session, row)? {
+        assert!((volume(&session, copy)? - 60. * 40. * 10.).abs() < 1e-3);
+    }
     assert!((volume(&session, half)? - 60. * 40. * 8.).abs() < 1e-3);
 
     // Revolução em torno de uma linha de construção cotada: o eixo acompanha a cota.

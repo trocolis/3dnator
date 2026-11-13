@@ -885,6 +885,8 @@ impl Draft {
                 d.base = Some(base);
                 d.output = Some(division);
             }
+            // `edit_cad_feature` abre a operação que gerou as partes; esta não tem campos.
+            Operation::Piece { base, .. } => d.base = Some(base),
             Operation::ComponentCut {
                 base,
                 outline,
@@ -2014,16 +2016,19 @@ fn body_name(part: &nator_document::Part, id: Option<BodyId>) -> Option<String> 
 
 impl Editor {
     pub(super) fn edit_cad_feature(&mut self, part: PartId, feature: Feature) {
-        let feature = if let Operation::SplitRemainder { division, .. } = feature.operation {
-            self.current()
-                .session
-                .document()
-                .part(part)
-                .and_then(|p| p.features.iter().find(|f| f.output == division))
-                .cloned()
-        } else {
-            Some(feature)
-        };
+        // Partes separadas e o lado complementar editam a operação que os gerou.
+        let definition = self.current().session.document().part(part);
+        let mut feature = Some(feature);
+        for _ in 0..definition.map_or(0, |p| p.features.len()) {
+            let origin = match feature.as_ref().map(|f| &f.operation) {
+                Some(Operation::SplitRemainder { division, .. }) => *division,
+                Some(Operation::Piece { base, .. }) => *base,
+                _ => break,
+            };
+            feature = definition
+                .and_then(|p| p.features.iter().find(|f| f.output == origin))
+                .cloned();
+        }
         if let Some(feature) = feature {
             self.feature_edit = Some(Draft::edit(self.current().id, part, feature));
         }

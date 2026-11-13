@@ -1,6 +1,6 @@
-# Formato de projeto — versão interna 53
+# Formato de projeto — versão interna 54
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 53; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 54; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -17,6 +17,16 @@ labels/<body_id>.brep            (contornos unitários do rótulo)
 ```
 
 ## Manifesto
+
+Desde a versão 54, `Piece { base, key }` é uma parte desconectada do resultado `base`: um
+corpo é sempre um objeto só. Ao criar ou recalcular operações, cada resultado final com
+sólidos que não compartilham nem um vértice ganha uma `Piece` por parte, logo após a
+operação (ou após as partes já existentes), e `base` fica oculto como etapa intermediária.
+`key` guarda os nomes estáveis das faces da parte (`faces`, ordenados) e o centro de massa
+(`center`, mm) da última construção; no recálculo, cada parte fica com o sólido de mais
+faces em comum e, no empate, o mais próximo, e a chave é atualizada. Parte que deixou de
+existir ou empate indistinguível falha com erro explícito. Partes novas (o resultado passou
+a ter mais sólidos) ganham novas operações `Piece`.
 
 Desde a versão 53, cada grupo pode ter `rigid: true` (omitido quando falso). Membros de um
 grupo rígido se movem juntos; um componente pertence a no máximo um grupo rígido, e um

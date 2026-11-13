@@ -8,6 +8,27 @@ use nator_document::{
 use nator_kernel::Solid;
 use nator_sketch::{Plane, Sketch};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+/// Resultado inteiro da operação: partes soltas viram corpos próprios e o conjunto fica
+/// oculto como etapa intermediária.
+fn whole(
+    session: &Session,
+    part: nator_document::PartId,
+    body: nator_document::BodyId,
+) -> Result<nator_document::BodyId> {
+    let feature = session
+        .document()
+        .part(part)
+        .ok_or("Peça ausente")?
+        .features
+        .iter()
+        .find(|f| f.output == body)
+        .ok_or("Operação ausente")?;
+    Ok(match feature.operation {
+        Operation::Piece { base, .. } => base,
+        _ => body,
+    })
+}
 #[test]
 fn multiple_profiles_and_external_axis_recalculate_clone_and_roundtrip() -> Result<()> {
     let mut a = Sketch::new("Áreas", Plane::xy());
@@ -50,6 +71,7 @@ fn multiple_profiles_and_external_axis_recalculate_clone_and_roundtrip() -> Resu
     else {
         return Err("Resultado".into());
     };
+    let body = whole(&session, part, body)?;
     let volume = |session: &Session| -> Result<f64> {
         let b = session.document().body(body).ok_or("Corpo")?;
         Ok(Solid::from_brep(b.brep.as_ref().ok_or("B-rep")?, Some(&b.face_names))?.volume()?)

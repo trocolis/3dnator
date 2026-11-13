@@ -185,6 +185,8 @@ pub(super) struct Built {
     pub brep: Arc<Vec<u8>>,
     pub faces: Arc<Vec<String>>,
     pub intrinsic_colors: Arc<Vec<Option<nator_geometry::RgbColor>>>,
+    /// Identidade atualizada de uma parte separada (`Operation::Piece`).
+    pub key: Option<nator_document::features::PieceKey>,
 }
 
 /// Recalcula na ordem as operações ativas da peça. Operações suprimidas, dependentes de uma
@@ -222,6 +224,15 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::Com
                 }),
             }
         })?;
+        if let Some(key) = built.key.clone()
+            && let Some(Operation::Piece { key: stored, .. }) = doc
+                .part_mut(part)?
+                .features
+                .get_mut(position)
+                .map(|f| &mut f.operation)
+        {
+            *stored = key;
+        }
         let body = doc.body_mut(feature.output)?;
         let bytes = body.brep.replace(built.brep);
         let names = std::mem::replace(&mut body.face_names, built.faces);
@@ -231,6 +242,7 @@ pub(super) fn rebuild(doc: &mut Document, part: PartId) -> Result<(), super::Com
             retarget(doc, part, feature.output, &bytes, &names);
         }
     }
+    separate(doc, part)?;
     crate::appearance::rebuild(doc, part)?;
     Ok(())
 }
@@ -1374,6 +1386,7 @@ pub(super) fn construct(
     let value = |expression: &str| piece.parameters.evaluate(expression, Dimension::Length);
     let owner = body_owner(output);
     let mut label_colors = None;
+    let mut piece_key_out = None;
     let mut solid = match operation {
         operation @ (Operation::Extrude { combine, .. }
         | Operation::ExtrudeFace { combine, .. }
@@ -1811,6 +1824,36 @@ pub(super) fn construct(
                 .split(origin, normal.map(|v| -v), &owner)
                 .map_err(error)?
         }
+        Operation::Piece { base, key } => {
+            let pieces = source(doc, part, *base)?.0.pieces().map_err(error)?;
+            let keys = pieces
+                .iter()
+                .map(piece_key)
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut claims = siblings(piece, *base);
+            let position = match claims.iter().position(|(id, _)| *id == output) {
+                Some(position) => {
+                    claims[position].1 = key.clone();
+                    position
+                }
+                None => {
+                    claims.push((output, key.clone()));
+                    claims.len() - 1
+                }
+            };
+            let claims = claims.into_iter().map(|(_, key)| key).collect::<Vec<_>>();
+            let index = assign(&claims, &keys)?[position].ok_or_else(|| {
+                DocumentError(
+                    "Esta parte não existe mais no resultado da operação anterior; exclua-a ou ajuste o histórico."
+                        .into(),
+                )
+            })?;
+            piece_key_out = keys.get(index).cloned();
+            pieces
+                .into_iter()
+                .nth(index)
+                .ok_or_else(|| DocumentError("Parte inexistente no resultado.".into()))?
+        }
     };
     solid.volume().map_err(error)?;
     let brep = Arc::new(solid.to_brep().map_err(error)?);
@@ -1832,6 +1875,7 @@ pub(super) fn construct(
         brep,
         faces,
         intrinsic_colors,
+        key: piece_key_out,
     })
 }
 #[cfg(not(feature = "occt"))]
@@ -1843,6 +1887,204 @@ pub(super) fn construct(
 ) -> Result<Built, DocumentError> {
     nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
     Err(DocumentError("Construção CAD indisponível.".into()))
+}
+
+/// Identidade de uma parte: nomes estáveis das faces e centro de massa.
+#[cfg(feature = "occt")]
+fn piece_key(solid: &Solid) -> Result<nator_document::features::PieceKey, DocumentError> {
+    let mut faces = solid
+        .face_names()
+        .iter()
+        .filter(|n| !n.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    faces.sort_unstable();
+    faces.dedup();
+    Ok(nator_document::features::PieceKey {
+        faces,
+        center: solid.properties().map_err(error)?.center,
+    })
+}
+
+/// Partes já separadas do resultado `base`, na ordem do histórico, com suas identidades.
+#[cfg(feature = "occt")]
+fn siblings(
+    piece: &nator_document::Part,
+    base: BodyId,
+) -> Vec<(BodyId, nator_document::features::PieceKey)> {
+    piece
+        .features
+        .iter()
+        .filter_map(|f| match &f.operation {
+            Operation::Piece { base: source, key } if *source == base => {
+                Some((f.output, key.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Associa cada identidade guardada a uma parte do resultado: primeiro os pares com mais
+/// faces em comum e, no empate, os mais próximos. Identidade sem parte restante fica `None`;
+/// duas partes igualmente prováveis para a mesma identidade são um erro, nunca um palpite.
+#[cfg(feature = "occt")]
+fn assign(
+    claims: &[nator_document::features::PieceKey],
+    solids: &[nator_document::features::PieceKey],
+) -> Result<Vec<Option<usize>>, DocumentError> {
+    use nator_document::features::PieceKey;
+    let overlap = |a: &PieceKey, b: &PieceKey| {
+        let common = a
+            .faces
+            .iter()
+            .filter(|f| b.faces.binary_search(f).is_ok())
+            .count();
+        let union = a.faces.len() + b.faces.len() - common;
+        // Duas partes sem faces nomeadas têm conjuntos iguais; decide a distância.
+        if union == 0 {
+            1.
+        } else {
+            common as f64 / union as f64
+        }
+    };
+    let distance =
+        |a: &PieceKey, b: &PieceKey| nator_geometry::norm(nator_geometry::sub(a.center, b.center));
+    let mut pairs = Vec::with_capacity(claims.len() * solids.len());
+    for (c, claim) in claims.iter().enumerate() {
+        for (s, solid) in solids.iter().enumerate() {
+            pairs.push((overlap(claim, solid), distance(claim, solid), c, s));
+        }
+    }
+    pairs.sort_by(|a, b| {
+        b.0.total_cmp(&a.0)
+            .then(a.1.total_cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+            .then(a.3.cmp(&b.3))
+    });
+    let mut result = vec![None; claims.len()];
+    let mut taken = vec![false; solids.len()];
+    for &(score, near, c, s) in &pairs {
+        if result[c].is_some() || taken[s] {
+            continue;
+        }
+        let rival = pairs.iter().any(|&(other, far, oc, os)| {
+            oc == c
+                && os != s
+                && !taken[os]
+                && (other - score).abs() < 1e-12
+                && (far - near).abs() < SAME_PLACE_MM
+        });
+        if rival {
+            return Err(DocumentError(
+                "Duas partes separadas ficaram indistinguíveis; exclua uma delas e refaça a separação."
+                    .into(),
+            ));
+        }
+        result[c] = Some(s);
+        taken[s] = true;
+    }
+    Ok(result)
+}
+
+/// Um corpo é sempre um objeto só. Cada resultado final (não consumido por nenhuma operação)
+/// com partes desconectadas ganha uma operação `Piece` por parte ainda sem corpo, logo depois
+/// das partes existentes; o resultado inteiro fica oculto como etapa intermediária.
+/// Devolve os corpos criados.
+#[cfg(feature = "occt")]
+pub(super) fn separate(doc: &mut Document, part: PartId) -> Result<Vec<BodyId>, DocumentError> {
+    use std::collections::HashSet;
+    let piece = doc
+        .part(part)
+        .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+    let states = nator_document::features::states(piece);
+    // Consumo por operações inativas também conta: reativá-las não pode duplicar o corpo.
+    let consumed = piece
+        .features
+        .iter()
+        .filter(|f| !matches!(f.operation, Operation::Piece { .. }))
+        .flat_map(|f| f.operation.inputs())
+        .collect::<HashSet<_>>();
+    let candidates = piece
+        .features
+        .iter()
+        .zip(states)
+        .filter(|(f, state)| {
+            state.is_active()
+                && !matches!(f.operation, Operation::Piece { .. })
+                && !consumed.contains(&f.output)
+        })
+        .map(|(f, _)| (f.output, f.name.clone()))
+        .collect::<Vec<_>>();
+    let mut created = Vec::new();
+    for (body, name) in candidates {
+        let Ok((solid, _)) = source(doc, part, body) else {
+            continue;
+        };
+        if solid.piece_count().map_err(error)? <= 1 {
+            continue;
+        }
+        let keys = solid
+            .pieces()
+            .map_err(error)?
+            .iter()
+            .map(piece_key)
+            .collect::<Result<Vec<_>, _>>()?;
+        // Partes que nem a identidade distingue ficam juntas: separá-las seria um palpite.
+        let twins = keys.iter().enumerate().any(|(i, a)| {
+            keys[i + 1..].iter().any(|b| {
+                a.faces == b.faces
+                    && nator_geometry::norm(nator_geometry::sub(a.center, b.center)) < SAME_PLACE_MM
+            })
+        });
+        let piece = doc
+            .part(part)
+            .ok_or_else(|| DocumentError("Peça inexistente.".into()))?;
+        let existing = siblings(piece, body);
+        if twins || existing.len() >= keys.len() {
+            continue;
+        }
+        let claims = existing.iter().map(|(_, k)| k.clone()).collect::<Vec<_>>();
+        let Ok(assignment) = assign(&claims, &keys) else {
+            continue;
+        };
+        let claimed = assignment.into_iter().flatten().collect::<HashSet<_>>();
+        let mut position = piece
+            .features
+            .iter()
+            .rposition(|f| {
+                f.output == body
+                    || matches!(f.operation, Operation::Piece { base, .. } if base == body)
+            })
+            .map_or(piece.features.len(), |p| p + 1);
+        let (base_name, visible) = doc
+            .body(body)
+            .map(|b| (b.name.clone(), b.visible))
+            .ok_or_else(|| DocumentError("Corpo inexistente.".into()))?;
+        let mut number = existing.len();
+        for (index, key) in keys.into_iter().enumerate() {
+            if claimed.contains(&index) {
+                continue;
+            }
+            number += 1;
+            let output = super::insert_feature(
+                doc,
+                part,
+                format!("{name} · parte {number}"),
+                Operation::Piece { base: body, key },
+                Some(position),
+            )?;
+            position += 1;
+            let target = doc.body_mut(output)?;
+            target.name = format!("{base_name}.{number}");
+            target.visible = visible;
+            created.push(output);
+        }
+    }
+    Ok(created)
+}
+#[cfg(not(feature = "occt"))]
+pub(super) fn separate(_doc: &mut Document, _part: PartId) -> Result<Vec<BodyId>, DocumentError> {
+    Ok(Vec::new())
 }
 
 /// Excluir uma operação nunca deixa referências silenciosamente apontando para outra geometria:

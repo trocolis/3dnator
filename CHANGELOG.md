@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.54.0 — 12/11/2026
+
+- Um corpo é sempre um objeto só. Quando uma operação (divisão, extrusão de áreas separadas, padrão ou espelhamento sem contato, corte que atravessa) deixa partes desconectadas, cada parte vira um corpo próprio, numerado a partir do nome original ("Corpo 1 (1).1", "Corpo 1 (1).2"). Antes, dividir um corpo em U pelos dois braços gerava dois corpos, um deles com os dois braços soltos. Sólidos que se tocam numa aresta ou num vértice continuam juntos.
+- Nova operação `Piece` no histórico, logo após a que gerou as partes; o resultado inteiro fica oculto como etapa intermediária. Editar uma parte abre a operação de origem. No recálculo, cada parte acompanha o mesmo objeto pelos nomes estáveis das faces e, no empate, pela posição; parte que deixou de existir falha com erro explícito, e partes novas ganham corpos novos.
+- Ponte OCCT: `nator_piece_count`/`nator_piece` separam os componentes conexos de um resultado, preservando os nomes das faces (`Solid::pieces`).
+- Formato de projeto 54.
+
 ## 0.53.0 — 11/11/2026
 
 - Importação STEP: um sólido reprovado pela verificação do OCCT não recusa mais o arquivo inteiro (antes: "Sólido STEP inválido."). O STEP não guarda tolerâncias por aresta; numa face B-spline cujas curvas paramétricas só se cruzavam dentro da tolerância de origem, a releitura encolhe as tolerâncias e o fio passa a se cruzar, como num STEP exportado pelo próprio 3dnator com peças vindas do Fusion. A ponte tenta um reparo e só o aceita se o sólido ficar válido com as mesmas faces e o mesmo volume; senão o sólido entra como lido, e a barra de estado lista os corpos não verificados. Operações sobre eles continuam validando o resultado.

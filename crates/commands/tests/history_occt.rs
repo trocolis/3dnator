@@ -112,7 +112,7 @@ fn chain() -> Result<Chain> {
                 first: LinearAxis {
                     direction: [1., 0., 0.],
                     count: 2,
-                    spacing: "70 mm".into(),
+                    spacing: "50 mm".into(),
                 },
                 second: None,
             },
@@ -185,7 +185,7 @@ fn refinements_keep_one_listed_body_and_editing_reuses_its_result() -> Result<()
     assert_eq!(piece.bodies.len(), 3);
     assert_eq!(piece.features.len(), 3);
     assert_eq!(listed(session.document())?, [(c, "Chassi".into())]);
-    assert!((volume(&session, c)? - 2. * 60. * 40. * 8.).abs() < 1e-6);
+    assert!((volume(&session, c)? - 110. * 40. * 8.).abs() < 1e-6);
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("corpo-editado.3dnator");
     nator_project_io::write_project(&path, session.document())?;
@@ -255,7 +255,7 @@ fn suppression_hides_dependents_and_reactivation_rebuilds_them() -> Result<()> {
         suppressed: false,
     })?;
     assert!(part_states(&session, part)?.iter().all(|s| s.is_active()));
-    assert!((volume(&session, c)? - 2. * 60. * 40. * 10.).abs() < 1e-6);
+    assert!((volume(&session, c)? - 110. * 40. * 10.).abs() < 1e-6);
     assert!(!visible(&session, a)? && !visible(&session, b)? && visible(&session, c)?);
     // Desfazer a reativação volta ao histórico suprimido, com a mesma visibilidade.
     assert!(session.undo());
@@ -307,7 +307,7 @@ fn history_marker_rolls_back_inserts_and_persists() -> Result<()> {
     session.execute(Command::SetHistoryMarker { part, marker: None })?;
     assert!(part_states(&session, part)?.iter().all(|s| s.is_active()));
     assert!(!visible(&session, a)? && visible(&session, d)? && visible(&session, c)?);
-    assert!((volume(&session, c)? - 2. * 60. * 40. * 8.).abs() < 1e-6);
+    assert!((volume(&session, c)? - 110. * 40. * 8.).abs() < 1e-6);
     Ok(())
 }
 

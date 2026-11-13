@@ -99,6 +99,8 @@ unsafe extern "C" {
         angle: f64,
     ) -> *mut c_void;
     fn nator_volume(body: *const c_void, volume: *mut f64) -> bool;
+    fn nator_piece_count(body: *const c_void, count: *mut usize) -> bool;
+    fn nator_piece(body: *const c_void, index: usize) -> *mut c_void;
     fn nator_read_step(path: *const c_char) -> *mut c_void;
     fn nator_write_step(body: *const c_void, path: *const c_char) -> bool;
     fn nator_tessellate(body: *mut c_void, linear: f64, angular: f64) -> bool;
@@ -446,6 +448,34 @@ impl Solid {
         part.volume()
             .map_err(|_| KernelError("O plano não deixa material do lado escolhido.".into()))?;
         Ok(part)
+    }
+
+    /// Quantidade de partes conexas: sólidos que não compartilham nem um vértice.
+    pub fn piece_count(&self) -> Result<usize, KernelError> {
+        let mut count = 0;
+        // SAFETY: objeto vivo nesta thread; destino válido durante a chamada.
+        if !unsafe { nator_piece_count(self.pointer.as_ptr(), &mut count) } {
+            return Err(last_error());
+        }
+        Ok(count)
+    }
+
+    /// Partes conexas do sólido, cada uma com os nomes de face que tinham no conjunto.
+    pub fn pieces(&self) -> Result<Vec<Self>, KernelError> {
+        (0..self.piece_count()?)
+            .map(|index| {
+                // SAFETY: corpo vivo; a ponte valida o índice e devolve uma forma nova.
+                Self::from_pointer(unsafe { nator_piece(self.pointer.as_ptr(), index) })?
+                    .with_inherited(
+                        &[&self.faces],
+                        &Inheritance {
+                            owner: "piece",
+                            generated: "piece",
+                            modified_suffix: None,
+                        },
+                    )
+            })
+            .collect()
     }
 
     /// Ferramenta de furo com eixo em `center` e furação na direção `direction`. As faces se

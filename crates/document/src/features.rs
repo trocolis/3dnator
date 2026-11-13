@@ -129,6 +129,16 @@ pub fn dependents(part: &Part, output: BodyId) -> Vec<BodyId> {
     result
 }
 
+/// Identidade de uma parte desconectada no recálculo: nomes estáveis das suas faces e
+/// centro de massa na última construção. Vale a parte com mais faces em comum; no empate,
+/// a mais próxima. Partes indistinguíveis fazem o recálculo falhar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PieceKey {
+    /// Nomes não vazios, ordenados e sem repetição.
+    pub faces: Vec<String>,
+    pub center: [f64; 3],
+}
+
 /// Região de um rascunho escolhida para extrusão ou revolução.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RegionRef {
@@ -373,6 +383,9 @@ pub enum Operation {
     /// Resultado complementar de uma divisão. Consulta o mesmo plano da etapa
     /// primária, impedindo divergência entre os lados durante edição/recálculo.
     SplitRemainder { base: BodyId, division: BodyId },
+    /// Uma parte desconectada do resultado de `base`: um corpo é sempre um objeto só.
+    /// Criada automaticamente quando uma operação deixa partes soltas; `base` fica oculto.
+    Piece { base: BodyId, key: PieceKey },
     /// Elimina contatos em linha com um pino de `radius` ao longo de cada um. `contacts`
     /// guarda os nomes ordenados das faces em volta do contato: se ele deixar de existir,
     /// a operação falha em vez de agir sobre outra geometria.
@@ -718,6 +731,7 @@ impl Operation {
             | Self::Mirror { base, .. }
             | Self::Split { base, .. }
             | Self::SplitRemainder { base, .. }
+            | Self::Piece { base, .. }
             | Self::RepairContacts { base, .. }
             | Self::ComponentCut { base, .. }
             | Self::Lip { base, .. }
@@ -1021,6 +1035,14 @@ impl Feature {
             Operation::SplitRemainder { base, division } => {
                 body(base)?;
                 body(division)?;
+            }
+            Operation::Piece { base, key } => {
+                body(base)?;
+                for face in &mut key.faces {
+                    *face = remap_face_name(face, bodies);
+                }
+                key.faces.sort_unstable();
+                key.faces.dedup();
             }
             Operation::RepairContacts { base, contacts, .. } => {
                 body(base)?;
@@ -1664,6 +1686,11 @@ pub fn validate(part: &Part) -> Result<(), DocumentError> {
                     return Err(DocumentError(
                         "A divisão complementar perdeu sua etapa primária.".into(),
                     ));
+                }
+            }
+            Operation::Piece { key, .. } => {
+                if !key.center.iter().all(|v| v.is_finite()) {
+                    return Err(DocumentError("Centro da parte separada inválido.".into()));
                 }
             }
             Operation::Boolean { .. } => {}

@@ -6,6 +6,28 @@ use nator_sketch::{Plane, Sketch};
 use std::sync::Arc;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+/// Resultado inteiro da operação: partes soltas viram corpos próprios e o conjunto fica
+/// oculto como etapa intermediária.
+#[cfg(feature = "occt")]
+fn whole(
+    session: &nator_commands::Session,
+    part: nator_document::PartId,
+    body: nator_document::BodyId,
+) -> Result<nator_document::BodyId> {
+    let feature = session
+        .document()
+        .part(part)
+        .ok_or("Peça ausente")?
+        .features
+        .iter()
+        .find(|f| f.output == body)
+        .ok_or("Operação ausente")?;
+    Ok(match feature.operation {
+        nator_document::features::Operation::Piece { base, .. } => base,
+        _ => body,
+    })
+}
+
 #[test]
 fn visible_sketch_areas_edges_and_vertices_project_with_holes_and_exclude_the_target() -> Result<()>
 {
@@ -88,6 +110,7 @@ fn multiple_projected_areas_extrude_as_one_operation_and_survive_roundtrip() -> 
     else {
         return Err("Corpo ausente".into());
     };
+    let body = whole(&session, part, body)?;
     let solid = nator_kernel::Solid::from_brep(
         session
             .document()

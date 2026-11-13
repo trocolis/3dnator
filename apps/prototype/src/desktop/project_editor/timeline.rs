@@ -71,7 +71,9 @@ pub(super) fn operation_icon(operation: &Operation) -> Icon {
         Operation::Boolean { .. } => Icon::Boolean,
         Operation::Pattern { .. } => Icon::Pattern,
         Operation::Mirror { .. } => Icon::Mirror,
-        Operation::Split { .. } | Operation::SplitRemainder { .. } => Icon::Split,
+        Operation::Split { .. } | Operation::SplitRemainder { .. } | Operation::Piece { .. } => {
+            Icon::Split
+        }
         Operation::ComponentCut { .. } => Icon::ComponentCut,
         Operation::Lip { .. } => Icon::Lip,
         Operation::MergeFaces { .. } => Icon::Join,

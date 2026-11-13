@@ -68,7 +68,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 /// referência filhos dela. Ausente, a pasta fica visível.
 /// Versão 52: operação `RemoveFaces` (remover arredondamentos, chanfros e outras faces).
 /// Versão 53: grupos rígidos (`groups[].rigid`); ausente, o grupo é organizacional.
-pub const FORMAT_VERSION: u32 = 53;
+/// Versão 54: operação `Piece`, uma parte desconectada do resultado de outra operação.
+pub const FORMAT_VERSION: u32 = 54;
 const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;

@@ -634,7 +634,8 @@ impl Command {
                 let original = doc.body(base).map(|b| b.name.clone()).unwrap_or(name);
                 doc.body_mut(first)?.name = format!("{original} (1)");
                 doc.body_mut(second)?.name = format!("{original} (2)");
-                return Ok(Effect::Imported { part, body: first });
+                let body = separated(doc, part, first)?;
+                return Ok(Effect::Imported { part, body });
             }
             Self::AddSmartExtrusion {
                 part,
@@ -644,7 +645,8 @@ impl Command {
             } => {
                 let operation = extrusion::automatic(doc, part, operation, preferred)?;
                 let output = add_feature(doc, part, name, operation)?;
-                return Ok(Effect::Imported { part, body: output });
+                let body = separated(doc, part, output)?;
+                return Ok(Effect::Imported { part, body });
             }
             Self::AddFeature {
                 part,
@@ -652,7 +654,8 @@ impl Command {
                 operation,
             } => {
                 let output = add_feature(doc, part, name, operation)?;
-                return Ok(Effect::Imported { part, body: output });
+                let body = separated(doc, part, output)?;
+                return Ok(Effect::Imported { part, body });
             }
             Self::PatternInstance { id, layout } => {
                 let source = doc
@@ -1212,6 +1215,35 @@ fn add_feature(
     name: String,
     operation: nator_document::features::Operation,
 ) -> Result<BodyId, DocumentError> {
+    insert_feature(doc, part, name, operation, None)
+}
+
+/// Separa as partes desconectadas da peça (`features::separate`). Se `output` virou
+/// etapa intermediária, devolve a primeira parte dele, que é o corpo visível a selecionar.
+fn separated(doc: &mut Document, part: PartId, output: BodyId) -> Result<BodyId, DocumentError> {
+    let created = features::separate(doc, part)?;
+    let first = doc.part(part).and_then(|p| {
+        p.features.iter().find_map(|f| match &f.operation {
+            nator_document::features::Operation::Piece { base, .. }
+                if *base == output && created.contains(&f.output) =>
+            {
+                Some(f.output)
+            }
+            _ => None,
+        })
+    });
+    Ok(first.unwrap_or(output))
+}
+
+/// Como `add_feature`, mas em `position` do histórico quando indicada (sempre antes do
+/// marcador, que avança junto); sem posição, a operação entra no marcador.
+fn insert_feature(
+    doc: &mut Document,
+    part: PartId,
+    name: String,
+    operation: nator_document::features::Operation,
+    position: Option<usize>,
+) -> Result<BodyId, DocumentError> {
     // O identificador vem antes da construção porque os nomes das faces levam o corpo dono;
     // em caso de falha, a cópia candidata do documento é descartada inteira.
     let output = doc.allocate_body_id()?;
@@ -1315,12 +1347,18 @@ fn add_feature(
         operation,
         suppressed: false,
     };
-    match piece.history_marker {
-        Some(marker) => {
+    match (position, piece.history_marker) {
+        (Some(position), marker) if position <= piece.features.len() => {
+            piece.features.insert(position, feature);
+            if let Some(marker) = marker.filter(|m| position <= *m) {
+                piece.history_marker = Some(marker + 1);
+            }
+        }
+        (_, Some(marker)) => {
             piece.features.insert(marker, feature);
             piece.history_marker = Some(marker + 1);
         }
-        None => piece.features.push(feature),
+        (_, None) => piece.features.push(feature),
     }
     Ok(output)
 }
