@@ -63,11 +63,16 @@ impl Query {
     fn project(&self, p: Point3) -> Option<egui::Pos2> {
         sketch_scene::project(&self.camera, self.bounds, self.rect, p)
     }
+    /// Meio comprimento visível de uma reta infinita: atravessa toda a cena.
+    fn extent(&self) -> f64 {
+        nator_geometry::norm(self.bounds.size()).max(1.) * 2.
+    }
     fn candidate(&self, target: Target, overlay: highlight::Overlay) -> Option<ScreenCandidate> {
         let (point, priority, distance) = match &target {
             Target::Vertex { point } => (*point, 0, self.project(*point)?.distance(self.position)),
-            Target::Edge { points, .. } => {
-                let (point, distance) = points
+            Target::Edge { .. } => {
+                let (point, distance) = target
+                    .reach_points(self.extent())
                     .windows(2)
                     .filter_map(|s| {
                         let a = self.project(s[0])?;
@@ -123,13 +128,15 @@ impl Query {
             }
         }
         for entity in &sketch.entities {
-            if entity.infinite {
-                continue;
-            }
+            // Retas infinitas também valem: mede-se até elas (são comuns nas referências).
             if let Ok(target) = nator_commands::measure::sketch_entity(sketch, entity.id, pose) {
                 let overlay = match &target {
-                    Target::Edge { points, .. } => highlight::Overlay {
-                        segments: points.windows(2).map(|s| ([s[0], s[1]], None)).collect(),
+                    Target::Edge { .. } => highlight::Overlay {
+                        segments: target
+                            .reach_points(self.extent())
+                            .windows(2)
+                            .map(|s| ([s[0], s[1]], None))
+                            .collect(),
                         ..Default::default()
                     },
                     _ => continue,
@@ -259,6 +266,53 @@ mod tests {
             result.target.anchor()[2] >= 6. - 1e-7,
             "Linha oculta foi medida"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn reference_lines_including_infinite_ones_are_measured_against_an_edge()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut doc = Document::new("Referências")?;
+        let mut sketch = nator_sketch::Sketch::new("Linhas", nator_sketch::Plane::xy());
+        sketch.add_line([0., 50.], [40., 50.], false)?;
+        // Reta infinita definida longe do ponto clicado.
+        sketch.add_line_with_type([90., 70.], [95., 70.], nator_sketch::LineType::Infinite)?;
+        sketch.add_line([0., 90.], [40., 90.], true)?;
+        doc.add_reference_sketch(sketch)?;
+        let bounds = nator_geometry::Bounds {
+            min: [0., 0., 0.],
+            max: [100., 100., 10.],
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.));
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let edge = Target::Edge {
+            points: vec![[0., 10., 0.], [40., 10., 0.]],
+            length_mm: 40.,
+            circle: None,
+            infinite: false,
+        };
+        for y in [50., 70., 90.] {
+            let position =
+                sketch_scene::project(&camera, bounds, rect, [20., y, 0.]).ok_or("Ponto")?;
+            let query = Query {
+                camera: camera.clone(),
+                bounds,
+                rect,
+                position,
+                reach: 1.,
+                section: None,
+            };
+            let candidate = query
+                .run(&doc, &ViewState::default())?
+                .ok_or("Linha de referência não capturada")?;
+            assert!(!candidate.overlay.segments.is_empty());
+            let readings = nator_commands::measure::readings(&edge, Some(&candidate.target), false);
+            let [nator_commands::measure::Reading::Distance { mm, .. }] = readings[..] else {
+                return Err(format!("Distância esperada: {readings:?}").into());
+            };
+            assert!((mm - (y - 10.)).abs() < 1e-9, "{mm}");
+        }
         Ok(())
     }
 }

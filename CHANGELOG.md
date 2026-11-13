@@ -2,6 +2,10 @@
 
 ## Não lançado
 
+## 0.56.0 — 13/11/2026
+
+- Medir: retas infinitas de rascunho, comuns nos rascunhos de referência, agora podem ser escolhidas e medidas contra uma aresta, um vértice ou uma face. Antes elas eram ignoradas pelo cursor (linhas comuns e de construção já funcionavam). Com uma aresta paralela, a distância sai do meio da aresta até o pé da perpendicular na reta, mesmo longe dos pontos que a definem; não paralelas mostram o ângulo, como antes. A reta escolhida aparece realçada de um lado a outro da cena. `measure::Target::Edge` ganha `infinite` e `Target::reach_points`.
+
 ## 0.55.0 — 13/11/2026
 
 - Face a face: o movimento acontece só ao longo da normal da face de destino; as demais coordenadas do objeto ficam como estavam. Faces paralelas não giram: opostas encostam uma na outra, voltadas para o mesmo lado ficam no mesmo plano (com faces em planos XZ, só Y muda). Antes, o ponto clicado da origem ia até o ponto clicado do destino nos três eixos. Faces inclinadas ainda giram o mínimo para ficarem opostas (ou alinhadas, com Inverter) antes de andar pela normal.

@@ -246,6 +246,8 @@ pub enum Target {
         length_mm: f64,
         /// Centro e raio de arestas circulares.
         circle: Option<(Point3, f64)>,
+        /// Reta infinita de rascunho: `points` são dois pontos dela, sem comprimento.
+        infinite: bool,
     },
     Face {
         /// Ponto clicado sobre a face.
@@ -264,13 +266,38 @@ impl Target {
             Self::Edge { points, .. } => along(points, 0.5),
         }
     }
+    /// Pontos da aresta; uma reta infinita vira um trecho de `extent` mm para cada lado
+    /// do meio, para desenhá-la e medir até ela.
+    pub fn reach_points(&self, extent: f64) -> Vec<Point3> {
+        match self {
+            Self::Edge {
+                points,
+                infinite: true,
+                ..
+            } if points.len() == 2 => {
+                let middle = scale(add(points[0], points[1]), 0.5);
+                match unit(sub(points[1], points[0])) {
+                    Some(d) => vec![sub(middle, scale(d, extent)), add(middle, scale(d, extent))],
+                    None => points.clone(),
+                }
+            }
+            Self::Edge { points, .. } => points.clone(),
+            Self::Vertex { point } | Self::Face { point, .. } => vec![*point],
+        }
+    }
+    fn infinite(&self) -> bool {
+        matches!(self, Self::Edge { infinite: true, .. })
+    }
     fn straight(&self) -> Option<(Point3, Point3)> {
         match self {
             Self::Edge {
                 points,
                 circle: None,
                 ..
-            } if points.len() == 2 => Some((points[0], points[1])),
+            } if points.len() == 2 => {
+                let points = self.reach_points(INFINITE_MM);
+                Some((points[0], points[1]))
+            }
             _ => None,
         }
     }
@@ -322,6 +349,10 @@ pub enum Reading {
         at: Point3,
     },
 }
+
+/// Meio comprimento com que uma reta infinita entra nas medições: muito além de qualquer
+/// peça, sem perder precisão em ponto flutuante.
+const INFINITE_MM: f64 = 1e6;
 
 /// Abaixo disto (0,01°), duas direções são paralelas.
 const PARALLEL_RAD: f64 = 0.01 * std::f64::consts::PI / 180.;
@@ -409,7 +440,11 @@ fn closest_points(first: &Target, second: &Target) -> (Point3, Point3) {
             Target::Edge { points, .. } if points.len() < 2 => {
                 points.first().map(|p| vec![(*p, *p)]).unwrap_or_default()
             }
-            Target::Edge { points, .. } => points.windows(2).map(|w| (w[0], w[1])).collect(),
+            Target::Edge { .. } => t
+                .reach_points(INFINITE_MM)
+                .windows(2)
+                .map(|w| (w[0], w[1]))
+                .collect(),
         }
     };
     let mut best = (f64::INFINITY, ([0.; 3], [0.; 3]));
@@ -437,10 +472,13 @@ pub fn readings(first: &Target, second: Option<&Target>, axes: bool) -> Vec<Read
     let Some(second) = second else {
         return match first {
             Target::Vertex { point } => vec![Reading::Point { at: *point }],
+            // Reta infinita: nada a medir sozinha; o realce mostra que ela foi escolhida.
+            Target::Edge { infinite: true, .. } => Vec::new(),
             Target::Edge {
                 points,
                 length_mm,
                 circle,
+                ..
             } => {
                 let mut result = vec![Reading::Length {
                     mm: *length_mm,
@@ -514,10 +552,18 @@ pub fn readings(first: &Target, second: Option<&Target>, axes: bool) -> Vec<Read
         (Some((a0, a1)), Some((b0, b1)), _, _) => {
             let angle = acute(sub(a1, a0), sub(b1, b0)).unwrap_or(0.);
             if angle < PARALLEL_RAD {
-                let middle = scale(add(a0, a1), 0.5);
-                let d = sub(b1, b0);
-                let foot = add(b0, scale(d, dot(sub(middle, b0), d) / dot(d, d)));
-                distance(middle, foot)
+                // A cota parte do meio do elemento finito (reta infinita não tem meio).
+                let foot = |p: Point3, (o, e): (Point3, Point3)| {
+                    let d = sub(e, o);
+                    add(o, scale(d, dot(sub(p, o), d) / dot(d, d)))
+                };
+                if first.infinite() && !second.infinite() {
+                    let middle = second.anchor();
+                    distance(foot(middle, (a0, a1)), middle)
+                } else {
+                    let middle = first.anchor();
+                    distance(middle, foot(middle, (b0, b1)))
+                }
             } else {
                 let (p, q) = segments(a0, a1, b0, b1);
                 vec![Reading::Angle {
@@ -598,6 +644,7 @@ pub fn target_at(doc: &Document, pick: &Pick, reach: f64) -> Result<Target, Docu
             points: vec![p, q],
             length_mm: norm(sub(q, p)),
             circle: None,
+            infinite: false,
         });
     }
     Ok(Target::Face {
@@ -669,6 +716,7 @@ fn solid_target(doc: &Document, pick: &Pick, reach: f64) -> Result<Target, Docum
             points: points.into_iter().map(world).collect(),
             length_mm,
             circle: circle.map(|(center, radius)| (world(center), radius)),
+            infinite: false,
         });
     }
     let index = doc.face_index_at(pick)?;
@@ -753,6 +801,7 @@ mod tests {
             points: vec![a, b],
             length_mm: norm(sub(b, a)),
             circle: None,
+            infinite: false,
         }
     }
 
@@ -812,6 +861,41 @@ mod tests {
             return Err("ângulo esperado".into());
         };
         assert!((rad.to_degrees() - 30.).abs() < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn an_edge_measures_to_an_infinite_sketch_line_beyond_its_defining_points()
+    -> Result<(), Box<dyn Error>> {
+        // Reta infinita definida por um trecho curto e longe da aresta.
+        let line = Target::Edge {
+            points: vec![[100., 7., 0.], [101., 7., 0.]],
+            length_mm: 1.,
+            circle: None,
+            infinite: true,
+        };
+        assert!(readings(&line, None, false).is_empty());
+        let a = edge([0., 0., 0.], [10., 0., 0.]);
+        for (first, second) in [(&a, &line), (&line, &a)] {
+            let (mm, from, to) =
+                only_distance(&readings(first, Some(second), false)).ok_or("distância")?;
+            assert!((mm - 7.).abs() < 1e-9, "{mm}");
+            // A cota sai do meio da aresta, não dos pontos que definem a reta.
+            let (edge_end, line_end) = if std::ptr::eq(first, &a) {
+                (from, to)
+            } else {
+                (to, from)
+            };
+            assert!(norm(sub(edge_end, [5., 0., 0.])) < 1e-9);
+            assert!(norm(sub(line_end, [5., 7., 0.])) < 1e-9);
+        }
+        // Um vértice mede até o pé da perpendicular na reta, fora do trecho que a define.
+        let vertex = Target::Vertex {
+            point: [0., 0., 0.],
+        };
+        let (mm, _, to) =
+            only_distance(&readings(&vertex, Some(&line), false)).ok_or("distância")?;
+        assert!((mm - 7.).abs() < 1e-9 && norm(sub(to, [0., 7., 0.])) < 1e-6);
         Ok(())
     }
 

@@ -10,10 +10,21 @@ pub fn sketch_entity(
     placement: Placement,
 ) -> Result<Target, DocumentError> {
     let entity = sketch.entity(entity).map_err(error)?;
-    if entity.infinite {
-        return Err(error("Uma reta infinita não tem comprimento finito."));
-    }
     let world = |p| placement.apply(sketch.plane.world(p));
+    // Reta infinita: dois pontos definem a direção; mede-se até ela, não o comprimento.
+    if entity.infinite {
+        let Curve::Line { start, end } = entity.curve else {
+            return Err(error("Só retas podem ser infinitas."));
+        };
+        let a = sketch.point(start).map_err(error)?;
+        let b = sketch.point(end).map_err(error)?;
+        return Ok(Target::Edge {
+            points: vec![world(a), world(b)],
+            length_mm: distance(a, b),
+            circle: None,
+            infinite: true,
+        });
+    }
     let (length_mm, circle) = match entity.curve {
         Curve::Line { start, end } => {
             let a = sketch.point(start).map_err(error)?;
@@ -57,6 +68,7 @@ pub fn sketch_entity(
         points,
         length_mm,
         circle,
+        infinite: false,
     })
 }
 

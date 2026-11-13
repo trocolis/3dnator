@@ -1,4 +1,5 @@
-//! Ferramenta Medir, sem painel: cada clique escolhe um vértice, uma aresta ou uma face,
+//! Ferramenta Medir, sem painel: cada clique escolhe um vértice, uma aresta, uma face ou uma
+//! linha de rascunho (inclusive reta infinita de referência),
 //! e a medida aparece desenhada na cena. Um alvo mostra a própria medida; dois mostram a
 //! distância (ou o ângulo, se não forem paralelos); o duplo clique no segundo alvo
 //! decompõe a distância nos eixos X, Y e Z. Esc limpa os alvos e, sem alvos, sai do Medir.
@@ -99,8 +100,14 @@ impl Editor {
                         painter.circle_filled(p, 4.5, TARGET);
                     }
                 }
-                Target::Edge { points, .. } => {
-                    let line = points.iter().filter_map(|p| screen(*p)).collect::<Vec<_>>();
+                Target::Edge { .. } => {
+                    // Reta infinita: desenhada de um lado a outro da cena.
+                    let extent = norm(bounds.size()).max(1.) * 2.;
+                    let line = target
+                        .reach_points(extent)
+                        .iter()
+                        .filter_map(|p| screen(*p))
+                        .collect::<Vec<_>>();
                     painter.add(egui::Shape::line(line, egui::Stroke::new(3., TARGET)));
                 }
                 Target::Face { point, .. } => {
