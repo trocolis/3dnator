@@ -3354,16 +3354,17 @@ mod tests {
         let ok = label_position(&mut editor, &context, text(T::Ok))?;
         click(&mut editor, &context, ok)?;
         settle(&mut editor, &context)?;
+        // Anéis soltos: uma revolução e um corpo por anel.
         assert_eq!(
-            editor
-                .current()
-                .session
-                .document()
-                .part(part)
-                .ok_or("Peça")?
-                .features
-                .len(),
-            1,
+            operations_and_pieces(
+                editor
+                    .current()
+                    .session
+                    .document()
+                    .part(part)
+                    .ok_or("Peça")?
+            ),
+            (1, 2),
             "{}",
             editor.status
         );
@@ -5723,10 +5724,16 @@ mod tests {
             let document = editor.current().session.document();
             let body = document.body(original).ok_or("Corpo alinhado ausente")?;
             assert_eq!(document.part(part).ok_or("Peça ausente")?.bodies.len(), 1);
+            // Face a face anda só ao longo da normal do destino (Z); X e Y ficam.
+            let expected = if mode == navigation::PickMode::Face {
+                nator_geometry::add(from.point, [0., 0., 7.])
+            } else {
+                target
+            };
             assert!(
                 nator_geometry::norm(nator_geometry::sub(
                     body.placement.apply(from.point),
-                    target
+                    expected
                 )) < 1e-8
             );
             assert_eq!(
@@ -5773,6 +5780,93 @@ mod tests {
                 .translation_mm(),
             [300., 0., 0.]
         );
+        Ok(())
+    }
+
+    /// Face a face na edição de uma peça: o cursor realça a face elegível, não o componente
+    /// inteiro. Na origem só valem faces do que se move; no destino, também as faces dos
+    /// componentes translúcidos de fora da peça.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn face_to_face_highlights_eligible_faces_even_on_translucent_parts()
+    -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut document = Document::new("Face a face")?;
+        let (part, original) = document.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let (other_part, _) = document.add_mesh(
+            None,
+            "Outra peça".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let other_instance = document
+            .instances()
+            .iter()
+            .find(|i| i.part == other_part)
+            .ok_or("Instância externa ausente")?
+            .id;
+        document.instance_mut(other_instance)?.placement = Placement::new([300., 0., 0.], [0.; 3])?;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: original }));
+        editor.invalidate_scene();
+        settle(&mut editor, &context)?;
+        editor.open_align(navigation::PickMode::Face);
+        frame(&mut editor, &context, vec![])?;
+        let screen = |editor: &Editor, x: f64| -> Result<egui::Pos2, Box<dyn Error>> {
+            let hit = editor
+                .current()
+                .session
+                .document()
+                .pick(nator_geometry::query::Ray {
+                    origin: [x, 10., 100.],
+                    direction: [0., 0., -1.],
+                })?
+                .ok_or("Corpo não atingido")?;
+            Ok(sketch_scene::project(
+                &editor.viewport.camera,
+                editor.display_bounds(),
+                editor.canvas_rect,
+                hit.point,
+            )
+            .ok_or("Ponto sem projeção")?)
+        };
+        let own = screen(&editor, 10.)?;
+        let foreign = screen(&editor, 310.)?;
+        let hover =
+            |editor: &mut Editor, at: egui::Pos2| -> Result<highlight::Overlay, Box<dyn Error>> {
+                for offset in [0., 3.] {
+                    std::thread::sleep(Duration::from_millis(40));
+                    frame(
+                        editor,
+                        &context,
+                        vec![egui::Event::PointerMoved(at + egui::vec2(offset, 0.))],
+                    )?;
+                }
+                Ok(editor
+                    .hover
+                    .as_ref()
+                    .map(|h| h.overlay.clone())
+                    .unwrap_or_default())
+            };
+        // Origem: a face do suporte se realça; a outra peça não pode se mover.
+        let overlay = hover(&mut editor, own)?;
+        assert!(!overlay.triangles.is_empty(), "{overlay:?}");
+        assert!(hover(&mut editor, foreign)?.is_empty());
+        click(&mut editor, &context, own)?;
+        // Destino: a face da peça translúcida se realça, sem o contorno do componente.
+        let overlay = hover(&mut editor, foreign)?;
+        assert!(!overlay.triangles.is_empty(), "{overlay:?}");
+        assert!(overlay.segments.is_empty(), "{overlay:?}");
+        assert!(overlay.triangles.iter().flatten().all(|p| p[0] > 250.));
         Ok(())
     }
 
@@ -9463,7 +9557,11 @@ mod tests {
             .document()
             .part(part)
             .ok_or("Peça ausente")?;
-        let feature = piece.features.last().ok_or("Operação ausente")?;
+        let feature = piece
+            .features
+            .iter()
+            .rfind(|f| !matches!(f.operation, Operation::Piece { .. }))
+            .ok_or("Operação ausente")?;
         assert!(matches!(
             &feature.operation,
             Operation::ExtrudeFace { base: source, boundaries, combine: Some(combine), .. }
@@ -9482,10 +9580,10 @@ mod tests {
             body.brep.as_ref().ok_or("B-rep ausente")?,
             Some(&body.face_names),
         )?;
-        let cylinder = std::f64::consts::PI * 25. * 10.;
+        // O cilindro solto do rascunho virou um corpo próprio: a base é só a placa.
         let plate = 40. * 30. * 10.;
         let rim = (40. * 30. - 20. * 10.) * 5.;
-        assert!((solid.volume()? - (plate + cylinder + rim)).abs() < 1e-3);
+        assert!((solid.volume()? - (plate + rim)).abs() < 1e-3);
         Ok(())
     }
 
@@ -12570,7 +12668,8 @@ mod tests {
             .document()
             .part(part)
             .ok_or("Peça")?;
-        assert_eq!(piece.features.len(), 1);
+        // Quatro áreas soltas: uma operação e um corpo por área.
+        assert_eq!(operations_and_pieces(piece), (1, 4));
         let feature = piece.features[0].clone();
         assert!(
             matches!(&feature.operation,Operation::ExtrudeMany {profiles,..} if profiles.len()==4)
@@ -12710,8 +12809,9 @@ mod tests {
             .document()
             .part(part)
             .ok_or("Peça ausente")?;
-        assert_eq!(part.features.len(), 1);
-        assert_eq!(part.bodies.len(), 1);
+        // As duas áreas não se tocam: cada uma vira um corpo (operação `Piece`).
+        assert_eq!(operations_and_pieces(part), (1, 2));
+        assert_eq!(part.shown_bodies().count(), 2);
         assert!(
             matches!(&part.features[0].operation,nator_document::features::Operation::Extrude{region:RegionRef::Multiple(regions),until:Some(nator_document::features::ExtrusionLimit::Sketch{sketch}),..} if regions.len()==2 && *sketch==limit)
         );
@@ -14238,6 +14338,21 @@ mod tests {
             .copied()
             .ok_or_else(|| "Viewport ausente".into())
     }
+    /// Operações do histórico e partes separadas (`Piece`) de uma peça.
+    fn operations_and_pieces(part: &nator_document::Part) -> (usize, usize) {
+        let pieces = part
+            .features
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.operation,
+                    nator_document::features::Operation::Piece { .. }
+                )
+            })
+            .count();
+        (part.features.len() - pieces, pieces)
+    }
+
     fn click(
         editor: &mut Editor,
         context: &egui::Context,

@@ -1042,7 +1042,7 @@ pub fn text(key: Text) -> &'static str {
         Text::NewPartName => "Pieza",
         Text::MoveFreeHint => "Manipulador 3D y valores de traslación y rotación.",
         Text::MoveFaceHint => {
-            "Caras opuestas y coplanares; acepta el plano de un boceto de referencia como destino."
+            "Mueve solo a lo largo de la normal del destino: las caras opuestas se tocan, las demás quedan en el mismo plano. Acepta el plano de un boceto de referencia como destino."
         }
         Text::MoveEdgeHint => {
             "Aristas paralelas; acepta líneas de bocetos de referencia como destino."

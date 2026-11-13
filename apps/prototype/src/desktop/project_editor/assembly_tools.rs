@@ -801,10 +801,42 @@ fn align_rotation(from: Point3, to: Point3, pivot: Point3) -> Option<Placement> 
     Placement::default().rotated_about(pivot, axis, angle).ok()
 }
 
+/// Face a face: leva a face de origem ao plano da face de destino movendo só ao longo da
+/// normal do destino; as demais coordenadas do objeto não mudam. Faces paralelas (opostas
+/// ou voltadas para o mesmo lado) não giram: as opostas encostam, as outras ficam no mesmo
+/// plano. Faces inclinadas giram o mínimo para ficarem opostas (ou alinhadas com `flip`).
+fn face_to_plane(
+    from_point: Point3,
+    from_normal: Point3,
+    to_point: Point3,
+    to_normal: Point3,
+    flip: bool,
+) -> Option<Placement> {
+    let length = norm(to_normal);
+    if !length.is_finite() || length < 1e-12 {
+        return None;
+    }
+    let axis = to_normal.map(|v| v / length);
+    let parallel = nator_geometry::query::angle_between(from_normal, axis)
+        .ok()
+        .is_some_and(|angle| angle < 1e-6 || angle > std::f64::consts::PI - 1e-6);
+    let rotation = if parallel {
+        Placement::default()
+    } else {
+        let target = if flip { axis } else { axis.map(|v| -v) };
+        align_rotation(from_normal, target, from_point)?
+    };
+    let distance = dot(sub(to_point, rotation.apply(from_point)), axis);
+    rotation.translated(axis.map(|v| v * distance)).ok()
+}
+
 impl AlignDraft {
     /// Transformação que leva a geometria de origem à de destino.
     fn delta(&self) -> Option<Placement> {
         let (from, to) = (self.from.as_ref()?, self.to.as_ref()?);
+        if self.kind == navigation::PickMode::Face {
+            return face_to_plane(from.point, from.normal, to.point, to.normal, self.flip);
+        }
         let rotation = match self.kind {
             navigation::PickMode::Face => {
                 let target = if self.flip {
@@ -880,6 +912,33 @@ impl Editor {
             }
             _ => None,
         }
+    }
+
+    /// Face a face escolhendo a face de origem: só faces do que pode se mover são elegíveis.
+    fn alignment_picks_source_face(&self) -> bool {
+        matches!(
+            &self.assembly_panel,
+            Some(Panel::Align(d)) if d.tab == self.current().id
+                && d.kind == navigation::PickMode::Face
+                && d.field == Some(AlignField::From)
+        )
+    }
+
+    /// Tipo e campo do alinhamento em edição: mudá-los refaz a pré-seleção.
+    pub(super) fn alignment_hover_context(&self) -> Option<(navigation::PickMode, bool)> {
+        match &self.assembly_panel {
+            Some(Panel::Align(d)) if d.field.is_some() => {
+                Some((d.kind, d.field == Some(AlignField::From)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Elegibilidade de uma face sob o cursor no face a face (`None` fora dele).
+    pub(super) fn alignment_face_eligible(&self, pick: &Pick) -> Option<bool> {
+        (self.alignment_pick_mode() == Some(navigation::PickMode::Face)).then(|| {
+            !self.alignment_picks_source_face() || self.movable_in_construction(pick).is_ok()
+        })
     }
 
     /// Corpo mapeado no ponto a ponto, com um campo em edição.
@@ -3046,9 +3105,27 @@ mod tests {
             from_outline: Vec::new(),
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
-        // O ponto de origem vai ao destino e a normal fica oposta à do destino.
-        assert!(norm(sub(delta.apply([0., 0., 5.]), [20., 0., 0.])) < 1e-9);
+        // Face inclinada: gira até ficar oposta e só então anda ao longo da normal do
+        // destino, até o plano dele.
+        let moved = delta.apply([0., 0., 5.]);
+        assert!((moved[0] - 20.).abs() < 1e-9);
         assert!(norm(sub(delta.apply_vector([0., 0., 1.]), [-1., 0., 0.])) < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn parallel_faces_move_only_along_the_normal() -> Result<(), Box<dyn std::error::Error>> {
+        // Faces em planos XZ (normais ±Y): só Y muda, sem girar o objeto.
+        for (normal, flip) in [
+            ([0., -1., 0.], false),
+            ([0., 1., 0.], false),
+            ([0., -1., 0.], true),
+        ] {
+            let delta = face_to_plane([3., 10., 7.], [0., 1., 0.], [-40., 25., 90.], normal, flip)
+                .ok_or("Alinhamento inválido")?;
+            assert!(norm(sub(delta.apply([3., 10., 7.]), [3., 25., 7.])) < 1e-9);
+            assert!(norm(sub(delta.apply_vector([1., 2., 3.]), [1., 2., 3.])) < 1e-9);
+        }
         Ok(())
     }
 }

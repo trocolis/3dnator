@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.55.0 — 13/11/2026
+
+- Face a face: o movimento acontece só ao longo da normal da face de destino; as demais coordenadas do objeto ficam como estavam. Faces paralelas não giram: opostas encostam uma na outra, voltadas para o mesmo lado ficam no mesmo plano (com faces em planos XZ, só Y muda). Antes, o ponto clicado da origem ia até o ponto clicado do destino nos três eixos. Faces inclinadas ainda giram o mínimo para ficarem opostas (ou alinhadas, com Inverter) antes de andar pela normal.
+- Face a face: o cursor realça a face elegível sob ele, também em cenas grandes e na edição de uma peça, inclusive nas faces dos componentes translúcidos (antes realçava o contorno do componente inteiro). Na escolha da origem só se realçam faces do que pode se mover.
+- Ensaios gráficos de extrusão e revolução atualizados para a separação em corpos da 0.54.0.
+
 ## 0.54.0 — 12/11/2026
 
 - Um corpo é sempre um objeto só. Quando uma operação (divisão, extrusão de áreas separadas, padrão ou espelhamento sem contato, corte que atravessa) deixa partes desconectadas, cada parte vira um corpo próprio, numerado a partir do nome original ("Corpo 1 (1).1", "Corpo 1 (1).2"). Antes, dividir um corpo em U pelos dois braços gerava dois corpos, um deles com os dois braços soltos. Sólidos que se tocam numa aresta ou num vértice continuam juntos.

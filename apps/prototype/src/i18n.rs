@@ -2009,7 +2009,7 @@ fn pt(key: Text) -> &'static str {
         Text::NewPartName => "Peça",
         Text::MoveFreeHint => "Manipulador 3D e valores de translação e rotação.",
         Text::MoveFaceHint => {
-            "Faces opostas e coplanares; aceita o plano de um rascunho de referência como destino."
+            "Move só ao longo da normal do destino: faces opostas encostam, as demais ficam no mesmo plano. Aceita o plano de um rascunho de referência como destino."
         }
         Text::MoveEdgeHint => {
             "Arestas paralelas; aceita linhas de rascunhos de referência como destino."

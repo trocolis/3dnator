@@ -353,7 +353,8 @@ impl Editor {
     /// Contexto de pré-seleção: muda quando o painel, o campo ou o modo mudam.
     fn hover_context(&self) -> String {
         format!(
-            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+            self.alignment_hover_context(),
             self.feature_edit
                 .as_ref()
                 .and_then(|d| d.field().map(|f| (d.part(), d.output(), f))),
@@ -414,9 +415,10 @@ impl Editor {
             .as_ref()
             .is_none_or(|s| s.triangles().len() > HOVER_TRIANGLES);
         let points = self.alignment_pick_mode() == Some(navigation::PickMode::Vertex);
-        // No ponto a ponto o realce dos apoios é o guia do movimento: continua em cenas
-        // grandes, com o mesmo intervalo mínimo entre consultas da pré-seleção comum.
-        let Some(position) = position.filter(|_| !blocked && (points || !heavy)) else {
+        let faces = self.alignment_pick_mode() == Some(navigation::PickMode::Face);
+        // No ponto a ponto e no face a face o realce é o guia do movimento: continua em
+        // cenas grandes, com o mesmo intervalo mínimo entre consultas da pré-seleção comum.
+        let Some(position) = position.filter(|_| !blocked && (points || faces || !heavy)) else {
             self.hover = None;
             return;
         };
@@ -639,7 +641,33 @@ impl Editor {
         let construction = self.current().active_part == Some(pick.part);
         let mode = self.pick_mode;
         let awaits_body = self.alignment_awaits_body();
+        let alignment_face = self.alignment_face_eligible(pick);
         let cache = &mut self.highlight_cache;
+        // Face a face: realça só a face elegível, inclusive nos objetos translúcidos fora da
+        // peça em construção; o rótulo diz de quem ela é.
+        if let Some(eligible) = alignment_face {
+            if !eligible {
+                return Default::default();
+            }
+            let owner = if construction {
+                body.name.clone()
+            } else {
+                document
+                    .instance(pick.instance)
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| body.name.clone())
+            };
+            return match face_of(pick) {
+                Some(f) => (face(body, pose, f), owner),
+                None => (
+                    Overlay {
+                        triangles: vec![pick.vertices],
+                        ..Default::default()
+                    },
+                    owner,
+                ),
+            };
+        }
         // Ponto a ponto antes de escolher o corpo: realça o corpo inteiro a mapear.
         if awaits_body {
             return (body_outline(cache, body, pose), body.name.clone());

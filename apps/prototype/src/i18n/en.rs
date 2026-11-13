@@ -1010,7 +1010,7 @@ pub fn text(key: Text) -> &'static str {
         Text::NewPartName => "Part",
         Text::MoveFreeHint => "3D manipulator and translation and rotation values.",
         Text::MoveFaceHint => {
-            "Opposite and coplanar faces; accepts the plane of a reference sketch as target."
+            "Moves only along the target normal: opposite faces touch, others become coplanar. Accepts the plane of a reference sketch as target."
         }
         Text::MoveEdgeHint => "Parallel edges; accepts lines of reference sketches as target.",
         Text::MovePointHint => {
