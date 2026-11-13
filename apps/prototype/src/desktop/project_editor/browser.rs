@@ -43,6 +43,8 @@ pub(super) enum MenuAction {
     Group,
     Export(Selection),
     ExportStep(nator_commands::export::StepScope),
+    /// STEP, STL ou 3MF para dentro da peça, como corpos dela.
+    ImportInto(PartId),
 }
 
 /// Estado da aba usado pelos menus.
@@ -107,6 +109,9 @@ pub(super) fn instance_menu(
         action = Some(MenuAction::MakeReference(instance.id));
     }
     ui.separator();
+    if item(ui, Icon::Import, T::ImportIntoPart) {
+        action = Some(MenuAction::ImportInto(instance.part));
+    }
     if item(ui, Icon::Export, T::ExportStep) {
         action = Some(MenuAction::ExportStep(
             nator_commands::export::StepScope::Part(instance.part),
@@ -522,6 +527,19 @@ impl Editor {
                 self.open_export_target(item);
             }
             MenuAction::ExportStep(scope) => self.export_step(context, tab, scope),
+            MenuAction::ImportInto(part) => {
+                if self
+                    .current()
+                    .session
+                    .document()
+                    .part(part)
+                    .is_none_or(|p| p.reference)
+                {
+                    self.status.warning(text(T::ReferenceNotEditable));
+                } else {
+                    self.import(context, super::ImportSource::Bodies, Some(part), false);
+                }
+            }
         }
     }
 

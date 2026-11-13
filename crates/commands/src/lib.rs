@@ -65,6 +65,12 @@ pub enum Command {
         destination: Option<PartId>,
         name: String,
     },
+    /// Todos os sólidos do STEP viram corpos da peça `part`, na posição de cada ocorrência,
+    /// sem criar subpeças: a hierarquia do arquivo é achatada.
+    ImportStepBodies {
+        path: std::path::PathBuf,
+        part: PartId,
+    },
     SetSheet {
         id: Option<nator_document::SheetId>,
         target: Option<PartId>,
@@ -452,6 +458,7 @@ impl Command {
             Self::UpdateReferenceImage { .. } => "Editar imagem de referência",
             Self::RemoveReferenceImage { .. } => "Excluir imagem de referência",
             Self::ImportStep { .. } => "Importar montagem STEP",
+            Self::ImportStepBodies { .. } => "Importar STEP para a peça",
             Self::SetSheet { .. } => "Salvar folha técnica associada",
             Self::ImportSolid { .. } => "Importar sólido CAD",
             Self::SplitBody { .. } => "Dividir corpo em dois lados",
@@ -584,6 +591,14 @@ impl Command {
             } => {
                 let id = doc.set_sheet(id, target, specification, annotations)?;
                 return Ok(Effect::SheetSaved { id });
+            }
+            Self::ImportStepBodies { path, part } => {
+                return Ok(assembly::import_step_bodies(
+                    doc,
+                    &path,
+                    part,
+                    &mut rebuilds.unverified,
+                )?);
             }
             Self::ImportSolid {
                 destination,

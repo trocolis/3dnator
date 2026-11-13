@@ -7940,6 +7940,135 @@ mod tests {
         Ok(())
     }
 
+    /// Importar para a peça: botão na aba Construção, só com uma peça editável em edição, e
+    /// item no menu de contexto da peça na árvore.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn import_into_part_is_in_the_construction_ribbon_and_the_part_menu()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Importar")?;
+        let part = document.create_part("Suporte".into())?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        assert!(!editor.import_into_part_enabled());
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        assert!(editor.import_into_part_enabled());
+        label_position(&mut editor, &context, text(T::ImportMenu))?;
+        let node = label_position(&mut editor, &context, "Suporte")?;
+        for pressed in [true, false] {
+            frame(
+                &mut editor,
+                &context,
+                vec![
+                    egui::Event::PointerMoved(node),
+                    egui::Event::PointerButton {
+                        pos: node,
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )?;
+        }
+        label_position(&mut editor, &context, text(T::ImportIntoPart))?;
+        // Peça de referência: nada a importar para dentro dela.
+        editor
+            .current_mut()
+            .session
+            .execute(Command::SetPartReference {
+                part,
+                reference: true,
+            })?;
+        assert!(!editor.import_into_part_enabled());
+        Ok(())
+    }
+
+    /// Árvore longa: durante o arrasto de um componente, a roda do mouse continua rolando a
+    /// lista, e o componente pode ser solto num nó que estava fora da vista.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn dragging_in_a_long_tree_still_scrolls_to_a_hidden_node() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Árvore longa")?;
+        let mut parts = Vec::new();
+        for i in 1..=60 {
+            parts.push(document.create_part(format!("Item {i:02}"))?);
+        }
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        settle(&mut editor, &context)?;
+        let (first, last) = (parts[0], parts[59]);
+        // Só vale o rótulo dentro da área da árvore: fora dela ele é desenhado e recortado.
+        let visible = editor.canvas_rect;
+        let from = label_position_in(&mut editor, &context, "Item 01", Some(visible))?;
+        assert!(label_position_in(&mut editor, &context, "Item 60", Some(visible)).is_err());
+        let press = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, &context, vec![egui::Event::PointerMoved(from)])?;
+        frame(&mut editor, &context, vec![press(true, from)])?;
+        // Longe das bordas, para que só a roda role a lista.
+        let middle = from + egui::vec2(0., 200.);
+        for step in 1..=8 {
+            let at = from + (middle - from) * (step as f32 / 8.);
+            frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+        }
+        let mut target = None;
+        for _ in 0..80 {
+            frame(
+                &mut editor,
+                &context,
+                vec![
+                    egui::Event::PointerMoved(middle),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0., -120.),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )?;
+            if let Ok(position) = label_position_in(&mut editor, &context, "Item 60", Some(visible))
+            {
+                target = Some(position);
+                break;
+            }
+        }
+        let mut to = target.ok_or("A roda não rolou a árvore durante o arrasto")?;
+        // A rolagem suave da roda (e a da borda) ainda anda alguns quadros: solta-se sobre
+        // o rótulo depois que ele para no lugar.
+        for _ in 0..120 {
+            frame(&mut editor, &context, vec![egui::Event::PointerMoved(to)])?;
+            let now = label_position_in(&mut editor, &context, "Item 60", Some(visible))?;
+            let settled = now.distance(to) < 0.5;
+            to = now;
+            if settled {
+                break;
+            }
+        }
+        frame(&mut editor, &context, vec![press(false, to)])?;
+        frame(&mut editor, &context, vec![])?;
+        settle(&mut editor, &context)?;
+        let document = editor.current().session.document();
+        let moved = document
+            .instances()
+            .iter()
+            .find(|i| i.part == first)
+            .ok_or("Instância")?;
+        assert_eq!(moved.parent, Some(last), "{}", editor.status);
+        Ok(())
+    }
+
     /// Placa dividida ao meio por uma extrusão zero, com a câmera sobre a face superior.
     fn divided_plate_editor(
         context: &egui::Context,

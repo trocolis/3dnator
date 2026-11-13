@@ -997,6 +997,7 @@ pub fn text(key: Text) -> &'static str {
         Text::MergeCoplanarAreas => "Merge coplanar areas",
         Text::ImportMenu => "Import",
         Text::ImportReference => "Import STEP, STL or 3MF as a reference",
+        Text::ImportIntoPart => "Import STEP, STL or 3MF into the part",
         Text::MovementMode => "Movement mode",
         Text::MoveMenu => "Move",
         Text::MoveFree => "Free",

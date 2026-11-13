@@ -100,6 +100,8 @@ enum Action {
     ReferenceSketch,
     NewEmptyPart,
     ImportReference,
+    /// STEP, STL ou 3MF para dentro da peça em edição, como corpos dela.
+    ImportIntoPart,
     MoveFace,
     MoveEdge,
     MovePoint,
@@ -167,6 +169,7 @@ impl Action {
             Self::ReferenceSketch => T::ReferenceSketch,
             Self::NewEmptyPart => T::NewPartMenu,
             Self::ImportReference => T::ImportReference,
+            Self::ImportIntoPart => T::ImportIntoPart,
             Self::MoveFace => T::MoveFaceToFace,
             Self::MoveEdge => T::MoveEdgeToEdge,
             Self::MovePoint => T::MovePointToPoint,
@@ -218,7 +221,7 @@ impl Action {
             Self::ExportStep => T::StepShort,
             Self::SketchFace => T::SketchFaceShort,
             Self::SketchTool(sketch_editor::Tool::Select) => T::SketchDiagnosticsShort,
-            Self::ImportReference => T::ImportMenu,
+            Self::ImportReference | Self::ImportIntoPart => T::ImportMenu,
             _ => self.label(),
         }
     }
@@ -278,7 +281,7 @@ impl Action {
             Self::InsertPart => Icon::Import,
             Self::ReferenceSketch => Icon::ReferenceSketch,
             Self::NewEmptyPart => Icon::NewBody,
-            Self::ImportReference => Icon::Import,
+            Self::ImportReference | Self::ImportIntoPart => Icon::Import,
             Self::MoveFace => Icon::FaceToFace,
             Self::MoveEdge => Icon::EdgeToEdge,
             Self::MovePoint => Icon::PointToPoint,
@@ -395,6 +398,7 @@ const SEARCH_ACTIONS: &[Action] = &[
     Action::ReferenceSketch,
     Action::NewEmptyPart,
     Action::ImportReference,
+    Action::ImportIntoPart,
     Action::MoveFace,
     Action::MoveEdge,
     Action::MovePoint,
@@ -459,6 +463,11 @@ fn compact_group_width(count: usize) -> f32 {
 }
 
 impl Editor {
+    /// Botão Importar da aba Construção habilitado, para os ensaios.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn import_into_part_enabled(&self) -> bool {
+        self.action_enabled(Action::ImportIntoPart)
+    }
     fn action_enabled(&self, action: Action) -> bool {
         let editable = !self.busy() && self.pending_close.is_none();
         match action {
@@ -535,6 +544,15 @@ impl Editor {
             }
             Action::InsertPart => {
                 editable && self.current().sketch_edit.is_none() && self.tabs.len() > 1
+            }
+            Action::ImportIntoPart => {
+                editable
+                    && self.current().sketch_edit.is_none()
+                    && self
+                        .current()
+                        .active_part
+                        .and_then(|id| self.current().session.document().part(id))
+                        .is_some_and(|p| !p.reference)
             }
             Action::ReferenceSketch
             | Action::NewEmptyPart
@@ -774,6 +792,12 @@ impl Editor {
             }
             // Abre direto o seletor com STEP, STL e 3MF; o modelo entra só como referência.
             Action::ImportReference => self.import(context, ImportSource::Any, None, true),
+            Action::ImportIntoPart => self.import(
+                context,
+                ImportSource::Bodies,
+                self.current().active_part,
+                false,
+            ),
             Action::MoveFace => self.open_align(navigation::PickMode::Face),
             Action::MoveEdge => self.open_align(navigation::PickMode::Edge),
             Action::MovePoint => self.open_align(navigation::PickMode::Vertex),
@@ -1467,6 +1491,7 @@ impl Editor {
         match self.shell.tab {
             RibbonTab::Model => {
                 self.ribbon_group(ui, Some(T::SectionSketch), &[Action::NewSketch]);
+                self.ribbon_group(ui, Some(T::SectionImport), &[Action::ImportIntoPart]);
                 self.ribbon_group(
                     ui,
                     Some(T::SectionCreate),

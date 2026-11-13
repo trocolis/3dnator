@@ -2,6 +2,12 @@
 
 ## Não lançado
 
+## 0.57.0 — 13/11/2026
+
+- Aba Construção, grupo **Importar**: traz um STEP, STL ou 3MF para dentro da peça em edição. O mesmo item aparece no menu de contexto da peça na árvore ("Importar STEP, STL ou 3MF para a peça"). Peças de referência não recebem corpos.
+- No STEP, a hierarquia é achatada: cada ocorrência vira um corpo da peça por sólido, na posição do mundo (guardada na posição do corpo), sem criar subpeças; a cor da ocorrência vale sobre a do sólido, e superfícies abertas entram como malha. Novo comando `ImportStepBodies { path, part }`. STL e 3MF seguem o painel de unidade e entram como corpo de malha da peça.
+- Árvore: arrastar um corpo ou componente não trava mais a rolagem. O egui ignora a roda do mouse durante qualquer arrasto; agora a roda continua rolando a lista e levar o item perto da borda de cima ou de baixo rola sozinho, então dá para soltá-lo num nó fora da vista.
+
 ## 0.56.0 — 13/11/2026
 
 - Medir: retas infinitas de rascunho, comuns nos rascunhos de referência, agora podem ser escolhidas e medidas contra uma aresta, um vértice ou uma face. Antes elas eram ignoradas pelo cursor (linhas comuns e de construção já funcionavam). Com uma aresta paralela, a distância sai do meio da aresta até o pé da perpendicular na reta, mesmo longe dos pontos que a definem; não paralelas mostram o ângulo, como antes. A reta escolhida aparece realçada de um lado a outro da cena. `measure::Target::Edge` ganha `infinite` e `Target::reach_points`.

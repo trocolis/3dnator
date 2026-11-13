@@ -52,6 +52,48 @@ enum Dragged {
     Instance(Vec<InstanceId>),
 }
 
+/// Rolagem da árvore enquanto um corpo ou componente é arrastado. O `ScrollArea` do egui
+/// ignora a roda do mouse durante qualquer arrasto, o que impedia levar o item até um nó
+/// fora da vista. Chamada dentro da área de rolagem: a roda continua valendo e o cursor
+/// perto da borda de cima ou de baixo rola sozinho, mais rápido quanto mais perto.
+pub(super) fn scroll_while_dragging(ui: &egui::Ui) {
+    if !egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx()) {
+        return;
+    }
+    let visible = ui.clip_rect();
+    let Some(pointer) = ui
+        .ctx()
+        .pointer_latest_pos()
+        .filter(|p| visible.x_range().contains(p.x))
+    else {
+        return;
+    };
+    let mut delta = 0.;
+    if visible.contains(pointer) {
+        delta += ui.input(|i| i.smooth_scroll_delta.y);
+    }
+    delta += edge_scroll(visible.y_range(), pointer.y);
+    if delta != 0. {
+        ui.scroll_with_delta(egui::vec2(0., delta));
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Deslocamento por quadro da rolagem automática: positivo sobe o conteúdo visível (o
+/// cursor perto do topo), negativo desce. Começa a 32 px da borda e continua além dela.
+fn edge_scroll(range: egui::Rangef, y: f32) -> f32 {
+    const ZONE: f32 = 32.;
+    const FASTEST: f32 = 18.;
+    let depth = if y < range.min + ZONE {
+        (range.min + ZONE - y) / ZONE
+    } else if y > range.max - ZONE {
+        -(y - (range.max - ZONE)) / ZONE
+    } else {
+        return 0.;
+    };
+    depth.clamp(-1.5, 1.5) * FASTEST
+}
+
 pub(super) struct Tree<'a> {
     document: &'a Document,
     tab: &'a Tab,
@@ -1127,5 +1169,23 @@ fn group_visibility(
             })
             .map(|&id| Command::SetInstanceVisibility { id, visible })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edge_scroll_grows_toward_each_border_and_stops_in_the_middle() {
+        let range = egui::Rangef::new(100., 500.);
+        assert_eq!(edge_scroll(range, 300.), 0.);
+        // Perto do topo, o conteúdo desce (revela o que está acima); perto do fim, sobe.
+        assert!(edge_scroll(range, 120.) > 0.);
+        assert!(edge_scroll(range, 480.) < 0.);
+        assert!(edge_scroll(range, 101.) > edge_scroll(range, 120.));
+        // Além da borda continua rolando, com velocidade limitada.
+        assert!(edge_scroll(range, 40.) >= edge_scroll(range, 101.));
+        assert!(edge_scroll(range, -1000.).is_finite() && edge_scroll(range, -1000.) <= 27.);
     }
 }

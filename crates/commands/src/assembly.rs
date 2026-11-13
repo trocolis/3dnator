@@ -89,56 +89,8 @@ pub(super) fn import_step(
                 .id;
             doc.remove_instance(automatic)?;
             for body in &mut part.bodies {
-                if body.surface {
-                    // Superfície aberta não é um sólido: vira corpo de malha, que aparece e
-                    // sai em STL, mas fica fora das operações CAD e da exportação STEP.
-                    let (mesh, _) = body
-                        .solid
-                        .tessellate_with_faces(0.05, 0.25)
-                        .map_err(|e| DocumentError(e.to_string()))?;
-                    triangles += mesh.triangles().len();
-                    if triangles > nator_document::MAX_SCENE_TRIANGLES {
-                        return Err(DocumentError(
-                            "STEP excede dois milhões de triângulos.".into(),
-                        ));
-                    }
-                    let (_, b) =
-                        doc.add_mesh(Some(id), body.name.clone(), Arc::new(MeshAsset::new(mesh)))?;
-                    doc.body_mut(b)?.color = body.color;
-                    first_body.get_or_insert((id, b));
-                    continue;
-                }
-                let faces = body
-                    .solid
-                    .face_count()
-                    .map_err(|e| DocumentError(e.to_string()))?;
-                let brep = body
-                    .solid
-                    .to_brep()
-                    .map_err(|e| DocumentError(e.to_string()))?;
-                let (mesh, face_indices) = body
-                    .solid
-                    .tessellate_with_faces(0.05, 0.25)
-                    .map_err(|e| DocumentError(e.to_string()))?;
-                triangles += mesh.triangles().len();
-                if triangles > nator_document::MAX_SCENE_TRIANGLES {
-                    return Err(DocumentError(
-                        "STEP excede dois milhões de triângulos.".into(),
-                    ));
-                }
-                let (_, b) = doc.add_mesh(
-                    Some(id),
-                    body.name.clone(),
-                    Arc::new(MeshAsset::with_faces(mesh, face_indices)?),
-                )?;
-                let record = doc.body_mut(b)?;
-                record.brep = Some(Arc::new(brep));
-                record.face_names = Arc::new(nator_kernel::indexed_face_names(
-                    &nator_document::features::body_owner(b),
-                    faces,
-                ));
-                record.color = body.color;
-                if !body.verified {
+                let b = add_step_body(doc, id, body, body.name.clone(), &mut triangles)?;
+                if !body.surface && !body.verified {
                     unverified.push(format!("{} / {}", part.name, body.name));
                 }
                 first_body.get_or_insert((id, b));
@@ -166,6 +118,139 @@ pub(super) fn import_step(
         }
         let (part, body) =
             first_body.ok_or_else(|| DocumentError("STEP não contém corpos sólidos.".into()))?;
+        Ok(super::Effect::Imported { part, body })
+    }
+}
+
+/// Corpo de um sólido STEP na peça `part`. Superfície aberta não é um sólido: vira corpo de
+/// malha, que aparece e sai em STL, mas fica fora das operações CAD e da exportação STEP.
+#[cfg(feature = "occt")]
+fn add_step_body(
+    doc: &mut Document,
+    part: PartId,
+    body: &mut nator_kernel::StepBody,
+    name: String,
+    triangles: &mut usize,
+) -> Result<nator_document::BodyId, DocumentError> {
+    let kernel = |e: nator_kernel::KernelError| DocumentError(e.to_string());
+    let (mesh, face_indices) = body
+        .solid
+        .tessellate_with_faces(0.05, 0.25)
+        .map_err(kernel)?;
+    *triangles += mesh.triangles().len();
+    if *triangles > nator_document::MAX_SCENE_TRIANGLES {
+        return Err(DocumentError(
+            "STEP excede dois milhões de triângulos.".into(),
+        ));
+    }
+    if body.surface {
+        let (_, b) = doc.add_mesh(Some(part), name, Arc::new(MeshAsset::new(mesh)))?;
+        doc.body_mut(b)?.color = body.color;
+        return Ok(b);
+    }
+    let faces = body.solid.face_count().map_err(kernel)?;
+    let brep = body.solid.to_brep().map_err(kernel)?;
+    let (_, b) = doc.add_mesh(
+        Some(part),
+        name,
+        Arc::new(MeshAsset::with_faces(mesh, face_indices)?),
+    )?;
+    let record = doc.body_mut(b)?;
+    record.brep = Some(Arc::new(brep));
+    // A geometria importada nunca é recalculada: nomes posicionais são estáveis.
+    record.face_names = Arc::new(nator_kernel::indexed_face_names(
+        &nator_document::features::body_owner(b),
+        faces,
+    ));
+    record.color = body.color;
+    Ok(b)
+}
+
+/// Importa os sólidos de um STEP como corpos da peça `part`. Cada ocorrência do arquivo vira
+/// um corpo por sólido da definição, na posição acumulada da hierarquia (guardada em
+/// `Body::placement`); nenhuma subpeça é criada.
+pub(super) fn import_step_bodies(
+    doc: &mut Document,
+    path: &std::path::Path,
+    part: PartId,
+    unverified: &mut Vec<String>,
+) -> Result<super::Effect, DocumentError> {
+    if doc.part(part).is_none() {
+        return Err(DocumentError("Peça de destino inexistente.".into()));
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = (path, unverified);
+        nator_kernel::require_available().map_err(|e| DocumentError(e.to_string()))?;
+        Err(DocumentError("Importação STEP indisponível.".into()))
+    }
+    #[cfg(feature = "occt")]
+    {
+        let mut scene =
+            nator_kernel::StepAssembly::read(path).map_err(|e| DocumentError(e.to_string()))?;
+        // Ocorrências na ordem do arquivo, com a posição composta desde a raiz.
+        let mut placed = Vec::new();
+        let mut pending = scene
+            .instances
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.parent.is_none())
+            .map(|(i, o)| (i, o.placement, o.color, 0_usize))
+            .collect::<Vec<_>>();
+        pending.reverse();
+        while let Some((index, placement, color, depth)) = pending.pop() {
+            if depth > 64 || placed.len() >= nator_document::MAX_ELEMENTS {
+                return Err(DocumentError(
+                    "Hierarquia STEP cíclica ou excessiva.".into(),
+                ));
+            }
+            let occurrence = &scene.instances[index];
+            placed.push((occurrence.part, occurrence.name.clone(), placement, color));
+            let children = scene
+                .instances
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| o.parent == Some(occurrence.part))
+                .map(|(i, o)| {
+                    placement
+                        .compose(o.placement)
+                        .map(|world| (i, world, o.color.or(color), depth + 1))
+                        .map_err(|e| DocumentError(e.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            pending.extend(children.into_iter().rev());
+        }
+        let mut first = None;
+        let mut triangles = 0;
+        for (definition, occurrence, placement, color) in placed {
+            let definition = scene
+                .parts
+                .get_mut(definition)
+                .ok_or_else(|| DocumentError("Definição STEP ausente.".into()))?;
+            let single = definition.bodies.len() == 1;
+            for body in &mut definition.bodies {
+                let name = if single || body.name.is_empty() {
+                    occurrence.clone()
+                } else {
+                    format!("{occurrence} / {}", body.name)
+                };
+                let name = if name.trim().is_empty() {
+                    "Corpo STEP".to_string()
+                } else {
+                    name
+                };
+                let b = add_step_body(doc, part, body, name.clone(), &mut triangles)?;
+                let record = doc.body_mut(b)?;
+                record.placement = placement;
+                // Como na montagem, a cor da ocorrência mais interna vale sobre a do sólido.
+                record.color = color.or(record.color);
+                if !body.surface && !body.verified {
+                    unverified.push(name);
+                }
+                first.get_or_insert(b);
+            }
+        }
+        let body = first.ok_or_else(|| DocumentError("STEP não contém corpos sólidos.".into()))?;
         Ok(super::Effect::Imported { part, body })
     }
 }

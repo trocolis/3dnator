@@ -330,6 +330,7 @@ impl Editor {
                             );
                             tree.show(ui);
                             intents.append(&mut tree.intents);
+                            project_tree::scroll_while_dragging(ui);
                         });
                 });
                 for intent in intents {

@@ -36,6 +36,7 @@ pub(super) fn context(command: &Command, doc: &Document) -> C {
             .map(|i| sketch_context(doc, i.sketch))
             .unwrap_or(C::Keep),
         Command::SplitBody { part, .. }
+        | Command::ImportStepBodies { part, .. }
         | Command::AddFeature { part, .. }
         | Command::AddSmartExtrusion { part, .. }
         | Command::EditFeature { part, .. }
