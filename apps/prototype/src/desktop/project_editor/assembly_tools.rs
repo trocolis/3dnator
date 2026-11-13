@@ -168,6 +168,10 @@ impl Panel {
     fn numbers_valid(&self) -> bool {
         match self {
             Self::Move(d) => d.numbers_valid(),
+            Self::Align(d) => d
+                .offset_inputs
+                .iter()
+                .all(|i| i.is_valid(panel::Quantity::Length)),
             Self::Pattern(d) if d.circular => d
                 .origin_inputs
                 .iter()
@@ -234,6 +238,8 @@ pub(super) struct MoveDraft {
     drag: Option<GizmoDrag>,
     floating: distance_arrow::Input,
     floating_handle: Option<Handle>,
+    /// Eixos do mundo travados: a translação neles fica como está.
+    locked: [bool; 3],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -259,6 +265,11 @@ pub(super) struct AlignDraft {
     focus: Option<PointFocus>,
     /// Perímetro do círculo ou arco quando a origem é o centro dele.
     from_outline: Vec<Point3>,
+    /// Ajuste digitado por eixo sobre o alinhamento, no mundo.
+    offset: Point3,
+    offset_inputs: [panel::NumberInput; 3],
+    /// Eixos travados: no ponto a ponto, o alinhamento não move o objeto neles.
+    locked: [bool; 3],
 }
 
 /// Corpo escolhido no ponto a ponto, identificado pela ocorrência na montagem.
@@ -856,13 +867,27 @@ impl AlignDraft {
             }
             navigation::PickMode::Vertex => Placement::default(),
         };
-        rotation.translated(sub(to.point, from.point)).ok()
+        let mut translation = sub(to.point, from.point);
+        if self.kind == navigation::PickMode::Vertex {
+            for (value, locked) in translation.iter_mut().zip(self.locked) {
+                if locked {
+                    *value = 0.;
+                }
+            }
+        }
+        rotation.translated(translation).ok()
     }
-    /// Movimento acumulado no mundo, com o alinhamento se ele já estiver completo.
-    fn total(&self) -> Placement {
+    /// Movimento acumulado no mundo sem o ajuste digitado.
+    fn aligned(&self) -> Placement {
         self.delta()
             .and_then(|delta| delta.compose(self.carried).ok())
             .unwrap_or(self.carried)
+    }
+    /// Movimento acumulado no mundo, com o alinhamento se ele já estiver completo e o
+    /// ajuste por eixo por último.
+    fn total(&self) -> Placement {
+        let aligned = self.aligned();
+        aligned.translated(self.offset).unwrap_or(aligned)
     }
 }
 
@@ -883,6 +908,7 @@ impl MoveDraft {
             drag: None,
             floating: Default::default(),
             floating_handle: None,
+            locked: [false; 3],
         }
     }
 
@@ -1016,6 +1042,13 @@ impl Editor {
             Panel::Align(d) if movement.kind().is_some() => d.carried,
             _ => total,
         };
+        // As travas valem para o novo tipo; o ajuste digitado segue entre alinhamentos
+        // (no Livre ele já está no acumulado).
+        let (locked, offset) = match &panel {
+            Panel::Move(d) => (d.locked, [0.; 3]),
+            Panel::Align(d) => (d.locked, d.offset),
+            _ => ([false; 3], [0.; 3]),
+        };
         let (tab, targets, mode, independent, source, destination, field, flip) = match panel {
             Panel::Move(d) => (
                 d.tab,
@@ -1075,11 +1108,15 @@ impl Editor {
                 carried,
                 focus: None,
                 from_outline: Vec::new(),
+                offset,
+                offset_inputs: Default::default(),
+                locked,
             }))
         } else {
             let mut draft = MoveDraft::new(tab, targets);
             draft.mode = mode;
             draft.independent = independent;
+            draft.locked = locked;
             // O acumulado vira os valores do painel, medidos do centro dos alvos.
             let frames = frames(self.current(), &draft.targets);
             if let Some(pivot) = pivot_point(self.current(), &frames, draft.pivot) {
@@ -1254,6 +1291,15 @@ impl Editor {
             _ => None,
         }
     }
+    /// Eixos travados do Mover aberto (livre ou alinhamento), para ensaios.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn move_locks_for_test(&self) -> Option<[bool; 3]> {
+        match &self.assembly_panel {
+            Some(Panel::Move(d)) => Some(d.locked),
+            Some(Panel::Align(d)) => Some(d.locked),
+            _ => None,
+        }
+    }
     pub(super) fn set_move_for_capture(&mut self, translation: Point3, rotation: Point3) {
         if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
             draft.translation = translation;
@@ -1322,6 +1368,9 @@ impl Editor {
             carried: Placement::default(),
             focus,
             from_outline: Vec::new(),
+            offset: [0.; 3],
+            offset_inputs: Default::default(),
+            locked: [false; 3],
         })));
     }
     pub(super) fn open_instance_pattern(&mut self, circular: bool) {
@@ -1741,6 +1790,11 @@ impl Editor {
         };
         let document = self.current().session.document().clone();
         let picked = self.current().picked.as_ref().map(|p| p.point);
+        // Deslocamento do centro dos alvos pelo alinhamento (sem o ajuste digitado).
+        let aligned = match &panel {
+            Panel::Align(d) => self.align_center(d).map(|c| sub(d.aligned().apply(c), c)),
+            _ => None,
+        };
         let initial_copy = panel.copy_kind();
         let mut copy_kind = initial_copy;
         let bodies = self.current().active_part.is_some();
@@ -1765,7 +1819,7 @@ impl Editor {
                 }
                 match &mut panel {
                     Panel::Move(d) => move_panel(ui, d, &document, picked),
-                    Panel::Align(d) => align_panel(ui, d, &document),
+                    Panel::Align(d) => align_panel(ui, d, &document, aligned),
                     Panel::Pattern(d) => pattern_panel(ui, d, &document),
                     Panel::Mirror(d) => mirror_panel(ui, d, &document),
                 }
@@ -1803,6 +1857,17 @@ impl Editor {
             self.keep_preview();
         }
         self.assembly_panel = Some(panel);
+    }
+
+    /// Centro dos elementos que o alinhamento move, na posição gravada.
+    fn align_center(&self, d: &AlignDraft) -> Option<Point3> {
+        let tab = self.current();
+        let targets = if d.targets.is_empty() {
+            vec![tab.selection_for_pick(d.from.as_ref()?)?]
+        } else {
+            d.targets.clone()
+        };
+        pivot_point(tab, &frames(tab, &targets), Pivot::Center)
     }
 
     fn panel_command(&self, panel: &Panel) -> Option<Command> {
@@ -1912,6 +1977,7 @@ impl Editor {
             return false;
         };
         let rect = response.rect;
+        let locked = draft.locked;
         let camera = self.viewport.camera.clone();
         let center_world: Point3 = std::array::from_fn(|i| pivot[i] + draft.translation[i]);
         let project = |p: Point3| sketch_scene::project(&camera, bounds, rect, p);
@@ -1970,12 +2036,15 @@ impl Editor {
                 })
                 .fold(f32::INFINITY, f32::min)
         };
-        let hovered = pointer.and_then(|p| {
+        // Um painel aberto sobre o manipulador fica com o clique.
+        let uncovered = response.contains_pointer();
+        let hovered = pointer.filter(|_| uncovered).and_then(|p| {
             if p.distance(center) < 9. {
                 return Some(Handle::Free);
             }
             for (k, tip) in tips.iter().enumerate() {
                 if let Some(tip) = tip
+                    && !locked[k]
                     && distance_to(&[center, *tip], p) < 7.
                 {
                     return Some(Handle::Axis(k));
@@ -2008,12 +2077,18 @@ impl Editor {
             } else {
                 2.5
             };
-            painter.line_segment([center, *tip], egui::Stroke::new(width, colors[k]));
+            // Eixo travado: seta apagada, sem resposta ao cursor.
+            let color = if locked[k] {
+                colors[k].gamma_multiply(0.3)
+            } else {
+                colors[k]
+            };
+            painter.line_segment([center, *tip], egui::Stroke::new(width, color));
             let d = (*tip - center).normalized();
             let n = egui::vec2(-d.y, d.x);
             painter.add(egui::Shape::convex_polygon(
                 vec![*tip + d * 10., *tip + n * 5., *tip - n * 5.],
-                colors[k],
+                color,
                 egui::Stroke::NONE,
             ));
             painter.text(
@@ -2021,7 +2096,7 @@ impl Editor {
                 egui::Align2::CENTER_CENTER,
                 AXIS_NAMES[k],
                 egui::FontId::proportional(11.),
-                colors[k],
+                color,
             );
         }
         painter.circle(
@@ -2116,8 +2191,13 @@ impl Editor {
                     };
                     let a = camera.world_on_target_plane(cursor(drag.start), bounds, aspect);
                     let b = camera.world_on_target_plane(cursor(position), bounds, aspect);
+                    // Arraste livre só anda nos eixos destravados.
                     draft.translation = std::array::from_fn(|i| {
-                        settings.snap_length(drag.translation[i] + b[i] - a[i])
+                        if locked[i] {
+                            drag.translation[i]
+                        } else {
+                            settings.snap_length(drag.translation[i] + b[i] - a[i])
+                        }
                     });
                 }
             }
@@ -2146,6 +2226,7 @@ impl Editor {
                     });
             if let Some(value) = edit.value {
                 match handle {
+                    Handle::Axis(k) if locked[k] => {}
                     Handle::Axis(k) => draft.translation[k] = value,
                     Handle::Ring(k) => draft.rotation[k] = value,
                     Handle::Free => {}
@@ -2486,6 +2567,41 @@ fn number_row(
     );
 }
 
+/// Translação em lista vertical, um eixo por linha. Com `locked`, cada linha termina
+/// numa caixa que trava o eixo: o campo fica fixo e o movimento só ocorre nos demais.
+fn axis_list(
+    ui: &mut egui::Ui,
+    label: &str,
+    values: &mut Point3,
+    inputs: &mut [panel::NumberInput; 3],
+    mut locked: Option<&mut [bool; 3]>,
+    document: &Document,
+) {
+    let decimals = usize::from(document.settings().display_decimals);
+    let quantity = panel::Quantity::Length;
+    // O título ocupa a coluna de rótulos da primeira linha, sem linha própria.
+    let title = format!("{label} ({})", quantity.unit(document.settings()));
+    for (axis, (value, input)) in values.iter_mut().zip(inputs).enumerate() {
+        panel::row(ui, if axis == 0 { &title } else { "" }, |ui| {
+            ui.label(
+                egui::RichText::new(AXIS_NAMES[axis])
+                    .strong()
+                    .color(theme::muted()),
+            );
+            let fixed = locked.as_ref().is_some_and(|l| l[axis]);
+            let width =
+                (ui.available_width() - if locked.is_some() { 70. } else { 8. }).clamp(60., 150.);
+            ui.add_enabled_ui(!fixed, |ui| {
+                input.show(ui, (label, axis), value, quantity, decimals, width);
+            });
+            if let Some(locked) = locked.as_mut() {
+                ui.checkbox(&mut locked[axis], text(T::LockAxis))
+                    .on_hover_text(text(T::LockAxisHint));
+            }
+        });
+    }
+}
+
 fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked: Option<Point3>) {
     let description = d.targets.first().map(|t| item_name(document, *t));
     let s = panel::selection(
@@ -2510,12 +2626,12 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
             Selection::Body { .. } => None,
         }),
     );
-    number_row(
+    axis_list(
         ui,
         text(T::TranslationField),
         &mut d.translation,
         &mut d.translation_inputs,
-        panel::Quantity::Length,
+        Some(&mut d.locked),
         document,
     );
     number_row(
@@ -2594,7 +2710,12 @@ fn rigid_hint(ui: &mut egui::Ui, document: &Document, chosen: impl Iterator<Item
     }
 }
 
-fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
+fn align_panel(
+    ui: &mut egui::Ui,
+    d: &mut AlignDraft,
+    document: &Document,
+    aligned: Option<Point3>,
+) {
     for (field, label) in [
         (AlignField::From, T::AlignFrom),
         (AlignField::To, T::AlignTo),
@@ -2671,6 +2792,32 @@ fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document) {
                     d.focus = None;
                 }
             }
+        }
+    }
+    // O quanto o objeto anda, por eixo: digitar ajusta aquele eixo depois do alinhamento.
+    // As travas só fazem sentido no ponto a ponto, que não gira o objeto.
+    if let Some(aligned) = aligned {
+        let mut values: Point3 = std::array::from_fn(|k| aligned[k] + d.offset[k]);
+        let before = values;
+        let vertex = d.kind == navigation::PickMode::Vertex;
+        axis_list(
+            ui,
+            text(T::MovedField),
+            &mut values,
+            &mut d.offset_inputs,
+            vertex.then_some(&mut d.locked),
+            document,
+        );
+        for k in 0..3 {
+            if values[k] != before[k] {
+                d.offset[k] = values[k] - aligned[k];
+            }
+        }
+        if d.offset.iter().any(|v| v.abs() > 1e-12)
+            && ui.small_button(text(T::ClearAdjustment)).clicked()
+        {
+            d.offset = [0.; 3];
+            d.offset_inputs = Default::default();
         }
     }
     if d.kind != navigation::PickMode::Vertex {
@@ -3103,6 +3250,9 @@ mod tests {
             carried: Placement::default(),
             focus: None,
             from_outline: Vec::new(),
+            offset: [0.; 3],
+            offset_inputs: Default::default(),
+            locked: [false; 3],
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
         // Face inclinada: gira até ficar oposta e só então anda ao longo da normal do
@@ -3110,6 +3260,49 @@ mod tests {
         let moved = delta.apply([0., 0., 5.]);
         assert!((moved[0] - 20.).abs() < 1e-9);
         assert!(norm(sub(delta.apply_vector([0., 0., 1.]), [-1., 0., 0.])) < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn locked_axes_stay_put_point_to_point_and_typed_adjustments_add_on_top()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let pick = |point: Point3| Pick {
+            instance: InstanceId(1),
+            part: PartId(1),
+            body: BodyId(1),
+            triangle: 0,
+            point,
+            normal: [0., 0., 1.],
+            vertices: [point; 3],
+            placement: Placement::default(),
+        };
+        let mut draft = AlignDraft {
+            tab: 1,
+            kind: navigation::PickMode::Vertex,
+            from: Some(pick([1., 2., 3.])),
+            to: Some(Anchor::from_pick(&pick([11., 22., 33.]), String::new())),
+            field: None,
+            flip: false,
+            targets: vec![],
+            mode: MoveMode::Move,
+            independent: false,
+            carried: Placement::new([0., 0., 4.], [0.; 3])?,
+            focus: None,
+            from_outline: Vec::new(),
+            offset: [0.; 3],
+            offset_inputs: Default::default(),
+            locked: [false, true, false],
+        };
+        // Y travado: o ponto só anda em X e Z; o que já foi movido antes continua.
+        assert_eq!(draft.total().apply([0.; 3]), [10., 0., 34.]);
+        // O ajuste digitado entra por último, inclusive num eixo já alinhado.
+        draft.offset = [0., 0., -2.];
+        assert_eq!(draft.total().apply([0.; 3]), [10., 0., 32.]);
+        assert_eq!(draft.aligned().apply([0.; 3]), [10., 0., 34.]);
+        // Destravado, Y volta a acompanhar o alinhamento.
+        draft.locked = [false; 3];
+        draft.offset = [0.; 3];
+        assert_eq!(draft.total().apply([0.; 3]), [10., 20., 34.]);
         Ok(())
     }
 

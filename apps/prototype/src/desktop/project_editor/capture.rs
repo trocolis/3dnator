@@ -7675,6 +7675,144 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn locked_axis_holds_in_free_drag_and_point_to_point() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut sketch = Sketch::new("Placa", Plane::xy());
+        sketch.add_rectangle([0., 0.], [20., 10.], false)?;
+        let mut session = Session::new(Document::new("Travas")?)?;
+        let Effect::SketchCreated { part, sketch } = session.execute(Command::AddSketch {
+            destination: None,
+            sketch,
+        })?
+        else {
+            return Err("Rascunho ausente".into());
+        };
+        let Effect::Imported { body, .. } = session.execute(Command::AddFeature {
+            part,
+            name: "Placa".into(),
+            operation: Operation::Extrude {
+                sketch,
+                region: RegionRef::Index(0),
+                from: "0 mm".into(),
+                to: "10 mm".into(),
+                combine: None,
+                until: None,
+            },
+        })?
+        else {
+            return Err("Corpo ausente".into());
+        };
+        let instance = session
+            .document()
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância")?
+            .id;
+        let start = session
+            .document()
+            .body(body)
+            .ok_or("Corpo")?
+            .placement
+            .translation_mm();
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        editor.invalidate_scene();
+        settle(&mut editor, &context)?;
+        editor.open_body_move(false);
+        // A janela do painel aparece a partir do segundo quadro.
+        frame(&mut editor, &context, vec![])?;
+        // A primeira caixa "Travar" é a do eixo X.
+        let lock = label_position(&mut editor, &context, text(T::LockAxis))?;
+        click(&mut editor, &context, lock)?;
+        assert_eq!(editor.move_locks_for_test(), Some([true, false, false]));
+        // O arraste livre pelo centro do manipulador não mexe em X.
+        frame(&mut editor, &context, vec![])?;
+        let center = context
+            .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("move_center")))
+            .ok_or("Manipulador ausente")?;
+        drag_between(
+            &mut editor,
+            &context,
+            center,
+            center + egui::vec2(60., -40.),
+        )?;
+        let (translation, _) = editor.move_values_for_test().ok_or("Painel Mover")?;
+        assert_eq!(translation[0], 0.);
+        assert!(
+            translation[1].abs() + translation[2].abs() > 1.,
+            "{translation:?}"
+        );
+        // A seta de X travada não responde.
+        let tips = context
+            .data(|d| d.get_temp::<[Option<egui::Pos2>; 3]>(egui::Id::new("move_tips")))
+            .ok_or("Setas")?;
+        let tip = tips[0].ok_or("Eixo X")?;
+        let center = context
+            .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("move_center")))
+            .ok_or("Manipulador ausente")?;
+        drag_between(
+            &mut editor,
+            &context,
+            center + (tip - center) * 0.92,
+            tip + egui::vec2(50., 0.),
+        )?;
+        let (after, rotation) = editor.move_values_for_test().ok_or("Painel Mover")?;
+        assert_eq!(after, translation);
+        assert_eq!(rotation, [0.; 3]);
+
+        // No ponto a ponto a trava continua e o painel mostra o deslocamento por eixo.
+        click_choice(&mut editor, &context, T::MovePointToPoint)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.move_locks_for_test(), Some([true, false, false]));
+        label_position(
+            &mut editor,
+            &context,
+            &format!("{} (mm)", text(T::MovedField)),
+        )?;
+        let point = [20., 10., 10.];
+        editor.set_align_for_capture(
+            nator_document::assembly::Pick {
+                instance,
+                part,
+                body,
+                triangle: 0,
+                point,
+                normal: [0., 0., 1.],
+                vertices: [point; 3],
+                placement: Placement::default(),
+            },
+            [point[0] + 5., point[1] + 6., point[2] + 7.],
+        );
+        settle(&mut editor, &context)?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let placed = editor
+            .current()
+            .session
+            .document()
+            .body(body)
+            .ok_or("Corpo")?
+            .placement
+            .translation_mm();
+        let moved = nator_geometry::sub(placed, start);
+        let expected = [0., translation[1] + 6., translation[2] + 7.];
+        assert!(
+            nator_geometry::norm(nator_geometry::sub(moved, expected)) < 1e-6,
+            "{moved:?} ≠ {expected:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn changing_the_move_type_continues_from_where_it_stopped_and_leaves_a_skeleton()
     -> Result<(), Box<dyn Error>> {
         let context = egui::Context::default();

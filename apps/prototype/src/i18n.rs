@@ -954,6 +954,10 @@ pub enum Text {
     CopyIndependent,
     NewPartName,
     MoveFreeHint,
+    LockAxis,
+    LockAxisHint,
+    MovedField,
+    ClearAdjustment,
     MoveFaceHint,
     MoveEdgeHint,
     MovePointHint,
@@ -2018,6 +2022,10 @@ fn pt(key: Text) -> &'static str {
         Text::CopyIndependent => "Cópia independente",
         Text::NewPartName => "Peça",
         Text::MoveFreeHint => "Manipulador 3D e valores de translação e rotação.",
+        Text::LockAxis => "Travar",
+        Text::LockAxisHint => "Travar o eixo: o movimento ocorre só nos eixos livres.",
+        Text::MovedField => "Deslocamento",
+        Text::ClearAdjustment => "Limpar ajuste",
         Text::MoveFaceHint => {
             "Move só ao longo da normal do destino: faces opostas encostam, as demais ficam no mesmo plano. Aceita o plano de um rascunho de referência como destino."
         }

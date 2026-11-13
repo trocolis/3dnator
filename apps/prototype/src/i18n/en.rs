@@ -1015,6 +1015,10 @@ pub fn text(key: Text) -> &'static str {
         Text::CopyIndependent => "Independent copy",
         Text::NewPartName => "Part",
         Text::MoveFreeHint => "3D manipulator and translation and rotation values.",
+        Text::LockAxis => "Lock",
+        Text::LockAxisHint => "Lock the axis: movement happens only along the free axes.",
+        Text::MovedField => "Displacement",
+        Text::ClearAdjustment => "Clear adjustment",
         Text::MoveFaceHint => {
             "Moves only along the target normal: opposite faces touch, others become coplanar. Accepts the plane of a reference sketch as target."
         }

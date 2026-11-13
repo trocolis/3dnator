@@ -2,6 +2,13 @@
 
 ## Não lançado
 
+## 0.59.0 — 13/11/2026
+
+- Mover: a translação aparece em lista vertical (X, Y, Z, um eixo por linha) e cada linha termina numa caixa **Travar**. Com o eixo travado, o movimento só acontece nos eixos livres: o campo fica fixo, a seta do manipulador fica apagada e não responde, e o arraste livre pelo centro não altera aquele eixo.
+- Ponto a ponto respeita as mesmas travas: o objeto vai até o ponto de destino só nos eixos destravados. As travas seguem ao trocar entre Livre e Ponto a ponto. Face a face e aresta a aresta (que podem girar o objeto) não mostram as caixas.
+- Face a face, aresta a aresta e ponto a ponto mostram o **Deslocamento** do objeto por eixo (do centro dele). Os campos aceitam digitação: o valor digitado ajusta só aquele eixo depois do alinhamento, por exemplo encostar faces e então afastar 2 mm em Z. **Limpar ajuste** volta ao alinhamento puro. O ajuste segue ao trocar o tipo de alinhamento e vira os valores do Livre.
+- Corrige o manipulador do Mover agarrando cliques feitos num painel aberto por cima dele (por exemplo, marcar Criar cópia sobre uma seta abria o campo de distância e prendia o teclado). Agora ele só responde onde nada cobre a área 3D.
+
 ## 0.58.1 — 13/11/2026
 
 - Corrige o travamento da 0.58.0 ao usar Remover faces em sólidos grandes. A busca de faces dependentes rodava no trabalhador do projeto, a cada seleção, e encadeava remoções de teste sem limite; num corpo STEP de 642 faces, uma única remoção passa de 4 minutos, e o aplicativo inteiro ficava esperando. Agora a busca roda numa thread própria (cliques, prévias e comandos continuam livres), uma de cada vez, e tem prazo total de 20 s: cada remoção de teste é interrompida no próprio OCCT ao esgotá-lo (indicador de progresso com `UserBreak`), e o painel avisa para escolher as faces manualmente. Nova chamada `Solid::removes_within` (ponte `nator_remove_faces_within`).

@@ -1047,6 +1047,10 @@ pub fn text(key: Text) -> &'static str {
         Text::CopyIndependent => "Copia independiente",
         Text::NewPartName => "Pieza",
         Text::MoveFreeHint => "Manipulador 3D y valores de traslación y rotación.",
+        Text::LockAxis => "Bloquear",
+        Text::LockAxisHint => "Bloquear el eje: el movimiento ocurre solo en los ejes libres.",
+        Text::MovedField => "Desplazamiento",
+        Text::ClearAdjustment => "Borrar ajuste",
         Text::MoveFaceHint => {
             "Mueve solo a lo largo de la normal del destino: las caras opuestas se tocan, las demás quedan en el mismo plano. Acepta el plano de un boceto de referencia como destino."
         }
