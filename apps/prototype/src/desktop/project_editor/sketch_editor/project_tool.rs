@@ -9,6 +9,11 @@ use nator_commands::sketch_projection::{self, Element, Kind};
 pub(super) struct Cache {
     key: Option<projection::Key>,
     elements: Arc<Vec<Element>>,
+    /// Caixa envolvente de cada elemento no mundo: a escolha sob o cursor só examina os
+    /// elementos cuja caixa cai perto dele. Numa montagem grande (100 mil elementos e um
+    /// milhão de triângulos), examinar tudo levava segundos por movimento do mouse, e o
+    /// clique parecia não selecionar nada.
+    bounds: Arc<Vec<Option<[nator_geometry::Point3; 2]>>>,
     running: Option<Receiver<Result<Vec<Element>, String>>>,
     filter: Option<Kind>,
     selected: Vec<usize>,
@@ -171,7 +176,9 @@ impl Cache {
             match receiver.try_recv() {
                 Ok(result) => {
                     self.running = None;
-                    self.elements = Arc::new(result?);
+                    let elements = result?;
+                    self.bounds = Arc::new(elements.iter().map(source_bounds).collect());
+                    self.elements = Arc::new(elements);
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.running = None;
@@ -242,6 +249,7 @@ impl Cache {
         {
             let pointer = *pointer;
             let elements = self.elements.clone();
+            let bounds = self.bounds.clone();
             let frame = frame.clone();
             let selected = self.selected.clone();
             let filter = self.filter;
@@ -250,7 +258,7 @@ impl Cache {
             match std::thread::Builder::new()
                 .name("projection-pick".into())
                 .spawn(move || {
-                    let found = pick(&elements, &frame, pointer, filter, &selected);
+                    let found = pick(&elements, &bounds, &frame, pointer, filter, &selected);
                     let _ = sender.send(found);
                     context.request_repaint();
                 }) {
@@ -367,8 +375,53 @@ fn triangle_depth(
     let t = dot(e2, q) / d;
     (u >= -1e-9 && v >= -1e-9 && u + v <= 1. + 1e-9 && t >= 0.).then_some(t)
 }
+/// Caixa envolvente da geometria de origem, no mundo.
+fn source_bounds(element: &Element) -> Option<[nator_geometry::Point3; 2]> {
+    let source = &element.source;
+    let mut points = source
+        .vertices
+        .iter()
+        .chain(source.curves.iter().flatten())
+        .chain(source.triangles.iter().flatten())
+        .chain(source.contours.iter().flatten());
+    let first = *points.next()?;
+    Some(points.fold([first, first], |[low, high], p| {
+        [
+            std::array::from_fn(|i| low[i].min(p[i])),
+            std::array::from_fn(|i| high[i].max(p[i])),
+        ]
+    }))
+}
+
+/// A caixa, projetada na tela, passa a menos de `margin` pontos do cursor. Um canto sem
+/// projeção (atrás da câmera em perspectiva) não descarta o elemento.
+fn near_on_screen(
+    frame: &sketch_scene::Frame,
+    bounds: Option<[nator_geometry::Point3; 2]>,
+    pointer: egui::Pos2,
+    margin: f32,
+) -> bool {
+    let Some([low, high]) = bounds else {
+        return true;
+    };
+    let mut rect = egui::Rect::NOTHING;
+    for corner in 0..8 {
+        let p = [
+            if corner & 1 == 0 { low[0] } else { high[0] },
+            if corner & 2 == 0 { low[1] } else { high[1] },
+            if corner & 4 == 0 { low[2] } else { high[2] },
+        ];
+        match sketch_scene::project(&frame.camera, frame.bounds, frame.rect, p) {
+            Some(screen) => rect.extend_with(screen),
+            None => return true,
+        }
+    }
+    rect.expand(margin).contains(pointer)
+}
+
 fn pick(
     elements: &[Element],
+    bounds: &[Option<[nator_geometry::Point3; 2]>],
     frame: &sketch_scene::Frame,
     pointer: egui::Pos2,
     filter: Option<Kind>,
@@ -388,6 +441,7 @@ fn pick(
         .iter()
         .enumerate()
         .filter(|(_, e)| filter.is_none_or(|k| e.kind == k))
+        .filter(|(i, _)| near_on_screen(frame, bounds.get(*i).copied().flatten(), pointer, 9.))
     {
         let distance = match element.kind {
             Kind::Vertex => element
@@ -476,7 +530,11 @@ fn pick(
                 Kind::Edge => 1,
                 Kind::Plane => 2,
             };
-            if best.is_none_or(|(i, r, _, _)| rank <= r || selected.contains(&i)) {
+            // Uma origem do mesmo tipo sob o cursor ganha: com a face de cima escolhida,
+            // olhar por baixo e clicar escolhe a face de baixo em vez de desmarcar a de cima
+            // (a projeção dela cobre o mesmo ponto). Desmarca-se clicando na própria origem
+            // ou na lista do painel.
+            if best.is_none_or(|(i, r, _, _)| rank < r || selected.contains(&i)) {
                 return Some(choices[index].0);
             }
         }
@@ -585,14 +643,38 @@ mod tests {
         let projected = frame.screen(point).ok_or("Projeção invisível")?;
         assert!(original.distance(projected) > 30.);
         assert_eq!(
-            pick(std::slice::from_ref(&element), &frame, original, None, &[]),
+            pick(
+                std::slice::from_ref(&element),
+                &[source_bounds(&element)],
+                &frame,
+                original,
+                None,
+                &[]
+            ),
             Some(0)
         );
         assert_eq!(
-            pick(std::slice::from_ref(&element), &frame, projected, None, &[]),
+            pick(
+                std::slice::from_ref(&element),
+                &[source_bounds(&element)],
+                &frame,
+                projected,
+                None,
+                &[]
+            ),
             None
         );
-        assert_eq!(pick(&[element], &frame, projected, None, &[0]), Some(0));
+        assert_eq!(
+            pick(
+                std::slice::from_ref(&element),
+                &[source_bounds(&element)],
+                &frame,
+                projected,
+                None,
+                &[0]
+            ),
+            Some(0)
+        );
         Ok(())
     }
     #[test]
@@ -618,7 +700,81 @@ mod tests {
             contours: vec![],
         });
         let at = frame.screen([0., 0.]).ok_or("Face invisível")?;
-        assert_eq!(pick(&elements, &frame, at, Some(Kind::Plane), &[]), Some(1));
+        let bounds = elements.iter().map(source_bounds).collect::<Vec<_>>();
+        assert_eq!(
+            pick(&elements, &bounds, &frame, at, Some(Kind::Plane), &[]),
+            Some(1)
+        );
+        Ok(())
+    }
+
+    /// Com a face de cima escolhida, olhar por baixo e clicar escolhe a face de baixo: a
+    /// projeção da escolhida cobre o mesmo ponto do rascunho, mas não ganha da origem que
+    /// está sob o cursor. Clicar na própria face escolhida continua desmarcando.
+    #[test]
+    fn a_face_under_the_cursor_beats_the_projection_of_a_selected_one() -> Result<(), String> {
+        let face = |z: f64| Element {
+            kind: Kind::Plane,
+            source: SourceGeometry {
+                triangles: vec![[[-10., -10., z], [10., -10., z], [0., 10., z]]],
+                ..Default::default()
+            },
+            curves: vec![],
+            vertices: vec![],
+            triangles: vec![[[-10., -10.], [10., -10.], [0., 10.]]],
+            contours: vec![],
+        };
+        // Face de cima (0) e de baixo (1) de uma placa abaixo do rascunho em z = 30.
+        let elements = [face(5.), face(0.)];
+        let bounds = elements.iter().map(source_bounds).collect::<Vec<_>>();
+        let frame = |direction: [f64; 3]| {
+            let mut camera = nator_renderer::Camera::default();
+            camera.set_direction(direction);
+            sketch_scene::Frame {
+                camera,
+                bounds: sketch_scene::EMPTY_BOUNDS,
+                rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.)),
+                placement: Placement::default(),
+                plane: nator_sketch::Plane {
+                    origin: [0., 0., 30.],
+                    ..nator_sketch::Plane::xy()
+                },
+            }
+        };
+        let below = frame([0., 0., -1.]);
+        let at = below.screen([0., 0.]).ok_or("Face invisível")?;
+        assert_eq!(
+            pick(&elements, &bounds, &below, at, Some(Kind::Plane), &[0]),
+            Some(1)
+        );
+        let above = frame([0., 0., 1.]);
+        let at = above.screen([0., 0.]).ok_or("Face invisível")?;
+        assert_eq!(
+            pick(&elements, &bounds, &above, at, Some(Kind::Plane), &[0]),
+            Some(0)
+        );
+        Ok(())
+    }
+
+    /// O pré-filtro descarta só o que está longe do cursor na tela.
+    #[test]
+    fn far_elements_are_skipped_before_the_detailed_test() -> Result<(), String> {
+        let mut camera = nator_renderer::Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let frame = sketch_scene::Frame {
+            camera,
+            bounds: sketch_scene::EMPTY_BOUNDS,
+            rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.)),
+            placement: Placement::default(),
+            plane: nator_sketch::Plane::xy(),
+        };
+        let at = frame.screen([0., 0.]).ok_or("Centro invisível")?;
+        let near = Some([[-1., -1., 0.], [1., 1., 0.]]);
+        let far = Some([[200., 200., 0.], [210., 210., 0.]]);
+        assert!(near_on_screen(&frame, near, at, 9.));
+        assert!(!near_on_screen(&frame, far, at, 9.));
+        // Sem caixa (elemento sem geometria de origem), nada é descartado.
+        assert!(near_on_screen(&frame, None, at, 9.));
         Ok(())
     }
 }

@@ -2,6 +2,11 @@
 
 ## Não lançado
 
+## 0.61.1 — 14/11/2026
+
+- Projetar (rascunho): o clique numa face voltava a selecionar só depois de segundos, ou parecia não selecionar. Num projeto de montagem grande (101 mil elementos e 1,06 milhão de triângulos), cada escolha sob o cursor examinava tudo e levava 5 s no build de teste; como o clique espera a escolha do ponto exato, e cada movimento do mouse dispara outra, a seleção não chegava. Agora cada elemento tem a caixa envolvente calculada uma vez, e só os elementos cuja caixa, na tela, passa perto do cursor são examinados (12 de 101 mil, no caso medido).
+- Projetar: com uma face já escolhida, olhar o corpo por baixo e clicar na face de baixo desmarcava a de cima, porque a projeção da escolhida cobria o mesmo ponto do rascunho. Uma origem do mesmo tipo sob o cursor agora ganha; desmarca-se clicando na própria origem ou na lista do painel.
+
 ## 0.61.0 — 13/11/2026
 
 - Remover faces: só ficam vermelhas as faces que **precisam** sair junto, confirmadas no núcleo. Se a seleção sai sozinha, nada é marcado. Na 0.60 a sugestão era a concordância inteira de mesmo raio; num corpo todo arredondado com r = 1,7 mm (o carro Y do projeto da impressora), um canal que sai sozinho marcava todo o contorno externo.
