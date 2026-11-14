@@ -430,6 +430,9 @@ pub fn refine_corner(
             "Selecione duas linhas e uma dimensão positiva.".into(),
         ));
     }
+    if sketch.line(first).is_err() || sketch.line(second).is_err() {
+        return refine_curved_corner(sketch, first, second, size, rounded);
+    }
     let (a, b) = sketch.line(first)?;
     let (c, d) = sketch.line(second)?;
     let corner = [(a, c), (a, d), (b, c), (b, d)]
@@ -518,9 +521,476 @@ pub fn refine_corner(
     sketch.prune_unused_points();
     Ok(id)
 }
+/// Direção unitária com que a linha ou o arco sai da extremidade `at` para dentro de si;
+/// `None` quando `at` não é extremidade (ou a entidade é um círculo inteiro).
+pub fn leaving(sketch: &Sketch, id: u64, at: Point2) -> Result<Option<Point2>> {
+    let unit = |v: Point2| {
+        let length = distance(v, [0.; 2]);
+        (length > 1e-12).then(|| scale(v, 1. / length))
+    };
+    match sketch.entity(id)?.curve {
+        Curve::Line { .. } => {
+            let (a, b) = sketch.line(id)?;
+            Ok(if distance(a, at) < 1e-7 {
+                unit(sub(b, a))
+            } else if distance(b, at) < 1e-7 {
+                unit(sub(a, b))
+            } else {
+                None
+            })
+        }
+        Curve::Arc {
+            center,
+            start,
+            end,
+            clockwise,
+        } => {
+            let center = sketch.point(center)?;
+            let radial = sub(at, center);
+            // Sentido de percurso do arco (anti-horário salvo `clockwise`), do início ao fim.
+            let travel = if clockwise {
+                [radial[1], -radial[0]]
+            } else {
+                [-radial[1], radial[0]]
+            };
+            Ok(if distance(sketch.point(start)?, at) < 1e-7 {
+                unit(travel)
+            } else if distance(sketch.point(end)?, at) < 1e-7 {
+                unit(scale(travel, -1.))
+            } else {
+                None
+            })
+        }
+        Curve::Circle { .. } => Ok(None),
+    }
+}
+
+/// Curva deslocada para dentro do canto: reta paralela ou círculo concêntrico.
+enum Offset {
+    Line { point: Point2, direction: Point2 },
+    Circle { center: Point2, radius: f64 },
+}
+
+/// Interseções de duas curvas deslocadas.
+fn crossings(a: &Offset, b: &Offset) -> Vec<Point2> {
+    let line_circle = |point: Point2, direction: Point2, center: Point2, radius: f64| {
+        // |point + t·direction − center|² = radius², com direction unitária.
+        let w = sub(point, center);
+        let half = dot(direction, w);
+        let disc = half * half - (dot(w, w) - radius * radius);
+        if disc < -1e-12 {
+            return Vec::new();
+        }
+        let root = disc.max(0.).sqrt();
+        [-half - root, -half + root]
+            .into_iter()
+            .map(|t| add(point, scale(direction, t)))
+            .collect()
+    };
+    match (a, b) {
+        (Offset::Line { point, direction }, Offset::Circle { center, radius })
+        | (Offset::Circle { center, radius }, Offset::Line { point, direction }) => {
+            line_circle(*point, *direction, *center, *radius)
+        }
+        (
+            Offset::Circle {
+                center: c1,
+                radius: r1,
+            },
+            Offset::Circle {
+                center: c2,
+                radius: r2,
+            },
+        ) => {
+            let d = distance(*c1, *c2);
+            if d < 1e-12 || d > r1 + r2 + 1e-9 || d < (r1 - r2).abs() - 1e-9 {
+                return Vec::new();
+            }
+            let along = (d * d + r1 * r1 - r2 * r2) / (2. * d);
+            let height = (r1 * r1 - along * along).max(0.).sqrt();
+            let axis = scale(sub(*c2, *c1), 1. / d);
+            let base = add(*c1, scale(axis, along));
+            let normal = [-axis[1], axis[0]];
+            vec![
+                add(base, scale(normal, height)),
+                add(base, scale(normal, -height)),
+            ]
+        }
+        (
+            Offset::Line {
+                point: p1,
+                direction: d1,
+            },
+            Offset::Line {
+                point: p2,
+                direction: d2,
+            },
+        ) => {
+            let denominator = cross(*d1, *d2);
+            if denominator.abs() < 1e-12 {
+                return Vec::new();
+            }
+            let t = cross(sub(*p2, *p1), *d2) / denominator;
+            vec![add(*p1, scale(*d1, t))]
+        }
+    }
+}
+
+/// O ponto `point`, sobre a curva, fica dentro do trecho entre a extremidade `corner` e a
+/// outra (exclusive), percorrendo a partir do canto.
+fn within(sketch: &Sketch, id: u64, corner: Point2, point: Point2) -> Result<bool> {
+    match sketch.entity(id)?.curve {
+        Curve::Line { .. } => {
+            let (a, b) = sketch.line(id)?;
+            let far = if distance(a, corner) < 1e-7 { b } else { a };
+            let length = distance(corner, far);
+            let t = dot(sub(point, corner), scale(sub(far, corner), 1. / length));
+            Ok(t > 1e-7 && t < length - 1e-7)
+        }
+        Curve::Arc {
+            center, start, end, ..
+        } => {
+            let center = sketch.point(center)?;
+            let far = if distance(sketch.point(start)?, corner) < 1e-7 {
+                sketch.point(end)?
+            } else {
+                sketch.point(start)?
+            };
+            let Some(direction) = leaving(sketch, id, corner)? else {
+                return Ok(false);
+            };
+            // Ângulo percorrido a partir do canto, no sentido em que o arco segue.
+            let sweep = |target: Point2| {
+                let a = sub(corner, center);
+                let b = sub(target, center);
+                let mut angle = cross(a, b).atan2(dot(a, b));
+                let sense = cross(a, direction).signum();
+                angle *= sense;
+                if angle < 0. {
+                    angle += std::f64::consts::TAU;
+                }
+                angle
+            };
+            let total = sweep(far);
+            let total = if total < 1e-9 {
+                std::f64::consts::TAU
+            } else {
+                total
+            };
+            let at = sweep(point);
+            Ok(at > 1e-9 && at < total - 1e-9)
+        }
+        Curve::Circle { .. } => Ok(false),
+    }
+}
+
+/// Arredondamento ou chanfro de um canto em que ao menos uma das curvas é arco. O centro do
+/// arredondamento é o encontro das duas curvas deslocadas de `size` para dentro do canto
+/// (reta paralela; círculo com raio R − size ou R + size, conforme o lado); os pontos de
+/// tangência são as projeções do centro nas curvas. O chanfro corta `size` ao longo de cada
+/// curva (comprimento de arco, no arco).
+fn refine_curved_corner(
+    sketch: &mut Sketch,
+    first: u64,
+    second: u64,
+    size: f64,
+    rounded: bool,
+) -> Result<u64> {
+    let ends = |sketch: &Sketch, id: u64| -> Result<Vec<Point2>> {
+        Ok(match sketch.entity(id)?.curve {
+            Curve::Line { .. } => {
+                let (a, b) = sketch.line(id)?;
+                vec![a, b]
+            }
+            Curve::Arc { start, end, .. } => vec![sketch.point(start)?, sketch.point(end)?],
+            Curve::Circle { .. } => Vec::new(),
+        })
+    };
+    let first_ends = ends(sketch, first)?;
+    let second_ends = ends(sketch, second)?;
+    let corner = first_ends
+        .iter()
+        .copied()
+        .find(|p| second_ends.iter().any(|q| distance(*p, *q) < 1e-7))
+        .ok_or_else(|| SketchError("As curvas devem compartilhar uma extremidade.".into()))?;
+    let (Some(u), Some(v)) = (
+        leaving(sketch, first, corner)?,
+        leaving(sketch, second, corner)?,
+    ) else {
+        return Err(SketchError(
+            "As curvas devem compartilhar uma extremidade.".into(),
+        ));
+    };
+    let half = dot(u, v).clamp(-1., 1.).acos() / 2.;
+    if half.sin().abs() < 1e-6 || half.cos().abs() < 1e-6 {
+        return Err(SketchError(
+            "O encontro das curvas não forma um canto refinável.".into(),
+        ));
+    }
+    let bisector = {
+        let sum = add(u, v);
+        scale(sum, 1. / distance(sum, [0.; 2]))
+    };
+    let too_big = || SketchError("A dimensão ultrapassa as curvas selecionadas.".into());
+    // Para cada curva: deslocamento para dentro do canto e se o arredondamento fica do lado
+    // de dentro do arco (tangência interna).
+    let offset = |sketch: &Sketch, id: u64, direction: Point2| -> Result<(Offset, bool)> {
+        match sketch.entity(id)?.curve {
+            Curve::Arc { .. } => {
+                let (center, radius) = sketch.radial(id)?;
+                let inside = dot(bisector, sub(center, corner)) > 0.;
+                let radius = if inside { radius - size } else { radius + size };
+                if radius <= 1e-9 {
+                    return Err(too_big());
+                }
+                Ok((Offset::Circle { center, radius }, inside))
+            }
+            _ => {
+                let mut normal = [-direction[1], direction[0]];
+                if dot(normal, bisector) < 0. {
+                    normal = scale(normal, -1.);
+                }
+                Ok((
+                    Offset::Line {
+                        point: add(corner, scale(normal, size)),
+                        direction,
+                    },
+                    false,
+                ))
+            }
+        }
+    };
+    // Ponto de cada curva: tangência (arredondamento) ou corte (chanfro).
+    let touch = |sketch: &Sketch, id: u64, direction: Point2, center: Point2| -> Result<Point2> {
+        match sketch.entity(id)?.curve {
+            Curve::Arc { .. } => {
+                let (o, radius) = sketch.radial(id)?;
+                if rounded {
+                    let radial = sub(center, o);
+                    Ok(add(o, scale(radial, radius / distance(radial, [0.; 2]))))
+                } else {
+                    // Chanfro: `size` de comprimento de arco a partir do canto.
+                    let angle = size / radius * cross(sub(corner, o), direction).signum();
+                    let (sin, cos) = angle.sin_cos();
+                    let r = sub(corner, o);
+                    Ok(add(o, [r[0] * cos - r[1] * sin, r[0] * sin + r[1] * cos]))
+                }
+            }
+            _ => Ok(if rounded {
+                add(
+                    corner,
+                    scale(direction, dot(sub(center, corner), direction)),
+                )
+            } else {
+                add(corner, scale(direction, size))
+            }),
+        }
+    };
+    let (center, internal) = if rounded {
+        let (a, first_internal) = offset(sketch, first, u)?;
+        let (b, second_internal) = offset(sketch, second, v)?;
+        let center = crossings(&a, &b)
+            .into_iter()
+            .min_by(|p, q| distance(*p, corner).total_cmp(&distance(*q, corner)))
+            .ok_or_else(too_big)?;
+        (Some(center), [first_internal, second_internal])
+    } else {
+        (None, [false; 2])
+    };
+    let p = touch(sketch, first, u, center.unwrap_or(corner))?;
+    let q = touch(sketch, second, v, center.unwrap_or(corner))?;
+    if !within(sketch, first, corner, p)? || !within(sketch, second, corner, q)? {
+        return Err(too_big());
+    }
+    let pi = sketch.add_point(p)?;
+    let qi = sketch.add_point(q)?;
+    for (id, point) in [(first, pi), (second, qi)] {
+        let entity = sketch.entity(id)?.clone();
+        let curve = match entity.curve {
+            Curve::Line { start, end } => {
+                if distance(sketch.point(start)?, corner) < 1e-7 {
+                    Curve::Line { start: point, end }
+                } else {
+                    Curve::Line { start, end: point }
+                }
+            }
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise,
+            } => {
+                if distance(sketch.point(start)?, corner) < 1e-7 {
+                    Curve::Arc {
+                        center,
+                        start: point,
+                        end,
+                        clockwise,
+                    }
+                } else {
+                    Curve::Arc {
+                        center,
+                        start,
+                        end: point,
+                        clockwise,
+                    }
+                }
+            }
+            other => other,
+        };
+        if let Some(e) = sketch.entities.iter_mut().find(|e| e.id == id) {
+            e.curve = curve;
+        }
+    }
+    let id = if let Some(center) = center {
+        let ci = sketch.add_point(center)?;
+        let id = sketch.add_curve(
+            Curve::Arc {
+                center: ci,
+                start: pi,
+                end: qi,
+                clockwise: cross(sub(p, center), sub(q, center)) < 0.,
+            },
+            false,
+        )?;
+        sketch.add_constraint(
+            ConstraintKind::Radius {
+                circle: id,
+                value: size,
+            },
+            false,
+        )?;
+        for ((curve, point), internal) in [(first, pi), (second, qi)].into_iter().zip(internal) {
+            let kind = if sketch.line(curve).is_ok() {
+                ConstraintKind::Tangent {
+                    line: curve,
+                    arc: id,
+                    point,
+                }
+            } else {
+                ConstraintKind::CircleTangent {
+                    a: curve,
+                    b: id,
+                    internal,
+                }
+            };
+            sketch.add_constraint(kind, false)?;
+        }
+        id
+    } else {
+        sketch.add_curve(Curve::Line { start: pi, end: qi }, false)?
+    };
+    sketch.prune_unused_points();
+    Ok(id)
+}
+
 #[cfg(test)]
 mod corner_tests {
     use super::*;
+
+    /// Linha horizontal até a origem e um quarto de círculo que sobe dela (centro à
+    /// esquerda): o canto de 90° da captura do usuário.
+    fn line_and_arc() -> Result<(Sketch, u64, u64)> {
+        let mut sketch = Sketch::new("Linha e arco", Plane::xy());
+        let line = sketch.add_line([-20., 0.], [0., 0.], false)?;
+        let center = sketch.add_point([-30., 0.])?;
+        let start = sketch.add_point([0., 0.])?;
+        let end = sketch.add_point([-30., 30.])?;
+        let arc = sketch.add_curve(
+            Curve::Arc {
+                center,
+                start,
+                end,
+                clockwise: false,
+            },
+            false,
+        )?;
+        Ok((sketch, line, arc))
+    }
+
+    #[test]
+    fn a_line_and_an_arc_get_a_tangent_fillet() -> Result<()> {
+        let (mut sketch, line, arc) = line_and_arc()?;
+        let corners = crate::corners::selected(&sketch, &[line, arc])?;
+        assert_eq!(corners.len(), 1);
+        let fillet = refine_corner(&mut sketch, line, arc, 2., true)?;
+        sketch.validate()?;
+        assert!(solver::max_error(&sketch)? < 1e-9);
+        let (center, radius) = sketch.radial(fillet)?;
+        assert!((radius - 2.).abs() < 1e-9);
+        // Tangente à linha (centro a 2 mm acima dela) e, por dentro, ao arco de 30 mm.
+        assert!((center[1] - 2.).abs() < 1e-9);
+        assert!((distance(center, [-30., 0.]) - 28.).abs() < 1e-9);
+        // A linha e o arco terminam onde o arredondamento começa.
+        let (_, line_end) = sketch.line(line)?;
+        assert!((line_end[0] - center[0]).abs() < 1e-9 && line_end[1].abs() < 1e-9);
+        assert!((sketch.radial(arc)?.1 - 30.).abs() < 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn two_arcs_meeting_at_an_angle_get_a_fillet_and_a_chamfer() -> Result<()> {
+        for rounded in [true, false] {
+            let mut sketch = Sketch::new("Dois arcos", Plane::xy());
+            // Dois arcos de 20 mm que saem da origem em ângulo reto: um sobe (centro à
+            // esquerda) e o outro segue para a direita descendo (centro abaixo).
+            let corner = sketch.add_point([0., 0.])?;
+            let left = sketch.add_point([-20., 0.])?;
+            let left_end = sketch.add_point([-20., 20.])?;
+            let below = sketch.add_point([0., -20.])?;
+            let below_end = sketch.add_point([20., -20.])?;
+            let a = sketch.add_curve(
+                Curve::Arc {
+                    center: left,
+                    start: corner,
+                    end: left_end,
+                    clockwise: false,
+                },
+                false,
+            )?;
+            let b = sketch.add_curve(
+                Curve::Arc {
+                    center: below,
+                    start: corner,
+                    end: below_end,
+                    clockwise: true,
+                },
+                false,
+            )?;
+            let made = refine_corner(&mut sketch, a, b, 1.5, rounded)?;
+            sketch.validate()?;
+            assert!(solver::max_error(&sketch)? < 1e-9, "{rounded}");
+            assert!((sketch.radial(a)?.1 - 20.).abs() < 1e-9);
+            assert!((sketch.radial(b)?.1 - 20.).abs() < 1e-9);
+            if rounded {
+                assert!((sketch.radial(made)?.1 - 1.5).abs() < 1e-9);
+            } else {
+                let (p, q) = sketch.line(made)?;
+                assert!(distance(p, q) > 0.5);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_line_and_an_arc_get_a_chamfer_and_oversized_cuts_change_nothing() -> Result<()> {
+        let (mut sketch, line, arc) = line_and_arc()?;
+        let chamfer = refine_corner(&mut sketch, line, arc, 3., false)?;
+        sketch.validate()?;
+        let (p, q) = sketch.line(chamfer)?;
+        // 3 mm pela linha e 3 mm de arco a partir do canto.
+        let on_line = if p[1].abs() < 1e-9 { p } else { q };
+        assert!((on_line[0] + 3.).abs() < 1e-9);
+        let on_arc = if p[1].abs() < 1e-9 { q } else { p };
+        let angle = (on_arc[1]).atan2(on_arc[0] + 30.);
+        assert!((angle * 30. - 3.).abs() < 1e-9);
+        let (mut other, line, arc) = line_and_arc()?;
+        let before = other.clone();
+        assert!(crate::corners::refine(&mut other, &[line, arc], &[], 25., true).is_err());
+        assert_eq!(other.entities.len(), before.entities.len());
+        assert_eq!(other.line(line)?, before.line(line)?);
+        Ok(())
+    }
     #[test]
     fn fillet_has_exact_radius_tangent_endpoints_and_closed_contour() -> Result<()> {
         let mut sketch = Sketch::new("Canto", Plane::xy());

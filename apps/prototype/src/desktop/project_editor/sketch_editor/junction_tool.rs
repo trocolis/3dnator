@@ -18,7 +18,7 @@ pub(super) fn vertex(
         })
 }
 
-/// Linhas que terminam no vértice, na ordem em que aparecem no rascunho.
+/// Linhas e arcos que terminam no vértice, na ordem em que aparecem no rascunho.
 pub(super) fn corner_lines(sketch: &Sketch, position: Point2) -> Vec<u64> {
     let Ok(Some(junction)) = junctions::at(sketch, position) else {
         return Vec::new();
@@ -27,11 +27,7 @@ pub(super) fn corner_lines(sketch: &Sketch, position: Point2) -> Vec<u64> {
         .curves()
         .iter()
         .copied()
-        .filter(|id| {
-            sketch.line(*id).is_ok_and(|(a, b)| {
-                nator_sketch::distance(a, position) < 1e-6
-                    || nator_sketch::distance(b, position) < 1e-6
-            })
-        })
+        // Linhas e arcos que terminam no vértice: os dois formam cantos arredondáveis.
+        .filter(|id| nator_sketch::tools::leaving(sketch, *id, position).is_ok_and(|d| d.is_some()))
         .collect()
 }

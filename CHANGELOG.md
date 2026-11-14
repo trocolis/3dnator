@@ -2,6 +2,11 @@
 
 ## Não lançado
 
+## 0.62.0 — 14/11/2026
+
+- Rascunho, Arredondar e Chanfrar: cantos entre uma linha e um arco, ou entre dois arcos, agora são aceitos (antes só linha com linha, e a seleção de um arco dava "Selecione pelo menos duas linhas que formem um canto"). O centro do arredondamento é o encontro das duas curvas deslocadas do raio para dentro do canto: a reta paralela e o círculo com R − r ou R + r, conforme o arredondamento fique por dentro ou por fora do arco. Os pontos de tangência são as projeções do centro. O arco original mantém centro e raio, e o novo recebe a cota de raio e restrições de tangência (`Tangent` com a linha, `CircleTangent` com o arco, interna quando fica por dentro). O chanfro corta a medida ao longo da linha e, no arco, como comprimento de arco a partir do canto.
+- Escolher o canto pelo vértice também considera os arcos que terminam nele. Um corte maior que as curvas falha sem alterar o rascunho, como nos cantos entre linhas. Nova função `tools::leaving` (direção com que linha ou arco sai de uma extremidade).
+
 ## 0.61.1 — 14/11/2026
 
 - Projetar (rascunho): o clique numa face voltava a selecionar só depois de segundos, ou parecia não selecionar. Num projeto de montagem grande (101 mil elementos e 1,06 milhão de triângulos), cada escolha sob o cursor examinava tudo e levava 5 s no build de teste; como o clique espera a escolha do ponto exato, e cada movimento do mouse dispara outra, a seleção não chegava. Agora cada elemento tem a caixa envolvente calculada uma vez, e só os elementos cuja caixa, na tela, passa perto do cursor são examinados (12 de 101 mil, no caso medido).

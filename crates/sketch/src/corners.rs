@@ -19,17 +19,25 @@ pub fn selected(sketch: &Sketch, entities: &[u64]) -> Result<Vec<Corner>> {
         if !unique.insert(*id) {
             return Err(SketchError("Selecione entidades diferentes.".into()));
         }
-        // Arcos/círculos podem fazer parte da seleção de um contorno misto,
-        // mas o refinamento atual atua nos encontros entre segmentos retos.
-        if entity.infinite || !matches!(entity.curve, Curve::Line { .. }) {
-            continue;
-        }
-        let (a, b) = sketch.line(*id)?;
-        for (at, far) in [(a, b), (b, a)] {
+        // Linhas e arcos formam cantos; círculos inteiros não têm extremidades.
+        let points = match entity.curve {
+            _ if entity.infinite => continue,
+            Curve::Line { .. } => {
+                let (a, b) = sketch.line(*id)?;
+                vec![a, b]
+            }
+            Curve::Arc { start, end, .. } => vec![sketch.point(start)?, sketch.point(end)?],
+            Curve::Circle { .. } => continue,
+        };
+        for at in points {
+            // Direção com que a curva sai do canto: para o arco, a tangente nele.
+            let Some(direction) = tools::leaving(sketch, *id, at)? else {
+                continue;
+            };
             if let Some((_, owners)) = ends.iter_mut().find(|(p, _)| distance(*p, at) < 1e-7) {
-                owners.push((*id, far));
+                owners.push((*id, direction));
             } else {
-                ends.push((at, vec![(*id, far)]));
+                ends.push((at, vec![(*id, direction)]));
             }
         }
     }
@@ -38,11 +46,10 @@ pub fn selected(sketch: &Sketch, entities: &[u64]) -> Result<Vec<Corner>> {
         if owners.len() > 2 {
             return Err(SketchError("Escolha cantos sem ramificações.".into()));
         }
-        let [(first, a), (second, b)] = owners.as_slice() else {
+        let [(first, u), (second, v)] = owners.as_slice() else {
             continue;
         };
-        let u = scale(sub(*a, point), 1. / distance(*a, point));
-        let v = scale(sub(*b, point), 1. / distance(*b, point));
+        let (u, v) = (*u, *v);
         let half_angle = dot(u, v).clamp(-1., 1.).acos() / 2.;
         if half_angle.sin().abs() < 1e-6 || half_angle.cos().abs() < 1e-6 {
             continue;
@@ -58,7 +65,7 @@ pub fn selected(sketch: &Sketch, entities: &[u64]) -> Result<Vec<Corner>> {
     }
     if result.is_empty() {
         return Err(SketchError(
-            "Selecione pelo menos duas linhas que formem um canto.".into(),
+            "Selecione pelo menos duas linhas ou arcos que formem um canto.".into(),
         ));
     }
     Ok(result)
