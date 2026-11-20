@@ -67,14 +67,19 @@ impl State {
 }
 
 impl Editor {
+    /// Inclui o rascunho em edição mesmo quando sua visibilidade no modelo está desligada.
+    pub(super) fn measurement_sketch(
+        &self,
+    ) -> Option<(nator_sketch::Sketch, nator_geometry::Placement)> {
+        let work = self.current().sketch_edit.as_ref()?;
+        Some((self.working_sketch()?, work.placement))
+    }
     /// Alvos e cotas do Medir sobre a cena.
     pub(super) fn measure_overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
         if !self.shell.measure_open {
             return;
         }
-        let Some(bounds) = self.current().scene_bounds else {
-            return;
-        };
+        let bounds = self.display_bounds();
         let (tab, revision) = (self.current().id, self.current().session.revision());
         let Some((first, second)) = self.measure_tool.current(tab, revision) else {
             return;

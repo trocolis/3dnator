@@ -63,8 +63,12 @@ pub(super) enum Icon {
     RotateCounterclockwise,
     Search,
     Check,
+    Lock,
     LockOpen,
     Select,
+    SelectFace,
+    SelectEdge,
+    SelectVertex,
     Line,
     LineSymmetric,
     LineConstruction,
@@ -196,8 +200,12 @@ const ALL: &[Icon] = &[
     Icon::RotateCounterclockwise,
     Icon::Search,
     Icon::Check,
+    Icon::Lock,
     Icon::LockOpen,
     Icon::Select,
+    Icon::SelectFace,
+    Icon::SelectEdge,
+    Icon::SelectVertex,
     Icon::Line,
     Icon::LineSymmetric,
     Icon::LineConstruction,
@@ -447,12 +455,15 @@ pub(super) fn tree_button(
         egui::Button::new("")
             .min_size(egui::Vec2::splat(20.))
             .selected(selected)
-            .frame(selected),
+            .frame(false),
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if ui.is_rect_visible(response.rect) {
+        // O destaque é desenhado aqui: um botão com moldura ganha margens e mudaria a altura
+        // da linha ao ser selecionado.
+        selection_frame(ui, response.rect, 4, selected);
         if response.hovered() && ui.is_enabled() {
             ui.painter()
                 .rect_filled(response.rect, 4, theme::blue_fill());
@@ -473,6 +484,19 @@ pub(super) fn tree_button(
         );
     }
     response.on_hover_text(label)
+}
+
+/// Destaque de um elemento selecionado, com o mesmo aspecto do botão selecionado do tema.
+fn selection_frame(ui: &egui::Ui, rect: egui::Rect, radius: u8, selected: bool) {
+    if selected && ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, radius, theme::blue_fill());
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1., theme::accent().gamma_multiply(0.6)),
+            egui::StrokeKind::Inside,
+        );
+    }
 }
 
 /// Linha de árvore com ícone, foco de teclado e elipse para nomes longos.
@@ -506,11 +530,14 @@ pub(super) fn entry_with_hint(
         egui::Button::new("")
             .min_size(egui::vec2(ui.available_width().max(40.), 22.))
             .selected(selected)
-            .frame(selected),
+            .frame(false),
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
+    // Linha de altura fixa: o destaque é desenhado aqui, sem a moldura do botão, que
+    // empurraria o resto da árvore ao selecionar.
+    selection_frame(ui, response.rect, 5, selected);
     if response.hovered() && ui.is_enabled() {
         ui.painter()
             .rect_filled(response.rect, 4, theme::blue_fill());

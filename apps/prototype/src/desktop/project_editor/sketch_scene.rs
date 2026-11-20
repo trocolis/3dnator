@@ -286,6 +286,14 @@ pub(super) fn project(
 }
 
 pub(super) fn part_placement(tab: &Tab, part: PartId) -> Result<Placement, String> {
+    // A peça em construção tem uma ocorrência escolhida: é nela que as coisas se posicionam.
+    if tab.active_part == Some(part)
+        && let Some(path) = tab.editing_path()
+        && let Ok(occurrences) = tab.session.document().occurrences()
+        && let Some(found) = occurrences.iter().find(|o| o.path == path)
+    {
+        return Ok(found.placement);
+    }
     if let Some(pick) = tab.picked.as_ref().filter(|p| p.part == part) {
         return Ok(pick.placement);
     }

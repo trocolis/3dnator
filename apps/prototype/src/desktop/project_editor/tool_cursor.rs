@@ -81,6 +81,10 @@ impl Editor {
         else {
             return;
         };
+        // Sobre o manipulador de mover/girar vale o cursor dele, sem o distintivo.
+        if self.move_gizmo_hot() {
+            return;
+        }
         let Some(icon) = self.active_tool_icon() else {
             return;
         };

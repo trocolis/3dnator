@@ -27,6 +27,10 @@ pub(super) struct RenameDraft {
 /// Intenção escolhida num menu de contexto da árvore.
 pub(super) enum MenuAction {
     Activate(PartId),
+    /// Edita uma ocorrência específica da peça (caminho de instâncias desde a raiz).
+    ActivateOccurrence(PartId, Vec<InstanceId>),
+    /// Edita a peça pela instância escolhida, quando o caminho completo não é conhecido.
+    ActivateInstance(PartId, InstanceId),
     MakeReference(InstanceId),
     Deactivate,
     Select(Vec<Selection>),
@@ -89,15 +93,16 @@ pub(super) fn instance_menu(
     context: &MenuContext,
     instance: &Instance,
     part_name: &str,
+    active: bool,
 ) -> Option<MenuAction> {
     let mut action = None;
     let target = Selection::Instance(instance.id);
-    if context.active == Some(instance.part) {
+    if active {
         if item(ui, Icon::Cube, T::LeavePart) {
             action = Some(MenuAction::Deactivate);
         }
     } else if item(ui, Icon::Cube, T::EditPart) {
-        action = Some(MenuAction::Activate(instance.part));
+        action = Some(MenuAction::ActivateInstance(instance.part, instance.id));
     }
     // Sempre clicável: com uma ferramenta aberta ou um cálculo em andamento, o clique
     // explica o que falta em vez de não fazer nada.
@@ -405,6 +410,60 @@ impl Editor {
         }
     }
 
+    /// Entra na construção da peça. Com várias ocorrências, só a escolhida fica ativa (as
+    /// demais esmaecem como as outras peças) e o pivô de rotação passa para ela. Sem caminho
+    /// conhecido, vale a ocorrência selecionada, a do último clique ou a primeira.
+    pub(super) fn activate_part(&mut self, part: PartId, path: Option<Vec<InstanceId>>) {
+        let document = self.current().session.document();
+        if document.part(part).is_some_and(|p| p.reference) {
+            self.status.warning(text(T::ReferenceNotEditable));
+            return;
+        }
+        let occurrences = document.occurrences().unwrap_or_default();
+        let of_part = |o: &&nator_document::assembly::Occurrence| {
+            document
+                .instance(o.instance)
+                .is_some_and(|i| i.part == part)
+        };
+        let tab = self.current();
+        let chosen = path
+            .and_then(|path| occurrences.iter().find(|o| o.path == path))
+            .filter(|o| of_part(o))
+            .or_else(|| {
+                tab.picked
+                    .as_ref()
+                    .filter(|p| p.part == part)
+                    .and_then(|p| document.occurrence_at(p).ok())
+                    .and_then(|found| occurrences.iter().find(|o| o.path == found.path))
+            })
+            .or_else(|| {
+                occurrences.iter().filter(of_part).find(|o| {
+                    tab.selected
+                        .iter()
+                        .any(|s| matches!(s, Selection::Instance(id) if *id == o.instance))
+                })
+            })
+            .or_else(|| occurrences.iter().find(of_part));
+        let target = chosen.map(|o| (o.path.clone(), occurrence_center(document, o)));
+        let (path, center) = match target {
+            Some((path, center)) => (Some(path), center),
+            None => (None, None),
+        };
+        self.current_mut().active_part = Some(part);
+        self.current_mut().view.set_edit_occurrence(path);
+        // O pivô de rotação e o centro da vista passam para a peça em edição.
+        if let Some(center) = center
+            && let Some(bounds) = self.current().scene_bounds
+        {
+            self.viewport.camera.focus_world(center, bounds);
+            self.current_mut().camera_transition = None;
+        }
+        self.finish_sketch();
+        if self.shell.tab == shell::RibbonTab::Assembly {
+            self.shell.tab = shell::RibbonTab::Model;
+        }
+    }
+
     pub(super) fn apply_menu_action(&mut self, context: &egui::Context, action: MenuAction) {
         let tab = self.current().id;
         match action {
@@ -444,12 +503,18 @@ impl Editor {
                     },
                 );
             }
-            MenuAction::Activate(part) => {
-                self.current_mut().active_part = Some(part);
-                self.finish_sketch();
-                if self.shell.tab == shell::RibbonTab::Assembly {
-                    self.shell.tab = shell::RibbonTab::Model;
-                }
+            MenuAction::Activate(part) => self.activate_part(part, None),
+            MenuAction::ActivateOccurrence(part, path) => self.activate_part(part, Some(path)),
+            MenuAction::ActivateInstance(part, instance) => {
+                let path = self
+                    .current()
+                    .session
+                    .document()
+                    .occurrences()
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|o| o.instance == instance))
+                    .map(|o| o.path);
+                self.activate_part(part, path);
             }
             MenuAction::Deactivate => {
                 self.current_mut().active_part = None;
@@ -1045,4 +1110,30 @@ mod reference_step_tests {
         );
         Ok(())
     }
+}
+
+/// Centro, no mundo, dos corpos visíveis de uma ocorrência (caixa envolvente).
+pub(super) fn occurrence_center(
+    document: &Document,
+    occurrence: &nator_document::assembly::Occurrence,
+) -> Option<nator_geometry::Point3> {
+    let part = document
+        .instance(occurrence.instance)
+        .and_then(|i| document.part(i.part))?;
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for body in part.shown_bodies() {
+        let pose = occurrence.placement.compose(body.placement).ok()?;
+        for vertex in body.geometry.mesh().vertices() {
+            let p = pose.apply(*vertex);
+            for i in 0..3 {
+                min[i] = min[i].min(p[i]);
+                max[i] = max[i].max(p[i]);
+            }
+        }
+    }
+    min.iter()
+        .zip(&max)
+        .all(|(lo, hi)| lo <= hi)
+        .then(|| std::array::from_fn(|i| (min[i] + max[i]) / 2.))
 }

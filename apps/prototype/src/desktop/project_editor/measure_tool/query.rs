@@ -10,6 +10,7 @@ pub struct Query {
     pub position: egui::Pos2,
     pub reach: f64,
     pub section: Option<section::Section>,
+    pub active_sketch: Option<(nator_sketch::Sketch, Placement)>,
 }
 pub struct Candidate {
     pub target: Target,
@@ -21,6 +22,12 @@ struct ScreenCandidate {
     priority: u8,
     distance: f32,
     depth: f64,
+}
+fn compare_candidates(a: &ScreenCandidate, b: &ScreenCandidate) -> std::cmp::Ordering {
+    a.priority
+        .cmp(&b.priority)
+        .then(a.distance.total_cmp(&b.distance))
+        .then(a.depth.total_cmp(&b.depth))
 }
 fn body_overlay(document: &Document, pick: &Pick, target: &Target) -> highlight::Overlay {
     match target {
@@ -149,6 +156,16 @@ impl Query {
     }
     pub fn run(&self, document: &Document, view: &ViewState) -> Result<Option<Candidate>, String> {
         let mut candidates = Vec::new();
+        // O rascunho editado é desenhado sobre o modelo e pode estar oculto no documento.
+        // A seleção usa a mesma geometria e posição da sobreposição de edição.
+        if let Some((sketch, pose)) = &self.active_sketch {
+            self.sketch(sketch, *pose, &mut candidates);
+            candidates.sort_by(compare_candidates);
+            if let Some(candidate) = candidates.into_iter().next() {
+                return Ok(Some(candidate.value));
+            }
+            candidates = Vec::new();
+        }
         let ray = self.ray(self.position);
         let picks = document
             .pick_all_clipped_with(ray, |o| view.pickable(o), section::clip(self.section))
@@ -183,12 +200,7 @@ impl Query {
         {
             self.sketch(&record.sketch, Placement::default(), &mut candidates);
         }
-        candidates.sort_by(|a, b| {
-            a.priority
-                .cmp(&b.priority)
-                .then(a.distance.total_cmp(&b.distance))
-                .then(a.depth.total_cmp(&b.depth))
-        });
+        candidates.sort_by(compare_candidates);
         for candidate in candidates {
             let Some(at) = self.project(candidate.point) else {
                 continue;
@@ -216,6 +228,71 @@ impl Query {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editing_hidden_sketch_measures_circle_centers_in_world_coordinates()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use nator_commands::measure::Reading;
+        let mut document = Document::new("Centros")?;
+        let mut sketch = nator_sketch::Sketch::new(
+            "Círculos",
+            nator_sketch::Plane {
+                origin: [0., 0., 7.],
+                ..Default::default()
+            },
+        );
+        sketch.add_circle([10., 10.], 3., false)?;
+        sketch.add_circle([40., 10.], 2., false)?;
+        sketch.add_line([0., 30.], [50., 30.], false)?;
+        let (_, id) = document.add_sketch(None, sketch.clone())?;
+        document.sketch_mut(id)?.visible = false;
+        let pose = Placement::new([100., 0., 0.], [0., 0., std::f64::consts::FRAC_PI_2])?;
+        let bounds = nator_geometry::Bounds {
+            min: [40., 0., 0.],
+            max: [110., 60., 20.],
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.));
+        let mut camera = Camera::default();
+        camera.set_direction([0., 0., 1.]);
+        let mut targets = Vec::new();
+        for local in [[10., 10.], [40., 10.], [10., 30.], [13., 10.]] {
+            let point = pose.apply(sketch.plane.world(local));
+            let mut query = Query {
+                camera: camera.clone(),
+                bounds,
+                rect,
+                position: sketch_scene::project(&camera, bounds, rect, point).ok_or("Ponto")?,
+                reach: 1.,
+                section: None,
+                active_sketch: None,
+            };
+            assert!(query.run(&document, &ViewState::default())?.is_none());
+            query.active_sketch = Some((sketch.clone(), pose));
+            let candidate = query
+                .run(&document, &ViewState::default())?
+                .ok_or("Alvo ausente")?;
+            if targets.len() < 2 {
+                assert_eq!(candidate.overlay.points, vec![point]);
+                assert!(
+                    matches!(candidate.target, Target::Vertex { point: p } if norm(sub(p, point)) < 1e-9)
+                );
+            }
+            targets.push(candidate.target);
+        }
+        // A distância à curva segue a aproximação poligonal existente do Medir.
+        for (other, expected, tolerance) in [
+            (&targets[1], 30., 1e-9),
+            (&targets[2], 20., 1e-9),
+            (&targets[3], 3., 1e-3),
+        ] {
+            let readings = readings(&targets[0], Some(other), false);
+            assert!(
+                matches!(readings[..], [Reading::Distance { mm, .. }] if (mm - expected).abs() < tolerance),
+                "{readings:?}"
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn hidden_sketches_and_material_in_front_are_not_candidates()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -245,6 +322,7 @@ mod tests {
             position,
             reach: 1.,
             section: None,
+            active_sketch: None,
         };
         let view = ViewState::default();
         assert!(matches!(
@@ -302,6 +380,7 @@ mod tests {
                 position,
                 reach: 1.,
                 section: None,
+                active_sketch: None,
             };
             let candidate = query
                 .run(&doc, &ViewState::default())?

@@ -639,6 +639,8 @@ impl Editor {
     }
     /// Ferramenta escolhida na faixa, na busca ou pelos atalhos do rascunho.
     pub(super) fn select_sketch_tool(&mut self, tool: Tool) {
+        self.shell.measure_open = false;
+        self.measure_tool.clear();
         self.image_edit = None;
         self.sanitize_sketch_selection();
         let sketch = (tool == Tool::Dimension)
@@ -839,6 +841,9 @@ impl Editor {
     /// Painel da ferramenta escolhida. O rascunho nasce sem janela: cada escolha
     /// explícita abre seu painel, e operações com formulário usam `sketch_action_panel`.
     pub(super) fn sketch_tools_window(&mut self, context: &egui::Context) {
+        if self.shell.measure_open {
+            return;
+        }
         let Some(work) = self.current().sketch_edit.as_ref() else {
             return;
         };
@@ -981,6 +986,7 @@ impl Editor {
         }
     }
     pub(super) fn sketch_overlay(&mut self, ui: &egui::Ui, response: &egui::Response) {
+        let measuring = self.shell.measure_open;
         let camera_active = self.shell.camera_mode.is_some();
         let Some(mut sketch) = self.working_sketch() else {
             return;
@@ -1007,7 +1013,7 @@ impl Editor {
             .painter()
             .with_clip_rect(response.rect.intersect(ui.clip_rect()));
         let animating = self.current().camera_transition.is_some();
-        let hover = if animating {
+        let hover = if animating || measuring {
             None
         } else {
             response
@@ -1056,9 +1062,16 @@ impl Editor {
         {
             self.status.error(error);
         }
-        let image_blocked =
-            self.reference_images_overlay(ui, response, &frame, &sketch, !busy && !animating)
-                || (!busy && !animating && self.sketch_text_overlay(ui, response, &frame, &sketch));
+        let image_blocked = self.reference_images_overlay(
+            ui,
+            response,
+            &frame,
+            &sketch,
+            !busy && !animating && !measuring,
+        ) || (!busy
+            && !animating
+            && !measuring
+            && self.sketch_text_overlay(ui, response, &frame, &sketch));
         let mut text_preview = self.text_preview_sketch();
         let Some(work) = self.current_mut().sketch_edit.as_mut() else {
             return;
@@ -1171,6 +1184,19 @@ impl Editor {
             }
         }
         restrictions::paint_vertices(&frame, &painter, display_sketch, work);
+        // Medir conserva a grade e a geometria, mas reserva os gestos à medição.
+        if measuring {
+            indicators::centers(
+                &frame,
+                &painter,
+                sketch
+                    .entities
+                    .iter()
+                    .filter_map(|e| sketch.radial(e.id).ok().map(|(c, _)| c)),
+            );
+            dimension_tool::paint_all(&frame, &painter, &sketch, None);
+            return;
+        }
         // Cotas como cotas: extensões, linha com setas e valor (R/Ø, graus, parênteses).
         if work.primitive().is_some() {
             let points = work.references.points.centers.iter().copied().chain(

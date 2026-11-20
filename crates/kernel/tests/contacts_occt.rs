@@ -29,6 +29,15 @@ fn line_contact_is_found_with_its_faces_and_location() -> Result<()> {
     assert!(contact.points.iter().all(|p| p[..2] == [20., 20.]));
     let mut solid = solid;
     assert!(solid.tessellate(0.02, 0.25)?.topology().non_manifold_edges > 0);
+    // A recuperação da exportação não pode esconder um contato real entre volumes.
+    assert!(
+        solid
+            .tessellate_for_export(0.02, 0.25)?
+            .single_precision()?
+            .topology()
+            .non_manifold_edges
+            > 0
+    );
     Ok(())
 }
 

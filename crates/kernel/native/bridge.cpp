@@ -1085,6 +1085,15 @@ static bool append_apex_fan(const TopoDS_Face& face, const Handle(Poly_Triangula
 
 }  // extern "C"
 
+static bool negligible_face(const TopoDS_Face& face) {
+    GProp_GProps properties;
+    BRepGProp::SurfaceProperties(face, properties);
+    Bnd_Box box;
+    BRepBndLib::Add(face, box);
+    const double extent = box.IsVoid() ? 0. : box.SquareExtent();
+    return std::abs(properties.Mass()) <= 1e-9 * std::max(extent, 1e-12);
+}
+
 // Fora do bloco C: devolve um tipo C++, o que o MSVC recusa com ligação C (C2526).
 // Faces de STEP reais (cones e B-splines vindos do Fusion, por exemplo) às vezes fazem o
 // BRepMesh falhar na tesselação conjunta, embora sejam válidas. Tenta-se primeiro remalhar a
@@ -1102,12 +1111,7 @@ static std::optional<TopoDS_Face> triangulated_face(const TopoDS_Face& face, dou
     if (meshed(face)) {
         return face;
     }
-    GProp_GProps properties;
-    BRepGProp::SurfaceProperties(face, properties);
-    Bnd_Box box;
-    BRepBndLib::Add(face, box);
-    const double extent = box.IsVoid() ? 0. : box.SquareExtent();
-    if (std::abs(properties.Mass()) <= 1e-9 * std::max(extent, 1e-12)) {
+    if (negligible_face(face)) {
         return std::nullopt;
     }
     const double relaxed = std::max(angular, 0.5);
@@ -1134,16 +1138,39 @@ static std::optional<TopoDS_Face> triangulated_face(const TopoDS_Face& face, dou
 
 extern "C" {
 
-bool nator_tessellate(Shape* body, double linear, double angular) noexcept {
+bool nator_tessellate(Shape* body, double linear, double angular, bool shared_edges) noexcept {
     return guarded([&] {
         BRepMesh_IncrementalMesh mesher(body->value, linear, false, angular, false);
         if (!mesher.IsDone()) {
             throw std::runtime_error("Falha na tesselação do sólido.");
         }
+        const auto& faces = faces_of(body);
+        const auto complete = [&] {
+            for (int index = 1; index <= faces.Extent(); ++index) {
+                const auto face = TopoDS::Face(faces(index));
+                TopLoc_Location location;
+                if (BRep_Tool::Triangulation(face, location).IsNull() && !negligible_face(face)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        // Recuperar faces no contexto do sólido reaproveita as discretizações das arestas
+        // vizinhas. Remalhar só a face que falhou pode trocar seus nós de borda depois que
+        // a vizinha já foi copiada, abrindo o STL mesmo quando o B-rep é válido.
+        // Não limpar as triangulações: as faces que já atendem à qualidade são conservadas.
+        if (shared_edges && !complete()) {
+            for (const double factor : {1., 2., 4., 10., 20.}) {
+                BRepMesh_IncrementalMesh(body->value, linear * factor, false,
+                                        std::max(angular, 0.5), false);
+                if (complete()) {
+                    break;
+                }
+            }
+        }
         // Construir em memória temporária preserva a malha anterior em caso de falha.
         std::vector<double> positions;
         std::vector<std::int32_t> faces_of_triangles;
-        const auto& faces = faces_of(body);
         for (int index = 1; index <= faces.Extent(); ++index) {
             const auto meshable = triangulated_face(TopoDS::Face(faces(index)), linear, angular);
             if (!meshable) {

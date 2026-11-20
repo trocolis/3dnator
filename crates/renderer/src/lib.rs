@@ -184,6 +184,11 @@ pub enum Projection {
     Perspective,
 }
 
+/// Menor altura visível, em unidades da cena normalizada (1 = maior dimensão do modelo):
+/// dez micrômetros num modelo de 1 m, na prática sem limite. Abaixo disso os vértices
+/// em f32 deixariam de ter precisão para a escala.
+const MIN_SPAN: f64 = 1e-5;
+
 #[derive(Debug, Clone)]
 pub struct Camera {
     pub yaw: f64,
@@ -467,7 +472,9 @@ impl Camera {
 
     pub fn zoom_at(&mut self, scroll: f64, cursor: [f64; 2], aspect: f64) {
         let previous = self.span;
-        self.span = (self.span * (-scroll * 0.002).exp()).clamp(0.02, 100.);
+        // Sem limite prático de aproximação: o piso só evita a escala degenerada, a partir da
+        // qual a matriz em f32 deixaria de representar a cena.
+        self.span = (self.span * (-scroll * 0.002).exp()).clamp(MIN_SPAN, 100.);
         let (right, up, _) = self.basis();
         for i in 0..3 {
             self.target[i] +=
@@ -1259,6 +1266,32 @@ mod tests {
             let projected = gpu_projection(&camera, BOUNDS, point, aspect);
             assert!((projected[0] - cursor[0]).abs() < 1e-6);
             assert!((projected[1] - cursor[1]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn zoom_in_has_no_practical_limit_and_keeps_the_cursor_point() {
+        let cursor = [0.4, -0.3];
+        let aspect = 1.6;
+        for projection in PROJECTIONS {
+            let mut camera = Camera {
+                projection,
+                ..Camera::default()
+            };
+            let point = camera.world_on_target_plane(cursor, BOUNDS, aspect);
+            // Muito além do antigo piso de 0,02.
+            for _ in 0..25 {
+                camera.zoom_at(120., cursor, aspect);
+            }
+            assert!(camera.span < 0.01, "{}", camera.span);
+            let projected = gpu_projection(&camera, BOUNDS, point, aspect);
+            assert!((projected[0] - cursor[0]).abs() < 1e-3, "{projected:?}");
+            assert!((projected[1] - cursor[1]).abs() < 1e-3, "{projected:?}");
+            // O piso só impede a escala degenerada.
+            for _ in 0..200 {
+                camera.zoom_at(120., cursor, aspect);
+            }
+            assert_eq!(camera.span, MIN_SPAN);
         }
     }
 

@@ -63,6 +63,9 @@ palette! {
     /// Véu sobre as etapas do histórico posteriores ao marcador.
     veil = egui::Color32::from_rgba_unmultiplied_const(233, 238, 245, 150),
         egui::Color32::from_rgba_unmultiplied_const(23, 27, 34, 150);
+    /// Fundo translúcido do corpo da árvore flutuante: a cena aparece suavemente por trás.
+    tree_body = egui::Color32::from_rgba_unmultiplied_const(250, 252, 255, 200),
+        egui::Color32::from_rgba_unmultiplied_const(31, 36, 45, 200);
     header = rgb(40, 49, 64), rgb(15, 19, 26);
     /// Fundo de cartões, campos e janelas: branco no claro.
     surface = egui::Color32::WHITE, rgb(39, 45, 56);

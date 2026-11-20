@@ -643,8 +643,17 @@ pub struct UntilFace {
 #[serde(untagged)]
 pub enum ExtrusionLimit {
     Face(UntilFace),
-    Sketch { sketch: SketchId },
-    WorkPlane { work_plane: WorkPlaneId },
+    Sketch {
+        sketch: SketchId,
+    },
+    WorkPlane {
+        work_plane: WorkPlaneId,
+    },
+    /// Plano capturado de uma face externa, no referencial da peça, sem vínculo entre peças.
+    CapturedPlane {
+        origin: nator_geometry::Point3,
+        normal: nator_geometry::Point3,
+    },
 }
 impl From<UntilFace> for ExtrusionLimit {
     fn from(face: UntilFace) -> Self {
@@ -659,6 +668,12 @@ impl ExtrusionLimit {
                 ..
             }) => validate_face_name(name),
             Self::Face(_) => Ok(()),
+            Self::CapturedPlane { origin, normal }
+                if origin.iter().chain(normal).all(|v| v.is_finite())
+                    && (nator_geometry::norm(*normal) - 1.).abs() < 1e-8 =>
+            {
+                Ok(())
+            }
             Self::Sketch { sketch } if part.sketches.iter().any(|s| s.id == *sketch) => Ok(()),
             Self::WorkPlane { work_plane }
                 if part.work_planes.iter().any(|p| p.id == *work_plane) =>
@@ -687,6 +702,7 @@ impl ExtrusionLimit {
                     .get(sketch)
                     .ok_or_else(|| DocumentError("Rascunho limite ausente ao clonar.".into()))?
             }
+            Self::CapturedPlane { .. } => {} // Coordenadas locais, independentes da origem.
             Self::WorkPlane { .. } => {} // Remapeado com os planos da peça em assembly::clone_definition.
         }
         Ok(())

@@ -808,3 +808,46 @@ Esses valores não representam fluidez interativa nem validam a meta de computad
 - A área da árvore recebe a altura real do canvas, descontando as margens. A rolagem usa o espaço restante após o cabeçalho, sem herdar o limite inicial das áreas flutuantes do egui nem encolher com poucos nós.
 - Formatação, Clippy com e sem OCCT, testes do workspace sem OCCT e cinco ensaios gráficos de árvore com OCCT aprovados. O ensaio existente verifica agora também o limite inferior da árvore.
 - Capturas `tree-folders` nos temas claro/escuro, em 1440 × 900 e 900 × 600: conteúdo completo quando cabe e recorte/rolagem apenas quando excede a altura. Registros e imagens em `target/codex-validation/tree-height-20261107/`. Sem ensaio manual da janela.
+
+### Exportação de peças importadas em projeto externo
+
+O ensaio optativo `export_external_occt` recebe `NATOR_EXPORT_PROJECT` (caminho do
+`.3dnator`) e `NATOR_EXPORT_PART` (nome da peça). Exporta cada corpo visível nas três
+qualidades, grava STL em pasta temporária e reabre os arquivos, exigindo malhas fechadas,
+orientadas e com volume positivo. Os arquivos externos não são incorporados ao repositório.
+
+```sh
+cargo test -p nator-commands --features occt --locked --test export_external_occt -- --ignored --nocapture
+```
+
+### Pendências de interface — 20/11/2026
+
+- Extrusão até face externa: ensaio gráfico com as duas ocorrências transladadas e
+  rotacionadas confirma a conversão do plano para a peça ativa e publica a operação.
+  Um ensaio com OCCT verifica o volume do corte inclinado e seu recálculo após reabrir
+  o projeto no formato 55.
+- Seleção: ensaio da gaveta, dos filtros e da sequência de cliques para corpo e peça;
+  classificação automática de face, aresta e vértice em um sólido real. Ctrl conserva
+  a alternância de seleção. A regressão da árvore verifica que o grupo não desloca a lista.
+- Ocorrências: ensaio confirma apenas uma ativa, as demais esmaecidas, o referencial do
+  rascunho e o pivô da câmera no centro da ocorrência escolhida. Zoom verificado nas duas
+  projeções, conservando o ponto sob o cursor até o piso numérico.
+- Formatação e Clippy com e sem OCCT aprovados. Testes do workspace: 438 aprovados sem
+  OCCT e 634 com OCCT; os 122 ensaios gráficos são executados separadamente, em sequência.
+  Uma execução gráfica paralela encerrou com SIGSEGV; a execução sequencial do protótipo
+  passou os 245 testes. Sem ensaio interativo da janela.
+- Registros e folha de ícones conferida visualmente em
+  `target/codex-validation/ajustes-20261120/`.
+
+### Pré-seleção nos filtros da gaveta
+
+- O ensaio `selection_filters_highlight_targets_before_click_even_in_large_scenes` move
+  somente o ponteiro, sem clicar, e verifica os realces de face, aresta e vértice no
+  Automático e em cada filtro explícito, na Montagem e na Construção. A seleção e a revisão
+  permanecem intactas. Para exercitar o antigo limite de pré-seleção, amplia a malha de
+  apresentação acima de 400 mil triângulos; os alvos vêm do sólido real do ensaio.
+- As consultas desses estados usam o trabalhador de pré-seleção. O ensaio do corte de seção
+  aguarda a primeira resposta e continua exigindo descarte imediato ao mudar o plano,
+  mesmo sem mover o cursor.
+- Formatação e Clippy com e sem OCCT, testes do protótipo e ensaios gráficos sequenciais.
+  Registros `hover-*` em `target/codex-validation/ajustes-20261120/`.

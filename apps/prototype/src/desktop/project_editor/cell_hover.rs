@@ -10,6 +10,10 @@ struct Key {
     origin: Point3,
     direction: Point3,
     paint: bool,
+    filter: Option<navigation::SelectionFilter>,
+    reach: f64,
+    /// Seleção sem arranjo de células: montagem, filtros de aresta/vértice e cenas grandes.
+    plain: bool,
     /// Escolha de área da extrusão: nada além de células e faces planas da peça.
     area: bool,
     section: Option<section::Section>,
@@ -25,6 +29,8 @@ impl Key {
     fn same_context(&self, other: &Self) -> bool {
         self.scene == other.scene
             && self.paint == other.paint
+            && self.filter == other.filter
+            && self.plain == other.plain
             && self.area == other.area
             && self.section == other.section
             && self.view_rays == other.view_rays
@@ -182,11 +188,40 @@ fn compute(
         origin: key.origin,
         direction: key.direction,
     };
+    if key.plain {
+        // O raio e o realce são calculados juntos fora da interface, inclusive acima
+        // do antigo limite de 400 mil triângulos. A geometria do documento não muda.
+        let pick = document
+            .pick_clipped_with(ray, |o| view.pickable(o), section::clip(section))
+            .ok()
+            .and_then(|query| section::first_visible(query.picks, section));
+        let answer = match pick {
+            Some(pick) => {
+                let mode = key
+                    .filter
+                    .unwrap_or(navigation::SelectionFilter::Automatic)
+                    .resolve(document, &pick, key.reach);
+                let (overlay, label) = highlight::selection_overlay(
+                    document,
+                    &pick,
+                    mode,
+                    &mut highlight::Cache::default(),
+                );
+                Answer::Cell(overlay, label)
+            }
+            None => Answer::Empty,
+        };
+        return Computed {
+            key,
+            answer,
+            cached: None,
+            layers: 0,
+        };
+    }
     // Extrusão: as faces planas sólidas da peça sob o cursor, da frente para trás.
     let layers = if key.area {
         navigation::face_layers(document, view, section, ray, |pick| {
-            pick.part == part
-                && document.body(pick.body).is_some_and(|b| b.brep.is_some())
+            document.body(pick.body).is_some_and(|b| b.brep.is_some())
                 && nator_commands::measure::sketch_plane(document, pick).is_ok()
         })
     } else {
@@ -247,6 +282,16 @@ fn compute(
             layers: count,
         };
     };
+    if let Some(filter) = key.filter
+        && filter.resolve(document, &pick, key.reach) != navigation::PickMode::Face
+    {
+        return Computed {
+            key,
+            answer: Answer::Face(pick),
+            cached: None,
+            layers: count,
+        };
+    }
     if pick.part == part
         && document
             .body(pick.body)
@@ -332,8 +377,7 @@ fn compute(
     }
     // Curvas, malhas e outras peças não são áreas de extrusão.
     if key.area
-        && (pick.part != part
-            || document.body(pick.body).is_none_or(|b| b.brep.is_none())
+        && (document.body(pick.body).is_none_or(|b| b.brep.is_none())
             || nator_commands::measure::sketch_plane(document, &pick).is_err())
     {
         return Computed {
@@ -428,11 +472,12 @@ impl Editor {
             .feature_edit
             .as_ref()
             .is_some_and(|d| d.tab() == self.current().id && d.choosing_area());
-        self.current().active_part.is_some()
-            && (area
-                || (self.pick_mode == navigation::PickMode::Face
-                    && (self.selection_active() || self.paint_edit.is_some())))
-            && self.current().sketch_edit.is_none()
+        self.current().sketch_edit.is_none()
+            && (self.selection_active()
+                || (self.current().active_part.is_some()
+                    && (area
+                        || (self.pick_mode == navigation::PickMode::Face
+                            && self.paint_edit.is_some()))))
     }
     pub(super) fn update_cell_hover(&mut self, ui: &egui::Ui, response: &egui::Response) {
         self.hover = None;
@@ -444,6 +489,7 @@ impl Editor {
         // A consulta roda fora da interface; na extrusão ela continua em cenas grandes
         // (STEP importados), para as faces aptas sempre se destacarem.
         if !area
+            && !self.selection_active()
             && self
                 .scene
                 .as_ref()
@@ -456,11 +502,23 @@ impl Editor {
         }) else {
             return;
         };
-        let Some(part) = self.current().active_part else {
+        let Some(part) = self.current().active_part.or_else(|| {
+            self.current()
+                .session
+                .document()
+                .parts()
+                .first()
+                .map(|p| p.id)
+        }) else {
             return;
         };
-        let Ok(placement) = sketch_scene::part_placement(self.current(), part) else {
-            return;
+        let placement = if self.current().active_part.is_some() {
+            let Ok(placement) = sketch_scene::part_placement(self.current(), part) else {
+                return;
+            };
+            placement
+        } else {
+            Placement::default()
         };
         let bounds = self.display_bounds();
         let rect = response.rect;
@@ -477,6 +535,18 @@ impl Editor {
             origin: ray.origin,
             direction: ray.direction,
             paint: self.paint_edit.is_some(),
+            filter: self.selection_active().then_some(self.selection_filter),
+            reach: self.pick_reach(position, rect, bounds),
+            plain: self.selection_active()
+                && (self.current().active_part.is_none()
+                    || matches!(
+                        self.selection_filter,
+                        navigation::SelectionFilter::Edge | navigation::SelectionFilter::Vertex
+                    )
+                    || self
+                        .scene
+                        .as_ref()
+                        .is_some_and(|s| s.triangles().len() > highlight::HOVER_TRIANGLES)),
             area: self.feature_edit.is_some(),
             section: self.current().section,
             view_rays: [[0., 0.], [1., 1.]].map(|point| {
@@ -551,6 +621,9 @@ mod tests {
             origin: [0., 0., 10.],
             direction: [0., 0., -1.],
             paint: false,
+            filter: None,
+            reach: 0.,
+            plain: false,
             area: false,
             section: None,
             view_rays: [

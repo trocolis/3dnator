@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 /// Intervalo mínimo entre consultas de pré-seleção, para não disputar a interface.
 const HOVER_INTERVAL: Duration = Duration::from_millis(30);
-/// Acima disto, a pré-seleção é desligada: o raio percorre todos os triângulos.
+/// Limiar das consultas síncronas. A seleção neutra continua no trabalhador em cenas maiores.
 pub(super) const HOVER_TRIANGLES: usize = 400_000;
 
 /// Geometria de realce em coordenadas do mundo.
@@ -334,7 +334,7 @@ pub(super) struct Hover {
     pub label: String,
     /// Cursor de captura desenhado no apoio; o ponteiro do sistema continua livre
     /// para sair do raio sem saltos artificiais ou dependência do sistema operacional.
-    captured: Option<Point3>,
+    pub(super) captured: Option<Point3>,
     computed: Instant,
 }
 
@@ -369,7 +369,7 @@ impl Editor {
             self.feature_edit
                 .as_ref()
                 .and_then(|d| d.field().map(|f| (d.part(), d.output(), f))),
-            self.pick_mode,
+            (self.pick_mode, self.selection_filter),
             self.paint_edit.as_ref().map(|d| d.part),
             self.current().active_part,
             self.current().view.version,
@@ -394,6 +394,11 @@ impl Editor {
     pub(super) fn update_hover(&mut self, ui: &egui::Ui, response: &egui::Response) {
         // Nos modos de câmera o botão esquerdo não escolhe nada: não há o que antecipar.
         if self.shell.camera_mode.is_some() {
+            self.hover = None;
+            return;
+        }
+        // Movendo, o manipulador tem prioridade: nada é realçado sob o cursor.
+        if self.move_suppresses_hover() {
             self.hover = None;
             return;
         }
@@ -455,7 +460,7 @@ impl Editor {
             let Some(bounds) = self.current().scene_bounds else {
                 return;
             };
-            let document = self.current().session.document().clone();
+            let document = self.picking_document();
             let model = self.point_target(&document, response.rect, position, ui.ctx());
             // Rascunhos e origens ganham do modelo, salvo um ponto do modelo capturado mais
             // perto do cursor.
@@ -649,10 +654,24 @@ impl Editor {
                 .feature_edit
                 .as_ref()
                 .is_some_and(|d| d.part() != pick.part);
-        let construction = self.current().active_part == Some(pick.part);
-        let mode = self.pick_mode;
+        let construction = self.current().in_edit(pick);
+        let mode = if self.selection_active() {
+            let rect = self.canvas_rect;
+            let bounds = self.display_bounds();
+            let position = sketch_scene::project(&self.viewport.camera, bounds, rect, pick.point)
+                .unwrap_or(rect.center());
+            self.selection_filter
+                .resolve(document, pick, self.pick_reach(position, rect, bounds))
+        } else {
+            self.pick_mode
+        };
+        let external_limit = self
+            .feature_edit
+            .as_ref()
+            .is_some_and(|d| d.accepts_external_limit());
         let awaits_body = self.alignment_awaits_body();
         let alignment_face = self.alignment_face_eligible(pick);
+        let selecting = self.selection_active();
         let cache = &mut self.highlight_cache;
         // Face a face: realça só a face elegível, inclusive nos objetos translúcidos fora da
         // peça em construção; o rótulo diz de quem ela é.
@@ -684,7 +703,7 @@ impl Editor {
             return (body_outline(cache, body, pose), body.name.clone());
         }
         if let Some(awaiting) = awaiting {
-            if other_part {
+            if other_part && !external_limit {
                 return Default::default();
             }
             return match awaiting {
@@ -708,7 +727,7 @@ impl Editor {
             };
         }
         // Fora da peça em construção, a unidade é o componente inteiro.
-        if !construction {
+        if !construction && !selecting {
             let mut overlay = Overlay::default();
             let occurrence = document.occurrence_at(pick).ok();
             let root = occurrence
@@ -736,42 +755,7 @@ impl Editor {
                 .unwrap_or_default();
             return (overlay, name);
         }
-        match mode {
-            navigation::PickMode::Face => match face_of(pick) {
-                Some(f) => (face(body, pose, f), body.name.clone()),
-                None => (
-                    Overlay {
-                        triangles: vec![pick.vertices],
-                        ..Default::default()
-                    },
-                    body.name.clone(),
-                ),
-            },
-            navigation::PickMode::Edge => {
-                let mut snapped = pick.clone();
-                navigation::snap_pick(&mut snapped, navigation::PickMode::Edge);
-                let overlay = match document.edge_faces_at(pick) {
-                    Ok([a, b]) => edge(cache, body, pose, [a as u32, b as u32]),
-                    // Malhas: a aresta do triângulo mais próxima do cursor.
-                    _ => Overlay {
-                        segments: vec![([snapped.vertices[0], snapped.vertices[1]], None)],
-                        ..Default::default()
-                    },
-                };
-                (overlay, body.name.clone())
-            }
-            navigation::PickMode::Vertex => {
-                let mut snapped = pick.clone();
-                navigation::snap_pick(&mut snapped, navigation::PickMode::Vertex);
-                (
-                    Overlay {
-                        points: vec![snapped.point],
-                        ..Default::default()
-                    },
-                    body.name.clone(),
-                )
-            }
-        }
+        selection_overlay(document, pick, mode, cache)
     }
 
     /// Realces persistentes (referências do painel e face/aresta escolhida) e a pré-seleção.
@@ -898,8 +882,7 @@ impl Editor {
             && self.paint_edit.is_none()
             && self.current().plane_pick.is_none()
             && let Some(pick) = self.current().picked.clone()
-            && self.current().active_part == Some(pick.part)
-            && self.pick_mode != navigation::PickMode::Vertex
+            && self.current().view.topology_only == Some(pick.body)
         {
             let document = self.current().session.document().clone();
             if let Some(body) = document.body(pick.body) {
@@ -918,6 +901,10 @@ impl Editor {
                             edge(&mut self.highlight_cache, body, pose, [a as u32, b as u32])
                         }
                         _ => Overlay::default(),
+                    },
+                    (navigation::PickMode::Vertex, _) => Overlay {
+                        points: vec![pick.point],
+                        ..Default::default()
                     },
                     _ => Overlay::default(),
                 });
@@ -992,6 +979,63 @@ impl Editor {
                 );
                 painter.galley(at + egui::vec2(5., 3.), galley, egui::Color32::WHITE);
             }
+        }
+    }
+}
+
+/// Realce do alvo de seleção, também calculável no trabalhador de cenas grandes.
+pub(super) fn selection_overlay(
+    document: &Document,
+    pick: &Pick,
+    mode: navigation::PickMode,
+    cache: &mut Cache,
+) -> (Overlay, String) {
+    let Some(body) = document.body(pick.body) else {
+        return Default::default();
+    };
+    let pose = pick
+        .placement
+        .compose(body.placement)
+        .unwrap_or(pick.placement);
+    let face_of = |pick: &Pick| {
+        body.geometry
+            .triangle_faces()
+            .and_then(|faces| faces.get(pick.triangle).copied())
+    };
+    match mode {
+        navigation::PickMode::Face => match face_of(pick) {
+            Some(f) => (face(body, pose, f), body.name.clone()),
+            None => (
+                Overlay {
+                    triangles: vec![pick.vertices],
+                    ..Default::default()
+                },
+                body.name.clone(),
+            ),
+        },
+        navigation::PickMode::Edge => {
+            let mut snapped = pick.clone();
+            navigation::snap_topology(document, &mut snapped, navigation::PickMode::Edge);
+            let overlay = match document.edge_faces_at(pick) {
+                Ok([a, b]) => edge(cache, body, pose, [a as u32, b as u32]),
+                // Malhas: a aresta do triângulo mais próxima do cursor.
+                _ => Overlay {
+                    segments: vec![([snapped.vertices[0], snapped.vertices[1]], None)],
+                    ..Default::default()
+                },
+            };
+            (overlay, body.name.clone())
+        }
+        navigation::PickMode::Vertex => {
+            let mut snapped = pick.clone();
+            navigation::snap_topology(document, &mut snapped, navigation::PickMode::Vertex);
+            (
+                Overlay {
+                    points: vec![snapped.point],
+                    ..Default::default()
+                },
+                body.name.clone(),
+            )
         }
     }
 }

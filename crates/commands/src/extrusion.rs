@@ -155,6 +155,7 @@ mod precise {
         limit: &ExtrusionLimit,
     ) -> Result<(Point3, Point3), DocumentError> {
         let face = match limit {
+            ExtrusionLimit::CapturedPlane { origin, normal } => return Ok((*origin, *normal)),
             ExtrusionLimit::Face(face) => face,
             ExtrusionLimit::Sketch { sketch } => {
                 let plane = doc

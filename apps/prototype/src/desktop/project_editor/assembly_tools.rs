@@ -94,21 +94,16 @@ fn movement_picker(ui: &mut egui::Ui, movement: &mut Movement) {
             ],
         );
     });
-    if *movement == Movement::Free {
-        ui.label(
-            egui::RichText::new(text(T::MoveFreeHint))
-                .small()
-                .color(theme::muted()),
-        );
-    }
 }
 
+/// Tipos do Copiar, iguais na montagem (instâncias) e na peça (corpos).
 #[derive(Clone, Copy, PartialEq)]
-enum CopyKind {
+pub(super) enum CopyKind {
     Shared,
     Independent,
-    Linear,
-    Circular,
+    /// Retangular, com linhas, ou circular: o formato é escolhido no próprio painel.
+    Pattern,
+    Mirror,
 }
 impl Panel {
     fn copy_kind(&self) -> Option<CopyKind> {
@@ -123,55 +118,48 @@ impl Panel {
             } else {
                 CopyKind::Shared
             }),
-            Self::Pattern(d) => Some(if d.circular {
-                CopyKind::Circular
-            } else {
-                CopyKind::Linear
-            }),
+            Self::Pattern(_) => Some(CopyKind::Pattern),
+            Self::Mirror(_) => Some(CopyKind::Mirror),
             _ => None,
         }
     }
 }
-fn copy_picker(ui: &mut egui::Ui, kind: &mut CopyKind, bodies: bool) {
+/// Escolha do tipo de cópia. Corpos de uma peça não têm instâncias compartilhadas.
+pub(super) fn copy_picker(ui: &mut egui::Ui, kind: &mut CopyKind, bodies: bool) {
     panel::row(ui, text(T::CopyType), |ui| {
+        let shared = (CopyKind::Shared, Icon::NewBody, T::CopyNewInstance);
+        let rest = [
+            (CopyKind::Independent, Icon::Copy, T::CopyIndependent),
+            (CopyKind::Pattern, Icon::Pattern, T::CopyPattern),
+            (CopyKind::Mirror, Icon::Mirror, T::MirrorShort),
+        ];
         if bodies {
-            panel::choice(
-                ui,
-                kind,
-                &[(CopyKind::Independent, Icon::Copy, T::CopyIndependent)],
-            );
+            panel::choice(ui, kind, &rest);
         } else {
-            panel::choice(
-                ui,
-                kind,
-                &[
-                    (CopyKind::Shared, Icon::NewBody, T::CopyNewInstance),
-                    (CopyKind::Independent, Icon::Copy, T::CopyIndependent),
-                    (CopyKind::Linear, Icon::Pattern, T::RectangularPattern),
-                    (CopyKind::Circular, Icon::Revolve, T::CircularPattern),
-                ],
-            );
+            let all = [shared, rest[0], rest[1], rest[2]];
+            panel::choice(ui, kind, &all);
         }
     });
-    ui.label(
-        egui::RichText::new(text(match kind {
-            CopyKind::Shared => T::CopyInstanceHint,
-            CopyKind::Independent => T::CopyIndependentHint,
-            _ => T::CopyPatternHint,
-        }))
-        .small()
-        .color(theme::muted()),
-    );
+    let hint = match kind {
+        CopyKind::Shared => Some(T::CopyInstanceHint),
+        CopyKind::Independent => Some(T::CopyIndependentHint),
+        CopyKind::Pattern if !bodies => Some(T::CopyPatternHint),
+        _ => None,
+    };
+    if let Some(hint) = hint {
+        ui.label(
+            egui::RichText::new(text(hint))
+                .small()
+                .color(theme::muted()),
+        );
+    }
 }
 
 impl Panel {
     fn numbers_valid(&self) -> bool {
         match self {
             Self::Move(d) => d.numbers_valid(),
-            Self::Align(d) => d
-                .offset_inputs
-                .iter()
-                .all(|i| i.is_valid(panel::Quantity::Length)),
+            Self::Align(d) => d.numbers_valid(),
             Self::Pattern(d) if d.circular => d
                 .origin_inputs
                 .iter()
@@ -240,6 +228,9 @@ pub(super) struct MoveDraft {
     floating_handle: Option<Handle>,
     /// Eixos do mundo travados: a translação neles fica como está.
     locked: [bool; 3],
+    /// O ponteiro está sobre o manipulador (ou o arrasta): ele fica com o cursor e o realce
+    /// dos objetos é suspenso.
+    hot: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -268,6 +259,9 @@ pub(super) struct AlignDraft {
     /// Ajuste digitado por eixo sobre o alinhamento, no mundo.
     offset: Point3,
     offset_inputs: [panel::NumberInput; 3],
+    /// Ajuste de rotação (graus por eixo do mundo) sobre o alinhamento.
+    rotation_offset: Point3,
+    rotation_inputs: [panel::NumberInput; 3],
     /// Eixos travados: no ponto a ponto, o alinhamento não move o objeto neles.
     locked: [bool; 3],
 }
@@ -288,6 +282,59 @@ impl PointFocus {
             body: body.id,
             name: body.name.clone(),
         })
+    }
+
+    /// Corpo principal entre os alvos da movimentação, para já exibir os pontos de
+    /// origem no modo ponto a ponto sem exigir um clique prévio no objeto.
+    fn from_targets(
+        document: &Document,
+        targets: &[Selection],
+        picked: Option<&Pick>,
+    ) -> Option<Self> {
+        if let Some(pick) = picked
+            && targets
+                .iter()
+                .any(|target| selection_contains_pick(document, *target, pick))
+            && let Some(focus) = Self::from_pick(document, pick)
+        {
+            return Some(focus);
+        }
+        let occurrences = document.occurrences().ok()?;
+        for target in targets {
+            match *target {
+                Selection::Body { part, id } => {
+                    let body = document.body(id)?;
+                    let occurrence = occurrences.iter().find(|o| {
+                        document
+                            .instance(o.instance)
+                            .is_some_and(|instance| instance.part == part)
+                    })?;
+                    return Some(Self {
+                        path: occurrence.path.clone(),
+                        body: body.id,
+                        name: body.name.clone(),
+                    });
+                }
+                Selection::Instance(id) => {
+                    for occurrence in occurrences.iter().filter(|o| o.path.contains(&id)) {
+                        let Some(part) = document
+                            .instance(occurrence.instance)
+                            .and_then(|instance| document.part(instance.part))
+                        else {
+                            continue;
+                        };
+                        if let Some(body) = part.shown_bodies().next() {
+                            return Some(Self {
+                                path: occurrence.path.clone(),
+                                body: body.id,
+                                name: body.name.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -532,9 +579,33 @@ pub(super) struct PatternDraft {
     axis: usize,
     count: u32,
     spacing: String,
+    /// Linhas do padrão retangular: 1 é uma fileira só; mais de 1 repete a fileira.
+    rows: u32,
+    row_axis: usize,
+    row_spacing: String,
     angle: String,
     origin: Point3,
     origin_inputs: [panel::NumberInput; 3],
+}
+
+impl PatternDraft {
+    fn new(tab: u64, target: Option<InstanceId>, circular: bool) -> Self {
+        Self {
+            tab,
+            target,
+            picking: target.is_none(),
+            circular,
+            axis: 0,
+            count: 3,
+            spacing: "100 mm".into(),
+            rows: 1,
+            row_axis: 1,
+            row_spacing: "100 mm".into(),
+            angle: "360 deg".into(),
+            origin: [0.; 3],
+            origin_inputs: Default::default(),
+        }
+    }
 }
 
 pub(super) struct MirrorDraft {
@@ -543,6 +614,8 @@ pub(super) struct MirrorDraft {
     picking: bool,
     plane: usize,
     offset: f64,
+    /// Distância entre a original e a cópia espelhada, somada à reflexão pelo plano.
+    distance: f64,
     /// Linha de um rascunho de referência que posiciona o plano: ele passa por ela, com a
     /// orientação escolhida. Só a posição no momento da escolha é usada, sem vínculo.
     line: Option<MirrorLine>,
@@ -557,6 +630,18 @@ pub(super) struct MirrorLine {
 }
 
 impl MirrorDraft {
+    fn new(tab: u64, target: Option<InstanceId>) -> Self {
+        Self {
+            tab,
+            target,
+            picking: target.is_none(),
+            plane: 2,
+            offset: 0.,
+            distance: 0.,
+            line: None,
+            picking_line: false,
+        }
+    }
     /// Ponto do plano de espelhamento: na linha escolhida ou pelo deslocamento digitado.
     /// Uma linha que não é paralela ao plano não define posição e é recusada.
     fn origin(&self) -> Result<Point3, T> {
@@ -783,6 +868,29 @@ fn move_commands(
         .collect()
 }
 
+/// Plano de espelhamento deslocado para que a cópia fique `distance` mais afastada da
+/// original: a reflexão dobra o deslocamento, então o plano anda metade, para o lado oposto
+/// ao centro da original. Sem o centro ou com distância nula, o plano não muda.
+pub(super) fn spaced_plane(
+    origin: Point3,
+    normal: Point3,
+    center: Option<Point3>,
+    distance: f64,
+) -> Point3 {
+    let Some(center) = center else {
+        return origin;
+    };
+    if distance == 0. {
+        return origin;
+    }
+    let side = if nator_geometry::dot(sub(center, origin), normal) <= 0. {
+        1.
+    } else {
+        -1.
+    };
+    std::array::from_fn(|i| origin[i] + normal[i] * side * distance / 2.)
+}
+
 fn batch(label: &'static str, mut commands: Vec<Command>) -> Option<Command> {
     match commands.len() {
         0 => None,
@@ -883,11 +991,29 @@ impl AlignDraft {
             .and_then(|delta| delta.compose(self.carried).ok())
             .unwrap_or(self.carried)
     }
-    /// Movimento acumulado no mundo, com o alinhamento se ele já estiver completo e o
-    /// ajuste por eixo por último.
-    fn total(&self) -> Placement {
+    fn numbers_valid(&self) -> bool {
+        self.offset_inputs
+            .iter()
+            .all(|i| i.is_valid(panel::Quantity::Length))
+            && self
+                .rotation_inputs
+                .iter()
+                .all(|i| i.is_valid(panel::Quantity::Angle))
+    }
+    /// Movimento acumulado no mundo, com o alinhamento se ele já estiver completo e os
+    /// ajustes por eixo (posição e rotação) por último.
+    fn total(&self, center: Option<Point3>) -> Placement {
         let aligned = self.aligned();
-        aligned.translated(self.offset).unwrap_or(aligned)
+        if self.rotation_offset.iter().all(|v| v.abs() <= 1e-12) {
+            return aligned.translated(self.offset).unwrap_or(aligned);
+        }
+        let pivot = center.unwrap_or([0.; 3]);
+        let base_translation = sub(aligned.apply(pivot), pivot);
+        let base_rotation = aligned.rotation_rad().map(f64::to_degrees);
+        let translation = std::array::from_fn(|k| base_translation[k] + self.offset[k]);
+        let rotation = std::array::from_fn(|k| base_rotation[k] + self.rotation_offset[k]);
+        world_delta(pivot, translation, rotation)
+            .unwrap_or_else(|| aligned.translated(self.offset).unwrap_or(aligned))
     }
 }
 
@@ -909,6 +1035,7 @@ impl MoveDraft {
             floating: Default::default(),
             floating_handle: None,
             locked: [false; 3],
+            hot: false,
         }
     }
 
@@ -926,6 +1053,23 @@ impl MoveDraft {
 }
 
 impl Editor {
+    /// Com o Mover aberto e os alvos escolhidos, o realce de objetos sob o cursor só atrapalha
+    /// o manipulador: some, salvo se o campo Objetos estiver aguardando um clique no modelo
+    /// (e, mesmo então, some sobre o manipulador).
+    pub(super) fn move_suppresses_hover(&self) -> bool {
+        matches!(
+            &self.assembly_panel,
+            Some(Panel::Move(d))
+                if d.tab == self.current().id
+                    && !d.targets.is_empty()
+                    && (!d.picking || d.hot)
+        )
+    }
+    /// O ponteiro está sobre o manipulador de mover/girar: ele tem prioridade sobre o cursor
+    /// da ferramenta.
+    pub(super) fn move_gizmo_hot(&self) -> bool {
+        matches!(&self.assembly_panel, Some(Panel::Move(d)) if d.hot)
+    }
     pub(super) fn move_input_active(&self) -> bool {
         matches!(&self.assembly_panel,Some(Panel::Move(d)) if d.floating.active())
     }
@@ -1035,81 +1179,70 @@ impl Editor {
                     .and_then(|pivot| world_delta(pivot, d.translation, d.rotation))
                     .unwrap_or_default()
             }
-            Panel::Align(d) => d.total(),
+            Panel::Align(d) => d.total(self.align_center(d)),
             _ => Placement::default(),
         };
-        let carried = match &panel {
-            Panel::Align(d) if movement.kind().is_some() => d.carried,
-            _ => total,
+        let locked = match &panel {
+            Panel::Move(d) => d.locked,
+            Panel::Align(d) => d.locked,
+            _ => [false; 3],
         };
-        // As travas valem para o novo tipo; o ajuste digitado segue entre alinhamentos
-        // (no Livre ele já está no acumulado).
-        let (locked, offset) = match &panel {
-            Panel::Move(d) => (d.locked, [0.; 3]),
-            Panel::Align(d) => (d.locked, d.offset),
-            _ => ([false; 3], [0.; 3]),
-        };
-        let (tab, targets, mode, independent, source, destination, field, flip) = match panel {
-            Panel::Move(d) => (
-                d.tab,
-                d.targets,
-                d.mode,
-                d.independent,
-                None,
-                None,
-                None,
-                false,
-            ),
-            Panel::Align(d) => (
-                d.tab,
-                d.targets,
-                d.mode,
-                d.independent,
-                d.from,
-                d.to,
-                d.field,
-                d.flip,
-            ),
+        let (tab, targets, mode, independent) = match panel {
+            Panel::Move(d) => (d.tab, d.targets, d.mode, d.independent),
+            Panel::Align(d) => (d.tab, d.targets, d.mode, d.independent),
             other => return other,
         };
         if let Some(kind) = movement.kind() {
             self.pick_mode = kind;
+            let document = self.current().session.document();
             // O último clique foi feito na posição antiga: não vale depois de mover.
             let picked = self
                 .current()
                 .picked
                 .clone()
-                .filter(|_| carried == Placement::default());
-            let mut from = source.or(picked).filter(|p| {
-                targets
-                    .iter()
-                    .any(|t| selection_contains_pick(self.current().session.document(), *t, p))
-            });
-            if let Some(pick) = &mut from {
-                navigation::snap_pick(pick, kind);
-            }
-            // Trocar face/aresta/ponto mantém as duas escolhas e o campo em edição,
-            // para a movimentação continuar de onde parou em vez de reiniciar.
-            let field = if from.is_some() {
-                field.or(Some(AlignField::To))
+                .filter(|_| total == Placement::default());
+            let from = if kind == navigation::PickMode::Vertex {
+                None
             } else {
-                Some(AlignField::From)
+                picked
+                    .clone()
+                    .filter(|p| {
+                        targets
+                            .iter()
+                            .any(|t| selection_contains_pick(document, *t, p))
+                    })
+                    .map(|mut pick| {
+                        navigation::snap_pick(&mut pick, kind);
+                        pick
+                    })
+            };
+            let field = Some(if from.is_some() {
+                AlignField::To
+            } else {
+                AlignField::From
+            });
+            let focus = if kind == navigation::PickMode::Vertex && field == Some(AlignField::From) {
+                PointFocus::from_targets(document, &targets, picked.as_ref())
+            } else {
+                None
             };
             Panel::Align(Box::new(AlignDraft {
                 tab,
                 kind,
                 from,
-                to: destination,
+                to: None,
                 field,
-                flip,
+                flip: false,
                 targets,
                 mode,
                 independent,
-                carried,
-                focus: None,
+                carried: total,
+                focus,
                 from_outline: Vec::new(),
-                offset,
+                offset: [0.; 3],
                 offset_inputs: Default::default(),
+                rotation_offset: [0.; 3],
+                rotation_inputs: Default::default(),
                 locked,
             }))
         } else {
@@ -1119,10 +1252,9 @@ impl Editor {
             draft.locked = locked;
             // O acumulado vira os valores do painel, medidos do centro dos alvos.
             let frames = frames(self.current(), &draft.targets);
-            if let Some(pivot) = pivot_point(self.current(), &frames, draft.pivot) {
-                draft.translation = sub(total.apply(pivot), pivot);
-                draft.rotation = total.rotation_rad().map(f64::to_degrees);
-            }
+            let pivot = pivot_point(self.current(), &frames, draft.pivot).unwrap_or([0.; 3]);
+            draft.translation = sub(total.apply(pivot), pivot);
+            draft.rotation = total.rotation_rad().map(f64::to_degrees);
             Panel::Move(Box::new(draft))
         }
     }
@@ -1221,6 +1353,9 @@ impl Editor {
         )
     }
     fn movable_in_construction(&self, pick: &Pick) -> Result<(), T> {
+        if self.current().active_part == Some(pick.part) && !self.current().in_edit(pick) {
+            return Err(T::PickOtherPart);
+        }
         super::selection_tools::movable_in_construction(
             self.current().session.document(),
             self.current().active_part,
@@ -1274,13 +1409,16 @@ impl Editor {
             targets,
         ))));
     }
-    /// Entradas separadas da aba Peça: copiar nunca move o original, e mover não
-    /// cria uma cópia. A seleção continua disponível no painel e no viewport.
+    /// Mover e Copiar são os mesmos na montagem e na peça: o contexto (instâncias ou corpos
+    /// da peça em edição) só muda o alvo. Copiar nunca move o original e mover não cria cópia.
     pub(super) fn open_body_move(&mut self, copy: bool) {
-        self.open_move();
-        if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
-            draft.mode = if copy { MoveMode::Copy } else { MoveMode::Move };
-            draft.independent = true;
+        if copy {
+            self.open_copy(false);
+        } else {
+            self.open_move();
+            if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
+                draft.mode = MoveMode::Move;
+            }
         }
     }
     /// Translação e rotação do Mover/Copiar aberto, para capturas de ensaio.
@@ -1338,18 +1476,23 @@ impl Editor {
         // O último clique válido já fornece a geometria da origem. Uma seleção
         // feita só pela árvore não inventa uma face/aresta/ponto para alinhar.
         let selected = self.selected_pick().cloned();
-        // No ponto a ponto, a seleção vale só como o corpo cujos pontos se mapeiam.
-        let focus = selected
-            .as_ref()
-            .filter(|_| kind == navigation::PickMode::Vertex)
-            .and_then(|pick| PointFocus::from_pick(self.current().session.document(), pick));
+        let targets = self.movable_selection();
+        let document = self.current().session.document();
+        // No ponto a ponto, os pontos de origem já aparecem no objeto alvo da movimentação.
+        let focus = if kind == navigation::PickMode::Vertex {
+            selected
+                .as_ref()
+                .and_then(|pick| PointFocus::from_pick(document, pick))
+                .or_else(|| PointFocus::from_targets(document, &targets, None))
+        } else {
+            None
+        };
         let from = selected
             .filter(|_| kind != navigation::PickMode::Vertex)
             .map(|mut pick| {
                 navigation::snap_pick(&mut pick, kind);
                 pick
             });
-        let targets = self.movable_selection();
         let field = Some(if from.is_some() {
             AlignField::To
         } else {
@@ -1370,24 +1513,19 @@ impl Editor {
             from_outline: Vec::new(),
             offset: [0.; 3],
             offset_inputs: Default::default(),
+            rotation_offset: [0.; 3],
+            rotation_inputs: Default::default(),
             locked: [false; 3],
         })));
     }
     pub(super) fn open_instance_pattern(&mut self, circular: bool) {
         let target = self.selected_instance();
         self.feature_edit = None;
-        self.assembly_panel = Some(Panel::Pattern(Box::new(PatternDraft {
-            tab: self.current().id,
+        self.assembly_panel = Some(Panel::Pattern(Box::new(PatternDraft::new(
+            self.current().id,
             target,
-            picking: target.is_none(),
             circular,
-            axis: 0,
-            count: 3,
-            spacing: "100 mm".into(),
-            angle: "360 deg".into(),
-            origin: [0.; 3],
-            origin_inputs: Default::default(),
-        })));
+        ))));
     }
     /// Linha de referência escolhida no espelhar, para os ensaios.
     #[cfg(all(test, feature = "occt"))]
@@ -1412,15 +1550,7 @@ impl Editor {
     pub(super) fn open_instance_mirror(&mut self) {
         let target = self.selected_instance();
         self.feature_edit = None;
-        self.assembly_panel = Some(Panel::Mirror(MirrorDraft {
-            tab: self.current().id,
-            target,
-            picking: target.is_none(),
-            plane: 2,
-            offset: 0.,
-            line: None,
-            picking_line: false,
-        }));
+        self.assembly_panel = Some(Panel::Mirror(MirrorDraft::new(self.current().id, target)));
     }
 
     /// Copiar abre a prévia; a escolha da definição fica no painel.
@@ -1438,59 +1568,60 @@ impl Editor {
             d.independent = independent;
         }
     }
-    fn change_copy(&mut self, panel: Panel, kind: CopyKind) -> Panel {
-        if matches!(kind, CopyKind::Shared | CopyKind::Independent) {
-            let mut panel = match panel {
-                Panel::Pattern(d) => Panel::Move(Box::new(MoveDraft::new(
-                    d.tab,
-                    d.target.map(Selection::Instance).into_iter().collect(),
-                ))),
-                other => other,
-            };
-            match &mut panel {
-                Panel::Move(d) => {
-                    d.mode = MoveMode::Copy;
-                    d.independent = kind == CopyKind::Independent;
-                }
-                Panel::Align(d) => {
-                    d.mode = MoveMode::Copy;
-                    d.independent = kind == CopyKind::Independent;
-                }
-                _ => {}
-            }
-            panel
-        } else {
-            match panel {
-                Panel::Pattern(mut d) => {
-                    d.circular = kind == CopyKind::Circular;
-                    Panel::Pattern(d)
-                }
-                Panel::Move(d) => self.copy_pattern(d.tab, d.targets, kind),
-                Panel::Align(d) => self.copy_pattern(d.tab, d.targets, kind),
-                other => other,
-            }
+    /// Abre o padrão ou o espelho de corpos da peça em edição, no painel de operações.
+    fn open_body_layout(&mut self, kind: CopyKind) {
+        self.assembly_panel = None;
+        self.open_feature_tool(match kind {
+            CopyKind::Mirror => feature_editor::Tool::Mirror,
+            _ => feature_editor::Tool::LinearPattern,
+        });
+    }
+    /// Instância que o painel está copiando, para levar a escolha ao novo tipo.
+    fn copy_target(panel: &Panel) -> (u64, Vec<Selection>) {
+        let instance = |id: Option<InstanceId>| id.map(Selection::Instance).into_iter().collect();
+        match panel {
+            Panel::Move(d) => (d.tab, d.targets.clone()),
+            Panel::Align(d) => (d.tab, d.targets.clone()),
+            Panel::Pattern(d) => (d.tab, instance(d.target)),
+            Panel::Mirror(d) => (d.tab, instance(d.target)),
         }
     }
-    fn copy_pattern(&self, tab: u64, targets: Vec<Selection>, kind: CopyKind) -> Panel {
-        let target = targets.iter().find_map(|s| {
-            if let Selection::Instance(id) = s {
-                Some(*id)
-            } else {
-                None
-            }
+    fn change_copy(&mut self, panel: Panel, kind: CopyKind) -> Panel {
+        let (tab, targets) = Self::copy_target(&panel);
+        let target = targets.iter().find_map(|s| match s {
+            Selection::Instance(id) => Some(*id),
+            Selection::Body { .. } => None,
         });
-        Panel::Pattern(Box::new(PatternDraft {
-            tab,
-            target,
-            picking: target.is_none(),
-            circular: kind == CopyKind::Circular,
-            axis: 0,
-            count: 3,
-            spacing: "100 mm".into(),
-            angle: "360 deg".into(),
-            origin: [0.; 3],
-            origin_inputs: Default::default(),
-        }))
+        match kind {
+            CopyKind::Shared | CopyKind::Independent => {
+                let mut panel = match panel {
+                    Panel::Pattern(_) | Panel::Mirror(_) => {
+                        Panel::Move(Box::new(MoveDraft::new(tab, targets)))
+                    }
+                    other => other,
+                };
+                match &mut panel {
+                    Panel::Move(d) => {
+                        d.mode = MoveMode::Copy;
+                        d.independent = kind == CopyKind::Independent;
+                    }
+                    Panel::Align(d) => {
+                        d.mode = MoveMode::Copy;
+                        d.independent = kind == CopyKind::Independent;
+                    }
+                    _ => {}
+                }
+                panel
+            }
+            CopyKind::Pattern => match panel {
+                Panel::Pattern(d) => Panel::Pattern(d),
+                _ => Panel::Pattern(Box::new(PatternDraft::new(tab, target, false))),
+            },
+            CopyKind::Mirror => match panel {
+                Panel::Mirror(d) => Panel::Mirror(d),
+                _ => Panel::Mirror(MirrorDraft::new(tab, target)),
+            },
+        }
     }
     /// Grupo com as instâncias selecionadas do mesmo nível.
     pub(super) fn group_selection(&mut self, context: &egui::Context) {
@@ -1785,14 +1916,13 @@ impl Editor {
             Panel::Move(_) => (Icon::Move, T::MoveMenu),
             Panel::Align(d) if matches!(d.mode, MoveMode::Copy) => (Icon::Copy, T::CopyMenu),
             Panel::Align(_) => (Icon::Move, T::MoveMenu),
-            Panel::Pattern(_) => (Icon::Copy, T::CopyMenu),
-            Panel::Mirror(_) => (Icon::Mirror, T::MirrorComponent),
+            Panel::Pattern(_) | Panel::Mirror(_) => (Icon::Copy, T::CopyMenu),
         };
         let document = self.current().session.document().clone();
         let picked = self.current().picked.as_ref().map(|p| p.point);
-        // Deslocamento do centro dos alvos pelo alinhamento (sem o ajuste digitado).
-        let aligned = match &panel {
-            Panel::Align(d) => self.align_center(d).map(|c| sub(d.aligned().apply(c), c)),
+        // Centro dos alvos do alinhamento, para converter posição e rotação na seção Translação.
+        let align_center = match &panel {
+            Panel::Align(d) => self.align_center(d),
             _ => None,
         };
         let initial_copy = panel.copy_kind();
@@ -1816,10 +1946,11 @@ impl Editor {
                 }
                 if let Some(movement) = &mut movement {
                     movement_picker(ui, movement);
+                    ui.separator();
                 }
                 match &mut panel {
                     Panel::Move(d) => move_panel(ui, d, &document, picked),
-                    Panel::Align(d) => align_panel(ui, d, &document, aligned),
+                    Panel::Align(d) => align_panel(ui, d, &document, align_center),
                     Panel::Pattern(d) => pattern_panel(ui, d, &document),
                     Panel::Mirror(d) => mirror_panel(ui, d, &document),
                 }
@@ -1838,6 +1969,12 @@ impl Editor {
         if copy_kind != initial_copy
             && let Some(kind) = copy_kind
         {
+            // Na peça, padrão e espelho agem nos corpos: têm painel próprio, com histórico.
+            if bodies && matches!(kind, CopyKind::Pattern | CopyKind::Mirror) {
+                self.preview_command(tab, None, None, None);
+                self.open_body_layout(kind);
+                return;
+            }
             panel = self.change_copy(panel, kind);
         }
         // Valores digitados neste quadro já estão no rascunho: o comando é refeito com eles.
@@ -1909,9 +2046,11 @@ impl Editor {
                 {
                     return None;
                 }
-                // Sem as duas escolhas, ainda vale o que veio do tipo anterior.
-                let moved = d.carried != Placement::default();
-                if d.delta().is_none() && !moved {
+                // Sem as duas escolhas, ainda vale o que veio do tipo anterior ou foi digitado.
+                let center = self.align_center(d);
+                let total = d.total(center);
+                let moved = total != Placement::default();
+                if d.delta().is_none() && !moved && !d.mode.copies() {
                     return None;
                 }
                 let targets = if d.targets.is_empty() {
@@ -1922,7 +2061,7 @@ impl Editor {
                 let frames = frames(tab, &targets);
                 batch(
                     "Alinhar elemento",
-                    move_commands(tab, &frames, d.total(), d.mode.copies(), d.independent),
+                    move_commands(tab, &frames, total, d.mode.copies(), d.independent),
                 )
             }
             Panel::Pattern(d) => Some(Command::PatternInstance {
@@ -1941,7 +2080,11 @@ impl Editor {
                             count: d.count,
                             spacing: d.spacing.clone(),
                         },
-                        second: None,
+                        second: (d.rows > 1).then(|| LinearAxis {
+                            direction: AXES[d.row_axis],
+                            count: d.rows,
+                            spacing: d.row_spacing.clone(),
+                        }),
                     }
                 },
             }),
@@ -1949,9 +2092,12 @@ impl Editor {
                 let id = d.target?;
                 let instance = tab.session.document().instance(id)?;
                 let normal = PLANES[d.plane].1;
+                let origin = d.origin().ok()?;
+                let center =
+                    pivot_point(tab, &frames(tab, &[Selection::Instance(id)]), Pivot::Center);
                 Some(Command::MirrorInstance {
                     id,
-                    origin: d.origin().ok()?,
+                    origin: spaced_plane(origin, normal, center, d.distance),
                     normal,
                     name: format!("{} ({})", instance.name, text(T::MirroredSuffix)),
                 })
@@ -1962,6 +2108,9 @@ impl Editor {
     /// Manipulador do Mover/Copiar: setas por eixo, anéis de rotação e centro livre.
     /// Devolve verdadeiro quando o ponteiro está sobre ele ou o arrasta.
     pub(super) fn move_gizmo(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
+        if let Some(Panel::Move(draft)) = &mut self.assembly_panel {
+            draft.hot = false;
+        }
         let Some(Panel::Move(draft)) = &self.assembly_panel else {
             return false;
         };
@@ -2051,7 +2200,7 @@ impl Editor {
                 }
             }
             (0..3)
-                .find(|k| distance_to(&rings[*k], p) < 6.)
+                .find(|k| !locked[*k] && distance_to(&rings[*k], p) < 6.)
                 .map(Handle::Ring)
         });
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -2063,9 +2212,14 @@ impl Editor {
             } else {
                 1.6
             };
+            let color = if locked[k] {
+                colors[k].gamma_multiply(0.3)
+            } else {
+                colors[k].gamma_multiply(0.85)
+            };
             painter.add(egui::Shape::line(
                 ring.clone(),
-                egui::Stroke::new(width, colors[k].gamma_multiply(0.85)),
+                egui::Stroke::new(width, color),
             ));
         }
         for (k, tip) in tips.iter().enumerate() {
@@ -2207,6 +2361,16 @@ impl Editor {
         if !down {
             draft.drag = None;
         }
+        // O manipulador manda no cursor: sem o distintivo da ferramenta e sem realce de
+        // objetos enquanto o ponteiro está sobre ele ou o arrasta.
+        draft.hot = hovered.is_some() || dragging;
+        if draft.hot {
+            ui.ctx().set_cursor_icon(match (active, dragging) {
+                (Some(Handle::Free), _) => egui::CursorIcon::Move,
+                (_, true) => egui::CursorIcon::Grabbing,
+                _ => egui::CursorIcon::Grab,
+            });
+        }
         let mut floating_blocked = false;
         if let Some(handle) = draft.floating_handle {
             let (value, quantity, label) = match handle {
@@ -2336,10 +2500,10 @@ impl Editor {
                     painter.circle(p, 6., egui::Color32::WHITE, egui::Stroke::new(2.5, color));
                 }
             };
-        // Pontos mapeados do corpo escolhido no ponto a ponto, discretos: o realce forte
-        // fica para o ponto sob o cursor.
+        // Pontos mapeados do corpo escolhido no ponto a ponto, discretos: só o ponto sob
+        // o cursor recebe o destaque completo (losango, triângulo ou seta).
         if let Some(focus) = self.alignment_point_focus() {
-            let document = self.current().session.document();
+            let document = self.picking_document();
             let revision = (self.current().id, self.current().session.revision());
             if let Some(anchors) = self.point_cache.anchors(revision, focus.body)
                 && let Some(occurrence) = document
@@ -2349,11 +2513,18 @@ impl Editor {
                 && let Some(body) = document.body(focus.body)
                 && let Ok(pose) = occurrence.placement.compose(body.placement)
             {
-                let color = theme::accent().gamma_multiply(0.8);
+                let hovered = self
+                    .hover
+                    .as_ref()
+                    .filter(|h| h.tab == self.current().id)
+                    .and_then(|h| h.captured);
+                let subtle_fill = egui::Color32::from_white_alpha(150);
+                let subtle_color = theme::accent().gamma_multiply(0.5);
                 let section = self.current().section.filter(|s| s.visible);
                 let toward_viewer = camera.direction();
                 // Passo no mundo para projetar a normal: pequeno diante da cena.
                 let step = nator_geometry::norm(sub(bounds.max, bounds.min)).max(1.) * 0.01;
+                let mut highlighted = None;
                 for anchor in anchors {
                     let point = pose.apply(anchor.point);
                     if section.is_some_and(|s| !s.keeps(point)) {
@@ -2362,35 +2533,46 @@ impl Editor {
                     let Some(p) = project(point) else {
                         continue;
                     };
-                    let Some(style) = anchor_style(anchor.kind) else {
-                        painter.circle(p, 2.5, egui::Color32::WHITE, egui::Stroke::new(1.2, color));
-                        continue;
-                    };
-                    // Só centros virtuais (no vazio) ganham seta; os demais, só a marca.
-                    if !anchor.circle.is_some_and(|c| !c.on_material) {
-                        anchor_mark(&painter, p, style);
+                    if hovered.is_some_and(|h| norm(sub(h, point)) < 1e-4) {
+                        highlighted = Some((anchor, point, p));
                         continue;
                     }
-                    // Seta perpendicular ao plano do ponto, vinda de fora do material: um
-                    // centro do outro lado do corpo recebe a seta de lá. Sem a face externa,
-                    // vem do lado do observador.
-                    let outward = anchor.circle.and_then(|c| c.outward);
-                    let normal = anchor.normal.map(|n| {
-                        let n = pose.apply_vector(n);
-                        if outward.is_none() && nator_geometry::dot(n, toward_viewer) < 0. {
-                            n.map(|v| -v)
-                        } else {
-                            n
+                    let ring_color = anchor_style(anchor.kind)
+                        .map(|style| style.color.gamma_multiply(0.55))
+                        .unwrap_or(subtle_color);
+                    painter.circle(p, 2.0, subtle_fill, egui::Stroke::new(1.0, ring_color));
+                }
+                if let Some((anchor, point, p)) = highlighted {
+                    if let Some(style) = anchor_style(anchor.kind) {
+                        if anchor.circle.is_some_and(|c| !c.on_material) {
+                            let outward = anchor.circle.and_then(|c| c.outward);
+                            let normal = anchor.normal.map(|n| {
+                                let n = pose.apply_vector(n);
+                                if outward.is_none() && nator_geometry::dot(n, toward_viewer) < 0. {
+                                    n.map(|v| -v)
+                                } else {
+                                    n
+                                }
+                            });
+                            let screen_normal = normal
+                                .and_then(|n| {
+                                    project(std::array::from_fn(|i| point[i] + n[i] * step))
+                                })
+                                .map(|q| q - p)
+                                .filter(|v| v.length() > 0.5)
+                                .map(egui::Vec2::normalized);
+                            let from = screen_normal.unwrap_or(egui::vec2(-1., -1.).normalized());
+                            pointer_arrow(&painter, p, from, style.color);
                         }
-                    });
-                    let screen_normal = normal
-                        .and_then(|n| project(std::array::from_fn(|i| point[i] + n[i] * step)))
-                        .map(|q| q - p)
-                        .filter(|v| v.length() > 0.5)
-                        .map(egui::Vec2::normalized);
-                    let from = screen_normal.unwrap_or(egui::vec2(-1., -1.).normalized());
-                    pointer_arrow(&painter, p, from, style.color);
-                    anchor_mark(&painter, p, style);
+                        anchor_mark(&painter, p, style);
+                    } else {
+                        painter.circle(
+                            p,
+                            4.5,
+                            egui::Color32::WHITE,
+                            egui::Stroke::new(2.0, theme::accent()),
+                        );
+                    }
                 }
             }
         }
@@ -2567,39 +2749,133 @@ fn number_row(
     );
 }
 
-/// Translação em lista vertical, um eixo por linha. Com `locked`, cada linha termina
-/// numa caixa que trava o eixo: o campo fica fixo e o movimento só ocorre nos demais.
-fn axis_list(
-    ui: &mut egui::Ui,
-    label: &str,
-    values: &mut Point3,
-    inputs: &mut [panel::NumberInput; 3],
-    mut locked: Option<&mut [bool; 3]>,
-    document: &Document,
-) {
+struct TransformFields<'a> {
+    translation: &'a mut Point3,
+    rotation: &'a mut Point3,
+    translation_inputs: &'a mut [panel::NumberInput; 3],
+    rotation_inputs: &'a mut [panel::NumberInput; 3],
+    locked: &'a mut [bool; 3],
+    valid: bool,
+}
+
+/// Seção Translação compartilhada por todos os modos do Mover/Copiar: posições X, Y e Z,
+/// rotação em cada eixo e botão de cadeado para travar o eixo.
+fn transform_section(ui: &mut egui::Ui, fields: TransformFields<'_>, document: &Document) -> bool {
+    let TransformFields {
+        translation,
+        rotation,
+        translation_inputs,
+        rotation_inputs,
+        locked,
+        valid,
+    } = fields;
     let decimals = usize::from(document.settings().display_decimals);
-    let quantity = panel::Quantity::Length;
-    // O título ocupa a coluna de rótulos da primeira linha, sem linha própria.
-    let title = format!("{label} ({})", quantity.unit(document.settings()));
-    for (axis, (value, input)) in values.iter_mut().zip(inputs).enumerate() {
-        panel::row(ui, if axis == 0 { &title } else { "" }, |ui| {
-            ui.label(
-                egui::RichText::new(AXIS_NAMES[axis])
-                    .strong()
-                    .color(theme::muted()),
+    let length = panel::Quantity::Length;
+    let angle = panel::Quantity::Angle;
+    ui.label(egui::RichText::new(text(T::TranslationField)).strong());
+    let axis_width = 16.;
+    let lock_width = 28.;
+    let spacing = 6.;
+    // Cada TextEdit acrescenta ~8 pt de margem interna além de `desired_width`.
+    let column_width =
+        ((ui.available_width() - axis_width - lock_width - spacing * 3.) / 2.).clamp(66., 126.);
+    let field_width = (column_width - 10.).max(52.);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = spacing;
+        ui.add_space(axis_width);
+        ui.add_sized(
+            [column_width, 16.],
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "{} ({})",
+                    text(T::PositionField),
+                    length.unit(document.settings())
+                ))
+                .small()
+                .color(theme::muted()),
+            ),
+        );
+        ui.add_sized(
+            [column_width, 16.],
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "{} ({})",
+                    text(T::RotationField),
+                    angle.unit(document.settings())
+                ))
+                .small()
+                .color(theme::muted()),
+            ),
+        );
+    });
+    for axis in 0..3 {
+        let fixed = locked[axis];
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = spacing;
+            ui.add_sized(
+                [axis_width, 22.],
+                egui::Label::new(
+                    egui::RichText::new(AXIS_NAMES[axis])
+                        .strong()
+                        .color(theme::muted()),
+                ),
             );
-            let fixed = locked.as_ref().is_some_and(|l| l[axis]);
-            let width =
-                (ui.available_width() - if locked.is_some() { 70. } else { 8. }).clamp(60., 150.);
             ui.add_enabled_ui(!fixed, |ui| {
-                input.show(ui, (label, axis), value, quantity, decimals, width);
+                translation_inputs[axis].show(
+                    ui,
+                    ("move_translation", axis),
+                    &mut translation[axis],
+                    length,
+                    decimals,
+                    field_width,
+                );
             });
-            if let Some(locked) = locked.as_mut() {
-                ui.checkbox(&mut locked[axis], text(T::LockAxis))
-                    .on_hover_text(text(T::LockAxisHint));
+            ui.add_enabled_ui(!fixed, |ui| {
+                rotation_inputs[axis].show(
+                    ui,
+                    ("move_rotation", axis),
+                    &mut rotation[axis],
+                    angle,
+                    decimals,
+                    field_width,
+                );
+            });
+            let icon = if locked[axis] {
+                Icon::Lock
+            } else {
+                Icon::LockOpen
+            };
+            let response = icons::button_with_hint(
+                ui,
+                icon,
+                text(T::LockAxis),
+                false,
+                locked[axis],
+                text(T::LockAxisHint),
+            );
+            #[cfg(all(test, feature = "occt"))]
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(egui::Id::new(("move_lock_rect", axis)), response.rect);
+            });
+            if response.clicked() {
+                locked[axis] = !locked[axis];
             }
         });
     }
+    let mut reset = false;
+    ui.horizontal(|ui| {
+        if ui.small_button(text(T::ResetTransform)).clicked() {
+            reset = true;
+        }
+    });
+    if !valid {
+        ui.label(
+            egui::RichText::new(text(T::InvalidTransformNumber))
+                .small()
+                .color(theme::danger()),
+        );
+    }
+    reset
 }
 
 fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked: Option<Point3>) {
@@ -2626,22 +2902,6 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
             Selection::Body { .. } => None,
         }),
     );
-    axis_list(
-        ui,
-        text(T::TranslationField),
-        &mut d.translation,
-        &mut d.translation_inputs,
-        Some(&mut d.locked),
-        document,
-    );
-    number_row(
-        ui,
-        text(T::RotationField),
-        &mut d.rotation,
-        &mut d.rotation_inputs,
-        panel::Quantity::Angle,
-        document,
-    );
     panel::row(ui, text(T::PivotField), |ui| {
         panel::choice(
             ui,
@@ -2663,6 +2923,30 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
             d.pivot = Pivot::Point(point);
         }
     });
+    ui.label(
+        egui::RichText::new(text(T::MoveFreeHint))
+            .small()
+            .color(theme::muted()),
+    );
+    ui.separator();
+    let valid = d.numbers_valid();
+    if transform_section(
+        ui,
+        TransformFields {
+            translation: &mut d.translation,
+            rotation: &mut d.rotation,
+            translation_inputs: &mut d.translation_inputs,
+            rotation_inputs: &mut d.rotation_inputs,
+            locked: &mut d.locked,
+            valid,
+        },
+        document,
+    ) {
+        d.translation = [0.; 3];
+        d.rotation = [0.; 3];
+        d.translation_inputs = Default::default();
+        d.rotation_inputs = Default::default();
+    }
     // A alternância permanece só no painel genérico do menu de contexto. Mover e
     // Copiar na aba Peça têm intenção fixa desde a abertura, inclusive sem seleção.
     if let MoveMode::MoveOrCopy(copy) = &mut d.mode {
@@ -2674,21 +2958,6 @@ fn move_panel(ui: &mut egui::Ui, d: &mut MoveDraft, document: &Document, picked:
         } else {
             *copy = false;
         }
-    }
-    ui.horizontal(|ui| {
-        if ui.small_button(text(T::ResetTransform)).clicked() {
-            d.translation = [0.; 3];
-            d.rotation = [0.; 3];
-            d.translation_inputs = Default::default();
-            d.rotation_inputs = Default::default();
-        }
-    });
-    if !d.numbers_valid() {
-        ui.label(
-            egui::RichText::new(text(T::InvalidTransformNumber))
-                .small()
-                .color(theme::danger()),
-        );
     }
     ui.label(
         egui::RichText::new(text(T::MoveHint))
@@ -2710,12 +2979,7 @@ fn rigid_hint(ui: &mut egui::Ui, document: &Document, chosen: impl Iterator<Item
     }
 }
 
-fn align_panel(
-    ui: &mut egui::Ui,
-    d: &mut AlignDraft,
-    document: &Document,
-    aligned: Option<Point3>,
-) {
+fn align_panel(ui: &mut egui::Ui, d: &mut AlignDraft, document: &Document, center: Option<Point3>) {
     for (field, label) in [
         (AlignField::From, T::AlignFrom),
         (AlignField::To, T::AlignTo),
@@ -2742,7 +3006,11 @@ fn align_panel(
         );
         if s.activate {
             if d.field != Some(field) {
-                d.focus = None;
+                d.focus = if field == AlignField::From && d.kind == navigation::PickMode::Vertex {
+                    PointFocus::from_targets(document, &d.targets, None)
+                } else {
+                    None
+                };
             }
             d.field = Some(field);
         }
@@ -2752,7 +3020,11 @@ fn align_panel(
                 AlignField::To => d.to = None,
             }
             d.field = Some(field);
-            d.focus = None;
+            d.focus = if field == AlignField::From && d.kind == navigation::PickMode::Vertex {
+                PointFocus::from_targets(document, &d.targets, None)
+            } else {
+                None
+            };
         }
     }
     let moved = d
@@ -2770,7 +3042,7 @@ fn align_panel(
         )
         .collect::<Vec<_>>();
     rigid_hint(ui, document, moved.into_iter());
-    // Ponto a ponto: primeiro o corpo, depois os pontos dele.
+    // Ponto a ponto: os pontos de origem já aparecem no alvo; ainda é possível trocar o corpo.
     if d.kind == navigation::PickMode::Vertex && d.field.is_some() {
         match &d.focus {
             None => {
@@ -2794,32 +3066,6 @@ fn align_panel(
             }
         }
     }
-    // O quanto o objeto anda, por eixo: digitar ajusta aquele eixo depois do alinhamento.
-    // As travas só fazem sentido no ponto a ponto, que não gira o objeto.
-    if let Some(aligned) = aligned {
-        let mut values: Point3 = std::array::from_fn(|k| aligned[k] + d.offset[k]);
-        let before = values;
-        let vertex = d.kind == navigation::PickMode::Vertex;
-        axis_list(
-            ui,
-            text(T::MovedField),
-            &mut values,
-            &mut d.offset_inputs,
-            vertex.then_some(&mut d.locked),
-            document,
-        );
-        for k in 0..3 {
-            if values[k] != before[k] {
-                d.offset[k] = values[k] - aligned[k];
-            }
-        }
-        if d.offset.iter().any(|v| v.abs() > 1e-12)
-            && ui.small_button(text(T::ClearAdjustment)).clicked()
-        {
-            d.offset = [0.; 3];
-            d.offset_inputs = Default::default();
-        }
-    }
     if d.kind != navigation::PickMode::Vertex {
         panel::row(ui, text(T::FlipDirection), |ui| {
             if icons::button(ui, Icon::Flip, text(T::FlipDirection), false, d.flip).clicked() {
@@ -2836,6 +3082,61 @@ fn align_panel(
         .small()
         .color(theme::muted()),
     );
+    ui.separator();
+    // Seção Translação idêntica em todos os modos, preservando os valores acumulados.
+    let pivot = center.unwrap_or([0.; 3]);
+    let aligned = d.aligned();
+    let aligned_translation = sub(aligned.apply(pivot), pivot);
+    let aligned_rotation = aligned.rotation_rad().map(f64::to_degrees);
+    let mut translation: Point3 = std::array::from_fn(|k| aligned_translation[k] + d.offset[k]);
+    let mut rotation: Point3 = std::array::from_fn(|k| aligned_rotation[k] + d.rotation_offset[k]);
+    let before_t = translation;
+    let before_r = rotation;
+    let valid = d.numbers_valid();
+    if transform_section(
+        ui,
+        TransformFields {
+            translation: &mut translation,
+            rotation: &mut rotation,
+            translation_inputs: &mut d.offset_inputs,
+            rotation_inputs: &mut d.rotation_inputs,
+            locked: &mut d.locked,
+            valid,
+        },
+        document,
+    ) {
+        d.carried = Placement::default();
+        d.from = None;
+        d.to = None;
+        d.from_outline.clear();
+        d.offset = [0.; 3];
+        d.rotation_offset = [0.; 3];
+        d.offset_inputs = Default::default();
+        d.rotation_inputs = Default::default();
+        d.field = Some(AlignField::From);
+        d.focus = (d.kind == navigation::PickMode::Vertex)
+            .then(|| PointFocus::from_targets(document, &d.targets, None))
+            .flatten();
+    } else if translation != before_t || rotation != before_r {
+        if d.from.is_none() && d.to.is_none() {
+            // Sem alinhamento ativo, editar a seção atualiza diretamente a base acumulada
+            // para que os pontos de referência acompanhem a posição atual do objeto.
+            if let Some(updated) = world_delta(pivot, translation, rotation) {
+                d.carried = updated;
+                d.offset = [0.; 3];
+                d.rotation_offset = [0.; 3];
+            }
+        } else {
+            for k in 0..3 {
+                if translation[k] != before_t[k] {
+                    d.offset[k] = translation[k] - aligned_translation[k];
+                }
+                if rotation[k] != before_r[k] {
+                    d.rotation_offset[k] = rotation[k] - aligned_rotation[k];
+                }
+            }
+        }
+    }
     if let MoveMode::MoveOrCopy(copy) = &mut d.mode
         && d.targets
             .iter()
@@ -2877,6 +3178,16 @@ fn instance_selection(
 
 fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
     instance_selection(ui, &mut d.target, &mut d.picking, document);
+    panel::row(ui, text(T::PatternShape), |ui| {
+        panel::choice(
+            ui,
+            &mut d.circular,
+            &[
+                (false, Icon::Pattern, T::RectangularPattern),
+                (true, Icon::Revolve, T::CircularPattern),
+            ],
+        )
+    });
     panel::row(
         ui,
         text(if d.circular {
@@ -2920,9 +3231,29 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut PatternDraft, document: &Document) {
             panel::expression(ui, &mut d.angle)
         });
     } else {
-        panel::row(ui, text(T::SpacingField), |ui| {
+        panel::row(ui, text(T::CopyDistance), |ui| {
             panel::length_expression(ui, &mut d.spacing)
         });
+        panel::row(ui, text(T::RowsField), |ui| {
+            ui.add(egui::DragValue::new(&mut d.rows).range(1..=1000))
+        });
+        if d.rows > 1 {
+            // As linhas seguem outro eixo: o mesmo eixo sobreporia as cópias.
+            if d.row_axis == d.axis {
+                d.row_axis = (d.axis + 1) % AXES.len();
+            }
+            panel::row(ui, text(T::DirectionField), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.;
+                for (i, name) in AXIS_NAMES.iter().enumerate() {
+                    if i != d.axis && ui.selectable_label(d.row_axis == i, *name).clicked() {
+                        d.row_axis = i;
+                    }
+                }
+            });
+            panel::row(ui, text(T::CopyDistance), |ui| {
+                panel::length_expression(ui, &mut d.row_spacing)
+            });
+        }
     }
 }
 
@@ -2983,6 +3314,11 @@ fn mirror_panel(ui: &mut egui::Ui, d: &mut MirrorDraft, document: &Document) {
             );
         }
     }
+    panel::row(ui, text(T::CopyDistance), |ui| {
+        let context = ui.ctx().clone();
+        ui.add(panel::length_value(&context, &mut d.distance, 0.0..=1e7))
+    });
+    panel::hint(ui, text(T::MirrorDistanceHint));
     if d.picking_line {
         ui.label(
             egui::RichText::new(text(T::MirrorLinePrompt))
@@ -3004,6 +3340,27 @@ mod tests {
     /// O plano escolhido passa pela linha quando ela é paralela a ele; uma linha
     /// atravessando o plano não define posição e o comando não é montado.
     #[test]
+    fn mirror_distance_moves_the_plane_away_from_the_original() {
+        let normal = [1., 0., 0.];
+        // Original do lado negativo: o plano avança metade da distância, a cópia afasta-se dela.
+        assert_eq!(
+            spaced_plane([0.; 3], normal, Some([-5., 0., 0.]), 10.),
+            [5., 0., 0.]
+        );
+        // Original do lado positivo: o plano recua.
+        assert_eq!(
+            spaced_plane([0.; 3], normal, Some([5., 0., 0.]), 10.),
+            [-5., 0., 0.]
+        );
+        // Sem distância, ou sem centro conhecido, o plano fica onde está.
+        assert_eq!(
+            spaced_plane([2., 0., 0.], normal, Some([-5., 0., 0.]), 0.),
+            [2., 0., 0.]
+        );
+        assert_eq!(spaced_plane([2., 0., 0.], normal, None, 10.), [2., 0., 0.]);
+    }
+
+    #[test]
     fn mirror_plane_follows_a_parallel_reference_line_and_rejects_a_crossing_one() {
         let yz = PLANES
             .iter()
@@ -3015,6 +3372,7 @@ mod tests {
             picking: false,
             plane: yz,
             offset: 5.,
+            distance: 0.,
             line: None,
             picking_line: false,
         };
@@ -3252,6 +3610,8 @@ mod tests {
             from_outline: Vec::new(),
             offset: [0.; 3],
             offset_inputs: Default::default(),
+            rotation_offset: [0.; 3],
+            rotation_inputs: Default::default(),
             locked: [false; 3],
         };
         let delta = draft.delta().ok_or("Alinhamento inválido")?;
@@ -3291,18 +3651,26 @@ mod tests {
             from_outline: Vec::new(),
             offset: [0.; 3],
             offset_inputs: Default::default(),
+            rotation_offset: [0.; 3],
+            rotation_inputs: Default::default(),
             locked: [false, true, false],
         };
         // Y travado: o ponto só anda em X e Z; o que já foi movido antes continua.
-        assert_eq!(draft.total().apply([0.; 3]), [10., 0., 34.]);
+        assert_eq!(draft.total(None).apply([0.; 3]), [10., 0., 34.]);
         // O ajuste digitado entra por último, inclusive num eixo já alinhado.
         draft.offset = [0., 0., -2.];
-        assert_eq!(draft.total().apply([0.; 3]), [10., 0., 32.]);
+        assert_eq!(draft.total(None).apply([0.; 3]), [10., 0., 32.]);
         assert_eq!(draft.aligned().apply([0.; 3]), [10., 0., 34.]);
+        // O ajuste de rotação também se compõe sobre o alinhamento em torno do centro.
+        draft.rotation_offset = [0., 0., 90.];
+        let rotated = draft.total(Some([0.; 3]));
+        assert!(norm(sub(rotated.apply_vector([1., 0., 0.]), [0., 1., 0.])) < 1e-9);
+        assert!(norm(sub(rotated.apply([0.; 3]), [10., 0., 32.])) < 1e-9);
+        draft.rotation_offset = [0.; 3];
         // Destravado, Y volta a acompanhar o alinhamento.
         draft.locked = [false; 3];
         draft.offset = [0.; 3];
-        assert_eq!(draft.total().apply([0.; 3]), [10., 20., 34.]);
+        assert_eq!(draft.total(None).apply([0.; 3]), [10., 20., 34.]);
         Ok(())
     }
 
@@ -3319,6 +3687,34 @@ mod tests {
             assert!(norm(sub(delta.apply([3., 10., 7.]), [3., 25., 7.])) < 1e-9);
             assert!(norm(sub(delta.apply_vector([1., 2., 3.]), [1., 2., 3.])) < 1e-9);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn point_focus_resolves_from_body_and_instance_targets()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut document = Document::new("Alvos")?;
+        let mesh = Arc::new(nator_document::MeshAsset::new(nator_geometry::Mesh::new(
+            vec![[0., 0., 0.], [10., 0., 0.], [0., 10., 0.]],
+            vec![[0, 1, 2]],
+        )?));
+        let (part, body) = document.add_mesh(None, "Placa".into(), mesh)?;
+        let instance = document
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância ausente")?
+            .id;
+        let from_body =
+            PointFocus::from_targets(&document, &[Selection::Body { part, id: body }], None)
+                .ok_or("Foco ausente para corpo")?;
+        assert_eq!(from_body.body, body);
+        assert_eq!(from_body.path, vec![instance]);
+        let from_instance =
+            PointFocus::from_targets(&document, &[Selection::Instance(instance)], None)
+                .ok_or("Foco ausente para instância")?;
+        assert_eq!(from_instance.body, body);
+        assert_eq!(from_instance.path, vec![instance]);
         Ok(())
     }
 }

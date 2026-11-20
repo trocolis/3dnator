@@ -1796,11 +1796,19 @@ mod tests {
             [30., 0., 1.],
         )
         .ok_or("Cursor")?;
-        frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
-        assert!(
-            editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty()),
-            "Corpo visível sem hover"
-        );
+        // A pré-seleção da montagem também roda em segundo plano. Esperar a primeira
+        // resposta conserva o teste principal: mudar o corte invalida o realce de imediato.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+            if editor.hover.as_ref().is_some_and(|h| !h.overlay.is_empty()) {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err("Corpo visível sem hover".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let revision = editor.current().session.revision();
         if let Some(section) = &mut editor.current_mut().section {
             section.offset = -5.;
@@ -2100,9 +2108,12 @@ mod tests {
                 editor.assembly_panel.is_some(),
                 "Copiar deve abrir o painel"
             );
+            // Padrão (com as formas retangular e circular), Espelhar e de volta à instância.
             for kind in [
-                T::RectangularPattern,
+                T::CopyPattern,
                 T::CircularPattern,
+                T::RectangularPattern,
+                T::MirrorShort,
                 T::CopyNewInstance,
             ] {
                 click_choice(&mut editor, &context, kind)?;
@@ -5573,6 +5584,233 @@ mod tests {
         Ok(())
     }
 
+    /// Com o Mover aberto, o objeto sob o cursor não é realçado; sobre o manipulador, ele
+    /// também fica com o cursor (o distintivo da ferramenta some).
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn move_tool_suppresses_object_hover_and_gives_the_gizmo_the_cursor()
+    -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut document = Document::new("Mover sem realce")?;
+        let (part, body) = document.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        let canvas = frame(&mut editor, &context, vec![])?;
+        // Ponto sobre o corpo que realça algo antes de abrir o Mover.
+        let mut over_body = None;
+        'search: for iy in 1..20 {
+            for ix in 1..30 {
+                let p = egui::pos2(
+                    canvas.left() + canvas.width() * ix as f32 / 30.,
+                    canvas.top() + canvas.height() * iy as f32 / 20.,
+                );
+                for _ in 0..3 {
+                    frame(&mut editor, &context, vec![egui::Event::PointerMoved(p)])?;
+                }
+                if editor.hover.as_ref().is_some_and(|h| {
+                    !h.overlay.triangles.is_empty() || !h.overlay.segments.is_empty()
+                }) {
+                    over_body = Some(p);
+                    break 'search;
+                }
+            }
+        }
+        let at = over_body.ok_or("Nenhum ponto do corpo realçou")?;
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        editor.open_move();
+        frame(&mut editor, &context, vec![])?;
+        let center = context
+            .data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("move_center")))
+            .ok_or("Centro do manipulador")?;
+        // Longe do manipulador, mas ainda sobre o corpo: sem realce.
+        let far = if at.distance(center) > 120. {
+            at
+        } else {
+            center + egui::vec2(0., 0.)
+        };
+        for _ in 0..3 {
+            frame(&mut editor, &context, vec![egui::Event::PointerMoved(far)])?;
+        }
+        if at.distance(center) > 120. {
+            assert!(editor.hover.is_none(), "o realce deveria estar suspenso");
+            assert!(!editor.move_gizmo_hot());
+        }
+        // Sobre o manipulador: ele fica com o cursor e nada é realçado.
+        for _ in 0..3 {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(center)],
+            )?;
+        }
+        assert!(editor.hover.is_none());
+        assert!(editor.move_gizmo_hot());
+        Ok(())
+    }
+
+    /// Escolher um grupo na árvore seleciona os membros sem rolar a lista: ela fica no grupo.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn selecting_a_group_in_the_tree_keeps_the_scroll_on_the_group() -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let mut document = Document::new("Grupo em árvore longa")?;
+        let mut ids = Vec::new();
+        for i in 1..=60 {
+            let part = document.create_part(format!("Item {i:02}"))?;
+            ids.push(
+                document
+                    .instances()
+                    .iter()
+                    .find(|i| i.part == part)
+                    .ok_or("Instância")?
+                    .id,
+            );
+        }
+        let mut session = Session::new(document)?;
+        session.execute(Command::CreateGroup {
+            name: "Conjunto".into(),
+            members: vec![ids[0], ids[1]],
+        })?;
+        let mut editor = Editor::from_gpu(gpu_state()?, &context, session.document().clone())
+            .map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.shell.tab = shell::RibbonTab::Assembly;
+        settle(&mut editor, &context)?;
+        let visible = editor.canvas_rect;
+        let middle = egui::pos2(visible.left() + 150., visible.center().y);
+        // Rola até o fim da lista, onde ficam os grupos.
+        let mut group = None;
+        for _ in 0..120 {
+            frame(
+                &mut editor,
+                &context,
+                vec![
+                    egui::Event::PointerMoved(middle),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0., -200.),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )?;
+            if let Ok(position) =
+                label_position_in(&mut editor, &context, "Conjunto", Some(visible))
+            {
+                group = Some(position);
+                break;
+            }
+        }
+        let mut before = group.ok_or("O grupo não apareceu")?;
+        // A rolagem suave termina antes do clique.
+        for _ in 0..120 {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(before)],
+            )?;
+            let now = label_position_in(&mut editor, &context, "Conjunto", Some(visible))?;
+            let settled = now.distance(before) < 0.5;
+            before = now;
+            if settled {
+                break;
+            }
+        }
+        click(&mut editor, &context, before)?;
+        for _ in 0..30 {
+            frame(
+                &mut editor,
+                &context,
+                vec![egui::Event::PointerMoved(before)],
+            )?;
+        }
+        assert!(editor.current().is_selected(Selection::Instance(ids[0])));
+        let after = label_position_in(&mut editor, &context, "Conjunto", Some(visible))?;
+        assert!(
+            after.distance(before) < 1.,
+            "a árvore rolou: {before:?} -> {after:?}"
+        );
+        Ok(())
+    }
+
+    /// Na Construção o Copiar é o mesmo da Montagem: o seletor de tipo alterna entre cópia
+    /// independente, padrão e espelho de corpos, sem perder o corpo escolhido.
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn part_copy_switches_between_independent_pattern_and_mirror() -> Result<(), Box<dyn Error>> {
+        let state = gpu_state()?;
+        let context = egui::Context::default();
+        let mut document = Document::new("Copiar na peça")?;
+        let (part, body) = document.add_mesh(
+            None,
+            "Suporte".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let mut editor = Editor::from_gpu(state, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.current_mut().active_part = Some(part);
+        editor
+            .current_mut()
+            .select(Some(Selection::Body { part, id: body }));
+        editor.shell.tab = shell::RibbonTab::Model;
+        settle(&mut editor, &context)?;
+        let copy = label_position(&mut editor, &context, text(T::CopyMenu))?;
+        click(&mut editor, &context, copy)?;
+        assert!(editor.assembly_panel.is_some() && editor.feature_edit.is_none());
+        // Corpos não têm instâncias compartilhadas.
+        frame(&mut editor, &context, vec![])?;
+        assert!(
+            context
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new((
+                    "choice_rect",
+                    text(T::CopyNewInstance)
+                ))))
+                .is_none()
+        );
+        click_choice(&mut editor, &context, T::CopyPattern)?;
+        frame(&mut editor, &context, vec![])?;
+        assert!(editor.assembly_panel.is_none());
+        assert!(
+            editor
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.is_tool(feature_editor::Tool::LinearPattern))
+        );
+        click_choice(&mut editor, &context, T::CircularPattern)?;
+        frame(&mut editor, &context, vec![])?;
+        assert!(
+            editor
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.is_tool(feature_editor::Tool::CircularPattern))
+        );
+        click_choice(&mut editor, &context, T::MirrorShort)?;
+        frame(&mut editor, &context, vec![])?;
+        assert!(
+            editor
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.is_tool(feature_editor::Tool::Mirror))
+        );
+        click_choice(&mut editor, &context, T::CopyIndependent)?;
+        frame(&mut editor, &context, vec![])?;
+        assert!(editor.assembly_panel.is_some() && editor.feature_edit.is_none());
+        Ok(())
+    }
+
     /// As duas entradas da aba Peça produzem intenções diferentes sem exigir que
     /// o usuário alterne uma opção escondida no painel. Ambas continuam reversíveis.
     #[test]
@@ -7865,8 +8103,12 @@ mod tests {
         editor.open_body_move(false);
         // A janela do painel aparece a partir do segundo quadro.
         frame(&mut editor, &context, vec![])?;
-        // A primeira caixa "Travar" é a do eixo X.
-        let lock = label_position(&mut editor, &context, text(T::LockAxis))?;
+        frame(&mut editor, &context, vec![])?;
+        // O primeiro cadeado é o do eixo X.
+        let lock = context
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("move_lock_rect", 0usize))))
+            .ok_or("Cadeado do eixo X ausente")?
+            .center();
         click(&mut editor, &context, lock)?;
         assert_eq!(editor.move_locks_for_test(), Some([true, false, false]));
         // O arraste livre pelo centro do manipulador não mexe em X.
@@ -7904,15 +8146,13 @@ mod tests {
         assert_eq!(after, translation);
         assert_eq!(rotation, [0.; 3]);
 
-        // No ponto a ponto a trava continua e o painel mostra o deslocamento por eixo.
+        // No ponto a ponto a trava continua, a seção Translação permanece igual e o foco
+        // dos pontos de origem já aparece no objeto alvo.
         click_choice(&mut editor, &context, T::MovePointToPoint)?;
         settle(&mut editor, &context)?;
         assert_eq!(editor.move_locks_for_test(), Some([true, false, false]));
-        label_position(
-            &mut editor,
-            &context,
-            &format!("{} (mm)", text(T::MovedField)),
-        )?;
+        assert!(editor.alignment_point_focus().is_some());
+        label_position(&mut editor, &context, text(T::TranslationField))?;
         let point = [20., 10., 10.];
         editor.set_align_for_capture(
             nator_document::assembly::Pick {
@@ -8017,6 +8257,16 @@ mod tests {
                 .body(body)
                 .ok_or("Corpo")?
                 .placement
+        );
+        // Ao mudar para ponto a ponto, os pontos de origem já aparecem no objeto alvo
+        // e acompanham a posição atual, não a original.
+        click_choice(&mut editor, &context, T::MovePointToPoint)?;
+        settle(&mut editor, &context)?;
+        assert!(editor.alignment_point_focus().is_some());
+        let moved_point = editor.picking_document();
+        assert_eq!(
+            moved_point.body(body).ok_or("Corpo")?.placement,
+            moved.body(body).ok_or("Corpo")?.placement
         );
         click_choice(&mut editor, &context, T::MoveFree)?;
         frame(&mut editor, &context, vec![])?;
@@ -13504,16 +13754,17 @@ mod tests {
         click(&mut editor, &context, delete)?;
         assert!(editor.current().session.document().sketch(id).is_none());
         assert!(editor.current().sketch_edit.is_none());
-        // O menu da pasta fica desativado enquanto a exclusão é processada.
         settle(&mut editor, &context)?;
-        let folder = label_position(
-            &mut editor,
-            &context,
-            &format!("{} (0)", text(T::SketchesGroup)),
-        )?;
-        // Primeiro nó é o de referência; escolher o da peça pelo rótulo contextual
-        // usa o mesmo fluxo sem alterar geometria antes da escolha de suporte.
-        right(&mut editor, folder)?;
+        // A pasta Rascunhos ficou vazia e deixou de ser exibida na árvore.
+        assert!(
+            label_position(
+                &mut editor,
+                &context,
+                &format!("{} (0)", text(T::SketchesGroup)),
+            )
+            .is_err()
+        );
+        // O novo rascunho nasce pela faixa, sem alterar geometria antes de escolher o suporte.
         let new = label_position(&mut editor, &context, text(T::NewSketch))?;
         click(&mut editor, &context, new)?;
         assert!(editor.current().plane_pick.is_some());
@@ -14468,6 +14719,82 @@ mod tests {
 
     #[test]
     #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn measure_in_sketch_edit_picks_centers_without_drawing_and_returns_to_tools()
+    -> Result<(), Box<dyn Error>> {
+        use nator_commands::measure::Reading;
+        let context = egui::Context::default();
+        let mut document = Document::new("Medir em edição")?;
+        let mut sketch = Sketch::new("Centros", Plane::xy());
+        sketch.add_circle([0., 0.], 5., false)?;
+        sketch.add_circle([30., 0.], 4., false)?;
+        sketch.add_line([-10., 20.], [40., 20.], false)?;
+        let (part, id) = document.add_sketch(None, sketch)?;
+        document.sketch_mut(id)?.visible = false;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, document).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        editor.begin_sketch(part, id);
+        editor.align_sketch_camera(true, false);
+        settle(&mut editor, &context)?;
+        editor.select_sketch_tool(sketch_editor::Tool::Line);
+        frame(&mut editor, &context, vec![])?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::MeasureTool)?.center(),
+        )?;
+        assert!(editor.shell.measure_open);
+        assert!(editor.current().sketch_edit.is_some());
+        let revision = editor.current().session.revision();
+        for (other, expected) in [([30., 0., 0.], 30.), ([0., 20., 0.], 20.)] {
+            editor.measure_tool.clear();
+            for point in [[0., 0., 0.], other] {
+                let at = sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    editor.canvas_rect,
+                    point,
+                )
+                .ok_or("Alvo fora da vista")?;
+                click(&mut editor, &context, at)?;
+                settle(&mut editor, &context)?;
+            }
+            let readings = editor.measure_tool.readings();
+            assert!(
+                matches!(readings[..], [Reading::Distance { mm, .. }] if (mm - expected).abs() < 1e-8),
+                "{readings:?}"
+            );
+            assert_eq!(editor.current().session.revision(), revision);
+        }
+        frame(&mut editor, &context, escape())?;
+        assert!(editor.shell.measure_open);
+        assert!(editor.measure_tool.is_empty());
+        frame(&mut editor, &context, escape())?;
+        assert!(!editor.shell.measure_open);
+        assert!(editor.current().sketch_edit.is_some());
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::MeasureTool)?.center(),
+        )?;
+        editor.select_sketch_tool(sketch_editor::Tool::Circle);
+        assert!(!editor.shell.measure_open);
+        assert_eq!(
+            editor
+                .current()
+                .sketch_edit
+                .as_ref()
+                .ok_or("Rascunho fechado")?
+                .tool(),
+            sketch_editor::Tool::Circle
+        );
+        assert_eq!(editor.current().session.revision(), revision);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
     fn measure_picks_edges_and_vertices_and_draws_without_a_panel() -> Result<(), Box<dyn Error>> {
         use nator_commands::measure::Reading;
         let context = egui::Context::default();
@@ -14656,10 +14983,9 @@ mod tests {
                 ..Default::default()
             };
             editor.route_camera_input(&context, &mut input);
-            context
-                .run_ui(input, |ui| editor.draw(ui))
-                .platform_output
-                .cursor_icon
+            let mut output = context.run_ui(input, |ui| editor.draw(ui));
+            output.textures_delta.clear();
+            output.platform_output.cursor_icon
         };
         assert_eq!(cursor(&mut editor, position), egui::CursorIcon::Crosshair);
         let cube = view_cube::rect(editor.canvas_rect).center();
@@ -14832,14 +15158,13 @@ mod tests {
         frame(&mut editor, &context, vec![])?;
         // Ferramentas de inspeção ficam na faixa, sem menu de ferramentas ocultas.
         assert!(editor.shell.menu_rects.is_empty());
-        for label in [
-            T::CheckSolid,
-            T::OffsetPlane,
-            T::Parameters,
-            T::SectionAnalysis,
-        ] {
+        for label in [T::CheckSolid, T::OffsetPlane, T::MoveMenu, T::CopyMenu] {
             let rect = action_rect(&context, label)?;
             assert!(rect.right() <= 1280. && rect.bottom() < editor.canvas_rect.top());
+        }
+        // Parâmetros e Corte de seção saíram da faixa da Construção; seguem na busca.
+        for label in [T::Parameters, T::SectionAnalysis] {
+            assert!(action_rect(&context, label).is_err());
         }
         // Selecionar fica só na barra de navegação, que não tem legendas.
         for tab in [
@@ -14859,6 +15184,327 @@ mod tests {
             label_position(&mut editor, &context, text(label))?;
         }
         assert!(label_position(&mut editor, &context, "Inspecionar").is_err());
+        // O STEP da montagem saiu da faixa (menu da árvore e busca).
+        assert!(label_position(&mut editor, &context, text(T::StepShort)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn selection_filters_highlight_targets_before_click_even_in_large_scenes()
+    -> Result<(), Box<dyn Error>> {
+        use navigation::SelectionFilter as Filter;
+        let context = egui::Context::default();
+        let (mut editor, part) = navigation_editor(&context)?;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        let revision = editor.current().session.revision();
+        for (active, heavy) in [
+            (Some(part), false),
+            (None, false),
+            (Some(part), true),
+            (None, true),
+        ] {
+            editor.current_mut().active_part = active;
+            editor.invalidate_scene();
+            settle(&mut editor, &context)?;
+            if heavy {
+                // Amplia apenas a malha de apresentação para atravessar o antigo limite;
+                // os alvos continuam vindo do B-rep e da tesselação reais do cubo.
+                let scene = editor.scene.as_ref().ok_or("Cena")?;
+                let triangles = scene
+                    .triangles()
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(highlight::HOVER_TRIANGLES + 1)
+                    .collect();
+                editor.scene = Some(nator_geometry::Mesh::new(
+                    scene.vertices().to_vec(),
+                    triangles,
+                )?);
+            }
+            for (filter, point, kind) in [
+                (Filter::Automatic, [30., 30., 10.], 0),
+                (Filter::Automatic, [39.9, 20., 10.], 1),
+                (Filter::Automatic, [39.9, 39.9, 10.], 2),
+                (Filter::Face, [30., 30., 10.], 0),
+                (Filter::Edge, [39.9, 20., 10.], 1),
+                (Filter::Vertex, [39.9, 39.9, 10.], 2),
+            ] {
+                editor.selection_filter = filter;
+                let at = sketch_scene::project(
+                    &editor.viewport.camera,
+                    editor.display_bounds(),
+                    editor.canvas_rect,
+                    point,
+                )
+                .ok_or("Alvo fora da tela")?;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    frame(&mut editor, &context, vec![egui::Event::PointerMoved(at)])?;
+                    let matches = editor.hover.as_ref().is_some_and(|h| {
+                        h.position.distance(at) < 0.1
+                            && match kind {
+                                0 => !h.overlay.triangles.is_empty(),
+                                1 => {
+                                    !h.overlay.segments.is_empty() && h.overlay.triangles.is_empty()
+                                }
+                                _ => h.overlay.points.len() == 1,
+                            }
+                    });
+                    if matches {
+                        break;
+                    }
+                    if Instant::now() > deadline {
+                        return Err(format!("Sem pré-seleção: filtro={filter:?}, peça={active:?}, cena grande={heavy}").into());
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(editor.current().selected.is_empty());
+                assert!(editor.current().picked.is_none());
+                assert_eq!(editor.current().session.revision(), revision);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn selection_drawer_filters_and_repeated_clicks_choose_body_then_part()
+    -> Result<(), Box<dyn Error>> {
+        let context = egui::Context::default();
+        let (mut editor, part) = navigation_editor(&context)?;
+        editor.viewport.camera.set_direction([0., 0., 1.]);
+        editor.current_mut().camera = editor.viewport.camera.clone();
+        settle(&mut editor, &context)?;
+        click(
+            &mut editor,
+            &context,
+            action_rect(&context, T::Select)?.center(),
+        )?;
+        frame(&mut editor, &context, vec![])?;
+        let vertex = context
+            .data(|d| {
+                d.get_temp::<egui::Rect>(egui::Id::new((
+                    "selection_filter_rect",
+                    text(T::SelectVertex),
+                )))
+            })
+            .ok_or("Gaveta de seleção não abriu")?;
+        click(&mut editor, &context, vertex.center())?;
+        assert_eq!(editor.selection_filter, navigation::SelectionFilter::Vertex);
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            [30., 30., 10.],
+        )
+        .ok_or("Projeção")?;
+        for (point, expected) in [
+            ([30., 30., 10.], navigation::PickMode::Face),
+            ([39.9, 20., 10.], navigation::PickMode::Edge),
+            ([39.9, 39.9, 10.], navigation::PickMode::Vertex),
+        ] {
+            let doc = editor.current().session.document();
+            let pick = doc
+                .pick_all_clipped_with(
+                    nator_geometry::query::Ray {
+                        origin: [point[0], point[1], 100.],
+                        direction: [0., 0., -1.],
+                    },
+                    |_| true,
+                    None,
+                )?
+                .into_iter()
+                .next()
+                .ok_or("Alvo automático")?;
+            assert_eq!(
+                navigation::SelectionFilter::Automatic.resolve(doc, &pick, 0.5),
+                expected
+            );
+        }
+        // A espera do trabalhador avança o relógio sintético: estender a janela de
+        // multiclíque mantém a sequência determinística em adaptadores lentos.
+        context.options_mut(|o| o.input_options.max_double_click_delay = 10.);
+        // O clique seguinte já está longe da gaveta e conta como primeiro no modelo.
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        assert_eq!(editor.pick_mode, navigation::PickMode::Vertex);
+        assert!(editor.current().view.topology_only.is_some());
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        assert!(
+            matches!(editor.current().selection, Some(Selection::Body { part: p, .. }) if p == part),
+            "{:?}",
+            editor.current().selection
+        );
+        assert!(editor.current().view.topology_only.is_none());
+        assert!(editor.current().picked.is_none());
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        assert!(matches!(
+            editor.current().selection,
+            Some(Selection::Instance(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn editing_one_occurrence_dims_the_others_and_centers_the_pivot() -> Result<(), Box<dyn Error>>
+    {
+        let context = egui::Context::default();
+        let mut doc = Document::new("Ocorrências")?;
+        let (part, _) = doc.add_mesh(
+            None,
+            "Peça".into(),
+            Arc::new(MeshAsset::new(reference_bracket()?)),
+        )?;
+        let chosen =
+            doc.add_instance(part, None, Placement::new([200., 0., 0.], [0., 0., 0.3])?)?;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        settle(&mut editor, &context)?;
+        editor.activate_part(part, Some(vec![chosen]));
+        settle(&mut editor, &context)?;
+        let tab = editor.current();
+        let document = tab.session.document();
+        for o in document.occurrences()? {
+            assert_eq!(
+                tab.is_editing_occurrence(part, &o.path),
+                o.instance == chosen
+            );
+            assert_eq!(
+                tab.view.style(document, &o, part, Some(part)),
+                Some(if o.instance == chosen {
+                    nator_document::Style::Normal
+                } else {
+                    nator_document::Style::Dimmed
+                })
+            );
+        }
+        let pose = sketch_scene::part_placement(tab, part)?;
+        assert_eq!(
+            pose,
+            document.instance(chosen).ok_or("Ocorrência")?.placement
+        );
+        let occurrence = document
+            .occurrences()?
+            .into_iter()
+            .find(|o| o.instance == chosen)
+            .ok_or("Escolhida")?;
+        let center = browser::occurrence_center(document, &occurrence).ok_or("Centro")?;
+        let projected = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            center,
+        )
+        .ok_or("Pivô")?;
+        assert!(projected.distance(editor.canvas_rect.center()) < 1.);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requer adaptador gráfico wgpu (físico ou software)."]
+    fn extrusion_picks_an_external_face_in_the_active_occurrence_frame()
+    -> Result<(), Box<dyn Error>> {
+        use nator_document::features::{ExtrusionLimit, Operation, RegionRef};
+        let context = egui::Context::default();
+        let mut doc = Document::new("Limite externo")?;
+        let mut sketch = Sketch::new("Perfil", nator_sketch::Plane::xy());
+        sketch.add_rectangle([0., 0.], [10., 10.], false)?;
+        let (part, sketch_id) = doc.add_sketch(None, sketch)?;
+        let instance = doc
+            .instances()
+            .iter()
+            .find(|i| i.part == part)
+            .ok_or("Instância")?
+            .id;
+        let pose = Placement::new([10., 20., 5.], [0.1, 0.2, 0.3])?;
+        doc.instance_mut(instance)?.placement = pose;
+        let mut solid = nator_kernel::Solid::cuboid([0.; 3], [40., 40., 10.])?;
+        let (mesh, faces) = solid.tessellate_with_faces(0.05, 0.2)?;
+        let (foreign, body) = doc.add_mesh(
+            None,
+            "Limite".into(),
+            Arc::new(MeshAsset::with_faces(mesh, faces)?),
+        )?;
+        doc.body_mut(body)?.brep = Some(Arc::new(solid.to_brep()?));
+        doc.body_mut(body)?.face_names = Arc::new(nator_kernel::indexed_face_names(
+            &nator_document::features::body_owner(body),
+            solid.face_count()?,
+        ));
+        let foreign_instance = doc
+            .instances()
+            .iter()
+            .find(|i| i.part == foreign)
+            .ok_or("Outra instância")?
+            .id;
+        let foreign_pose = Placement::new([60., 0., 30.], [0., 0.2, 0.1])?;
+        doc.instance_mut(foreign_instance)?.placement = foreign_pose;
+        let mut editor =
+            Editor::from_gpu(gpu_state()?, &context, doc).map_err(|e| e.to_string())?;
+        editor.recoveries.clear();
+        editor.show_recovery = false;
+        settle(&mut editor, &context)?;
+        editor.activate_part(part, Some(vec![instance]));
+        editor
+            .viewport
+            .camera
+            .fit(f64::from(editor.canvas_rect.aspect_ratio()));
+        editor.open_feature_tool(feature_editor::Tool::Extrude);
+        editor
+            .feature_edit
+            .as_mut()
+            .ok_or("Painel")?
+            .choose_region(sketch_id, RegionRef::Index(0));
+        settle(&mut editor, &context)?;
+        let point = foreign_pose.apply([20., 20., 10.]);
+        let at = sketch_scene::project(
+            &editor.viewport.camera,
+            editor.display_bounds(),
+            editor.canvas_rect,
+            point,
+        )
+        .ok_or("Face")?;
+        click(&mut editor, &context, at)?;
+        settle(&mut editor, &context)?;
+        label_position(&mut editor, &context, text(T::CapturedLimitPlane))?;
+        let ok = label_position(&mut editor, &context, text(T::Ok))?;
+        click(&mut editor, &context, ok)?;
+        settle(&mut editor, &context)?;
+        let feature = editor
+            .current()
+            .session
+            .document()
+            .part(part)
+            .ok_or("Peça")?
+            .features
+            .first()
+            .ok_or("Extrusão não publicada")?;
+        let until = match &feature.operation {
+            Operation::Extrude { until, .. } | Operation::ExtrudeMany { until, .. } => until,
+            _ => return Err("Operação inesperada".into()),
+        };
+        let Some(ExtrusionLimit::CapturedPlane { origin, normal }) = until else {
+            return Err("Plano não capturado".into());
+        };
+        let world_origin = pose.apply(*origin);
+        let world_normal = pose.apply_vector(*normal);
+        assert!(
+            nator_geometry::dot(nator_geometry::sub(point, world_origin), world_normal).abs()
+                < 1e-6
+        );
+        assert!(
+            nator_geometry::norm(nator_geometry::cross(
+                world_normal,
+                foreign_pose.apply_vector([0., 0., 1.])
+            )) < 1e-8
+        );
         Ok(())
     }
 

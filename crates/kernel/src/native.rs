@@ -103,7 +103,7 @@ unsafe extern "C" {
     fn nator_piece(body: *const c_void, index: usize) -> *mut c_void;
     fn nator_read_step(path: *const c_char) -> *mut c_void;
     fn nator_write_step(body: *const c_void, path: *const c_char) -> bool;
-    fn nator_tessellate(body: *mut c_void, linear: f64, angular: f64) -> bool;
+    fn nator_tessellate(body: *mut c_void, linear: f64, angular: f64, shared_edges: bool) -> bool;
     fn nator_mesh_size(body: *const c_void) -> usize;
     fn nator_mesh_copy(body: *const c_void, output: *mut f64, length: usize) -> bool;
     fn nator_mesh_faces_copy(body: *const c_void, output: *mut i32, length: usize) -> bool;
@@ -1362,6 +1362,40 @@ impl Solid {
         linear_mm: f64,
         angular_rad: f64,
     ) -> Result<(Mesh, Vec<u32>), KernelError> {
+        self.tessellate_with_faces_mode(linear_mm, angular_rad, false)
+    }
+
+    /// Tesselação para STL: só adota a recuperação de faces se a malha final fechar.
+    /// Uma cópia sem triangulação preserva o B-rep e a tesselação inicial se a tentativa falhar.
+    pub fn tessellate_for_export(
+        &mut self,
+        linear_mm: f64,
+        angular_rad: f64,
+    ) -> Result<Mesh, KernelError> {
+        let mesh = self.tessellate(linear_mm, angular_rad)?;
+        let printable = |mesh: &Mesh| {
+            mesh.single_precision().is_ok_and(|mesh| {
+                mesh.topology().has_closed_oriented_edges() && mesh.signed_volume() > 0.
+            })
+        };
+        if printable(&mesh) {
+            return Ok(mesh);
+        }
+        let mut copy = Self::from_brep(&self.to_brep()?, None)?;
+        if let Ok((recovered, _)) = copy.tessellate_with_faces_mode(linear_mm, angular_rad, true)
+            && printable(&recovered)
+        {
+            return Ok(recovered);
+        }
+        Ok(mesh)
+    }
+
+    fn tessellate_with_faces_mode(
+        &mut self,
+        linear_mm: f64,
+        angular_rad: f64,
+        shared_edges: bool,
+    ) -> Result<(Mesh, Vec<u32>), KernelError> {
         positive(linear_mm, "Tolerância linear")?;
         positive(angular_rad, "Tolerância angular")?;
         if angular_rad > std::f64::consts::PI {
@@ -1370,7 +1404,8 @@ impl Solid {
             ));
         }
         // SAFETY: acesso exclusivo impede modificar a malha durante a cópia subsequente.
-        if !unsafe { nator_tessellate(self.pointer.as_ptr(), linear_mm, angular_rad) } {
+        if !unsafe { nator_tessellate(self.pointer.as_ptr(), linear_mm, angular_rad, shared_edges) }
+        {
             return Err(last_error());
         }
         // SAFETY: o objeto continua vivo e sem outros acessos nesta thread.

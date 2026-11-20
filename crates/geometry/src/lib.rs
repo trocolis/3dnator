@@ -91,6 +91,10 @@ fn next_loop(next: &mut HashMap<u32, Vec<u32>>, start: u32) -> Option<Vec<u32>> 
         }
         // Passar de novo por um vértice fecha um laço menor dentro do caminho.
         if let Some(index) = path.iter().position(|p| *p == step) {
+            // O prefixo pertence a outro laço e precisa continuar disponível.
+            for pair in path[..=index].windows(2) {
+                next.entry(pair[0]).or_default().push(pair[1]);
+            }
             return Some(path.split_off(index));
         }
         path.push(step);
@@ -395,6 +399,10 @@ impl Mesh {
             if *count - directed.get(&(*b, *a)).copied().unwrap_or(0) == 1 {
                 next.entry(*a).or_default().push(*b);
             }
+        }
+        // A ordem da HashMap não pode decidir que frestas são vedadas.
+        for targets in next.values_mut() {
+            targets.sort_unstable_by(|a, b| b.cmp(a));
         }
         let mut starts = next.keys().copied().collect::<Vec<_>>();
         starts.sort_unstable();
@@ -775,6 +783,25 @@ mod tests {
             ],
             vec![[0, 3, 2], [2, 3, 1], [0, 1, 4], [1, 3, 4], [3, 0, 4]],
         )
+    }
+
+    #[test]
+    fn extracting_an_inner_boundary_loop_preserves_the_outer_prefix() -> Result<(), Box<dyn Error>>
+    {
+        // Dois triângulos compartilham 2; a caminhada entra no laço 2–3–4 primeiro.
+        let mut next = HashMap::from([
+            (0, vec![1]),
+            (1, vec![2]),
+            (2, vec![0, 3]),
+            (3, vec![4]),
+            (4, vec![2]),
+        ]);
+        let inner = next_loop(&mut next, 0).ok_or("Laço interno ausente")?;
+        assert_eq!(inner, vec![2, 3, 4]);
+        let outer = next_loop(&mut next, 0).ok_or("Prefixo da borda foi perdido")?;
+        assert_eq!(outer, vec![0, 1, 2]);
+        assert!(next.values().all(Vec::is_empty));
+        Ok(())
     }
 
     #[test]

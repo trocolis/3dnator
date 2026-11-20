@@ -219,6 +219,82 @@ impl Pen<'_> {
         self.detail(&[[12., 12.4], [12., 21.4]], self.ink);
     }
 
+    /// Bloco 3D com a aresta vertical da frente suavizada (`round`) ou cortada (reta). Os
+    /// lados e o topo são desenhados até as tangentes da faixa; a faixa leva o destaque.
+    fn block_with_corner(&self, round: bool) {
+        // Pontos da curva (ou do corte) nas bordas de cima e de baixo da faixa.
+        let curve = |from: [f32; 2], corner: [f32; 2], to: [f32; 2]| -> Vec<[f32; 2]> {
+            if !round {
+                return vec![from, to];
+            }
+            (0..=10)
+                .map(|i| {
+                    let t = i as f32 / 10.;
+                    let u = 1. - t;
+                    [
+                        u * u * from[0] + 2. * u * t * corner[0] + t * t * to[0],
+                        u * u * from[1] + 2. * u * t * corner[1] + t * t * to[1],
+                    ]
+                })
+                .collect()
+        };
+        let upper = curve([18., 9.2], [12., 12.4], [6., 9.2]);
+        let lower = curve([18., 18.2], [12., 21.4], [6., 18.2]);
+        // Lados planos.
+        self.fill(&[[3., 7.6], [6., 9.2], [6., 18.2], [3., 16.6]], self.paper);
+        self.fill(
+            &[[18., 9.2], [21., 7.6], [21., 16.6], [18., 18.2]],
+            self.surface,
+        );
+        // Faixa da aresta, em fatias convexas.
+        for i in 0..upper.len() - 1 {
+            self.fill(
+                &[upper[i], upper[i + 1], lower[i + 1], lower[i]],
+                self.bright,
+            );
+        }
+        // Topo com o canto suavizado.
+        let mut top = vec![[3., 7.6], [12., 2.8], [21., 7.6]];
+        top.extend(upper.iter().copied());
+        self.fill(&top, self.bright);
+        // Contorno externo.
+        let mut outline = vec![[3., 7.6], [12., 2.8], [21., 7.6], [21., 16.6]];
+        outline.extend(lower.iter().copied());
+        outline.extend([[3., 16.6], [3., 7.6]]);
+        self.stroke(&outline, self.ink);
+        // Arestas internas: tangentes da faixa e a borda curva (ou reta) do topo.
+        self.detail(&[[3., 7.6], [6., 9.2]], self.ink);
+        self.detail(&[[18., 9.2], [21., 7.6]], self.ink);
+        self.detail(&[[6., 9.2], [6., 18.2]], self.ink);
+        self.detail(&[[18., 9.2], [18., 18.2]], self.ink);
+        self.line(&upper, self.accent, 2.);
+    }
+
+    /// Plano de rascunho em perspectiva com o canto superior esquerdo suavizado (`round`) ou
+    /// cortado, e o contorno do canto em destaque.
+    fn plane_with_corner(&self, round: bool) {
+        let corner = [7., 9.];
+        let (from, to) = ([5.1, 13.1], [11.5, 9.]);
+        let edge: Vec<[f32; 2]> = if round {
+            (0..=12)
+                .map(|i| {
+                    let t = i as f32 / 12.;
+                    let u = 1. - t;
+                    [
+                        u * u * from[0] + 2. * u * t * corner[0] + t * t * to[0],
+                        u * u * from[1] + 2. * u * t * corner[1] + t * t * to[1],
+                    ]
+                })
+                .collect()
+        } else {
+            vec![from, to]
+        };
+        let mut outline = edge.clone();
+        outline.extend([[22., 9.], [17., 20.], [2., 20.]]);
+        self.polygon(&outline, self.surface, self.ink, MAIN);
+        self.line(&edge, self.accent, 2.2);
+    }
+
     fn document(&self) {
         self.polygon(
             &[[5.5, 2.5], [14.5, 2.5], [19., 7.], [19., 21.5], [5.5, 21.5]],
@@ -690,18 +766,8 @@ fn draw(p: &Pen, icon: Icon) {
             p.ellipse_fill(12., 7., 3.6, 1.8, p.paper);
             p.ellipse(12., 7., 3.6, 1.8, p.accent, DETAIL);
         }
-        Icon::Fillet => {
-            p.stroke(&[[5., 21.], [5., 11.]], p.ink);
-            p.stroke(&[[11., 5.], [21., 5.]], p.ink);
-            p.arc(11., 11., 6., PI, PI + FRAC_PI_2, p.accent);
-        }
-        Icon::Chamfer => {
-            p.stroke(&[[5., 21.], [5., 11.]], p.ink);
-            p.stroke(&[[11., 5.], [21., 5.]], p.ink);
-            p.dashed([5., 5.], [5., 11.], p.ink, 1.1);
-            p.dashed([5., 5.], [11., 5.], p.ink, 1.1);
-            p.line(&[[5., 11.], [11., 5.]], p.accent, 2.2);
-        }
+        Icon::Fillet => p.block_with_corner(true),
+        Icon::Chamfer => p.block_with_corner(false),
         Icon::Shell => {
             p.fill(&[[3., 8.], [12., 13.], [12., 21.], [3., 16.]], p.paper);
             p.fill(&[[12., 13.], [21., 8.], [21., 16.], [12., 21.]], p.surface);
@@ -1100,6 +1166,17 @@ fn draw(p: &Pen, icon: Icon) {
             p.line(&[[19.5, 4.5], [4.5, 19.5]], p.ink, 2.4);
         }
         Icon::Check => p.line(&[[4., 12.5], [9.5, 18.], [20., 6.]], p.positive, 2.8),
+        Icon::SelectFace | Icon::SelectEdge | Icon::SelectVertex => {
+            p.cube();
+            match icon {
+                Icon::SelectFace => p.fill(
+                    &[[12., 12.4], [21., 7.6], [21., 16.6], [12., 21.4]],
+                    p.accent,
+                ),
+                Icon::SelectEdge => p.line(&[[12., 12.4], [12., 21.4]], p.accent, 3.),
+                _ => p.disc(12., 12.4, 2.6, p.accent),
+            }
+        }
         Icon::Select => {
             p.fill(&[[5., 2.], [5., 20.], [13., 14.]], p.surface);
             p.fill(&[[10., 16.], [14., 22.], [17., 20.], [13., 14.]], p.surface);
@@ -1581,26 +1658,8 @@ fn draw(p: &Pen, icon: Icon) {
             p.stroke(&[[7., 21.], [7., 10.], [10., 7.], [21., 7.]], p.accent);
             p.arrow([13., 15.], [19., 15.], p.accent);
         }
-        Icon::SketchFillet => {
-            // Retângulo com o canto superior esquerdo arredondado; o Chanfro
-            // usa a mesma silhueta com uma aresta reta no lugar do arco.
-            let mut outline = vec![[10., 4.], [20., 4.], [20., 20.], [4., 20.], [4., 10.]];
-            outline.extend((0..=12).map(|index| {
-                let angle = PI + FRAC_PI_2 * index as f32 / 12.;
-                [10. + 6. * angle.cos(), 10. + 6. * angle.sin()]
-            }));
-            p.polygon(&outline, p.surface, p.ink, MAIN);
-            p.arc(10., 10., 6., PI, PI + FRAC_PI_2, p.accent);
-        }
-        Icon::SketchChamfer => {
-            p.polygon(
-                &[[10., 4.], [20., 4.], [20., 20.], [4., 20.], [4., 10.]],
-                p.surface,
-                p.ink,
-                MAIN,
-            );
-            p.line(&[[4., 10.], [10., 4.]], p.accent, 2.2);
-        }
+        Icon::SketchFillet => p.plane_with_corner(true),
+        Icon::SketchChamfer => p.plane_with_corner(false),
         Icon::SketchMirror => {
             p.dashed([12., 2.], [12., 22.], p.ink, 1.4);
             p.polygon(&[[3., 18.], [8., 7.], [8., 18.]], p.surface, p.ink, DETAIL);
@@ -1724,6 +1783,23 @@ fn draw(p: &Pen, icon: Icon) {
             p.detail(&[[12., 2.], [12., 22.]], p.ink);
             p.ring(12., 12., 6., p.accent, 2.2);
             p.disc(12., 12., 1.6, p.accent);
+        }
+        Icon::Lock => {
+            let mut shackle = vec![[7.5, 11.], [7.5, 6.5]];
+            shackle.extend((0..=12).map(|index| {
+                let angle = PI + PI * index as f32 / 12.;
+                [12. + 4.5 * angle.cos(), 6.5 + 4.5 * angle.sin()]
+            }));
+            shackle.push([16.5, 11.]);
+            p.stroke(&shackle, p.ink);
+            p.polygon(
+                &[[5., 11.], [19., 11.], [19., 21.], [5., 21.]],
+                p.surface,
+                p.ink,
+                MAIN,
+            );
+            p.disc(12., 15.5, 1.4, p.accent);
+            p.line(&[[12., 16.5], [12., 19.]], p.accent, 2.);
         }
         Icon::LockOpen => {
             let mut shackle = vec![[11.5, 11.], [11.5, 6.5]];

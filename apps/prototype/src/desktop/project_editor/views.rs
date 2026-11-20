@@ -208,6 +208,13 @@ impl Editor {
             self.save(context, self.current().id, false, false);
             return;
         }
+        if self.shell.measure_open
+            && !context.egui_wants_keyboard_input()
+            && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.escape_to_selection(context);
+            return;
+        }
         if self.current().plane_pick.is_some()
             && context.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
@@ -315,24 +322,29 @@ impl Editor {
                 let collapse = theme::floating_frame()
                     .show(ui, |ui| tree_title(ui, document.name(), true, 8))
                     .inner;
-                // Apenas o cabeçalho tem fundo: os nós ficam diretamente sobre a cena.
-                egui::Frame::new().inner_margin(12).show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("project_browser")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let mut tree = project_tree::Tree::new(
-                                document,
-                                tab,
-                                &menu,
-                                busy,
-                                self.section_edit.is_some(),
-                            );
-                            tree.show(ui);
-                            intents.append(&mut tree.intents);
-                            project_tree::scroll_while_dragging(ui);
-                        });
-                });
+                // O cabeçalho é opaco; o corpo tem fundo translúcido sobre a cena.
+                egui::Frame::new()
+                    .fill(theme::tree_body())
+                    .stroke(egui::Stroke::new(1., theme::border()))
+                    .corner_radius(8)
+                    .inner_margin(12)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("project_browser")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                let mut tree = project_tree::Tree::new(
+                                    document,
+                                    tab,
+                                    &menu,
+                                    busy,
+                                    self.section_edit.is_some(),
+                                );
+                                tree.show(ui);
+                                intents.append(&mut tree.intents);
+                                project_tree::scroll_while_dragging(ui);
+                            });
+                    });
                 for intent in intents {
                     self.apply_tree_intent(ui, intent);
                 }
@@ -528,7 +540,7 @@ impl Editor {
             }
             Intent::Command(command) => self.execute(*command),
             Intent::Menu(action) => self.apply_menu_action(ui.ctx(), action),
-            Intent::EditPart(part, node) => {
+            Intent::EditPart(part, node, occurrence) => {
                 let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
                     ui.ctx(),
                     node,
@@ -536,7 +548,10 @@ impl Editor {
                 );
                 state.set_open(true);
                 state.store(ui.ctx());
-                self.apply_menu_action(ui.ctx(), browser::MenuAction::Activate(part));
+                self.apply_menu_action(
+                    ui.ctx(),
+                    browser::MenuAction::ActivateOccurrence(part, occurrence),
+                );
             }
             Intent::LeavePart => self.apply_menu_action(ui.ctx(), browser::MenuAction::Deactivate),
             Intent::EditSketch(part, id) => self.begin_sketch(part, id),
@@ -751,7 +766,7 @@ impl Editor {
                     && (self.revolve_axis_overlay(ui, &response)
                         || self.profile_overlay(ui, &response));
                 let gesture = !gizmo && self.selection_gestures(ui, &response);
-                if self.current().sketch_edit.is_none()
+                if (self.current().sketch_edit.is_none() || self.shell.measure_open)
                     && self.current().plane_pick.is_none()
                     && !profile
                     && !gesture
@@ -843,6 +858,10 @@ impl Editor {
                 if self.viewport.section_pending() {
                     ui.ctx()
                         .request_repaint_after(std::time::Duration::from_millis(16));
+                }
+                if self.alignment_point_focus().is_some() {
+                    let document = self.picking_document();
+                    self.prepare_points(&document, ui.ctx());
                 }
                 self.align_overlay(ui, response.rect);
                 self.measure_overlay(ui, response.rect);

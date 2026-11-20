@@ -6,6 +6,7 @@ use super::*;
 use assembly::Pick;
 use features::{EdgeRef, FaceRef};
 use nator_geometry::Point3;
+use nator_geometry::{norm, sub};
 use std::collections::HashMap;
 
 fn solid<'a>(doc: &'a Document, pick: &Pick) -> Result<(&'a Body, &'a [u32]), DocumentError> {
@@ -90,9 +91,31 @@ impl Document {
             face_name(body, b as u32)?,
         ]))
     }
+    /// Vértice topológico próximo ao clique: encontro de três faces distintas. Pontos
+    /// internos da tesselação de uma curva não viram vértices de seleção automática.
+    pub fn vertex_hit(&self, pick: &Pick, reach: f64) -> Option<Point3> {
+        let body = self.body(pick.body)?;
+        let pose = pick.placement.compose(body.placement).ok()?;
+        let local = pose.inverse_apply(pick.point);
+        body.geometry
+            .selection_vertices
+            .iter()
+            .copied()
+            .filter(|point| norm(sub(*point, local)) <= reach)
+            .min_by(|a, b| norm(sub(*a, local)).total_cmp(&norm(sub(*b, local))))
+            .map(|point| pose.apply(point))
+    }
+
     /// Par transitório de faces junto à aresta mais próxima. Não exige nome;
     /// serve ao realce e à consulta exata de aresta no núcleo, fora da interface.
     pub fn edge_faces_at(&self, pick: &Pick) -> Result<[usize; 2], DocumentError> {
+        self.edge_hit(pick).map(|hit| hit.faces)
+    }
+
+    /// Aresta de fronteira da malha mais próxima do clique, entre a face clicada e uma
+    /// vizinha: as faces, as extremidades (no mundo) e a distância do clique a ela. Serve à
+    /// seleção automática, que decide entre vértice, aresta e face pela proximidade.
+    pub fn edge_hit(&self, pick: &Pick) -> Result<EdgeHit, DocumentError> {
         let (body, faces) = solid(self, pick)?;
         let mesh = body.geometry.mesh();
         let pose = pick
@@ -109,7 +132,7 @@ impl Document {
                 edges.entry((a.min(b), a.max(b))).or_default().push(index);
             }
         }
-        let mut best: Option<(f64, u32)> = None;
+        let mut best: Option<(f64, u32, [u32; 2])> = None;
         for ((a, b), triangles) in &edges {
             let [first, second] = triangles.as_slice() else {
                 continue;
@@ -124,15 +147,29 @@ impl Document {
                 mesh.vertices()[*a as usize],
                 mesh.vertices()[*b as usize],
             );
-            if best.is_none_or(|(d, _)| distance < d) {
-                best = Some((distance, other));
+            if best.is_none_or(|(d, ..)| distance < d) {
+                best = Some((distance, other, [*a, *b]));
             }
         }
-        let (_, other) = best.ok_or_else(|| {
+        let (distance, other, ends) = best.ok_or_else(|| {
             DocumentError("A face selecionada não faz fronteira com outra face.".into())
         })?;
-        Ok([clicked as usize, other as usize])
+        Ok(EdgeHit {
+            faces: [clicked as usize, other as usize],
+            ends: ends.map(|i| pose.apply(mesh.vertices()[i as usize])),
+            distance,
+        })
     }
+}
+
+/// Aresta de fronteira entre duas faces, próxima de um clique.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeHit {
+    pub faces: [usize; 2],
+    /// Extremidades do trecho da malha, no mundo.
+    pub ends: [Point3; 2],
+    /// Distância do clique ao trecho, em mm.
+    pub distance: f64,
 }
 
 #[cfg(test)]
@@ -223,6 +260,14 @@ mod tests {
             FaceRef::Index { index: 1, .. }
         ));
         assert_eq!(doc.edge_faces_at(&pick)?, [1, 2]);
+        // O clique a 0,05 da aresta: a extremidade e a distância servem à seleção automática.
+        let hit = doc.edge_hit(&pick)?;
+        assert!((hit.distance - 0.05).abs() < 1e-9, "{}", hit.distance);
+        assert_eq!(hit.faces, [1, 2]);
+        assert!(doc.vertex_hit(&pick, 0.1).is_none());
+        let corner = pick_at(&doc, body, 2, [0.01, 0.01, 1.]);
+        assert_eq!(doc.vertex_hit(&corner, 0.1), Some([0., 0., 1.]));
+        assert!(hit.ends.iter().all(|p| p[1] == 0.));
         assert!(doc.edge_at(&pick).is_err());
         let mut invalid = pick.clone();
         invalid.triangle = usize::MAX;

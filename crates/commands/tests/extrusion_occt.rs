@@ -1750,3 +1750,46 @@ fn multiple_extrusion_respects_face_cells_and_shared_associative_limit() -> Resu
     assert!((volume(&s, output)? - before).abs() < 1e-6);
     Ok(())
 }
+
+/// Plano externo capturado: corte inclinado exato e persistência sem referência ao outro corpo.
+#[test]
+fn captured_external_limit_trims_and_round_trips_without_cross_part_dependencies() -> Result<()> {
+    use nator_document::features::ExtrusionLimit;
+    let (mut session, part, _) = fixture(false)?;
+    let mut sketch = Sketch::new("Perfil independente", Plane::xy());
+    sketch.add_rectangle([0., 0.], [20., 20.], false)?;
+    let (_, sketch) = add_sketch(&mut session, Some(part), sketch)?;
+    let normal = [0.3_f64.sin(), 0., 0.3_f64.cos()];
+    let limit = ExtrusionLimit::CapturedPlane {
+        origin: [0., 0., 30.],
+        normal,
+    };
+    let operation = Operation::Extrude {
+        sketch,
+        region: RegionRef::Index(0),
+        from: "0 mm".into(),
+        to: "1 mm".into(),
+        combine: None,
+        until: Some(limit),
+    };
+    let body = created(session.execute(Command::AddFeature {
+        part,
+        name: "Até face externa".into(),
+        operation,
+    })?)?;
+    let expected = 400. * (30. - normal[0] * 10. / normal[2]);
+    assert!((volume(&session, body)? - expected).abs() < 1e-3);
+    let folder = tempfile::tempdir()?;
+    let path = folder.path().join("capturado.3dnator");
+    nator_project_io::write_project(&path, session.document())?;
+    let mut loaded = Session::new(nator_project_io::read_project(&path)?)?;
+    // Recalcular após reabrir conserva o plano.
+    loaded.execute(Command::SetParameter {
+        part,
+        name: "altura".into(),
+        expression: Some("12 mm".into()),
+        dimension: Dimension::Length,
+    })?;
+    assert!((volume(&loaded, body)? - expected).abs() < 1e-3);
+    Ok(())
+}

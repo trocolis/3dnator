@@ -651,7 +651,7 @@ fn body_mesh(doc: &Document, body: BodyId, quality: Quality) -> Result<Mesh, Doc
             let mut solid = nator_kernel::Solid::from_brep(bytes, None)
                 .map_err(|e| DocumentError(e.to_string()))?;
             solid
-                .tessellate(linear, angular)
+                .tessellate_for_export(linear, angular)
                 .map_err(|e| DocumentError(e.to_string()))?
         }
         _ => record.geometry.mesh().clone(),

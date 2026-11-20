@@ -19,7 +19,8 @@ pub(super) enum Intent {
     Command(Box<Command>),
     Menu(browser::MenuAction),
     /// Entra na edição da peça e abre o nó dela.
-    EditPart(PartId, egui::Id),
+    /// Peça, nó da árvore e caminho de instâncias da ocorrência a editar.
+    EditPart(PartId, egui::Id, Vec<InstanceId>),
     LeavePart,
     EditSketch(PartId, SketchId),
     /// Plano de trabalho clicado: vale como escolha quando um seletor de suporte está aberto.
@@ -115,6 +116,9 @@ impl<'a> Tree<'a> {
             .iter()
             .filter(|i| self.document.sketch_part(i.sketch) == owner)
             .collect::<Vec<_>>();
+        if images.is_empty() {
+            return;
+        }
         self.node(
             ui,
             self.id(("images", owner.map(|p| p.0), path)),
@@ -324,8 +328,8 @@ impl<'a> Tree<'a> {
         .inner
     }
 
-    /// Pasta com visibilidade própria; o corpo recebe a visibilidade efetiva. Vazia, vira
-    /// uma linha sem seta.
+    /// Pasta com visibilidade própria; o corpo recebe a visibilidade efetiva. Vazia, não é
+    /// exibida.
     #[allow(clippy::too_many_arguments)]
     fn folder(
         &mut self,
@@ -340,19 +344,8 @@ impl<'a> Tree<'a> {
     ) {
         let visible = self.document.folder_visible(folder).unwrap_or(true);
         let shown = parent_shown && visible;
+        // Pasta sem filhos não aparece: ela surge quando recebe o primeiro item.
         if empty {
-            self.leaf(ui, |tree, ui| {
-                if tree.eye(ui, visible, true) {
-                    tree.intents
-                        .push(Intent::Command(Box::new(Command::SetFolderVisibility {
-                            folder,
-                            visible: !visible,
-                        })));
-                }
-                let response = icons::entry_styled(ui, icon, &label, false, !shown);
-                tree.references_drop(ui, &response, folder);
-                tree.folder_menu(&response, folder);
-            });
             return;
         }
         self.node(
@@ -453,6 +446,19 @@ impl<'a> Tree<'a> {
             .iter()
             .filter(|i| i.parent.is_none())
             .partition(is_reference);
+        if roots.is_empty() {
+            // Sem peças não há pasta a mostrar: fica só a orientação para começar.
+            self.leaf(ui, |_, ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(text(T::BrowserEmpty)).strong());
+                    ui.label(
+                        egui::RichText::new(text(T::StartSketch))
+                            .small()
+                            .color(theme::muted()),
+                    );
+                });
+            });
+        }
         self.folder(
             ui,
             self.id("parts"),
@@ -460,20 +466,8 @@ impl<'a> Tree<'a> {
             Icon::Folder,
             format!("{} ({})", text(T::PartsFolder), roots.len()),
             shown,
-            false,
+            roots.is_empty(),
             |tree, ui, shown| {
-                if roots.is_empty() {
-                    tree.leaf(ui, |_, ui| {
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(text(T::BrowserEmpty)).strong());
-                            ui.label(
-                                egui::RichText::new(text(T::StartSketch))
-                                    .small()
-                                    .color(theme::muted()),
-                            );
-                        });
-                    });
-                }
                 for instance in roots {
                     tree.part(ui, instance, vec![instance.id.0], shown, 0);
                 }
@@ -646,7 +640,8 @@ impl<'a> Tree<'a> {
             return;
         }
         let shown = parent_shown && instance.visible;
-        let active = self.tab.active_part == Some(part.id);
+        let occurrence = path.iter().map(|&id| InstanceId(id)).collect::<Vec<_>>();
+        let active = self.tab.is_editing_occurrence(part.id, &occurrence);
         let id = self.id(("part", &path));
         self.node(
             ui,
@@ -674,7 +669,7 @@ impl<'a> Tree<'a> {
                     tree.intents.push(if active {
                         Intent::LeavePart
                     } else {
-                        Intent::EditPart(part.id, id)
+                        Intent::EditPart(part.id, id, occurrence.clone())
                     });
                 }
                 let response = icons::entry_with_hint(
@@ -742,13 +737,23 @@ impl<'a> Tree<'a> {
                         .push(Intent::Select(Selection::Instance(instance.id)));
                 }
                 if response.double_clicked() && !tree.busy {
-                    tree.intents.push(Intent::EditPart(part.id, id));
+                    tree.intents
+                        .push(Intent::EditPart(part.id, id, occurrence.clone()));
                 }
                 response.context_menu(|ui| {
                     ui.add_enabled_ui(!tree.busy, |ui| {
                         if let Some(action) =
-                            browser::instance_menu(ui, tree.menu, instance, &part.name)
+                            browser::instance_menu(ui, tree.menu, instance, &part.name, active)
                         {
+                            let action = match action {
+                                browser::MenuAction::ActivateInstance(part, _) => {
+                                    browser::MenuAction::ActivateOccurrence(
+                                        part,
+                                        occurrence.clone(),
+                                    )
+                                }
+                                other => other,
+                            };
                             tree.intents.push(Intent::Menu(action));
                         }
                     });

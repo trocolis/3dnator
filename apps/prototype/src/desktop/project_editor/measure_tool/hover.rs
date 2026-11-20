@@ -129,6 +129,7 @@ impl Editor {
             position,
             reach: key.reach,
             section: key.section,
+            active_sketch: self.measurement_sketch(),
         };
         let document = self.picking_document();
         let view = self.current().view.clone();

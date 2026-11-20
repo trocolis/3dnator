@@ -144,6 +144,10 @@ pub(super) struct ViewState {
     /// Corpo escolhido por uma face ou aresta na peça em construção: só o elemento fica
     /// realçado, não o corpo inteiro.
     topology_only: Option<BodyId>,
+    /// Ocorrência (caminho de instâncias) da peça em construção. Uma peça com várias
+    /// ocorrências é editada em uma só; as outras ficam esmaecidas, como as demais peças.
+    /// Sem caminho válido, todas as ocorrências da peça valem.
+    edit_occurrence: Option<Vec<InstanceId>>,
     /// Cores de Verificar para impressão, enquanto o painel está aberto.
     inspection: Option<Arc<nator_document::Inspection>>,
     version: u64,
@@ -151,6 +155,19 @@ pub(super) struct ViewState {
 impl ViewState {
     fn touched(&mut self) {
         self.version = self.version.wrapping_add(1);
+    }
+    /// Caminho da ocorrência em edição, se ainda for uma ocorrência da peça ativa.
+    fn edit_path(&self, document: &Document, active: PartId) -> Option<&[InstanceId]> {
+        let path = self.edit_occurrence.as_deref()?;
+        let leaf = document.instance(*path.last()?)?;
+        (leaf.part == active && path.iter().all(|id| document.instance(*id).is_some()))
+            .then_some(path)
+    }
+    fn set_edit_occurrence(&mut self, path: Option<Vec<InstanceId>>) {
+        if self.edit_occurrence != path {
+            self.edit_occurrence = path;
+            self.touched();
+        }
     }
     fn in_isolation(&self, occurrence: &nator_document::assembly::Occurrence) -> bool {
         self.isolated
@@ -174,6 +191,9 @@ impl ViewState {
             return Some(Style::Transparent);
         }
         let inside = |active: PartId| {
+            if let Some(path) = self.edit_path(document, active) {
+                return occurrence.path.starts_with(path);
+            }
             part == active
                 || occurrence
                     .path
@@ -192,11 +212,18 @@ impl ViewState {
         body: BodyId,
         style: nator_document::Style,
     ) -> nator_document::Style {
-        let chosen = (self.selected_bodies.contains(&body) && self.topology_only != Some(body))
-            || occurrence
-                .path
-                .iter()
-                .any(|i| self.selected_instances.contains(i));
+        let chosen = (self.selected_bodies.contains(&body)
+            && self.topology_only != Some(body)
+            && (self
+                .edit_occurrence
+                .as_ref()
+                .is_none_or(|path| occurrence.path == *path)
+                || style != nator_document::Style::Dimmed))
+            || (self.topology_only.is_none()
+                && occurrence
+                    .path
+                    .iter()
+                    .any(|i| self.selected_instances.contains(i)));
         if chosen && !style.is_translucent() {
             nator_document::Style::Selected
         } else {
@@ -404,6 +431,8 @@ enum Outcome {
         revision: u64,
         pick: Option<nator_document::assembly::Pick>,
         mode: navigation::PickMode,
+        /// 0: geometria, 1: corpo (duplo clique), 2: ocorrência (triplo clique).
+        level: u8,
         /// Ctrl pressionado no clique: alterna o elemento na seleção.
         additive: bool,
         /// Referência escolhida para o diálogo de operações, quando ele esperava um clique.
@@ -582,6 +611,7 @@ pub struct Editor {
     drawing_edit: Option<drawing_editor::Draft>,
     export_edit: Option<export_editor::Draft>,
     pick_mode: navigation::PickMode,
+    selection_filter: navigation::SelectionFilter,
     /// Região de rascunho candidata sob o cursor, no quadro atual.
     profile_hovered: bool,
     /// Linhas do último relatório de medição, já formatadas para exibição.
@@ -833,6 +863,7 @@ impl Editor {
             drawing_edit: None,
             export_edit: None,
             pick_mode: navigation::PickMode::Face,
+            selection_filter: navigation::SelectionFilter::Automatic,
             profile_hovered: false,
             measure_tool: measure_tool::State::default(),
             shell: shell::ShellState::new(),
@@ -1038,6 +1069,7 @@ impl Editor {
                 revision,
                 pick,
                 mode,
+                level,
                 additive,
                 topology,
             }) => {
@@ -1046,13 +1078,32 @@ impl Editor {
                     .is_some_and(|t| t.session.revision() == revision);
                 // Com um painel esperando, o clique pertence ao campo de seleção ativo.
                 let consumed = topology.is_some();
+                let external = pick.as_ref().is_some_and(|p| !self.current().in_edit(p));
+                let active_pose = self
+                    .feature_edit
+                    .as_ref()
+                    .and_then(|d| sketch_scene::part_placement(self.current(), d.part()).ok());
                 if current
                     && let (Some(result), Some(p), Some(draft)) =
                         (topology, pick.as_ref(), self.feature_edit.as_mut())
                     && draft.tab() == tab
                 {
                     match result {
-                        Ok(_) if p.part != draft.part() => {
+                        Ok(feature_editor::Kept::PlanarFace(_, plane, _))
+                            if external && draft.accepts_external_limit() =>
+                        {
+                            if let Some(pose) = active_pose {
+                                let world_origin = p.placement.apply(plane.origin);
+                                let world_normal = p.placement.apply_vector(plane.normal());
+                                draft.choose_limit(
+                                    nator_document::features::ExtrusionLimit::CapturedPlane {
+                                        origin: pose.inverse_apply(world_origin),
+                                        normal: pose.inverse_vector(world_normal),
+                                    },
+                                );
+                            }
+                        }
+                        Ok(_) if external || p.part != draft.part() => {
                             self.status.warning(text(T::PickOtherPart));
                         }
                         Ok(kept) => {
@@ -1063,13 +1114,24 @@ impl Editor {
                         Err(error) => self.status.error(error),
                     }
                 }
+                if current && !consumed {
+                    self.pick_mode = mode;
+                }
                 if let Some(target) = self
                     .find_tab(tab)
                     .filter(|t| t.session.revision() == revision && !consumed)
                 {
                     if let Some(mut p) = pick {
                         navigation::snap_pick(&mut p, mode);
-                        let Some(item) = target.selection_for_pick(&p) else {
+                        let item = match level {
+                            1 => Some(Selection::Body {
+                                part: p.part,
+                                id: p.body,
+                            }),
+                            2 => Some(Selection::Instance(p.instance)),
+                            _ => target.selection_for_pick(&p),
+                        };
+                        let Some(item) = item else {
                             return;
                         };
                         if additive {
@@ -1077,14 +1139,11 @@ impl Editor {
                         } else {
                             target.select(Some(item));
                             // Face ou aresta na peça em construção: o realce fica nela.
-                            if mode != navigation::PickMode::Vertex
-                                && target.active_part == Some(p.part)
-                                && matches!(item, Selection::Body { .. })
-                            {
+                            if level == 0 {
                                 target.view.set_topology_only(Some(p.body));
                             }
                         }
-                        target.picked = Some(p);
+                        target.picked = (level == 0).then_some(p);
                     } else if !additive {
                         target.picked = None;
                         target.select(None);

@@ -261,6 +261,8 @@ pub struct MeshAsset {
     /// Face do B-rep de origem de cada triângulo, nos corpos sólidos. Permite selecionar
     /// faces e arestas na área 3D e convertê-las em referências por nome.
     triangle_faces: Option<Vec<u32>>,
+    /// Encontros de três faces, calculados uma vez para a seleção automática.
+    selection_vertices: Vec<nator_geometry::Point3>,
 }
 impl MeshAsset {
     pub fn new(mesh: Mesh) -> Self {
@@ -270,6 +272,7 @@ impl MeshAsset {
             topology,
             creases,
             triangle_faces: None,
+            selection_vertices: Vec::new(),
         }
     }
     /// Malha de exibição de um sólido, com a face de origem de cada triângulo.
@@ -280,6 +283,26 @@ impl MeshAsset {
             ));
         }
         let mut asset = Self::new(mesh);
+        // Três índices por vértice bastam para reconhecer um canto, sem guardar
+        // conjuntos de adjacência nem percorrer todos os triângulos a cada movimento.
+        let mut incident = vec![[None; 3]; asset.mesh.vertices().len()];
+        for (triangle, face) in asset.mesh.triangles().iter().zip(&faces) {
+            for &index in triangle {
+                let adjacent = &mut incident[index as usize];
+                if !adjacent.contains(&Some(*face))
+                    && let Some(slot) = adjacent.iter_mut().find(|f| f.is_none())
+                {
+                    *slot = Some(*face);
+                }
+            }
+        }
+        asset.selection_vertices = asset
+            .mesh
+            .vertices()
+            .iter()
+            .zip(incident)
+            .filter_map(|(point, adjacent)| adjacent[2].is_some().then_some(*point))
+            .collect();
         asset.triangle_faces = Some(faces);
         Ok(asset)
     }

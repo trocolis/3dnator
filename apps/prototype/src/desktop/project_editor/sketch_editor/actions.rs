@@ -158,6 +158,8 @@ impl Editor {
         context: &egui::Context,
         action: Action,
     ) {
+        self.shell.measure_open = false;
+        self.measure_tool.clear();
         self.image_edit = None;
         self.sanitize_sketch_selection();
         let source = self.working_sketch();

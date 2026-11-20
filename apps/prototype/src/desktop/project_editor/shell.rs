@@ -534,14 +534,17 @@ impl Editor {
                     })
             }
             Action::MoveCopy | Action::Align => editable && self.current().sketch_edit.is_none(),
+            // Mesmo comando nos dois contextos: na montagem age nas instâncias; na peça em
+            // edição, nos corpos dela, e só existe com algum corpo.
             Action::MoveBody | Action::CopyBody => {
                 editable
                     && self.current().sketch_edit.is_none()
-                    && self
-                        .current()
-                        .active_part
-                        .and_then(|id| self.current().session.document().part(id))
-                        .is_some_and(|p| p.listed_bodies().next().is_some())
+                    && (self.shell.tab == RibbonTab::Assembly
+                        || self
+                            .current()
+                            .active_part
+                            .and_then(|id| self.current().session.document().part(id))
+                            .is_some_and(|p| p.listed_bodies().next().is_some()))
             }
             Action::InsertPart => {
                 editable && self.current().sketch_edit.is_none() && self.tabs.len() > 1
@@ -567,8 +570,7 @@ impl Editor {
             Action::SketchFace => {
                 editable && self.current().picked.is_some() && self.current().sketch_edit.is_none()
             }
-            // Medir usa cliques na área 3D, que o rascunho em edição reserva às ferramentas.
-            Action::Measure => editable && self.current().sketch_edit.is_none(),
+            Action::Measure => editable,
             Action::PrintCheck => editable && self.current().active_part.is_some(),
             Action::SketchTool(_) | Action::SketchEdit(_) => {
                 editable && self.current().sketch_edit.is_some()
@@ -842,8 +844,12 @@ impl Editor {
                 }
                 self.open_move();
             }
-            Action::MoveBody => self.open_body_move(false),
-            Action::CopyBody => self.open_body_move(true),
+            Action::MoveBody | Action::CopyBody => {
+                if self.shell.tab == RibbonTab::Assembly {
+                    self.enter_assembly_context(context);
+                }
+                self.open_body_move(action == Action::CopyBody);
+            }
             Action::Align => self.open_align(navigation::PickMode::Face),
             Action::NewInstance => self.duplicate_selection(context),
             Action::CloneInstance => self.clone_selection(context),
@@ -944,13 +950,73 @@ impl Editor {
                                     ui.separator();
                                 }
                                 for action in *group {
-                                    self.action_button(ui, *action, false);
+                                    if *action == Action::Select {
+                                        self.selection_button(ui);
+                                    } else {
+                                        self.action_button(ui, *action, false);
+                                    }
                                 }
                             }
                         });
                     });
             });
     }
+    /// Uma única posição na barra; a gaveta mostra os filtros quando solicitada.
+    fn selection_button(&mut self, ui: &mut egui::Ui) {
+        let response = icons::button(
+            ui,
+            self.selection_filter.icon(),
+            text(T::Select),
+            false,
+            self.selection_active() && self.shell.camera_mode.is_none(),
+        );
+        #[cfg(all(test, feature = "occt"))]
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(
+                egui::Id::new(("ribbon_action_rect", text(T::Select))),
+                response.rect,
+            )
+        });
+        if response.clicked() {
+            self.activate_action(ui.ctx(), Action::Select);
+            self.gestures.clicks = None;
+        }
+        let mut chosen = None;
+        egui::Popup::menu(&response).show(|ui| {
+            ui.horizontal(|ui| {
+                for filter in [
+                    navigation::SelectionFilter::Automatic,
+                    navigation::SelectionFilter::Face,
+                    navigation::SelectionFilter::Edge,
+                    navigation::SelectionFilter::Vertex,
+                ] {
+                    let button = icons::button(
+                        ui,
+                        filter.icon(),
+                        text(filter.label()),
+                        false,
+                        self.selection_filter == filter,
+                    );
+                    #[cfg(all(test, feature = "occt"))]
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(
+                            egui::Id::new(("selection_filter_rect", text(filter.label()))),
+                            button.rect,
+                        )
+                    });
+                    if button.clicked() {
+                        chosen = Some(filter);
+                        ui.close();
+                    }
+                }
+            });
+        });
+        if let Some(filter) = chosen {
+            self.selection_filter = filter;
+            self.hover = None;
+        }
+    }
+
     fn sketch_on_selected_face(&mut self, context: &egui::Context) {
         let Some(pick) = self.current().picked.clone() else {
             return;
@@ -1487,64 +1553,59 @@ impl Editor {
     fn ribbon_groups(&mut self, ui: &mut egui::Ui) {
         self.shell.menu_rects.clear();
         match self.shell.tab {
+            // Ordem de trabalho da peça: criar, modificar e inspecionar. Mover e Copiar são os
+            // mesmos da montagem; aqui agem nos corpos da peça em edição.
             RibbonTab::Model => {
-                self.ribbon_group(ui, Some(T::SectionSketch), &[Action::NewSketch]);
-                self.ribbon_group(ui, Some(T::SectionImport), &[Action::ImportIntoPart]);
                 self.ribbon_group(
                     ui,
                     Some(T::SectionCreate),
                     &[
+                        Action::NewSketch,
                         Action::Solid(SolidTool::Extrude),
                         Action::Solid(SolidTool::Revolve),
                         Action::Solid(SolidTool::Loft),
                         Action::Solid(SolidTool::Sweep),
                         Action::Solid(SolidTool::Pipe),
                         Action::Solid(SolidTool::Hole),
+                        Action::OffsetPlane,
+                        Action::ImportIntoPart,
                     ],
                 );
                 self.ribbon_group(
                     ui,
                     Some(T::SectionModify),
                     &[
-                        Action::Solid(SolidTool::Shell),
+                        Action::MoveBody,
+                        Action::CopyBody,
+                        Action::Solid(SolidTool::Join),
+                        Action::Solid(SolidTool::Split),
                         Action::Solid(SolidTool::Fillet),
                         Action::Solid(SolidTool::Chamfer),
-                        Action::Solid(SolidTool::RemoveFaces),
+                        Action::Solid(SolidTool::Shell),
                         Action::Paint,
                     ],
                 );
                 self.ribbon_group(
                     ui,
-                    Some(T::SectionArrange),
-                    &[
-                        Action::MoveBody,
-                        Action::CopyBody,
-                        Action::Solid(SolidTool::Join),
-                        Action::Solid(SolidTool::Split),
-                        Action::Solid(SolidTool::MergeFaces),
-                        Action::Solid(SolidTool::Mirror),
-                        Action::Solid(SolidTool::LinearPattern),
-                        Action::Solid(SolidTool::CircularPattern),
-                    ],
-                );
-                self.sketch_section(
-                    ui,
                     Some(T::SectionInspect),
-                    &[Action::Solid(SolidTool::CheckSolid), Action::OffsetPlane],
-                    &[Action::Parameters, Action::Section],
+                    &[Action::Solid(SolidTool::CheckSolid)],
                 );
             }
-            // Fluxo próprio da montagem, na ordem de trabalho: referências, peças,
-            // posicionamento, cópias e organização.
+            // Fluxo próprio da montagem: criar, transformar, agrupar e documentar.
             RibbonTab::Assembly => {
-                self.ribbon_group(ui, Some(T::SectionReference), &[Action::ReferenceSketch]);
-                self.ribbon_group(ui, Some(T::SectionPart), &[Action::NewEmptyPart]);
-                self.ribbon_group(ui, Some(T::SectionImport), &[Action::ImportReference]);
-                self.ribbon_group(ui, Some(T::SectionPlace), &[Action::MoveCopy]);
                 self.ribbon_group(
                     ui,
-                    Some(T::SectionCopy),
-                    &[Action::NewInstance, Action::InstanceMirror],
+                    Some(T::SectionCreate),
+                    &[
+                        Action::NewEmptyPart,
+                        Action::ImportReference,
+                        Action::ReferenceSketch,
+                    ],
+                );
+                self.ribbon_group(
+                    ui,
+                    Some(T::SectionTransform),
+                    &[Action::MoveBody, Action::CopyBody],
                 );
                 self.ribbon_group(
                     ui,
@@ -1554,7 +1615,7 @@ impl Editor {
                 self.ribbon_group(
                     ui,
                     Some(T::SectionDocument),
-                    &[Action::Drawing, Action::Section, Action::ExportStep],
+                    &[Action::Drawing, Action::Section],
                 );
             }
             RibbonTab::Print => {

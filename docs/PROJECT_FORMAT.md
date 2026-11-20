@@ -1,6 +1,6 @@
 # Formato de projeto — versão interna 54
 
-A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 54; a gravação sempre usa a versão atual.
+A versão do pacote (`FORMAT_VERSION` em `crates/project_io/src/project.rs`) é independente da versão do aplicativo. O leitor aceita as versões 1 a 55; a gravação sempre usa a versão atual.
 
 Um arquivo `.3dnator` é um ZIP com compressão Deflate e somente entradas declaradas:
 
@@ -279,3 +279,9 @@ A descoberta e a limpeza verificam o marcador `recovery = true` no manifesto. Ar
 ## Escopo ainda pendente
 
 A miniatura (`thumbnail.png`, 256 × 192, vista isométrica sombreada da cena visível) é gerada a cada gravação na CPU, sem GPU; projetos sem corpos visíveis não têm miniatura. Configurações persistentes de câmera ainda não fazem parte do esquema. A sequência de desfazer/refazer é somente da sessão e começa vazia ao reabrir um projeto.
+
+Desde a versão 55, `ExtrusionLimit` também aceita `{origin, normal}`: plano capturado de
+uma face externa, em coordenadas locais da peça em edição. A normal é unitária e os valores
+são finitos. Não há referência à outra peça ou ocorrência: mover ou excluir a origem externa
+não modifica o limite capturado. Faces da própria ocorrência continuam associativas por
+`UntilFace {body, face}`. Clonar a peça conserva as coordenadas do plano capturado.

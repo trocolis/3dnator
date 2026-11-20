@@ -1,6 +1,29 @@
 # Histórico de mudanças
 
-## Não lançado
+## 0.63.0 — 20/11/2026
+
+- Mover (Montagem e Construção): painel unificado mantendo o seletor de Modo de movimentação no topo, a seção específica de cada modo logo abaixo e a mesma seção **Translação** (posições X/Y/Z, rotação por eixo e trava com ícone de cadeado) em todos os modos, preservando os valores ao alternar entre eles. No modo ponto a ponto, os pontos de origem já aparecem automaticamente no objeto alvo na posição atual (inclusive após movimentações anteriores) e passam a ser exibidos de forma discreta, destacando-se ao posicionar o cursor em cima.
+- Seleção: passar o mouse já realça o alvo do filtro Automático, Face, Aresta ou Vértice, antes do clique, também na Montagem e em cenas acima de 400 mil triângulos. A consulta e o realce dessas cenas rodam em segundo plano, respeitando visibilidade, isolamento e corte de seção.
+
+- Extrusão: faces planas de outras peças ou ocorrências podem definir o limite, inclusive inclinadas. O plano é capturado no referencial da ocorrência em edição, sem vínculo entre peças; faces da própria ocorrência seguem associativas. Formato interno 55, com leitura das versões 1–55.
+- Zoom: aproximação ampliada em 2.000 vezes em relação ao limite anterior, mantendo o ponto sob o cursor; permanece apenas o piso numérico da câmera.
+- Construção: somente a ocorrência escolhida da peça fica ativa; as demais ficam esmaecidas. O centro da ocorrência passa a ser o pivô da câmera, e rascunhos, seleções e movimentação usam essa ocorrência.
+- Arredondar e Chanfrar: ícones de bloco 3D na Construção e de plano na aba Rascunho, com o canto arredondado ou cortado em destaque.
+- Seleção: o botão inferior abre uma gaveta com Automático, Face, Aresta e Vértice; somente o ícone escolhido fica na barra. O automático prioriza vértices topológicos e arestas próximas antes da face. Duplo clique seleciona o corpo, e triplo clique, a ocorrência da peça, contando apenas cliques no canvas.
+- Árvore: seleção de grupos verificada por ensaio gráfico, conservando a rolagem na linha do grupo.
+
+- Mover: com a ferramenta aberta e os alvos escolhidos, o objeto sob o cursor deixa de ser realçado (o realce só volta se o campo Objetos estiver aguardando um clique no modelo). Sobre o manipulador de movimento e rotação, o cursor passa a ser o dele (mão, ou setas no centro livre; fechada ao arrastar), sem o distintivo da ferramenta, e nada é realçado nem selecionado por baixo.
+- Árvore: pastas e nós sem filhos (Corpos, Sub-peças, Referências, Rascunhos, Planos e Imagens) deixam de ser exibidos e aparecem quando recebem o primeiro item. Sem nenhuma peça, resta só a orientação para começar.
+- Faixa da Montagem reorganizada em **Criar** (Nova peça, Importar, Rascunho de referência), **Transformar** (Mover, Copiar), **Grupos** (Agrupar, Desagrupar) e **Documentar** (Folha técnica, Corte de seção). O STEP da montagem sai pelo menu da árvore e pela busca.
+- Faixa da Construção reorganizada em **Criar** (Rascunho, Extrusão, Revolução, Transição entre perfis, Transição guiada, Tubo, Furo, Plano deslocado, Importar), **Modificar** (Mover, Copiar, Combinar, Dividir, Arredondar, Chanfrar, Casca, Pintar) e **Inspecionar** (Verificar sólido). Parâmetros, Corte de seção, Unir áreas e Remover faces saem da faixa e seguem na busca (S).
+- Mover e Copiar passam a ser os mesmos nas duas abas, com o mesmo painel; muda só o alvo (instâncias na Montagem, corpos na peça em edição). O Copiar da peça deixa de ser só "cópia independente".
+- Copiar tem os tipos **Nova instância** (só na Montagem), **Cópia independente**, **Padrão** e **Espelhar**. O Padrão reúne retangular e circular; o retangular ganha **Linhas** (com eixo e distância próprios) e **Distância entre as cópias**. O Espelhar ganha **Distância entre as cópias**, que afasta a imagem da original ao longo da normal do plano. Na Construção, Padrão e Espelhar abrem os painéis de operações de corpo, com o mesmo seletor de tipo, e voltam ao Copiar sem perder a escolha.
+- Os botões Espelhar, Padrão retangular e Padrão circular de corpos saem da faixa da Construção; ficam no Copiar.
+- Árvore do projeto: o corpo do painel flutuante estava totalmente transparente, com os nós soltos sobre a cena. Agora tem fundo translúcido (cor do painel com opacidade ~78%) e contorno, enquanto o cabeçalho segue opaco. Nova cor `theme::tree_body`.
+- Exportação STL: recupera faces curvas que o OCCT não triangulou no contexto do sólido inteiro, reaproveitando as bordas compartilhadas das faces já prontas. A recuperação local podia mudar a discretização de uma borda e abrir frestas em um sólido válido (42 arestas no `CARRO_X v2_COMPOUND`). A nova tentativa só substitui a malha se ela fechar na precisão do STL; o B-rep é preservado e contatos reais continuam rejeitados.
+- A vedação de frestas numéricas passa a ter ordem determinística e conserva os trechos anteriores quando encontra um laço interno. Isso evita resultados diferentes entre a validação e a gravação do mesmo STL.
+
+- Medir fica disponível durante a edição de rascunhos: os centros de círculos e arcos aparecem como apoios selecionáveis para medir distâncias até outros centros, pontos e elementos. A medição conserva o rascunho e suspende seus gestos de edição; escolher outra ferramenta retoma o desenho. Rascunhos ocultos também podem ser medidos enquanto estão em edição.
 
 ## 0.62.0 — 14/11/2026
 

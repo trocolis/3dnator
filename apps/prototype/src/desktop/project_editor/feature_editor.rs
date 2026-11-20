@@ -534,6 +534,8 @@ struct LayoutDraft {
     plane: usize,
     offset: f64,
     keep_original: bool,
+    /// Distância extra entre o corpo e a imagem espelhada.
+    distance: f64,
     flip: bool,
 }
 impl Default for LayoutDraft {
@@ -551,12 +553,15 @@ impl Default for LayoutDraft {
             plane: 2,
             offset: 0.,
             keep_original: true,
+            distance: 0.,
             flip: false,
         }
     }
 }
 
 pub(super) struct Draft {
+    /// Tipo de cópia escolhido no painel de padrão ou espelho, atendido ao fim do quadro.
+    copy_switch: Option<assembly_tools::CopyKind>,
     tab: u64,
     part: PartId,
     output: Option<BodyId>,
@@ -638,8 +643,14 @@ pub(super) struct Draft {
     fastening: fastening::FasteningDraft,
 }
 impl Draft {
+    /// Ferramenta aberta, para os ensaios de captura.
+    #[cfg(all(test, feature = "occt"))]
+    pub(super) fn is_tool(&self, tool: Tool) -> bool {
+        self.tool == tool
+    }
     fn new(tab: u64, part: PartId, tool: Tool) -> Self {
         Self {
+            copy_switch: None,
             tab,
             part,
             output: None,
@@ -1139,6 +1150,9 @@ impl Draft {
     }
     pub(super) fn choosing_cutting_plane(&self) -> bool {
         self.tool == Tool::Split && self.field == Some(Field::CuttingPlane)
+    }
+    pub(super) fn accepts_external_limit(&self) -> bool {
+        self.tool == Tool::Extrude && (self.field == Some(Field::UntilFace) || self.complete())
     }
     pub(super) fn planar_pick(&self) -> bool {
         self.accepts_face_profile() || self.choosing_cutting_plane()
@@ -2136,9 +2150,19 @@ impl Draft {
             }
             Tool::Mirror => {
                 let (origin, normal) = self.plane();
+                let center = part
+                    .bodies
+                    .iter()
+                    .find(|b| b.id == base)
+                    .map(|b| b.geometry.mesh().bounds().center());
                 Operation::Mirror {
                     base,
-                    origin,
+                    origin: assembly_tools::spaced_plane(
+                        origin,
+                        normal,
+                        center,
+                        self.layout.distance,
+                    ),
                     normal,
                     keep_original: self.layout.keep_original,
                 }
@@ -2415,6 +2439,7 @@ impl Editor {
                     revision,
                     pick: Some(pick),
                     mode: navigation::PickMode::Face,
+                    level: 0,
                     additive: false,
                     topology: kept.map(Ok),
                 })
@@ -2444,6 +2469,7 @@ impl Editor {
                 revision,
                 pick: Some(pick),
                 mode: navigation::PickMode::Edge,
+                level: 0,
                 additive: false,
                 topology: Some(topology),
             })
@@ -2594,6 +2620,22 @@ impl Editor {
                 {
                     ui.colored_label(theme::warning(), text(T::FixingFailure));
                 }
+                if matches!(
+                    d.tool,
+                    Tool::LinearPattern | Tool::CircularPattern | Tool::Mirror
+                ) {
+                    // Mesmo Copiar da montagem: aqui o padrão e o espelho agem nos corpos.
+                    let mut kind = if d.tool == Tool::Mirror {
+                        assembly_tools::CopyKind::Mirror
+                    } else {
+                        assembly_tools::CopyKind::Pattern
+                    };
+                    let shown = kind;
+                    assembly_tools::copy_picker(ui, &mut kind, true);
+                    if kind != shown {
+                        d.copy_switch = Some(kind);
+                    }
+                }
                 match d.tool {
                     Tool::Label => label::panel(ui, &mut d, &self.label_fonts.names),
                     Tool::Extrude => {
@@ -2630,6 +2672,16 @@ impl Editor {
             },
         );
         let tab = d.tab;
+        if let Some(kind) = d.copy_switch.take() {
+            self.preview_command(tab, None, None, None);
+            self.close_feature_panel(&d);
+            match kind {
+                assembly_tools::CopyKind::Mirror => self.open_feature_tool(Tool::Mirror),
+                assembly_tools::CopyKind::Pattern => self.open_feature_tool(Tool::LinearPattern),
+                _ => self.open_body_move(true),
+            }
+            return;
+        }
         d.suggest_hole_direction(&part);
         // Os campos podem mudar neste mesmo quadro (inclusive ao clicar em OK).
         // Publicar e pedir prévia sempre usa o estado posterior à edição do formulário.
@@ -2883,6 +2935,7 @@ fn extrude_panel(
         if e.to_face {
             let chosen = usize::from(d.until.is_some());
             let description = d.until.as_ref().map(|limit| match limit {
+                ExtrusionLimit::CapturedPlane { .. } => text(T::CapturedLimitPlane).into(),
                 ExtrusionLimit::Face(face) => describe_topology(&Kept::Face(face.face.clone())),
                 ExtrusionLimit::Sketch { sketch } => part
                     .sketches
@@ -3584,6 +3637,18 @@ fn hole_panel(
 
 fn pattern_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
     body_selection(ui, d, part, Field::Base, T::BodyField);
+    panel::row(ui, text(T::PatternShape), |ui| {
+        let mut tool = d.tool;
+        panel::choice(
+            ui,
+            &mut tool,
+            &[
+                (Tool::LinearPattern, Icon::Pattern, T::RectangularPattern),
+                (Tool::CircularPattern, Icon::Revolve, T::CircularPattern),
+            ],
+        );
+        d.tool = tool;
+    });
     let circular = d.tool == Tool::CircularPattern;
     let l = &mut d.layout;
     panel::row(
@@ -3608,18 +3673,29 @@ fn pattern_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) 
             panel::expression(ui, &mut l.angle)
         });
     } else {
-        panel::row(ui, text(T::SpacingField), |ui| {
+        panel::row(ui, text(T::CopyDistance), |ui| {
             panel::length_expression(ui, &mut l.spacing)
         });
-        ui.checkbox(&mut l.second, text(T::SecondDirection));
+        // Uma linha é só a fileira; mais de uma repete a fileira em outro eixo.
+        let mut rows = if l.second { l.second_count } else { 1 };
+        panel::row(ui, text(T::RowsField), |ui| {
+            ui.add(egui::DragValue::new(&mut rows).range(1..=1000))
+        });
+        l.second = rows > 1;
         if l.second {
+            l.second_count = rows;
+            if l.second_axis == l.axis {
+                l.second_axis = (l.axis + 1) % AXES.len();
+            }
             panel::row(ui, text(T::DirectionField), |ui| {
-                axis_choice(ui, &mut l.second_axis, &AXES)
+                ui.spacing_mut().item_spacing.x = 2.;
+                for (i, (name, _)) in AXES.iter().enumerate() {
+                    if i != l.axis && ui.selectable_label(l.second_axis == i, *name).clicked() {
+                        l.second_axis = i;
+                    }
+                }
             });
-            panel::row(ui, text(T::CountField), |ui| {
-                ui.add(egui::DragValue::new(&mut l.second_count).range(1..=1000))
-            });
-            panel::row(ui, text(T::SpacingField), |ui| {
+            panel::row(ui, text(T::CopyDistance), |ui| {
                 panel::length_expression(ui, &mut l.second_spacing)
             });
         }
@@ -3819,6 +3895,7 @@ fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
                 .iter()
                 .find(|s| s.id == *sketch)
                 .map(|s| s.sketch.name.clone()),
+            Some(ExtrusionLimit::CapturedPlane { .. }) => Some(text(T::CapturedLimitPlane).into()),
             None => d.fixed_plane.map(|_| text(T::Origin).into()),
         };
         let selection = panel::selection(
@@ -3853,6 +3930,11 @@ fn plane_panel(ui: &mut egui::Ui, d: &mut Draft, part: &nator_document::Part) {
         ui.add(panel::length_value(&context, &mut l.offset, -1e7..=1e7))
     });
     if mirror {
+        panel::row(ui, text(T::CopyDistance), |ui| {
+            let context = ui.ctx().clone();
+            ui.add(panel::length_value(&context, &mut l.distance, 0.0..=1e7))
+        });
+        panel::hint(ui, text(T::MirrorDistanceHint));
         ui.checkbox(&mut l.keep_original, text(T::KeepOriginal));
     } else {
         ui.checkbox(&mut l.flip, text(T::FlipSide));

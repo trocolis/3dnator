@@ -81,6 +81,70 @@ pub(super) enum PickMode {
     Edge,
     Face,
 }
+/// Filtro explícito do seletor; o automático resolve o tipo pela distância em tela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SelectionFilter {
+    Automatic,
+    Face,
+    Edge,
+    Vertex,
+}
+impl SelectionFilter {
+    pub(super) fn icon(self) -> icons::Icon {
+        match self {
+            Self::Automatic => icons::Icon::Select,
+            Self::Face => icons::Icon::SelectFace,
+            Self::Edge => icons::Icon::SelectEdge,
+            Self::Vertex => icons::Icon::SelectVertex,
+        }
+    }
+    pub(super) fn label(self) -> T {
+        match self {
+            Self::Automatic => T::SelectAutomatic,
+            Self::Face => T::SelectFace,
+            Self::Edge => T::SelectEdge,
+            Self::Vertex => T::SelectVertex,
+        }
+    }
+    pub(super) fn resolve(self, document: &Document, pick: &Pick, reach: f64) -> PickMode {
+        match self {
+            Self::Face => PickMode::Face,
+            Self::Edge => PickMode::Edge,
+            Self::Vertex => PickMode::Vertex,
+            Self::Automatic => {
+                if let Ok(hit) = document.edge_hit(pick) {
+                    // As pontas de segmentos de tesselação não são vértices CAD: o teste
+                    // de vértice usa o encontro de pelo menos três faces.
+                    if document.vertex_hit(pick, reach).is_some() {
+                        return PickMode::Vertex;
+                    }
+                    if hit.distance <= reach {
+                        return PickMode::Edge;
+                    }
+                }
+                PickMode::Face
+            }
+        }
+    }
+}
+/// Usa fronteiras de faces para não capturar diagonais ou vértices internos da tesselação.
+pub(super) fn snap_topology(document: &Document, pick: &mut Pick, mode: PickMode) {
+    match mode {
+        PickMode::Vertex => {
+            if let Some(point) = document.vertex_hit(pick, f64::INFINITY) {
+                pick.vertices = [point; 3];
+            }
+        }
+        PickMode::Edge => {
+            if let Ok(hit) = document.edge_hit(pick) {
+                pick.vertices = [hit.ends[0], hit.ends[1], hit.ends[0]];
+            }
+        }
+        PickMode::Face => {}
+    }
+    snap_pick(pick, mode);
+}
+
 pub(super) fn snap_pick(p: &mut Pick, mode: PickMode) {
     match mode {
         PickMode::Vertex => {
@@ -99,11 +163,15 @@ pub(super) fn snap_pick(p: &mut Pick, mode: PickMode) {
                 (p.vertices[2], p.vertices[0]),
             ]
             .into_iter()
-            .map(|(a, b)| {
+            .filter_map(|(a, b)| {
                 let d = sub(b, a);
-                let t = (dot(sub(p.point, a), d) / dot(d, d)).clamp(0., 1.);
+                let length_squared = dot(d, d);
+                if length_squared <= 1e-24 {
+                    return None;
+                }
+                let t = (dot(sub(p.point, a), d) / length_squared).clamp(0., 1.);
                 let q = std::array::from_fn(|i| a[i] + t * d[i]);
-                (a, b, q)
+                Some((a, b, q))
             })
             .min_by(|a, b| norm(sub(a.2, p.point)).total_cmp(&norm(sub(b.2, p.point))))
             {
@@ -191,7 +259,30 @@ impl Editor {
             let tab = self.current().id;
             let revision = self.current().session.revision();
             let mode = self.pick_mode;
+            let filter = self.selection_active().then_some(self.selection_filter);
             let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+            let level = if filter.is_some() && !additive {
+                let now = ui.input(|i| i.time);
+                let (delay, distance) = ui.ctx().options(|o| {
+                    (
+                        o.input_options.max_double_click_delay,
+                        o.input_options.max_click_dist,
+                    )
+                });
+                let count = self
+                    .gestures
+                    .clicks
+                    .filter(|(previous_tab, time, at, _)| {
+                        *previous_tab == tab
+                            && now - time < delay
+                            && at.distance(position) < distance
+                    })
+                    .map_or(1, |(_, _, _, count)| (count + 1).min(3));
+                self.gestures.clicks = Some((tab, now, position, count));
+                count - 1
+            } else {
+                0
+            };
             let awaiting = self.feature_edit.as_ref().and_then(|d| d.awaiting());
             let extrusion = self.feature_edit.as_ref().is_some_and(|d| d.planar_pick());
             let area = self
@@ -202,6 +293,10 @@ impl Editor {
             let face_layer = (awaiting == Some(feature_editor::Awaiting::Face))
                 .then_some(self.face_layers.layer)
                 .filter(|layer| *layer > 0);
+            let external_limit = self
+                .feature_edit
+                .as_ref()
+                .is_some_and(|d| d.accepts_external_limit());
             let feature_part = self.feature_edit.as_ref().map(|d| d.part());
             // Oito pontos de tela em mm: a mesma margem da captura de vértices do rascunho.
             let vertex_reach = self.pick_reach(position, response.rect, bounds);
@@ -214,6 +309,7 @@ impl Editor {
                 position,
                 reach: vertex_reach,
                 section: cut,
+                active_sketch: self.measurement_sketch(),
             };
             self.start(ui.ctx(), None, move || {
                 if measuring {
@@ -228,11 +324,11 @@ impl Editor {
                     });
                 }
                 // A parte escondida pelo corte de seção não é selecionável.
-                let pick = match face_layer {
+                let mut pick = match face_layer {
                     // A face destacada pelas setas, entre as aptas sob o cursor.
                     Some(layer) => face_layers(&document, &view, cut, ray, |p| {
                         if extrusion {
-                            Some(p.part) == feature_part
+                            (Some(p.part) == feature_part || external_limit)
                                 && document.body(p.body).is_some_and(|b| b.brep.is_some())
                                 && nator_commands::measure::sketch_plane(&document, p).is_ok()
                         } else {
@@ -269,10 +365,12 @@ impl Editor {
                                     .map(feature_editor::Kept::Edge),
                             }
                         }
-                        feature_editor::Awaiting::Face if extrusion => {
-                            feature_editor::planar_area(&document, p, area)
-                                .map_err(nator_document::DocumentError)
-                        }
+                        feature_editor::Awaiting::Face if extrusion => feature_editor::planar_area(
+                            &document,
+                            p,
+                            area && Some(p.part) == feature_part,
+                        )
+                        .map_err(nator_document::DocumentError),
                         feature_editor::Awaiting::Face => {
                             document.face_at(p).map(feature_editor::Kept::Face)
                         }
@@ -291,11 +389,20 @@ impl Editor {
                     }
                     .map_err(|e| e.to_string())
                 });
+                let mode = filter
+                    .zip(pick.as_ref())
+                    .map_or(mode, |(f, p)| f.resolve(&document, p, vertex_reach));
+                if filter.is_some()
+                    && let Some(pick) = pick.as_mut()
+                {
+                    snap_topology(&document, pick, mode);
+                }
                 Ok(Outcome::Picked {
                     tab,
                     revision,
                     pick,
                     mode,
+                    level,
                     additive,
                     topology,
                 })

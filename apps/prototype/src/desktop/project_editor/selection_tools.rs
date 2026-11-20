@@ -37,6 +37,8 @@ pub(super) struct SelectionGestures {
     pub window: Option<WindowSelect>,
     pub other: Option<SelectOther>,
     pub press: Option<Press>,
+    /// Conta apenas cliques no canvas, sem incorporar cliques anteriores em menus.
+    pub clicks: Option<(u64, f64, egui::Pos2, u8)>,
 }
 
 /// Referência de nível mais alto na ocorrência clicada. Na construção, um modelo de
@@ -83,10 +85,34 @@ pub(super) fn movable_in_construction(
 }
 
 impl Tab {
+    /// Caminho da ocorrência da peça em construção, quando a peça tem uma escolhida.
+    pub(super) fn editing_path(&self) -> Option<&[InstanceId]> {
+        self.view
+            .edit_path(self.session.document(), self.active_part?)
+    }
+    /// O nó da árvore (caminho de instâncias) é a ocorrência em construção. Sem ocorrência
+    /// escolhida, todas as da peça ativa contam.
+    pub(super) fn is_editing_occurrence(&self, part: PartId, path: &[InstanceId]) -> bool {
+        self.active_part == Some(part) && self.editing_path().is_none_or(|p| p == path)
+    }
+    /// O ponto está na ocorrência da peça em construção: só nela os corpos se editam.
+    pub(super) fn in_edit(&self, pick: &Pick) -> bool {
+        if self.active_part != Some(pick.part) {
+            return false;
+        }
+        match self.editing_path() {
+            None => true,
+            Some(path) => self
+                .session
+                .document()
+                .occurrence_at(pick)
+                .is_ok_and(|o| o.path == path),
+        }
+    }
     /// Na montagem, cliques no modelo escolhem o conjunto da raiz. Componentes
     /// internos continuam acessíveis explicitamente pela árvore.
     pub(super) fn selection_for_pick(&self, pick: &Pick) -> Option<Selection> {
-        if self.active_part == Some(pick.part) {
+        if self.in_edit(pick) {
             return Some(Selection::Body {
                 part: pick.part,
                 id: pick.body,
@@ -112,7 +138,7 @@ impl Editor {
     pub(super) fn selected_pick(&self) -> Option<&Pick> {
         let pick = self.current().picked.as_ref()?;
         let tab = self.current();
-        let selected = if tab.active_part == Some(pick.part) {
+        let selected = if tab.in_edit(pick) {
             tab.is_selected(Selection::Body {
                 part: pick.part,
                 id: pick.body,
@@ -391,7 +417,10 @@ impl Editor {
                 if !chosen {
                     continue;
                 }
-                let item = if active == Some(part.id) {
+                let item = if self
+                    .current()
+                    .is_editing_occurrence(part.id, &occurrence.path)
+                {
                     Selection::Body {
                         part: part.id,
                         id: body.id,
